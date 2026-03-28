@@ -1,0 +1,6 @@
+FROM ghcr.io/void-linux/void-glibc:latest
+RUN xbps-install -Sy git curl ca-certificates base-devel && \
+    rm -rf /var/cache/xbps/*
+COPY nac /usr/local/bin/nac
+RUN chmod +x /usr/local/bin/nac
+WORKDIR /workspace
