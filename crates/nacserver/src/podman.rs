@@ -18,6 +18,7 @@ pub struct RunResult {
 }
 
 pub async fn run_ephemeral(
+    container_name: &str,
     image: &str,
     workspace: &Path,
     env_vars: &[(&str, &str)],
@@ -25,6 +26,7 @@ pub async fn run_ephemeral(
 ) -> Result<RunResult> {
     let mut args = vec![
         "run".to_string(), "--rm".to_string(),
+        "--name".to_string(), container_name.to_string(),
         "-v".to_string(), format!("{}:/workspace", workspace.display()),
         "-w".to_string(), "/workspace".to_string(),
     ];
@@ -49,4 +51,12 @@ pub async fn run_ephemeral(
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code().unwrap_or(-1),
     })
+}
+
+pub async fn kill_container(container_name: &str) -> Result<()> {
+    let _ = Command::new("podman")
+        .args(["kill", container_name])
+        .output()
+        .await;
+    Ok(())
 }

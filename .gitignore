@@ -1,3 +1,4 @@
 **/target/
 .env
 images/nac
+nac.db

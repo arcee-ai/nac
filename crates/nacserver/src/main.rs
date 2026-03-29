@@ -1,14 +1,16 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Instant;
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::Deserialize;
+use tower_http::cors::CorsLayer;
 
 mod podman;
 mod task;
@@ -35,7 +37,7 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("NAC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
 
     let state = AppState {
-        tasks: task::new_store(),
+        tasks: task::open_store()?,
         api_key,
         base_url,
         model,
@@ -46,6 +48,8 @@ async fn main() -> Result<()> {
         .route("/health", get(health))
         .route("/tasks", post(create_task))
         .route("/tasks/{id}", get(get_task))
+        .route("/tasks/{id}", delete(kill_task))
+        .layer(CorsLayer::permissive())
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -73,14 +77,14 @@ async fn create_task(
     Json(req): Json<CreateTaskRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let task_id = uuid::Uuid::new_v4().to_string();
+    let container_name = format!("nac-{}", &task_id[..8]);
     let image = req.image.unwrap_or(state.default_image.clone());
     let source_branch = req.branch.unwrap_or_else(|| "main".to_string());
     let task_branch = format!("nac/task-{}", &task_id[..8]);
 
     let mut context = String::new();
     if let Some(ref parent_id) = req.parent_task_id {
-        let tasks = state.tasks.lock().await;
-        if let Some(parent) = tasks.get(parent_id) {
+        if let Ok(Some(parent)) = task::get(&state.tasks, parent_id).await {
             if let Some(ref output) = parent.output {
                 context = format!("Previous work:\n{}\n\n", output);
             }
@@ -88,44 +92,48 @@ async fn create_task(
     }
     let full_prompt = format!("{}{}", context, req.prompt);
 
-    let task = Task {
+    let new_task = Task {
         id: task_id.clone(),
+        container_name: container_name.clone(),
         status: TaskStatus::Running,
         prompt: req.prompt.clone(),
         output: None,
         branch: Some(task_branch.clone()),
         parent_task_id: req.parent_task_id.clone(),
     };
-    state.tasks.lock().await.insert(task_id.clone(), task);
+    task::insert(&state.tasks, &new_task).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {}", e)))?;
+
+    eprintln!("[task] {} created | image={} | prompt={}", &task_id[..8], image, &req.prompt[..req.prompt.len().min(80)]);
 
     let task_state = state.clone();
     let repo_url = req.repo_url.clone();
     let parent_task_id = req.parent_task_id.clone();
     let spawn_task_id = task_id.clone();
+    let spawn_container = container_name.clone();
 
     tokio::spawn(async move {
-        let result = run_task(
-            &task_state,
-            &image,
-            repo_url.as_deref(),
-            &source_branch,
-            &task_branch,
-            parent_task_id.as_deref(),
-            &full_prompt,
-        ).await;
+        let start = Instant::now();
+        let params = TaskParams {
+            container_name: &spawn_container,
+            image: &image,
+            repo_url: repo_url.as_deref(),
+            source_branch: &source_branch,
+            task_branch: &task_branch,
+            parent_task_id: parent_task_id.as_deref(),
+            prompt: &full_prompt,
+        };
+        let result = run_task(&task_state, &params).await;
 
-        let mut tasks = task_state.tasks.lock().await;
-        if let Some(task) = tasks.get_mut(&spawn_task_id) {
-            match result {
-                Ok((output, branch)) => {
-                    task.status = TaskStatus::Completed;
-                    task.output = Some(output);
-                    task.branch = branch;
-                }
-                Err(e) => {
-                    task.status = TaskStatus::Failed;
-                    task.output = Some(e.to_string());
-                }
+        let elapsed = start.elapsed().as_secs();
+        match result {
+            Ok((output, branch)) => {
+                let _ = task::update_completed(&task_state.tasks, &spawn_task_id, &output, branch.as_deref()).await;
+                eprintln!("[task] {} completed | {}s", &spawn_task_id[..8], elapsed);
+            }
+            Err(e) => {
+                let _ = task::update_failed(&task_state.tasks, &spawn_task_id, &e.to_string()).await;
+                eprintln!("[task] {} failed | {}s | {}", &spawn_task_id[..8], elapsed, e);
             }
         }
     });
@@ -136,22 +144,24 @@ async fn create_task(
     ))
 }
 
-async fn run_task(
-    state: &AppState,
-    image: &str,
-    repo_url: Option<&str>,
-    source_branch: &str,
-    task_branch: &str,
-    parent_task_id: Option<&str>,
-    prompt: &str,
-) -> Result<(String, Option<String>)> {
+struct TaskParams<'a> {
+    container_name: &'a str,
+    image: &'a str,
+    repo_url: Option<&'a str>,
+    source_branch: &'a str,
+    task_branch: &'a str,
+    parent_task_id: Option<&'a str>,
+    prompt: &'a str,
+}
+
+async fn run_task(state: &AppState, p: &TaskParams<'_>) -> Result<(String, Option<String>)> {
     let workspace = std::env::temp_dir().join(format!("nac-task-{}", &uuid::Uuid::new_v4().to_string()[..8]));
     std::fs::create_dir_all(&workspace)?;
 
     let _cleanup = WorkspaceCleanup(workspace.clone());
 
-    if let Some(url) = repo_url {
-        let checkout_branch = if parent_task_id.is_some() { task_branch } else { source_branch };
+    if let Some(url) = p.repo_url {
+        let checkout_branch = if p.parent_task_id.is_some() { p.task_branch } else { p.source_branch };
         git_clone(&workspace, url, checkout_branch).await?;
     }
 
@@ -163,10 +173,10 @@ async fn run_task(
         env_vars.push(("OPENAI_MODEL", &state.model));
     }
 
-    let result = podman::run_ephemeral(image, &workspace, &env_vars, prompt).await?;
+    let result = podman::run_ephemeral(p.container_name, p.image, &workspace, &env_vars, p.prompt).await?;
 
-    let branch = if repo_url.is_some() {
-        git_push_changes(&workspace, task_branch, &prompt[..prompt.len().min(72)]).await?
+    let branch = if p.repo_url.is_some() {
+        git_push_changes(&workspace, p.task_branch, &p.prompt[..p.prompt.len().min(72)]).await?
     } else {
         None
     };
@@ -246,16 +256,33 @@ async fn get_task(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let tasks = state.tasks.lock().await;
-    let task = tasks.get(&id)
+    let t = task::get(&state.tasks, &id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {}", e)))?
         .ok_or((StatusCode::NOT_FOUND, format!("task '{}' not found", id)))?;
 
     Ok(Json(serde_json::json!({
-        "task_id": task.id,
-        "status": task.status,
-        "prompt": task.prompt,
-        "output": task.output,
-        "branch": task.branch,
-        "parent_task_id": task.parent_task_id,
+        "task_id": t.id,
+        "status": t.status,
+        "prompt": t.prompt,
+        "output": t.output,
+        "branch": t.branch,
+        "parent_task_id": t.parent_task_id,
     })))
+}
+
+async fn kill_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let t = task::get(&state.tasks, &id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {}", e)))?
+        .ok_or((StatusCode::NOT_FOUND, format!("task '{}' not found", id)))?;
+
+    if matches!(t.status, TaskStatus::Running) {
+        let _ = podman::kill_container(&t.container_name).await;
+        let _ = task::update_failed(&state.tasks, &id, "killed by user").await;
+        eprintln!("[task] {} killed", &id[..id.len().min(8)]);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

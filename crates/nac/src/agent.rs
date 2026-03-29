@@ -56,10 +56,11 @@ impl Agent {
                      Each thread gets its own context and can read, write, edit files and \
                      run commands. Threads return a summary (episode) of what they did.\n\n\
                      Strategy:\n\
-                     - Analyze before implementing: dispatch a thread to read and understand code first\n\
+                     - Analyze before implementing: dispatch threads to read and understand code first\n\
+                     - Analysis threads can run in parallel (multiple threads in one turn)\n\
+                     - Implementation threads should run one at a time to avoid file conflicts\n\
                      - Use episodes from analysis threads as context for implementation threads\n\
-                     - Verify after implementing: dispatch a thread to run tests or check results\n\
-                     - You can dispatch multiple threads in a single turn for parallel execution\n\n\
+                     - Verify after implementing: dispatch a thread to run tests or check results\n\n\
                      You MUST use threads for all coding work. Do not attempt to read, write, \
                      or edit files yourself — you do not have those tools. Your job is to \
                      think strategically and delegate tactically.",
