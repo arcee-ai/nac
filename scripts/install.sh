@@ -16,11 +16,8 @@ detect_target() {
         arm64|aarch64)
           echo "aarch64-apple-darwin"
           ;;
-        x86_64)
-          echo "x86_64-apple-darwin"
-          ;;
         *)
-          echo "unsupported macOS architecture: $arch" >&2
+          echo "unsupported macOS architecture: $arch (Apple Silicon only for now)" >&2
           exit 1
           ;;
       esac
