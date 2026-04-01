@@ -167,6 +167,7 @@ mod tests {
             active_threads: Arc::new(Mutex::new(HashSet::new())),
             event_sink: EventSink::none(),
             sandbox: None,
+            mcp: None,
         }
     }
 

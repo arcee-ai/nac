@@ -16,3 +16,6 @@ ratatui = "0.30"
 crossterm = "0.29"
 ratatui-textarea = "0.8"
 libc = "0.2"
+rmcp = { version = "1.2.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+toml = "0.8"
+url = "2"

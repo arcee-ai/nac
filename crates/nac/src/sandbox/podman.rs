@@ -117,6 +117,31 @@ impl PodmanSession {
             .with_context(|| "failed to wait for 'podman exec'")
     }
 
+    pub(crate) fn child_process_command(
+        &self,
+        program: &str,
+        args: &[String],
+        envs: &[(String, String)],
+    ) -> Command {
+        let mut command = Command::new("podman");
+        command
+            .arg("exec")
+            .arg("-i")
+            .arg("--workdir")
+            .arg(&self.spec.workdir);
+        for (key, value) in envs {
+            command.arg("--env").arg(format!("{key}={value}"));
+        }
+        command.arg(&self.container_name).arg(program);
+        for arg in args {
+            command.arg(arg);
+        }
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::inherit());
+        command
+    }
+
     async fn container_exists(&self) -> Result<bool> {
         let output = Command::new("podman")
             .arg("container")

@@ -12,6 +12,7 @@ use uuid::Uuid;
 use nac::agent::{Agent, AgentConfig, AgentMode};
 use nac::api::OpenAiClient;
 use nac::events::EventSink;
+use nac::mcp::McpRegistry;
 use nac::sandbox::{
     build_sandbox_spec, parse_mount_spec, SandboxSession, DEFAULT_SANDBOX_IMAGE,
     DEFAULT_SANDBOX_WORKDIR,
@@ -189,6 +190,7 @@ async fn run() -> Result<()> {
 async fn build_run_config(cli: Cli) -> Result<RunConfig> {
     let client = OpenAiClient::from_env()?;
     let sandbox = build_sandbox_session(&cli).await?;
+    let current_dir = std::env::current_dir()?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -225,6 +227,11 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 .action
                 .ok_or_else(|| anyhow::anyhow!("managed worker dispatches require --action"))?;
             let store_path = cli.store_path.unwrap_or_else(store::default_store_path);
+            let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
+            let extra_tool_defs = mcp
+                .as_ref()
+                .map(|registry| registry.tool_definitions())
+                .unwrap_or_default();
 
             store::initialize(&store_path)?;
             let worker_context = store::load_worker_context(
@@ -244,6 +251,8 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                     event_sink: EventSink::stderr_prefixed(),
                     working_directory: working_directory.clone(),
                     sandbox: sandbox.clone(),
+                    mcp,
+                    extra_tool_defs,
                 },
             );
 
@@ -265,6 +274,11 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
         }
 
         let standalone_prompt = cli.prompt.clone();
+        let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
+        let extra_tool_defs = mcp
+            .as_ref()
+            .map(|registry| registry.tool_definitions())
+            .unwrap_or_default();
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
@@ -276,6 +290,8 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 event_sink: EventSink::none(),
                 working_directory: working_directory.clone(),
                 sandbox: sandbox.clone(),
+                mcp,
+                extra_tool_defs,
             },
         );
 
@@ -317,6 +333,8 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
             event_sink: EventSink::none(),
             working_directory,
             sandbox,
+            mcp: None,
+            extra_tool_defs: Vec::new(),
         },
     );
 
@@ -373,6 +391,7 @@ async fn commit_managed_worker(
         active_threads: Arc::new(Mutex::new(HashSet::new())),
         event_sink: EventSink::none(),
         sandbox: None,
+        mcp: None,
     };
     thread::auto_compact_if_needed(&runtime, client, &worker.session_id, &worker.thread_name)
         .await?;

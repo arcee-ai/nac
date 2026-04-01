@@ -6,6 +6,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::events::EventSink;
+use crate::mcp::McpRegistry;
 use crate::sandbox::SandboxSession;
 use crate::types::ToolDefinition;
 
@@ -27,6 +28,7 @@ pub struct ToolRuntime {
     pub active_threads: Arc<Mutex<HashSet<String>>>,
     pub event_sink: EventSink,
     pub sandbox: Option<SandboxSession>,
+    pub mcp: Option<Arc<McpRegistry>>,
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::const_new(());
@@ -154,6 +156,16 @@ pub async fn execute_tool(
     runtime: &ToolRuntime,
     _client: &crate::api::OpenAiClient,
 ) -> ToolResult {
+    if name.starts_with("mcp__") {
+        let Some(registry) = &runtime.mcp else {
+            return ToolResult {
+                content: format!("Error: MCP tool '{}' is not available", name),
+                is_error: true,
+            };
+        };
+        return registry.call_tool(name, args).await;
+    }
+
     match name {
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,

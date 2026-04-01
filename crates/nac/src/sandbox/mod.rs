@@ -96,6 +96,15 @@ impl SandboxSession {
     ) -> Result<std::process::Output> {
         self.inner.exec(program, args, stdin).await
     }
+
+    pub fn child_process_command(
+        &self,
+        program: &str,
+        args: &[String],
+        envs: &[(String, String)],
+    ) -> tokio::process::Command {
+        self.inner.child_process_command(program, args, envs)
+    }
 }
 
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {

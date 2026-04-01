@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod api;
 pub mod events;
+pub mod mcp;
 pub mod sandbox;
 pub mod store;
 pub mod tools;
