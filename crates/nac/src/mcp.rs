@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::header::{HeaderName, HeaderValue};
@@ -16,6 +17,7 @@ use rmcp::ServiceExt;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio::time::timeout;
 use url::Url;
 
 use crate::sandbox::SandboxSession;
@@ -23,6 +25,9 @@ use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
 type McpService = RunningService<RoleClient, NacMcpClientHandler>;
+const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const MCP_TOOL_INVENTORY_TIMEOUT: Duration = Duration::from_secs(15);
+const MCP_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct McpRegistry {
@@ -86,10 +91,28 @@ impl McpRegistry {
             return Ok(None);
         }
 
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read MCP config at {}", path.display()))?;
-        let config: McpConfigFile = toml::from_str(&raw)
-            .with_context(|| format!("failed to parse MCP config at {}", path.display()))?;
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) => {
+                eprintln!(
+                    "MCP config at '{}' could not be read; MCP will be disabled: {:#}",
+                    path.display(),
+                    error
+                );
+                return Ok(None);
+            }
+        };
+        let config: McpConfigFile = match toml::from_str(&raw) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!(
+                    "MCP config at '{}' is invalid; MCP will be disabled: {:#}",
+                    path.display(),
+                    error
+                );
+                return Ok(None);
+            }
+        };
 
         let root_uri = if sandbox.is_some() {
             "file:///workspace".to_string()
@@ -120,24 +143,46 @@ impl McpRegistry {
                 continue;
             }
 
-            let service =
-                match connect_server(&server_name, &server_config, &handler, sandbox).await {
-                    Ok(service) => Arc::new(service),
-                    Err(error) => {
-                        eprintln!(
-                            "MCP server '{}' is unavailable and will be skipped: {:#}",
-                            server_name, error
-                        );
-                        continue;
-                    }
-                };
+            let service = match timeout(
+                MCP_CONNECT_TIMEOUT,
+                connect_server(&server_name, &server_config, &handler, sandbox),
+            )
+            .await
+            {
+                Ok(Ok(service)) => Arc::new(service),
+                Ok(Err(error)) => {
+                    eprintln!(
+                        "MCP server '{}' is unavailable and will be skipped: {:#}",
+                        server_name, error
+                    );
+                    continue;
+                }
+                Err(_) => {
+                    eprintln!(
+                        "MCP server '{}' timed out during connect after {}s and will be skipped",
+                        server_name,
+                        MCP_CONNECT_TIMEOUT.as_secs()
+                    );
+                    continue;
+                }
+            };
 
-            let listed_tools = match service.list_all_tools().await {
-                Ok(tools) => tools,
-                Err(error) => {
+            let listed_tools = match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
+                .await
+            {
+                Ok(Ok(tools)) => tools,
+                Ok(Err(error)) => {
                     eprintln!(
                         "MCP server '{}' could not list tools and will be skipped: {:#}",
                         server_name, error
+                    );
+                    continue;
+                }
+                Err(_) => {
+                    eprintln!(
+                        "MCP server '{}' timed out while listing tools after {}s and will be skipped",
+                        server_name,
+                        MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
                     );
                     continue;
                 }
@@ -202,10 +247,23 @@ impl McpRegistry {
         if let Some(arguments) = arguments {
             params = params.with_arguments(arguments);
         }
-        match binding.server._service.call_tool(params).await {
-            Ok(result) => flatten_tool_result(result),
-            Err(error) => ToolResult {
+        match timeout(
+            MCP_TOOL_CALL_TIMEOUT,
+            binding.server._service.call_tool(params),
+        )
+        .await
+        {
+            Ok(Ok(result)) => flatten_tool_result(result),
+            Ok(Err(error)) => ToolResult {
                 content: format!("Error calling MCP tool '{}': {}", name, error),
+                is_error: true,
+            },
+            Err(_) => ToolResult {
+                content: format!(
+                    "Error calling MCP tool '{}': timed out after {}s",
+                    name,
+                    MCP_TOOL_CALL_TIMEOUT.as_secs()
+                ),
                 is_error: true,
             },
         }
@@ -461,6 +519,8 @@ fn expand_env(input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn sanitize_identifier_collapses_symbols() {
@@ -512,5 +572,37 @@ mod tests {
         let definition = tool_definition("mcp__github__search_issues", "github", &tool);
         assert_eq!(definition.function.name, "mcp__github__search_issues");
         assert_eq!(definition.function.description, "Search issues");
+    }
+
+    #[tokio::test]
+    async fn invalid_global_config_disables_mcp_instead_of_failing() {
+        let original = env::var_os("XDG_CONFIG_HOME");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_home = std::env::temp_dir().join(format!("nac-mcp-test-{unique}"));
+        let nac_dir = config_home.join("nac");
+        fs::create_dir_all(&nac_dir).unwrap();
+        fs::write(nac_dir.join("config.toml"), "this is not valid toml = [").unwrap();
+
+        unsafe {
+            env::set_var("XDG_CONFIG_HOME", &config_home);
+        }
+
+        let registry = McpRegistry::load(Path::new("."), None).await.unwrap();
+        assert!(registry.is_none());
+
+        if let Some(value) = original {
+            unsafe {
+                env::set_var("XDG_CONFIG_HOME", value);
+            }
+        } else {
+            unsafe {
+                env::remove_var("XDG_CONFIG_HOME");
+            }
+        }
+
+        let _ = fs::remove_dir_all(&config_home);
     }
 }
