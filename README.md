@@ -46,3 +46,16 @@ podman machine init
 podman machine start
 ```
 
+Optional MCP config lives at `~/.config/nac/config.toml`.
+Supported transports right now are `stdio` and `streamable_http`.
+
+```toml
+[mcp_servers.filesystem]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+
+[mcp_servers.context7]
+transport = "streamable_http"
+url = "https://mcp.context7.com/mcp"
+```
