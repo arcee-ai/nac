@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
@@ -16,9 +16,6 @@ ratatui = "0.30"
 crossterm = "0.29"
 ratatui-textarea = "0.8"
 libc = "0.2"
-rmcp = { version = "1.2.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "1.2.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 toml = "0.8"
 url = "2"
-http = "1"
-futures = "0.3"
-sse-stream = "0.2"
