@@ -213,11 +213,9 @@ impl PodmanSession {
             OsString::from(self.container_name.clone()),
         ];
 
-        if self.spec.mounts.iter().any(|mount| !mount.read_only) {
-            if let Some((uid, gid)) = current_uid_gid() {
-                args.push(OsString::from("--user"));
-                args.push(OsString::from(format!("{uid}:{gid}")));
-            }
+        if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
+            args.push(OsString::from("--userns"));
+            args.push(OsString::from("keep-id"));
         }
 
         for mount in &self.spec.mounts {
@@ -278,14 +276,14 @@ fn shell_escape_path(path: &PathBuf) -> String {
     path.display().to_string().replace('\'', "'\"'\"'")
 }
 
-#[cfg(unix)]
-fn current_uid_gid() -> Option<(u32, u32)> {
-    Some((unsafe { libc::geteuid() }, unsafe { libc::getegid() }))
+#[cfg(target_os = "linux")]
+fn should_keep_id_userns() -> bool {
+    true
 }
 
-#[cfg(not(unix))]
-fn current_uid_gid() -> Option<(u32, u32)> {
-    None
+#[cfg(not(target_os = "linux"))]
+fn should_keep_id_userns() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -332,7 +330,14 @@ mod tests {
         assert!(rendered.starts_with(&["run".to_string(), "-d".to_string(), "--rm".to_string(),]));
         assert!(rendered.contains(&"-v".to_string()));
         assert!(rendered.contains(&"/tmp/project:/workspace:rw".to_string()));
-        assert!(rendered.contains(&"--user".to_string()));
+        assert_eq!(
+            rendered.contains(&"--userns".to_string()),
+            should_keep_id_userns()
+        );
+        assert_eq!(
+            rendered.contains(&"keep-id".to_string()),
+            should_keep_id_userns()
+        );
         assert!(rendered
             .iter()
             .any(|value| value.contains("sleep infinity")));
@@ -354,6 +359,6 @@ mod tests {
             .into_iter()
             .map(|value| value.to_string_lossy().to_string())
             .collect();
-        assert!(!rendered.contains(&"--user".to_string()));
+        assert!(!rendered.contains(&"--userns".to_string()));
     }
 }

@@ -511,7 +511,8 @@ fn print_entry(terminal: &mut UiTerminal, entry: &UiEntry) -> Result<()> {
         return Ok(());
     }
 
-    let widget = build_entry_widget(entry);
+    let rendered_lines = wrapped_entry_lines(entry, width);
+    let widget = build_entry_widget(entry, rendered_lines);
     let body_height = entry_render_height(entry, width);
     let total_height = body_height.saturating_add(entry.spacing_after);
     let spacing_after = entry.spacing_after;
@@ -539,31 +540,10 @@ fn entry_render_height(entry: &UiEntry, width: u16) -> u16 {
         return 0;
     }
 
-    entry_plain_lines(entry)
-        .into_iter()
-        .map(|line| wrapped_line_count(&line, width))
-        .fold(0u16, |acc, count| acc.saturating_add(count))
-        .max(1)
+    wrapped_entry_lines(entry, width).len().max(1) as u16
 }
 
-fn wrapped_line_count(text: &str, width: u16) -> u16 {
-    let width = width.max(1) as usize;
-    let mut count = 0u16;
-
-    for line in text.split('\n') {
-        let chars = line.chars().count();
-        let wrapped = if chars == 0 {
-            1
-        } else {
-            ((chars - 1) / width + 1) as u16
-        };
-        count = count.saturating_add(wrapped.max(1));
-    }
-
-    count.max(1)
-}
-
-fn build_entry_widget(entry: &UiEntry) -> Paragraph<'static> {
+fn build_entry_widget(entry: &UiEntry, rendered_lines: Vec<String>) -> Paragraph<'static> {
     let title_style = match entry.kind {
         EntryKind::Log => Style::default().fg(Color::DarkGray),
         _ => Style::default().fg(Color::White),
@@ -577,57 +557,58 @@ fn build_entry_widget(entry: &UiEntry) -> Paragraph<'static> {
         }
     };
 
-    if entry.kind == EntryKind::Log {
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{} ", entry.symbol_text()),
-                entry.kind.symbol_style(),
-            ),
-            Span::styled(entry.title.clone(), title_style),
-            Span::raw(" "),
-            Span::styled(entry.body.clone(), body_style),
-        ]);
-        return Paragraph::new(Text::from(line)).wrap(Wrap { trim: false });
-    }
-
     let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("{} ", entry.symbol_text()),
-            entry.kind.symbol_style(),
-        ),
-        Span::styled(entry.title.clone(), title_style),
-    ]));
+    for (index, line) in rendered_lines.into_iter().enumerate() {
+        let is_title_line = index == 0;
+        if is_title_line {
+            let content = line
+                .strip_prefix(&format!("{} ", entry.symbol_text()))
+                .unwrap_or(&line)
+                .to_string();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", entry.symbol_text()),
+                    entry.kind.symbol_style(),
+                ),
+                Span::styled(content, title_style),
+            ]));
+            continue;
+        }
 
-    if !entry.body.is_empty() {
-        for line in entry.body.split('\n') {
+        if let Some(content) = line.strip_prefix("  ") {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(line.to_string(), body_style),
+                Span::styled(content.to_string(), body_style),
             ]));
+        } else {
+            lines.push(Line::from(Span::styled(line, body_style)));
         }
     }
 
-    Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
+    Paragraph::new(Text::from(lines))
 }
 
-fn entry_plain_lines(entry: &UiEntry) -> Vec<String> {
-    if entry.kind == EntryKind::Log {
-        return vec![format!(
-            "{} {} {}",
-            entry.symbol_text(),
-            entry.title,
-            entry.body
-        )];
+fn wrapped_entry_lines(entry: &UiEntry, width: u16) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
     }
 
-    let mut lines = vec![format!("{} {}", entry.symbol_text(), entry.title)];
-    if !entry.body.is_empty() {
+    let width = width as usize;
+    let mut wrapped = wrap_with_prefix(&format!("{} ", entry.symbol_text()), &entry.title, width);
+
+    if entry.kind == EntryKind::Log && !entry.body.is_empty() {
+        let log_prefix = " ".repeat(entry.symbol_text().chars().count() + 1);
+        wrapped.extend(wrap_with_prefix(&log_prefix, &entry.body, width));
+    } else if !entry.body.is_empty() {
         for line in entry.body.split('\n') {
-            lines.push(format!("  {line}"));
+            wrapped.extend(wrap_with_prefix("  ", line, width));
         }
     }
-    lines
+
+    if wrapped.is_empty() {
+        wrapped.push(String::new());
+    }
+    wrapped
 }
 
 fn print_preamble(terminal: &mut UiTerminal, metadata: &TuiMetadata) -> Result<()> {
@@ -703,7 +684,7 @@ fn wrapped_composer_view(
     let mut cursor_set = false;
 
     for (row, line) in lines.iter().enumerate() {
-        let segments = wrap_editor_line(line, width);
+        let segments = wrap_soft_line(line, width);
         let mut start = 0usize;
         for (segment_index, segment) in segments.iter().enumerate() {
             let segment_len = segment.chars().count();
@@ -759,12 +740,12 @@ fn composer_content_height(lines: &[String], width: u16) -> u16 {
     let width = width.max(1) as usize;
     lines
         .iter()
-        .map(|line| wrap_editor_line(line, width).len() as u16)
+        .map(|line| wrap_soft_line(line, width).len() as u16)
         .fold(0u16, |acc, count| acc.saturating_add(count))
         .max(1)
 }
 
-fn wrap_editor_line(line: &str, width: usize) -> Vec<String> {
+fn wrap_soft_line(line: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
@@ -808,6 +789,27 @@ fn wrap_editor_line(line: &str, width: usize) -> Vec<String> {
     }
 
     segments
+}
+
+fn wrap_with_prefix(prefix: &str, content: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    let prefix_width = prefix.chars().count();
+    if prefix_width >= width {
+        return vec![format!("{prefix}{content}")];
+    }
+
+    let mut wrapped = Vec::new();
+    let effective_width = width - prefix_width;
+    for segment in wrap_soft_line(content, effective_width) {
+        wrapped.push(format!("{prefix}{segment}"));
+    }
+    if wrapped.is_empty() {
+        wrapped.push(prefix.to_string());
+    }
+    wrapped
 }
 
 fn short_session(session_id: &str) -> String {
