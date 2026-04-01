@@ -37,6 +37,7 @@ pub struct TuiMetadata {
     pub model: String,
     pub base_url: String,
     pub session_id: Option<String>,
+    pub sandbox_status: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -646,6 +647,12 @@ fn print_preamble(terminal: &mut UiTerminal, metadata: &TuiMetadata) -> Result<(
         )
         .compact()
         .symbol("●"),
+    )?;
+    print_entry(
+        terminal,
+        &UiEntry::new(EntryKind::Log, "SANDBOX:", metadata.sandbox_status.clone())
+            .compact()
+            .symbol("●"),
     )?;
     print_entry(
         terminal,

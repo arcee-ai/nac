@@ -6,6 +6,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::events::EventSink;
+use crate::sandbox::SandboxSession;
 use crate::types::ToolDefinition;
 
 pub mod bash;
@@ -25,6 +26,7 @@ pub struct ToolRuntime {
     pub session_id: Option<String>,
     pub active_threads: Arc<Mutex<HashSet<String>>>,
     pub event_sink: EventSink,
+    pub sandbox: Option<SandboxSession>,
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::const_new(());
@@ -153,10 +155,10 @@ pub async fn execute_tool(
     _client: &crate::api::OpenAiClient,
 ) -> ToolResult {
     match name {
-        "read" => read::execute(args).await,
-        "write" => write::execute(args).await,
-        "edit" => edit::execute(args).await,
-        "bash" => bash::execute(args).await,
+        "read" => read::execute(args, runtime).await,
+        "write" => write::execute(args, runtime).await,
+        "edit" => edit::execute(args, runtime).await,
+        "bash" => bash::execute(args, runtime).await,
         "thread" => thread::execute_dispatch(args, runtime).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,

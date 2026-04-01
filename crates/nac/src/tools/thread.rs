@@ -419,6 +419,9 @@ async fn run_worker(
     for source_thread in source_threads {
         command.arg("--source-thread").arg(source_thread);
     }
+    if let Some(sandbox) = &runtime.sandbox {
+        command.args(sandbox.worker_cli_args());
+    }
 
     let mut child = command.spawn()?;
 

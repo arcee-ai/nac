@@ -15,3 +15,4 @@ uuid = { version = "1", features = ["v4"] }
 ratatui = "0.30"
 crossterm = "0.29"
 ratatui-textarea = "0.8"
+libc = "0.2"

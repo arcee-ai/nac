@@ -8,6 +8,7 @@ use tokio::task::JoinSet;
 
 use crate::api::OpenAiClient;
 use crate::events::{AgentEvent, EventSink};
+use crate::sandbox::SandboxSession;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition, Usage};
 
@@ -24,6 +25,8 @@ pub struct AgentConfig {
     pub initial_messages: Vec<Message>,
     pub thread_name: Option<String>,
     pub event_sink: EventSink,
+    pub working_directory: String,
+    pub sandbox: Option<SandboxSession>,
 }
 
 pub struct Agent {
@@ -48,9 +51,7 @@ impl Agent {
             .and_then(|value| value.parse().ok())
             .unwrap_or(100);
 
-        let cwd = std::env::current_dir()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|_| ".".to_string());
+        let cwd = config.working_directory.clone();
 
         let (system_prompt, tool_defs) = match config.mode {
             AgentMode::Worker => (
@@ -130,6 +131,7 @@ impl Agent {
                 session_id: config.session_id,
                 active_threads: Arc::new(Mutex::new(HashSet::new())),
                 event_sink: config.event_sink.clone(),
+                sandbox: config.sandbox,
             },
             last_usage: None,
             event_sink: config.event_sink,
@@ -147,6 +149,10 @@ impl Agent {
                 initial_messages: Vec::new(),
                 thread_name: None,
                 event_sink: EventSink::none(),
+                working_directory: std::env::current_dir()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|_| ".".to_string()),
+                sandbox: None,
             },
         )
     }
