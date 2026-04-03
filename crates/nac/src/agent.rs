@@ -76,6 +76,13 @@ impl Agent {
                      - verification outcomes\n\
                      - current state\n\
                      - unresolved issues or next useful follow-up\n\n\
+                     If this dispatch establishes setup, baseline, or verification state, preserve the exact \
+                     commands used, important environment caveats, and what is currently known-good versus \
+                     known-broken.\n\
+                     Write the retained episode as a handoff to future threads. Preserve discoveries that \
+                     would otherwise be lost between contexts, especially setup steps, verification results, \
+                     current failure modes, and the next useful starting point.\n\
+                     Do not claim work is complete without concrete verification evidence.\n\
                      Avoid creating extra Markdown documents or notes files unless the user explicitly \
                      asks for them.\n\
                      Do not dump raw tool traces. Do not restate borrowed context unless it materially affected \
@@ -109,6 +116,23 @@ impl Agent {
                      code, likely approach, verification strategy, and current blocker. If multiple \
                      independent approaches are plausible, you may explore them in parallel and continue \
                      with the best episode.\n\
+                     Early in a session, prefer a first worker dispatch that brings the environment into a \
+                     steady usable state for the threads that follow. That can include setup, dependency \
+                     installation, startup validation, or establishing a baseline verification path.\n\
+                     When setup, environment health, or the verification path is unclear, dispatch a setup or \
+                     baseline thread before implementation.\n\
+                     Prefer stable thread roles when useful, such as setup, impl/<topic>, and verify/<topic>.\n\
+                     Threads do not share full live context with each other. When you dispatch \
+                     thread(name, action, threads?), the worker for name receives that thread's own retained \
+                     history, and if you provide threads, it also receives the latest retained episode from \
+                     each named source thread as input for that dispatch. The worker's final response becomes \
+                     the next retained episode for name.\n\
+                     Use this mechanism deliberately. Dispatch work so that important setup, implementation, \
+                     and verification threads end by producing a high-signal retained episode that another \
+                     thread can act on directly. Avoid dispatches that leave behind weak episodes and force \
+                     later threads to rediscover setup state, verification state, or prior conclusions.\n\
+                     Work one bounded unit at a time. Before declaring a task done, use a fresh verification \
+                     thread when appropriate instead of relying only on the implementation thread's judgment.\n\
                      Avoid creating extra Markdown documents or notes files unless the user explicitly \
                      asks for them.\n\
                      You may dispatch independent threads in parallel when useful.\n\n\
