@@ -20,6 +20,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
 
+use crate::paths::nac_config_path;
 use crate::sandbox::SandboxSession;
 use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
@@ -466,17 +467,7 @@ fn flatten_tool_result(result: rmcp::model::CallToolResult) -> ToolResult {
 }
 
 fn default_config_path() -> Option<PathBuf> {
-    if let Some(xdg_config_home) = env::var_os("XDG_CONFIG_HOME") {
-        return Some(
-            PathBuf::from(xdg_config_home)
-                .join("nac")
-                .join("config.toml"),
-        );
-    }
-
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".config").join("nac").join("config.toml"))
+    nac_config_path()
 }
 
 fn default_enabled() -> bool {
@@ -576,24 +567,35 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_global_config_disables_mcp_instead_of_failing() {
-        let original = env::var_os("XDG_CONFIG_HOME");
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let config_home = std::env::temp_dir().join(format!("nac-mcp-test-{unique}"));
-        let nac_dir = config_home.join("nac");
-        fs::create_dir_all(&nac_dir).unwrap();
-        fs::write(nac_dir.join("config.toml"), "this is not valid toml = [").unwrap();
+        let nac_home = std::env::temp_dir().join(format!("nac-mcp-test-{unique}"));
+        fs::create_dir_all(&nac_home).unwrap();
+        fs::write(nac_home.join("config.toml"), "=\n").unwrap();
 
         unsafe {
-            env::set_var("XDG_CONFIG_HOME", &config_home);
+            env::set_var("NAC_HOME", &nac_home);
         }
 
-        let registry = McpRegistry::load(Path::new("."), None).await.unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let registry = McpRegistry::load(&cwd, None).await.unwrap();
         assert!(registry.is_none());
 
-        if let Some(value) = original {
+        if let Some(value) = original_nac_home {
+            unsafe {
+                env::set_var("NAC_HOME", value);
+            }
+        } else {
+            unsafe {
+                env::remove_var("NAC_HOME");
+            }
+        }
+
+        if let Some(value) = original_xdg {
             unsafe {
                 env::set_var("XDG_CONFIG_HOME", value);
             }
@@ -603,6 +605,6 @@ mod tests {
             }
         }
 
-        let _ = fs::remove_dir_all(&config_home);
+        let _ = fs::remove_dir_all(&nac_home);
     }
 }

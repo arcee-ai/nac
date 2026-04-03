@@ -39,6 +39,20 @@ impl SandboxSession {
         self.inner.spec().workdir.display().to_string()
     }
 
+    pub fn host_workdir(&self) -> Option<PathBuf> {
+        let spec = self.inner.spec();
+        for mount in &spec.mounts {
+            if spec.workdir.starts_with(&mount.guest) {
+                let suffix = spec
+                    .workdir
+                    .strip_prefix(&mount.guest)
+                    .unwrap_or_else(|_| Path::new(""));
+                return Some(join_host_path(&mount.host, suffix));
+            }
+        }
+        None
+    }
+
     pub fn image(&self) -> &str {
         &self.inner.spec().image
     }
@@ -170,6 +184,14 @@ fn absolutize_host_path(raw: &str, cwd: &Path) -> Result<PathBuf> {
 }
 
 fn join_guest_path(base: &Path, suffix: &Path) -> PathBuf {
+    join_path(base, suffix)
+}
+
+fn join_host_path(base: &Path, suffix: &Path) -> PathBuf {
+    join_path(base, suffix)
+}
+
+fn join_path(base: &Path, suffix: &Path) -> PathBuf {
     if suffix.as_os_str().is_empty() {
         return base.to_path_buf();
     }
@@ -214,6 +236,8 @@ mod tests {
                 false,
             )),
         };
+
+        assert_eq!(session.host_workdir().unwrap(), cwd);
 
         assert_eq!(
             session.resolve_path("Cargo.toml").unwrap(),
