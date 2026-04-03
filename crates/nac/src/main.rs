@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use nac::agent::{Agent, AgentConfig, AgentMode};
+use nac::agents_md::AgentsMdBundle;
 use nac::api::OpenAiClient;
 use nac::events::EventSink;
 use nac::mcp::McpRegistry;
@@ -104,6 +105,7 @@ struct RunConfig {
     client: OpenAiClient,
     session_id: Option<String>,
     sandbox_status: String,
+    agents_md_status: String,
 }
 
 #[tokio::main]
@@ -138,6 +140,7 @@ async fn run() -> Result<()> {
             base_url: run_config.client.base_url().to_string(),
             session_id: run_config.session_id.clone(),
             sandbox_status: run_config.sandbox_status.clone(),
+            agents_md_status: run_config.agents_md_status.clone(),
         };
         return tui::run(run_config.agent, run_config.initial_prompt, metadata).await;
     }
@@ -191,6 +194,8 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
     let client = OpenAiClient::from_env()?;
     let sandbox = build_sandbox_session(&cli).await?;
     let current_dir = std::env::current_dir()?;
+    let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
+    let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -199,6 +204,8 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
         .as_ref()
         .map(|session| session.status_text())
         .unwrap_or_else(|| "off".to_string());
+    let agents_md_message = agents_md.system_message();
+    let agents_md_status = agents_md.status_text();
 
     if cli.worker {
         if cli.single {
@@ -253,6 +260,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                     sandbox: sandbox.clone(),
                     mcp,
                     extra_tool_defs,
+                    agents_md_message: agents_md_message.clone(),
                 },
             );
 
@@ -270,6 +278,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 client,
                 session_id: None,
                 sandbox_status,
+                agents_md_status,
             });
         }
 
@@ -292,6 +301,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 sandbox: sandbox.clone(),
                 mcp,
                 extra_tool_defs,
+                agents_md_message: agents_md_message.clone(),
             },
         );
 
@@ -304,6 +314,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
             client,
             session_id: None,
             sandbox_status,
+            agents_md_status,
         });
     }
 
@@ -335,6 +346,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
             sandbox,
             mcp: None,
             extra_tool_defs: Vec::new(),
+            agents_md_message,
         },
     );
 
@@ -347,7 +359,18 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
         client,
         session_id: Some(session_id),
         sandbox_status,
+        agents_md_status,
     })
+}
+
+fn effective_agents_md_workspace_dir(
+    current_dir: &std::path::Path,
+    sandbox: Option<&SandboxSession>,
+) -> Option<PathBuf> {
+    if let Some(sandbox) = sandbox {
+        return sandbox.host_workdir();
+    }
+    Some(current_dir.to_path_buf())
 }
 
 fn build_worker_context_messages(

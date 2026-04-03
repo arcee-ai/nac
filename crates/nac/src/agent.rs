@@ -30,6 +30,7 @@ pub struct AgentConfig {
     pub sandbox: Option<SandboxSession>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
+    pub agents_md_message: Option<String>,
 }
 
 pub struct Agent {
@@ -129,6 +130,11 @@ impl Agent {
         let mut messages = vec![Message::System {
             content: system_prompt,
         }];
+        if let Some(agents_md_message) = config.agents_md_message {
+            messages.push(Message::System {
+                content: agents_md_message,
+            });
+        }
         messages.extend(config.initial_messages);
 
         Self {
@@ -166,6 +172,7 @@ impl Agent {
                 sandbox: None,
                 mcp: None,
                 extra_tool_defs: Vec::new(),
+                agents_md_message: None,
             },
         )
     }

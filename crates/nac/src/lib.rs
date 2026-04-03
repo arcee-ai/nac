@@ -1,7 +1,9 @@
 pub mod agent;
+pub mod agents_md;
 pub mod api;
 pub mod events;
 pub mod mcp;
+pub mod paths;
 pub mod sandbox;
 pub mod store;
 pub mod tools;
