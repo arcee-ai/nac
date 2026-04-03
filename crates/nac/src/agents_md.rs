@@ -155,7 +155,8 @@ fn read_non_empty_file(path: &Path) -> Result<Option<AgentsMdFile>> {
 fn find_project_root(workspace_dir: &Path) -> Option<PathBuf> {
     let mut current = Some(workspace_dir);
     while let Some(dir) = current {
-        if dir.join(".git").is_dir() {
+        let git_marker = dir.join(".git");
+        if git_marker.is_dir() || git_marker.is_file() {
             return Some(dir.to_path_buf());
         }
         current = dir.parent();
@@ -275,14 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn git_file_does_not_mark_project_root() {
-        let root = temp_dir("git_file_not_root");
+    fn git_file_marks_project_root() {
+        let root = temp_dir("git_file_root");
         let project_root = root.join("repo");
         let nested = project_root.join("nested");
         fs::create_dir_all(&nested).unwrap();
         fs::write(project_root.join(".git"), "gitdir: /tmp/fake").unwrap();
 
-        assert!(find_project_root(&nested).is_none());
+        assert_eq!(find_project_root(&nested).unwrap(), project_root);
     }
 
     #[test]
