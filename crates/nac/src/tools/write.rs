@@ -107,6 +107,8 @@ mod tests {
             event_sink: EventSink::none(),
             sandbox: None,
             mcp: None,
+            skills: None,
+            activated_skills: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 

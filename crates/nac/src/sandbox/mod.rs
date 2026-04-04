@@ -119,6 +119,17 @@ impl SandboxSession {
     ) -> tokio::process::Command {
         self.inner.child_process_command(program, args, envs)
     }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(spec: SandboxSpec) -> Self {
+        Self {
+            inner: Arc::new(podman::PodmanSession::new(
+                spec,
+                "test-session".to_string(),
+                false,
+            )),
+        }
+    }
 }
 
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {

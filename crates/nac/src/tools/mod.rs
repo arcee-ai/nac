@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use crate::events::EventSink;
 use crate::mcp::McpRegistry;
 use crate::sandbox::SandboxSession;
+use crate::skills::SkillRegistry;
 use crate::types::ToolDefinition;
 
 pub mod bash;
@@ -29,6 +30,8 @@ pub struct ToolRuntime {
     pub event_sink: EventSink,
     pub sandbox: Option<SandboxSession>,
     pub mcp: Option<Arc<McpRegistry>>,
+    pub skills: Option<Arc<SkillRegistry>>,
+    pub activated_skills: Arc<Mutex<HashSet<String>>>,
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::const_new(());
@@ -167,6 +170,7 @@ pub async fn execute_tool(
     }
 
     match name {
+        "activate_skill" => crate::skills::execute_activate_skill(args, runtime).await,
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,

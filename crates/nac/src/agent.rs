@@ -10,6 +10,7 @@ use crate::api::OpenAiClient;
 use crate::events::{AgentEvent, EventSink};
 use crate::mcp::McpRegistry;
 use crate::sandbox::SandboxSession;
+use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition, Usage};
 
@@ -29,6 +30,7 @@ pub struct AgentConfig {
     pub working_directory: String,
     pub sandbox: Option<SandboxSession>,
     pub mcp: Option<Arc<McpRegistry>>,
+    pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
 }
@@ -147,7 +149,18 @@ impl Agent {
                 tools::orchestrator_tool_definitions(),
             ),
         };
+        let skills_catalog_message = if config.mode == AgentMode::Worker {
+            config
+                .skills
+                .as_ref()
+                .and_then(|registry| registry.catalog_message())
+        } else {
+            None
+        };
         if config.mode == AgentMode::Worker {
+            if let Some(skills) = &config.skills {
+                tool_defs.push(skills.tool_definition());
+            }
             tool_defs.extend(config.extra_tool_defs);
         }
 
@@ -157,6 +170,11 @@ impl Agent {
         if let Some(agents_md_message) = config.agents_md_message {
             messages.push(Message::System {
                 content: agents_md_message,
+            });
+        }
+        if let Some(skills_catalog_message) = skills_catalog_message {
+            messages.push(Message::System {
+                content: skills_catalog_message,
             });
         }
         messages.extend(config.initial_messages);
@@ -173,6 +191,8 @@ impl Agent {
                 event_sink: config.event_sink.clone(),
                 sandbox: config.sandbox,
                 mcp: config.mcp,
+                skills: config.skills,
+                activated_skills: Arc::new(Mutex::new(HashSet::new())),
             },
             last_usage: None,
             event_sink: config.event_sink,
@@ -195,6 +215,7 @@ impl Agent {
                     .unwrap_or_else(|_| ".".to_string()),
                 sandbox: None,
                 mcp: None,
+                skills: None,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
             },
@@ -421,5 +442,74 @@ mod tests {
         let agent = Agent::default(client);
         assert!(!agent.messages.is_empty());
         assert!(!agent.tool_defs.is_empty());
+    }
+
+    #[test]
+    fn worker_surfaces_skills_but_orchestrator_does_not() {
+        let client = OpenAiClient::new_for_test();
+        let registry = Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
+            crate::skills::SkillRecord {
+                name: "lint".to_string(),
+                description: "Run linting workflows.".to_string(),
+                compatibility: None,
+                skill_md_path: PathBuf::from("/tmp/lint/SKILL.md"),
+                skill_root_host: PathBuf::from("/tmp/lint"),
+                skill_root_visible: PathBuf::from("/tmp/lint"),
+                body: "body".to_string(),
+                resources: Vec::new(),
+            },
+        ]));
+
+        let worker = Agent::with_config(
+            client.clone(),
+            AgentConfig {
+                mode: AgentMode::Worker,
+                store_path: crate::store::default_store_path(),
+                session_id: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                event_sink: EventSink::none(),
+                working_directory: ".".to_string(),
+                sandbox: None,
+                mcp: None,
+                skills: Some(registry.clone()),
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+            },
+        );
+        assert!(worker
+            .tool_defs
+            .iter()
+            .any(|definition| definition.function.name == "activate_skill"));
+        assert!(worker.messages.iter().any(|message| match message {
+            Message::System { content } => content.contains("<available_skills>"),
+            _ => false,
+        }));
+
+        let orchestrator = Agent::with_config(
+            client,
+            AgentConfig {
+                mode: AgentMode::Orchestrator,
+                store_path: crate::store::default_store_path(),
+                session_id: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                event_sink: EventSink::none(),
+                working_directory: ".".to_string(),
+                sandbox: None,
+                mcp: None,
+                skills: Some(registry),
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+            },
+        );
+        assert!(!orchestrator
+            .tool_defs
+            .iter()
+            .any(|definition| definition.function.name == "activate_skill"));
+        assert!(!orchestrator.messages.iter().any(|message| match message {
+            Message::System { content } => content.contains("<available_skills>"),
+            _ => false,
+        }));
     }
 }

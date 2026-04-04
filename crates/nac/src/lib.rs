@@ -5,6 +5,7 @@ pub mod events;
 pub mod mcp;
 pub mod paths;
 pub mod sandbox;
+pub mod skills;
 pub mod store;
 pub mod tools;
 pub mod tui;

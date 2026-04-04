@@ -18,6 +18,7 @@ use nac::sandbox::{
     build_sandbox_spec, parse_mount_spec, SandboxSession, DEFAULT_SANDBOX_IMAGE,
     DEFAULT_SANDBOX_WORKDIR,
 };
+use nac::skills::{self, SkillRegistry};
 use nac::store::{self, WorkerContext};
 use nac::tools::{thread, ToolRuntime};
 use nac::tui::{self, TuiMetadata};
@@ -192,10 +193,11 @@ async fn run() -> Result<()> {
 
 async fn build_run_config(cli: Cli) -> Result<RunConfig> {
     let client = OpenAiClient::from_env()?;
-    let sandbox = build_sandbox_session(&cli).await?;
     let current_dir = std::env::current_dir()?;
+    let sandbox = build_sandbox_session(&cli, &current_dir).await?;
     let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
+    let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -235,6 +237,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 .ok_or_else(|| anyhow::anyhow!("managed worker dispatches require --action"))?;
             let store_path = cli.store_path.unwrap_or_else(store::default_store_path);
             let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
+            let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
             let extra_tool_defs = mcp
                 .as_ref()
                 .map(|registry| registry.tool_definitions())
@@ -259,6 +262,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                     working_directory: working_directory.clone(),
                     sandbox: sandbox.clone(),
                     mcp,
+                    skills,
                     extra_tool_defs,
                     agents_md_message: agents_md_message.clone(),
                 },
@@ -284,6 +288,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
 
         let standalone_prompt = cli.prompt.clone();
         let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
+        let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
         let extra_tool_defs = mcp
             .as_ref()
             .map(|registry| registry.tool_definitions())
@@ -300,6 +305,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
                 working_directory: working_directory.clone(),
                 sandbox: sandbox.clone(),
                 mcp,
+                skills,
                 extra_tool_defs,
                 agents_md_message: agents_md_message.clone(),
             },
@@ -345,6 +351,7 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
             working_directory,
             sandbox,
             mcp: None,
+            skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message,
         },
@@ -364,6 +371,16 @@ async fn build_run_config(cli: Cli) -> Result<RunConfig> {
 }
 
 fn effective_agents_md_workspace_dir(
+    current_dir: &std::path::Path,
+    sandbox: Option<&SandboxSession>,
+) -> Option<PathBuf> {
+    if let Some(sandbox) = sandbox {
+        return sandbox.host_workdir();
+    }
+    Some(current_dir.to_path_buf())
+}
+
+fn effective_skills_workspace_dir(
     current_dir: &std::path::Path,
     sandbox: Option<&SandboxSession>,
 ) -> Option<PathBuf> {
@@ -415,13 +432,15 @@ async fn commit_managed_worker(
         event_sink: EventSink::none(),
         sandbox: None,
         mcp: None,
+        skills: None,
+        activated_skills: Arc::new(Mutex::new(HashSet::new())),
     };
     thread::auto_compact_if_needed(&runtime, client, &worker.session_id, &worker.thread_name)
         .await?;
     Ok(())
 }
 
-async fn build_sandbox_session(cli: &Cli) -> Result<Option<SandboxSession>> {
+async fn build_sandbox_session(cli: &Cli, cwd: &std::path::Path) -> Result<Option<SandboxSession>> {
     let sandbox_flags_present = cli.no_mount_cwd
         || !cli.mounts.is_empty()
         || !cli.mounts_ro.is_empty()
@@ -436,7 +455,6 @@ async fn build_sandbox_session(cli: &Cli) -> Result<Option<SandboxSession>> {
         return Ok(None);
     }
 
-    let cwd = std::env::current_dir()?;
     let mut mounts = Vec::new();
     if !cli.no_mount_cwd {
         mounts.push(parse_mount_spec(
@@ -452,13 +470,15 @@ async fn build_sandbox_session(cli: &Cli) -> Result<Option<SandboxSession>> {
         mounts.push(parse_mount_spec(mount, true, &cwd)?);
     }
 
-    let spec = build_sandbox_spec(
-        cli.sandbox_image.clone(),
-        cli.sandbox_workdir
-            .clone()
-            .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string()),
-        mounts,
-    )?;
+    let workdir = cli
+        .sandbox_workdir
+        .clone()
+        .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string());
+    let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
+        .unwrap_or_else(|| cwd.to_path_buf());
+    mounts.extend(skills::auto_mounts(&skills_workspace_dir, &mounts)?);
+
+    let spec = build_sandbox_spec(cli.sandbox_image.clone(), workdir, mounts)?;
     let owner = cli.sandbox_session_key.is_none();
     let session_key = cli
         .sandbox_session_key
@@ -472,6 +492,27 @@ fn current_directory_display() -> String {
     std::env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| ".".to_string())
+}
+
+fn workspace_dir_from_mounts(
+    mounts: &[nac::sandbox::MountSpec],
+    workdir: PathBuf,
+) -> Option<PathBuf> {
+    for mount in mounts {
+        if workdir.starts_with(&mount.guest) {
+            let suffix = workdir
+                .strip_prefix(&mount.guest)
+                .unwrap_or_else(|_| std::path::Path::new(""));
+            let mut host = mount.host.clone();
+            for component in suffix.components() {
+                if let std::path::Component::Normal(part) = component {
+                    host.push(part);
+                }
+            }
+            return Some(host);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -489,6 +530,29 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac_main_test_{}_{}", label, unique))
             .join("store.db")
+    }
+
+    #[test]
+    fn workspace_dir_from_explicit_mount_uses_workspace_guest_mapping() {
+        let root = std::env::temp_dir().join(format!(
+            "nac_main_test_workspace_mount_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+
+        let mounts = vec![nac::sandbox::MountSpec {
+            host: root.clone(),
+            guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            read_only: false,
+        }];
+
+        let resolved = workspace_dir_from_mounts(&mounts, PathBuf::from(DEFAULT_SANDBOX_WORKDIR));
+        assert_eq!(resolved.as_deref(), Some(root.as_path()));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
