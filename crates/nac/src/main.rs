@@ -1,12 +1,9 @@
-use std::collections::HashSet;
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process;
-use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use nac::agent::{Agent, AgentConfig, AgentMode};
@@ -20,7 +17,6 @@ use nac::sandbox::{
 };
 use nac::skills::{self, SkillRegistry};
 use nac::store::{self, WorkerContext};
-use nac::tools::{thread, ToolRuntime};
 use nac::tui::{self, TuiMetadata};
 use nac::types::Message;
 
@@ -147,15 +143,11 @@ async fn run() -> Result<()> {
     }
 
     let mut agent = run_config.agent;
-    let client = run_config.client;
 
     if let Some(prompt) = run_config.initial_prompt {
         let response = agent.send(&prompt).await?;
         if let Some(worker) = &run_config.managed_worker {
-            let completion_tokens = agent.last_completion_tokens().ok_or_else(|| {
-                anyhow::anyhow!("worker response did not include completion_tokens")
-            })?;
-            commit_managed_worker(worker, &client, &response, completion_tokens).await?;
+            commit_managed_worker(worker, &response).await?;
         }
         println!("{}", response);
         if !run_config.continue_repl {
@@ -412,9 +404,7 @@ fn build_worker_context_messages(
 
 async fn commit_managed_worker(
     worker: &ManagedWorkerConfig,
-    client: &OpenAiClient,
     response: &str,
-    completion_tokens: u32,
 ) -> Result<()> {
     store::append_episode(
         &worker.store_path,
@@ -422,21 +412,7 @@ async fn commit_managed_worker(
         &worker.thread_name,
         &worker.action,
         response,
-        completion_tokens as i64,
     )?;
-
-    let runtime = ToolRuntime {
-        store_path: worker.store_path.clone(),
-        session_id: Some(worker.session_id.clone()),
-        active_threads: Arc::new(Mutex::new(HashSet::new())),
-        event_sink: EventSink::none(),
-        sandbox: None,
-        mcp: None,
-        skills: None,
-        activated_skills: Arc::new(Mutex::new(HashSet::new())),
-    };
-    thread::auto_compact_if_needed(&runtime, client, &worker.session_id, &worker.thread_name)
-        .await?;
     Ok(())
 }
 
@@ -574,7 +550,6 @@ mod tests {
             "impl",
             "step-1",
             "impl retained episode",
-            14,
         )
         .unwrap();
         store::append_episode(
@@ -583,7 +558,6 @@ mod tests {
             "auth",
             "inspect",
             "auth latest episode",
-            11,
         )
         .unwrap();
         store::append_episode(
@@ -592,7 +566,6 @@ mod tests {
             "tests",
             "inspect",
             "tests latest episode",
-            12,
         )
         .unwrap();
 

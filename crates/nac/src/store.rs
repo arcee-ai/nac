@@ -17,7 +17,6 @@ pub struct EpisodeRecord {
 pub struct ThreadRecord {
     pub name: String,
     pub session_id: String,
-    pub context_tokens: i64,
     pub created_at: String,
     pub updated_at: String,
     pub episode_count: i64,
@@ -44,8 +43,7 @@ pub fn append_episode(
     thread_name: &str,
     action: &str,
     content: &str,
-    episode_tokens: i64,
-) -> Result<i64> {
+) -> Result<()> {
     let mut conn = open_connection(path)?;
     let tx = conn.transaction()?;
     ensure_thread_in_tx(&tx, session_id, thread_name)?;
@@ -56,21 +54,15 @@ pub fn append_episode(
         params![thread_name, session_id, action, content, now_utc()],
     )?;
 
-    let existing_context_tokens: i64 = tx.query_row(
-        "SELECT context_tokens FROM threads WHERE name = ?1 AND session_id = ?2",
-        params![thread_name, session_id],
-        |row| row.get(0),
-    )?;
-    let context_tokens = existing_context_tokens + episode_tokens;
     tx.execute(
         "UPDATE threads
-         SET context_tokens = ?1, updated_at = ?2
-         WHERE name = ?3 AND session_id = ?4",
-        params![context_tokens, now_utc(), thread_name, session_id],
+         SET updated_at = ?1
+         WHERE name = ?2 AND session_id = ?3",
+        params![now_utc(), thread_name, session_id],
     )?;
 
     tx.commit()?;
-    Ok(context_tokens)
+    Ok(())
 }
 
 pub fn load_worker_context(
@@ -98,7 +90,7 @@ pub fn load_worker_context(
 pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> {
     let conn = open_connection(path)?;
     let mut stmt = conn.prepare(
-        "SELECT t.name, t.session_id, t.context_tokens, t.created_at, t.updated_at,
+        "SELECT t.name, t.session_id, t.created_at, t.updated_at,
                 (SELECT COUNT(*) FROM episodes e
                  WHERE e.thread_name = t.name AND e.session_id = t.session_id) AS episode_count
          FROM threads t
@@ -112,10 +104,9 @@ pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> 
         threads.push(ThreadRecord {
             name: row.get(0)?,
             session_id: row.get(1)?,
-            context_tokens: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-            episode_count: row.get(5)?,
+            created_at: row.get(2)?,
+            updated_at: row.get(3)?,
+            episode_count: row.get(4)?,
         });
     }
     Ok(threads)
@@ -139,52 +130,6 @@ pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result
     )?;
     tx.commit()?;
     Ok(deleted > 0)
-}
-
-pub fn thread_context_tokens(
-    path: &Path,
-    session_id: &str,
-    thread_name: &str,
-) -> Result<Option<i64>> {
-    let conn = open_connection(path)?;
-    conn.query_row(
-        "SELECT context_tokens FROM threads WHERE name = ?1 AND session_id = ?2",
-        params![thread_name, session_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(Into::into)
-}
-
-pub fn compact_thread(
-    path: &Path,
-    session_id: &str,
-    thread_name: &str,
-    content: &str,
-    compacted_tokens: i64,
-) -> Result<i64> {
-    let mut conn = open_connection(path)?;
-    let tx = conn.transaction()?;
-    ensure_thread_in_tx(&tx, session_id, thread_name)?;
-
-    tx.execute(
-        "DELETE FROM episodes WHERE thread_name = ?1 AND session_id = ?2",
-        params![thread_name, session_id],
-    )?;
-    tx.execute(
-        "INSERT INTO episodes (thread_name, session_id, action, content, created_at)
-         VALUES (?1, ?2, 'compact', ?3, ?4)",
-        params![thread_name, session_id, content, now_utc()],
-    )?;
-    tx.execute(
-        "UPDATE threads
-         SET context_tokens = ?1, updated_at = ?2
-         WHERE name = ?3 AND session_id = ?4",
-        params![compacted_tokens, now_utc(), thread_name, session_id],
-    )?;
-
-    tx.commit()?;
-    Ok(compacted_tokens)
 }
 
 pub fn render_self_context(thread_name: &str, episodes: &[EpisodeRecord]) -> Option<String> {
@@ -248,7 +193,6 @@ fn open_connection(path: &Path) -> Result<Connection> {
          CREATE TABLE IF NOT EXISTS threads (
              name TEXT NOT NULL,
              session_id TEXT NOT NULL,
-             context_tokens INTEGER NOT NULL DEFAULT 0,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              PRIMARY KEY (name, session_id)
@@ -271,8 +215,8 @@ fn open_connection(path: &Path) -> Result<Connection> {
 fn ensure_thread_in_tx(tx: &Transaction<'_>, session_id: &str, thread_name: &str) -> Result<()> {
     let now = now_utc();
     tx.execute(
-        "INSERT OR IGNORE INTO threads (name, session_id, context_tokens, created_at, updated_at)
-         VALUES (?1, ?2, 0, ?3, ?3)",
+        "INSERT OR IGNORE INTO threads (name, session_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)",
         params![thread_name, session_id, now],
     )?;
     Ok(())
@@ -394,33 +338,10 @@ mod tests {
         initialize(&store_path).unwrap();
 
         let session_id = "session-a";
-        append_episode(
-            &store_path,
-            session_id,
-            "auth",
-            "inspect",
-            "first auth episode",
-            11,
-        )
-        .unwrap();
-        append_episode(
-            &store_path,
-            session_id,
-            "auth",
-            "refactor",
-            "second auth episode",
-            13,
-        )
-        .unwrap();
-        append_episode(
-            &store_path,
-            session_id,
-            "tests",
-            "inspect",
-            "test episode",
-            7,
-        )
-        .unwrap();
+        append_episode(&store_path, session_id, "auth", "inspect", "first auth episode").unwrap();
+        append_episode(&store_path, session_id, "auth", "refactor", "second auth episode")
+            .unwrap();
+        append_episode(&store_path, session_id, "tests", "inspect", "test episode").unwrap();
 
         let threads = list_threads(&store_path, session_id).unwrap();
         assert_eq!(threads.len(), 2);
@@ -446,17 +367,9 @@ mod tests {
         initialize(&store_path).unwrap();
 
         let session_id = "session-b";
-        append_episode(
-            &store_path,
-            session_id,
-            "auth",
-            "inspect",
-            "self history",
-            9,
-        )
-        .unwrap();
-        append_episode(&store_path, session_id, "tests", "scan", "old source", 8).unwrap();
-        append_episode(&store_path, session_id, "tests", "scan", "new source", 8).unwrap();
+        append_episode(&store_path, session_id, "auth", "inspect", "self history").unwrap();
+        append_episode(&store_path, session_id, "tests", "scan", "old source").unwrap();
+        append_episode(&store_path, session_id, "tests", "scan", "new source").unwrap();
 
         let context =
             load_worker_context(&store_path, session_id, "auth", &["tests".to_string()]).unwrap();
@@ -469,35 +382,13 @@ mod tests {
     }
 
     #[test]
-    fn compact_and_delete_thread() {
-        let store_path = temp_store_path("compact");
+    fn delete_thread_removes_all_episodes() {
+        let store_path = temp_store_path("delete");
         initialize(&store_path).unwrap();
 
         let session_id = "session-c";
-        append_episode(
-            &store_path,
-            session_id,
-            "impl",
-            "step-1",
-            "before compact 1",
-            10,
-        )
-        .unwrap();
-        append_episode(
-            &store_path,
-            session_id,
-            "impl",
-            "step-2",
-            "before compact 2",
-            12,
-        )
-        .unwrap();
-
-        compact_thread(&store_path, session_id, "impl", "compacted episode", 6).unwrap();
-        let episodes = thread_read(&store_path, session_id, "impl").unwrap();
-        assert_eq!(episodes.len(), 1);
-        assert_eq!(episodes[0].action, "compact");
-        assert_eq!(episodes[0].content, "compacted episode");
+        append_episode(&store_path, session_id, "impl", "step-1", "first episode").unwrap();
+        append_episode(&store_path, session_id, "impl", "step-2", "second episode").unwrap();
 
         let deleted = delete_thread(&store_path, session_id, "impl").unwrap();
         assert!(deleted);

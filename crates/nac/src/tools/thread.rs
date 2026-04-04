@@ -6,7 +6,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::api::OpenAiClient;
 use crate::events::{decode_stderr_event, AgentEvent};
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
@@ -208,12 +207,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
     let mut output = String::from("Active threads:");
     for thread in threads {
         output.push_str(&format!(
-            "\n- {} | {} episodes | {} context tokens | created {} | updated {}",
-            thread.name,
-            thread.episode_count,
-            thread.context_tokens,
-            thread.created_at,
-            thread.updated_at
+            "\n- {} | {} episodes | created {} | updated {}",
+            thread.name, thread.episode_count, thread.created_at, thread.updated_at
         ));
     }
 
@@ -282,72 +277,6 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: true,
         },
     }
-}
-
-pub async fn auto_compact_if_needed(
-    runtime: &ToolRuntime,
-    client: &OpenAiClient,
-    session_id: &str,
-    thread_name: &str,
-) -> Result<(), anyhow::Error> {
-    let threshold = (max_context_tokens() as f64 * 0.75) as i64;
-    let Some(context_tokens) =
-        store::thread_context_tokens(&runtime.store_path, session_id, thread_name)?
-    else {
-        return Ok(());
-    };
-
-    if context_tokens <= threshold {
-        return Ok(());
-    }
-
-    compact_thread(runtime, client, session_id, thread_name).await?;
-    Ok(())
-}
-
-async fn compact_thread(
-    runtime: &ToolRuntime,
-    client: &OpenAiClient,
-    session_id: &str,
-    thread_name: &str,
-) -> Result<String, anyhow::Error> {
-    let episodes = store::thread_read(&runtime.store_path, session_id, thread_name)?;
-    if episodes.is_empty() {
-        return Err(anyhow::anyhow!(
-            "thread '{}' has no retained episodes",
-            thread_name
-        ));
-    }
-    if episodes.len() == 1 {
-        return Ok(format!(
-            "Thread '{}' already has a single retained episode; compaction skipped.",
-            thread_name
-        ));
-    }
-
-    let source = store::render_thread_document(thread_name, &episodes);
-    let compacted = client
-        .complete_text(
-            "Compress this retained thread history into one episode. Preserve file paths, decisions, current state, verification results, and unresolved issues. Keep it concise, but do not drop important implementation context.",
-            &source,
-        )
-        .await?;
-    let compacted_tokens =
-        compacted.usage.completion_tokens.ok_or_else(|| {
-            anyhow::anyhow!("compaction response did not include completion_tokens")
-        })? as i64;
-
-    let context_tokens = store::compact_thread(
-        &runtime.store_path,
-        session_id,
-        thread_name,
-        &compacted.content,
-        compacted_tokens,
-    )?;
-    Ok(format!(
-        "Compacted thread '{}' to 1 retained episode ({} context tokens).",
-        thread_name, context_tokens
-    ))
 }
 
 fn def(name: &str, description: &str, parameters: serde_json::Value) -> ToolDefinition {
@@ -483,11 +412,4 @@ async fn run_worker(
         exit_code,
         timed_out,
     })
-}
-
-fn max_context_tokens() -> usize {
-    std::env::var("AGENT_MAX_CONTEXT_TOKENS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(120_000)
 }

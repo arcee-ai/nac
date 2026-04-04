@@ -12,7 +12,7 @@ use crate::mcp::McpRegistry;
 use crate::sandbox::SandboxSession;
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
-use crate::types::{Message, ToolCall, ToolDefinition, Usage};
+use crate::types::{Message, ToolCall, ToolDefinition};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
@@ -41,7 +41,6 @@ pub struct Agent {
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
     tool_runtime: ToolRuntime,
-    last_usage: Option<Usage>,
     event_sink: EventSink,
     thread_name: Option<String>,
 }
@@ -194,7 +193,6 @@ impl Agent {
                 skills: config.skills,
                 activated_skills: Arc::new(Mutex::new(HashSet::new())),
             },
-            last_usage: None,
             event_sink: config.event_sink,
             thread_name: config.thread_name,
         }
@@ -223,7 +221,6 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
-        self.last_usage = None;
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
@@ -252,8 +249,6 @@ impl Agent {
                     return Err(error);
                 }
             };
-            self.last_usage = response.usage.clone();
-
             let choice = match response.choices.into_iter().next() {
                 Some(choice) => choice,
                 None => {
@@ -267,7 +262,9 @@ impl Agent {
             };
 
             if choice.finish_reason.as_deref() == Some("length") {
-                let error = anyhow!("Context window full (finish_reason=length)");
+                let error = anyhow!(
+                    "Context window full (finish_reason=length). nac does not auto-compact thread history right now; retry with a narrower prompt, a fresh thread, or less carried context."
+                );
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
@@ -325,12 +322,6 @@ impl Agent {
             message: error.to_string(),
         });
         Err(error)
-    }
-
-    pub fn last_completion_tokens(&self) -> Option<u32> {
-        self.last_usage
-            .as_ref()
-            .and_then(|usage| usage.completion_tokens)
     }
 
     pub fn set_event_sink(&mut self, sink: EventSink) {
