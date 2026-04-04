@@ -921,6 +921,7 @@ mod tests {
                 },
                 Message::Assistant {
                     content: Some("world".to_string()),
+                    reasoning_content: Some("hidden thinking".to_string()),
                     tool_calls: None,
                 },
             ],
@@ -949,8 +950,12 @@ mod tests {
         match &run_config.agent.messages[2] {
             Message::Assistant {
                 content: Some(content),
+                reasoning_content: Some(reasoning),
                 ..
-            } => assert_eq!(content, "world"),
+            } => {
+                assert_eq!(content, "world");
+                assert_eq!(reasoning, "hidden thinking");
+            }
             other => panic!("expected restored assistant message, got {:?}", other),
         }
 

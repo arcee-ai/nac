@@ -25,6 +25,8 @@ pub enum Message {
         #[serde(serialize_with = "serialize_nullable_content")]
         content: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>,
     },
     #[serde(rename = "tool")]
@@ -90,6 +92,8 @@ pub struct ResponseMessage {
     pub role: String,
     pub content: Option<String>,
     #[serde(default)]
+    pub reasoning_content: Option<String>,
+    #[serde(default)]
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
@@ -108,6 +112,7 @@ mod tests {
     fn test_assistant_content_null() {
         let msg = Message::Assistant {
             content: None,
+            reasoning_content: Some("thinking".to_string()),
             tool_calls: Some(vec![ToolCall {
                 id: "call_123".to_string(),
                 call_type: "function".to_string(),
@@ -126,6 +131,11 @@ mod tests {
         assert!(
             json.contains("tool_calls"),
             "Expected tool_calls in JSON: {}",
+            json
+        );
+        assert!(
+            json.contains("\"reasoning_content\":\"thinking\""),
+            "Expected reasoning_content in JSON: {}",
             json
         );
     }

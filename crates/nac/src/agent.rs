@@ -281,6 +281,7 @@ impl Agent {
 
             self.messages.push(Message::Assistant {
                 content: choice.message.content.clone(),
+                reasoning_content: choice.message.reasoning_content.clone(),
                 tool_calls: choice.message.tool_calls.clone(),
             });
 
