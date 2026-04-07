@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{disable_raw_mode, supports_keyboard_enhancement};
 use ratatui::backend::CrosstermBackend;
@@ -163,6 +164,15 @@ impl App {
 
     fn clear_composer(&mut self) {
         self.composer = build_composer();
+    }
+
+    fn handle_paste(&mut self, text: &str) -> AppAction {
+        if matches!(self.send_state, SendState::Pending) {
+            return AppAction::None;
+        }
+
+        self.composer.insert_str(&normalize_paste(text));
+        AppAction::None
     }
 
     fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<UiEntry> {
@@ -421,6 +431,7 @@ pub async fn run(
     })?;
     terminal.hide_cursor()?;
     let keyboard_enhancements_enabled = enable_keyboard_enhancements(&mut terminal);
+    let bracketed_paste_enabled = enable_bracketed_paste(&mut terminal);
 
     let mut app = App::new();
     print_preamble(&mut terminal, &metadata)?;
@@ -450,6 +461,9 @@ pub async fn run(
                                 }
                                 AppAction::Quit | AppAction::None => {}
                             }
+                        }
+                        CrosstermEvent::Paste(text) => {
+                            let _ = app.handle_paste(&text);
                         }
                         CrosstermEvent::Resize(_, _) => {}
                         _ => {}
@@ -492,6 +506,9 @@ pub async fn run(
     let cleanup_result = (|| -> io::Result<()> {
         if keyboard_enhancements_enabled {
             let _ = crossterm::execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+        }
+        if bracketed_paste_enabled {
+            let _ = crossterm::execute!(terminal.backend_mut(), DisableBracketedPaste);
         }
         terminal.clear()?;
         terminal.show_cursor()?;
@@ -980,6 +997,14 @@ fn enable_keyboard_enhancements(terminal: &mut UiTerminal) -> bool {
     .is_ok()
 }
 
+fn enable_bracketed_paste(terminal: &mut UiTerminal) -> bool {
+    crossterm::execute!(terminal.backend_mut(), EnableBracketedPaste).is_ok()
+}
+
+fn normalize_paste(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn spawn_input_thread(
     running: Arc<AtomicBool>,
     input_tx: mpsc::UnboundedSender<CrosstermEvent>,
@@ -1090,5 +1115,24 @@ mod tests {
 
         assert!(matches!(action, AppAction::None));
         assert_eq!(app.prompt(), "a");
+    }
+
+    #[test]
+    fn multiline_paste_inserts_newlines_without_submit() {
+        let mut app = App::new();
+
+        let action = app.handle_paste("hello\nworld");
+
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.prompt(), "hello\nworld");
+    }
+
+    #[test]
+    fn pasted_crlf_is_normalized_to_newlines() {
+        let mut app = App::new();
+
+        app.handle_paste("hello\r\nworld\rtest");
+
+        assert_eq!(app.prompt(), "hello\nworld\ntest");
     }
 }
