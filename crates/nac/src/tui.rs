@@ -1,4 +1,5 @@
 use std::io;
+use std::io::Write;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -12,12 +13,13 @@ use crossterm::event::{
     KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
+use crossterm::style::Stylize;
 use crossterm::terminal::{disable_raw_mode, supports_keyboard_enhancement};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Padding, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Paragraph, Widget};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use ratatui_textarea::TextArea;
 use tokio::sync::{mpsc, Mutex};
@@ -31,6 +33,9 @@ use crate::types::Message;
 const COMPOSER_VIEWPORT_HEIGHT: u16 = 6;
 const EPISODE_PREVIEW_LINE_LIMIT: usize = 8;
 const EPISODE_PREVIEW_CHAR_LIMIT: usize = 700;
+const PROMPT_LABEL: &str = "ask";
+const PROMPT_SEPARATOR: &str = " › ";
+const CONTINUATION_PREFIX: &str = "    · ";
 
 type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -108,18 +113,8 @@ impl UiEntry {
         }
     }
 
-    fn compact(mut self) -> Self {
-        self.spacing_after = 0;
-        self
-    }
-
     fn muted_body(mut self) -> Self {
         self.muted_body = true;
-        self
-    }
-
-    fn symbol(mut self, symbol: &'static str) -> Self {
-        self.symbol_override = Some(symbol);
         self
     }
 
@@ -336,13 +331,14 @@ impl App {
             return;
         }
 
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
         let footer_height = 1;
-        let max_composer_height = area.height.saturating_sub(footer_height).max(3);
-        let content_height =
-            composer_content_height(self.composer.lines(), area.width.saturating_sub(2));
-        let composer_height = content_height
-            .saturating_add(2)
-            .clamp(3, max_composer_height);
+        let max_composer_height = area.height.saturating_sub(footer_height).max(1);
+        let content_height = composer_content_height(self.composer.lines(), area.width);
+        let composer_height = content_height.clamp(1, max_composer_height);
         let composer_area = Rect::new(area.x, area.y, area.width, composer_height);
         let footer_area = Rect::new(
             area.x,
@@ -351,30 +347,20 @@ impl App {
             footer_height.min(area.height.saturating_sub(composer_height)),
         );
 
-        let block = Block::bordered()
-            .title(" ask ")
-            .border_style(Style::default().fg(Color::DarkGray))
-            .padding(Padding::horizontal(1));
-        let inner = block.inner(composer_area);
-        frame.render_widget(block, composer_area);
-
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
-
         let view = wrapped_composer_view(
             self.composer.lines(),
             self.composer.cursor(),
-            inner.width,
-            inner.height,
-            "",
+            composer_area.width,
+            composer_area.height,
         );
 
         let paragraph = Paragraph::new(Text::from(view.lines.clone()))
-            .style(Style::default().fg(Color::White))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(paragraph, inner);
-        frame.set_cursor_position((inner.x + view.cursor_col, inner.y + view.cursor_row));
+            .style(Style::default().fg(Color::White));
+        frame.render_widget(paragraph, composer_area);
+        frame.set_cursor_position((
+            composer_area.x + view.cursor_col.min(composer_area.width.saturating_sub(1)),
+            composer_area.y + view.cursor_row.min(composer_area.height.saturating_sub(1)),
+        ));
 
         if footer_area.height > 0 {
             let footer = Paragraph::new(Line::from(vec![
@@ -428,6 +414,7 @@ pub async fn run(
     let mut animation_tick = time::interval(Duration::from_millis(150));
     animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    print_preamble_plain(&metadata)?;
     let mut terminal = ratatui::try_init_with_options(TerminalOptions {
         viewport: Viewport::Inline(COMPOSER_VIEWPORT_HEIGHT),
     })?;
@@ -436,7 +423,6 @@ pub async fn run(
     let bracketed_paste_enabled = enable_bracketed_paste(&mut terminal);
 
     let mut app = App::new();
-    print_preamble(&mut terminal, &metadata)?;
     print_restored_history(&mut terminal, &restored_messages)?;
     terminal.draw(|frame| app.render(frame))?;
 
@@ -666,69 +652,51 @@ fn wrapped_entry_lines(entry: &UiEntry, width: u16) -> Vec<String> {
     wrapped
 }
 
-fn print_preamble(terminal: &mut UiTerminal, metadata: &TuiMetadata) -> Result<()> {
-    print_blank_line(terminal)?;
-    print_entry(
-        terminal,
-        &UiEntry::new(EntryKind::Log, "OPENAI_MODEL:", metadata.model.clone())
-            .compact()
-            .symbol("●"),
+fn print_preamble_plain(metadata: &TuiMetadata) -> Result<()> {
+    let mut out = io::stdout().lock();
+    writeln!(out)?;
+    writeln!(
+        out,
+        "{}",
+        format!("● OPENAI_MODEL: {}", metadata.model).dark_grey()
     )?;
     if let Some(reasoning_effort) = metadata.reasoning_effort.as_deref() {
-        print_entry(
-            terminal,
-            &UiEntry::new(EntryKind::Log, "effort:", reasoning_effort)
-                .compact()
-                .symbol("●"),
+        writeln!(
+            out,
+            "{}",
+            format!("● effort: {}", reasoning_effort).dark_grey()
         )?;
     }
-    print_entry(
-        terminal,
-        &UiEntry::new(
-            EntryKind::Log,
-            "OPENAI_BASE_URL:",
-            metadata.base_url.clone(),
-        )
-        .compact()
-        .symbol("●"),
+    writeln!(
+        out,
+        "{}",
+        format!("● OPENAI_BASE_URL: {}", metadata.base_url).dark_grey()
     )?;
-    print_entry(
-        terminal,
-        &UiEntry::new(EntryKind::Log, "backend:", metadata.backend.clone())
-            .compact()
-            .symbol("●"),
+    writeln!(
+        out,
+        "{}",
+        format!("● backend: {}", metadata.backend).dark_grey()
     )?;
-    print_entry(
-        terminal,
-        &UiEntry::new(EntryKind::Log, "sandbox:", metadata.sandbox_status.clone())
-            .compact()
-            .symbol("●"),
+    writeln!(
+        out,
+        "{}",
+        format!("● sandbox: {}", metadata.sandbox_status).dark_grey()
     )?;
-    print_entry(
-        terminal,
-        &UiEntry::new(
-            EntryKind::Log,
-            "AGENTS.md:",
-            metadata.agents_md_status.clone(),
-        )
-        .compact()
-        .symbol("●"),
+    writeln!(
+        out,
+        "{}",
+        format!("● AGENTS.md: {}", metadata.agents_md_status).dark_grey()
     )?;
-    print_entry(
-        terminal,
-        &UiEntry::new(EntryKind::Log, "cwd:", metadata.cwd.clone())
-            .compact()
-            .symbol("●"),
-    )?;
+    writeln!(out, "{}", format!("● cwd: {}", metadata.cwd).dark_grey())?;
     if let Some(session_id) = metadata.session_id.as_deref() {
-        print_entry(
-            terminal,
-            &UiEntry::new(EntryKind::Log, "session:", short_session(session_id))
-                .compact()
-                .symbol("●"),
+        writeln!(
+            out,
+            "{}",
+            format!("● session: {}", short_session(session_id)).dark_grey()
         )?;
     }
-    print_blank_line(terminal)?;
+    writeln!(out)?;
+    out.flush()?;
     Ok(())
 }
 
@@ -777,27 +745,26 @@ fn wrapped_composer_view(
     cursor: (usize, usize),
     width: u16,
     height: u16,
-    placeholder: &str,
 ) -> WrappedComposerView {
+    let prefix_width = composer_prefix_width();
+    let content_width = width.max(1) as usize;
+    let effective_width = content_width.saturating_sub(prefix_width).max(1);
+
     if lines.len() == 1 && lines.first().is_some_and(|line| line.is_empty()) {
         return WrappedComposerView {
-            lines: vec![Line::from(Span::styled(
-                placeholder.to_string(),
-                Style::default().fg(Color::DarkGray),
-            ))],
+            lines: vec![prompt_line(true, "")],
             cursor_row: 0,
-            cursor_col: 0,
+            cursor_col: prefix_width as u16,
         };
     }
 
-    let width = width.max(1) as usize;
     let mut visual_lines = Vec::new();
     let mut cursor_row = 0usize;
     let mut cursor_col = 0usize;
     let mut cursor_set = false;
 
     for (row, line) in lines.iter().enumerate() {
-        let segments = wrap_soft_line(line, width);
+        let segments = wrap_soft_line(line, effective_width);
         let mut start = 0usize;
         for (segment_index, segment) in segments.iter().enumerate() {
             let segment_len = segment.chars().count();
@@ -806,17 +773,18 @@ fn wrapped_composer_view(
                 let is_last_segment = segment_index + 1 == segments.len();
                 if cursor.1 <= end || is_last_segment {
                     cursor_row = visual_lines.len();
-                    cursor_col = cursor.1.saturating_sub(start).min(segment_len);
+                    cursor_col = prefix_width + cursor.1.saturating_sub(start).min(segment_len);
                     cursor_set = true;
                 }
             }
-            visual_lines.push(segment.clone());
+            let is_first_visual = visual_lines.is_empty();
+            visual_lines.push((is_first_visual, segment.clone()));
             start = end;
         }
 
         if !cursor_set && row == cursor.0 && line.is_empty() {
             cursor_row = visual_lines.len().saturating_sub(1);
-            cursor_col = 0;
+            cursor_col = prefix_width;
             cursor_set = true;
         }
     }
@@ -825,8 +793,8 @@ fn wrapped_composer_view(
         cursor_row = visual_lines.len().saturating_sub(1);
         cursor_col = visual_lines
             .last()
-            .map(|line| line.chars().count())
-            .unwrap_or(0);
+            .map(|(_, line)| prefix_width + line.chars().count())
+            .unwrap_or(prefix_width);
     }
 
     let height = height.max(1) as usize;
@@ -835,7 +803,7 @@ fn wrapped_composer_view(
         .into_iter()
         .skip(scroll_top)
         .take(height)
-        .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::White))))
+        .map(|(is_first, line)| prompt_line(is_first, &line))
         .collect();
 
     WrappedComposerView {
@@ -851,11 +819,42 @@ fn composer_content_height(lines: &[String], width: u16) -> u16 {
     }
 
     let width = width.max(1) as usize;
+    let effective_width = width.saturating_sub(composer_prefix_width()).max(1);
     lines
         .iter()
-        .map(|line| wrap_soft_line(line, width).len() as u16)
+        .map(|line| wrap_soft_line(line, effective_width).len() as u16)
         .fold(0u16, |acc, count| acc.saturating_add(count))
         .max(1)
+}
+
+fn composer_prefix_width() -> usize {
+    PROMPT_LABEL.chars().count() + PROMPT_SEPARATOR.chars().count()
+}
+
+fn prompt_line(is_first: bool, content: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    if is_first {
+        spans.push(Span::styled(
+            PROMPT_LABEL,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            PROMPT_SEPARATOR,
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            CONTINUATION_PREFIX.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    spans.push(Span::styled(
+        content.to_string(),
+        Style::default().fg(Color::White),
+    ));
+    Line::from(spans)
 }
 
 fn wrap_soft_line(line: &str, width: usize) -> Vec<String> {
