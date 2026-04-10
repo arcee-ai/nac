@@ -29,6 +29,10 @@ struct PersistedSandboxSpec {
     image: String,
     workdir: String,
     mounts: Vec<PersistedMountSpec>,
+    #[serde(default)]
+    gpu_devices: Vec<String>,
+    #[serde(default = "default_sandbox_shm_size")]
+    shm_size: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +40,10 @@ struct PersistedMountSpec {
     host: String,
     guest: String,
     read_only: bool,
+}
+
+fn default_sandbox_shm_size() -> Option<String> {
+    Some("0".to_string())
 }
 
 pub fn create_session(snapshot: &SessionSnapshot) -> Result<()> {
@@ -232,6 +240,8 @@ fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
                 read_only: mount.read_only,
             })
             .collect(),
+        gpu_devices: spec.gpu_devices.clone(),
+        shm_size: spec.shm_size.clone(),
     };
     serde_json::to_string(&persisted).context("failed to serialize sandbox spec")
 }
@@ -254,6 +264,8 @@ fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxSpec>> {
                 read_only: mount.read_only,
             })
             .collect(),
+        gpu_devices: persisted.gpu_devices,
+        shm_size: persisted.shm_size,
     }))
 }
 

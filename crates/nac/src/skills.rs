@@ -781,6 +781,8 @@ mod tests {
                 },
             ],
             workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
         });
 
         let registry = SkillRegistry::load(Some(&repo), Some(&sandbox))

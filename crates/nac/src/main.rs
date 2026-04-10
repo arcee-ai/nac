@@ -91,6 +91,14 @@ struct RunCli {
     #[arg(long, default_value = DEFAULT_SANDBOX_IMAGE)]
     sandbox_image: String,
 
+    /// GPU CDI device to expose to the sandbox (repeatable; use 'all' for all NVIDIA GPUs)
+    #[arg(long = "sandbox-gpu")]
+    sandbox_gpus: Vec<String>,
+
+    /// Sandbox /dev/shm size (default: 0, meaning uncapped by Podman)
+    #[arg(long = "sandbox-shm-size")]
+    sandbox_shm_size: Option<String>,
+
     /// Internal sandbox session key used to attach worker subprocesses
     #[arg(long, hide = true)]
     sandbox_session_key: Option<String>,
@@ -616,7 +624,9 @@ async fn build_sandbox_session(cli: &RunCli, cwd: &Path) -> Result<Option<Sandbo
         || !cli.mounts_ro.is_empty()
         || cli.sandbox_session_key.is_some()
         || cli.sandbox_workdir.is_some()
-        || cli.sandbox_image != DEFAULT_SANDBOX_IMAGE;
+        || cli.sandbox_image != DEFAULT_SANDBOX_IMAGE
+        || !cli.sandbox_gpus.is_empty()
+        || cli.sandbox_shm_size.is_some();
 
     if !cli.sandbox {
         if sandbox_flags_present {
@@ -648,7 +658,20 @@ async fn build_sandbox_session(cli: &RunCli, cwd: &Path) -> Result<Option<Sandbo
         .unwrap_or_else(|| cwd.to_path_buf());
     mounts.extend(skills::auto_mounts(&skills_workspace_dir, &mounts)?);
 
-    let spec = build_sandbox_spec(cli.sandbox_image.clone(), workdir, mounts)?;
+    let spec = build_sandbox_spec(
+        cli.sandbox_image.clone(),
+        workdir,
+        mounts,
+        cli.sandbox_gpus
+            .iter()
+            .map(|device| normalize_gpu_device(device))
+            .collect(),
+        Some(
+            cli.sandbox_shm_size
+                .clone()
+                .unwrap_or_else(|| "0".to_string()),
+        ),
+    )?;
     let owner = cli.sandbox_session_key.is_none();
     let session_key = cli
         .sandbox_session_key
@@ -656,6 +679,14 @@ async fn build_sandbox_session(cli: &RunCli, cwd: &Path) -> Result<Option<Sandbo
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let session = SandboxSession::create(spec, session_key, owner).await?;
     Ok(Some(session))
+}
+
+fn normalize_gpu_device(device: &str) -> String {
+    if device == "all" {
+        "nvidia.com/gpu=all".to_string()
+    } else {
+        device.to_string()
+    }
 }
 
 fn current_directory_display() -> String {
@@ -801,6 +832,8 @@ mod tests {
             mounts: Vec::new(),
             mounts_ro: Vec::new(),
             sandbox_image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            sandbox_gpus: Vec::new(),
+            sandbox_shm_size: None,
             sandbox_session_key: None,
             sandbox_workdir: None,
             api_base_url: None,
@@ -851,6 +884,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn sandbox_gpu_all_maps_to_nvidia_cdi_device() {
+        assert_eq!(normalize_gpu_device("all"), "nvidia.com/gpu=all");
+        assert_eq!(
+            normalize_gpu_device("nvidia.com/gpu=mig1:0"),
+            "nvidia.com/gpu=mig1:0"
+        );
+    }
+
     #[tokio::test]
     async fn orchestrator_allows_explicit_session_id() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -890,6 +932,8 @@ mod tests {
             mounts: Vec::new(),
             mounts_ro: Vec::new(),
             sandbox_image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            sandbox_gpus: Vec::new(),
+            sandbox_shm_size: None,
             sandbox_session_key: None,
             sandbox_workdir: None,
             api_base_url: None,

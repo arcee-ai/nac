@@ -21,6 +21,8 @@ pub struct SandboxSpec {
     pub image: String,
     pub mounts: Vec<MountSpec>,
     pub workdir: PathBuf,
+    pub gpu_devices: Vec<String>,
+    pub shm_size: Option<String>,
 }
 
 #[derive(Clone)]
@@ -170,6 +172,8 @@ pub fn build_sandbox_spec(
     image: String,
     workdir: String,
     mounts: Vec<MountSpec>,
+    gpu_devices: Vec<String>,
+    shm_size: Option<String>,
 ) -> Result<SandboxSpec> {
     let workdir = PathBuf::from(workdir);
     if !workdir.is_absolute() {
@@ -183,6 +187,8 @@ pub fn build_sandbox_spec(
         image,
         mounts,
         workdir,
+        gpu_devices,
+        shm_size,
     })
 }
 
@@ -246,6 +252,8 @@ mod tests {
                     image: DEFAULT_SANDBOX_IMAGE.to_string(),
                     mounts: vec![mount],
                     workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                    gpu_devices: Vec::new(),
+                    shm_size: Some("0".to_string()),
                 },
                 "test-session".to_string(),
                 false,

@@ -75,6 +75,14 @@ impl PodmanSession {
                 mount.guest.display()
             )));
         }
+        if let Some(shm_size) = &self.spec.shm_size {
+            args.push(OsString::from("--sandbox-shm-size"));
+            args.push(OsString::from(shm_size));
+        }
+        for device in &self.spec.gpu_devices {
+            args.push(OsString::from("--sandbox-gpu"));
+            args.push(OsString::from(device));
+        }
 
         args
     }
@@ -232,6 +240,23 @@ impl PodmanSession {
             args.push(OsString::from(volume_arg(mount)));
         }
 
+        if let Some(shm_size) = &self.spec.shm_size {
+            args.push(OsString::from("--shm-size"));
+            args.push(OsString::from(shm_size));
+        }
+
+        if !self.spec.gpu_devices.is_empty() && should_enable_gpu_access_options() {
+            args.push(OsString::from("--security-opt"));
+            args.push(OsString::from("label=disable"));
+            args.push(OsString::from("--group-add"));
+            args.push(OsString::from("keep-groups"));
+        }
+
+        for device in &self.spec.gpu_devices {
+            args.push(OsString::from("--device"));
+            args.push(OsString::from(device));
+        }
+
         args.push(OsString::from(self.spec.image.clone()));
         args.push(OsString::from("sh"));
         args.push(OsString::from("-lc"));
@@ -295,6 +320,16 @@ fn should_keep_id_userns() -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
+fn should_enable_gpu_access_options() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "linux"))]
+fn should_enable_gpu_access_options() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +345,8 @@ mod tests {
                     read_only: false,
                 }],
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                gpu_devices: Vec::new(),
+                shm_size: Some("0".to_string()),
             },
             "abc123".to_string(),
             false,
@@ -327,6 +364,8 @@ mod tests {
         assert!(rendered.contains(&"--no-mount-cwd".to_string()));
         assert!(rendered.contains(&"--sandbox-session-key".to_string()));
         assert!(rendered.contains(&"/tmp/project:/workspace".to_string()));
+        assert!(rendered.contains(&"--sandbox-shm-size".to_string()));
+        assert!(rendered.contains(&"0".to_string()));
     }
 
     #[test]
@@ -339,6 +378,8 @@ mod tests {
         assert!(rendered.starts_with(&["run".to_string(), "-d".to_string(), "--rm".to_string(),]));
         assert!(rendered.contains(&"-v".to_string()));
         assert!(rendered.contains(&"/tmp/project:/workspace:rw".to_string()));
+        assert!(rendered.contains(&"--shm-size".to_string()));
+        assert!(rendered.contains(&"0".to_string()));
         assert_eq!(
             rendered.contains(&"--userns".to_string()),
             should_keep_id_userns()
@@ -359,6 +400,8 @@ mod tests {
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                gpu_devices: Vec::new(),
+                shm_size: Some("0".to_string()),
             },
             "empty".to_string(),
             false,
@@ -369,6 +412,42 @@ mod tests {
             .map(|value| value.to_string_lossy().to_string())
             .collect();
         assert!(!rendered.contains(&"--userns".to_string()));
+    }
+
+    #[test]
+    fn create_container_args_include_gpu_devices() {
+        let session = PodmanSession::new(
+            SandboxSpec {
+                image: DEFAULT_SANDBOX_IMAGE.to_string(),
+                mounts: Vec::new(),
+                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                gpu_devices: vec![
+                    "nvidia.com/gpu=all".to_string(),
+                    "nvidia.com/gpu=mig1:0".to_string(),
+                ],
+                shm_size: Some("8g".to_string()),
+            },
+            "gpu".to_string(),
+            false,
+        );
+        let rendered: Vec<String> = session
+            .create_container_args()
+            .into_iter()
+            .map(|value| value.to_string_lossy().to_string())
+            .collect();
+        assert!(rendered.contains(&"--device".to_string()));
+        assert!(rendered.contains(&"nvidia.com/gpu=all".to_string()));
+        assert!(rendered.contains(&"nvidia.com/gpu=mig1:0".to_string()));
+        assert!(rendered.contains(&"--shm-size".to_string()));
+        assert!(rendered.contains(&"8g".to_string()));
+        assert_eq!(
+            rendered.contains(&"label=disable".to_string()),
+            should_enable_gpu_access_options()
+        );
+        assert_eq!(
+            rendered.contains(&"keep-groups".to_string()),
+            should_enable_gpu_access_options()
+        );
     }
 
     #[test]
