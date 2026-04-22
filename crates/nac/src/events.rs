@@ -16,11 +16,13 @@ pub enum AgentEvent {
     },
     ToolCallStarted {
         thread_name: Option<String>,
+        call_id: String,
         name: String,
         args_preview: String,
     },
     ToolCallFinished {
         thread_name: Option<String>,
+        call_id: String,
         name: String,
         content_preview: String,
         is_error: bool,

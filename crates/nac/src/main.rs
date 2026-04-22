@@ -150,6 +150,8 @@ struct RunConfig {
     session_snapshot: Option<SessionSnapshot>,
     sandbox_status: String,
     agents_md_status: String,
+    workspace_display: String,
+    workspace_host_path: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -183,9 +185,12 @@ async fn run() -> Result<()> {
 
     if use_tui {
         let metadata = TuiMetadata {
-            cwd: std::env::current_dir()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|_| ".".to_string()),
+            cwd: run_config.workspace_display.clone(),
+            workspace_host_path: run_config.workspace_host_path.clone(),
+            store_path: session_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.store_path.clone())
+                .unwrap_or_else(store::default_store_path),
             model: run_config.client.model.clone(),
             base_url: run_config.client.base_url().to_string(),
             backend: run_config.client.backend().as_str().to_string(),
@@ -303,6 +308,11 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(current_directory_display);
+    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir()
+    } else {
+        Some(current_dir.clone())
+    };
     let sandbox_status = sandbox
         .as_ref()
         .map(|session| session.status_text())
@@ -388,6 +398,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
                 session_snapshot: None,
                 sandbox_status,
                 agents_md_status,
+                workspace_display: working_directory.clone(),
+                workspace_host_path: workspace_host_path.clone(),
             });
         }
 
@@ -430,6 +442,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
             session_snapshot: None,
             sandbox_status,
             agents_md_status,
+            workspace_display: working_directory.clone(),
+            workspace_host_path: workspace_host_path.clone(),
         });
     }
 
@@ -456,7 +470,7 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
             initial_messages: Vec::new(),
             thread_name: None,
             event_sink: EventSink::none(),
-            working_directory,
+            working_directory: working_directory.clone(),
             sandbox: sandbox.clone(),
             mcp: None,
             skills: None,
@@ -488,6 +502,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         session_snapshot: Some(session_snapshot),
         sandbox_status,
         agents_md_status,
+        workspace_display: working_directory,
+        workspace_host_path,
     })
 }
 
@@ -520,6 +536,11 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(current_directory_display);
+    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir()
+    } else {
+        Some(current_dir.clone())
+    };
     let sandbox_status = sandbox
         .as_ref()
         .map(|session| session.status_text())
@@ -536,7 +557,7 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
             initial_messages: Vec::new(),
             thread_name: None,
             event_sink: EventSink::none(),
-            working_directory,
+            working_directory: working_directory.clone(),
             sandbox,
             mcp: None,
             skills: None,
@@ -557,6 +578,8 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
         session_snapshot: Some(snapshot),
         sandbox_status,
         agents_md_status,
+        workspace_display: working_directory,
+        workspace_host_path,
     })
 }
 

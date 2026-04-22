@@ -216,6 +216,9 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             "\n- {} | {} episodes | created {} | updated {}",
             thread.name, thread.episode_count, thread.created_at, thread.updated_at
         ));
+        if let Some(action) = thread.latest_action.as_deref() {
+            output.push_str(&format!(" | last action: {}", action));
+        }
     }
 
     ToolResult {

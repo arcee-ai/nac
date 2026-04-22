@@ -1,7 +1,10 @@
-use std::io;
-use std::io::Write;
+use std::cmp::Ordering;
+use std::collections::{HashMap, VecDeque};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc,
 };
 use std::thread;
@@ -9,18 +12,21 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    KeyboardEnhancementFlags, MouseButton, MouseEvent, MouseEventKind, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
-use crossterm::style::Stylize;
-use crossterm::terminal::{disable_raw_mode, supports_keyboard_enhancement};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+    LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Paragraph, Widget};
-use ratatui::{Terminal, TerminalOptions, Viewport};
+use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::Terminal;
 use ratatui_textarea::TextArea;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{self, MissedTickBehavior};
@@ -28,11 +34,17 @@ use tokio::time::{self, MissedTickBehavior};
 use crate::agent::Agent;
 use crate::events::{AgentEvent, EventSink};
 use crate::sessions::{self, SessionSnapshot};
+use crate::store;
 use crate::types::Message;
 
-const COMPOSER_VIEWPORT_HEIGHT: u16 = 6;
-const EPISODE_PREVIEW_LINE_LIMIT: usize = 8;
-const EPISODE_PREVIEW_CHAR_LIMIT: usize = 700;
+const COMPOSER_HEIGHT: u16 = 6;
+const MIN_TERMINAL_WIDTH: u16 = 72;
+const MIN_TERMINAL_HEIGHT: u16 = 22;
+const TIMELINE_LIMIT: usize = 220;
+const TOOL_HISTORY_LIMIT: usize = 20;
+const TREE_DEPTH: usize = 3;
+const TREE_LINES: usize = 18;
+const FILE_CHANGE_LIMIT: usize = 36;
 const PROMPT_LABEL: &str = "ask";
 const PROMPT_SEPARATOR: &str = " › ";
 const CONTINUATION_PREFIX: &str = "    · ";
@@ -42,6 +54,8 @@ type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 #[derive(Clone)]
 pub struct TuiMetadata {
     pub cwd: String,
+    pub workspace_host_path: Option<PathBuf>,
+    pub store_path: PathBuf,
     pub model: String,
     pub base_url: String,
     pub backend: String,
@@ -52,107 +66,423 @@ pub struct TuiMetadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EntryKind {
-    User,
-    Assistant,
-    Tool,
-    Thread,
-    Error,
-    Log,
-}
-
-impl EntryKind {
-    fn symbol(self) -> &'static str {
-        match self {
-            EntryKind::User => "●",
-            EntryKind::Assistant => "○",
-            EntryKind::Tool => "◆",
-            EntryKind::Thread => "◇",
-            EntryKind::Error => "×",
-            EntryKind::Log => "·",
-        }
-    }
-
-    fn accent(self) -> Color {
-        match self {
-            EntryKind::User => Color::Cyan,
-            EntryKind::Assistant => Color::Green,
-            EntryKind::Tool => Color::Yellow,
-            EntryKind::Thread => Color::Magenta,
-            EntryKind::Error => Color::Red,
-            EntryKind::Log => Color::DarkGray,
-        }
-    }
-
-    fn symbol_style(self) -> Style {
-        Style::default()
-            .fg(self.accent())
-            .add_modifier(Modifier::BOLD)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct UiEntry {
-    kind: EntryKind,
-    title: String,
-    body: String,
-    spacing_after: u16,
-    muted_body: bool,
-    symbol_override: Option<&'static str>,
-}
-
-impl UiEntry {
-    fn new(kind: EntryKind, title: impl Into<String>, body: impl Into<String>) -> Self {
-        Self {
-            kind,
-            title: title.into(),
-            body: body.into(),
-            spacing_after: 1,
-            muted_body: false,
-            symbol_override: None,
-        }
-    }
-
-    fn muted_body(mut self) -> Self {
-        self.muted_body = true;
-        self
-    }
-
-    fn with_spacing_after(mut self, spacing_after: u16) -> Self {
-        self.spacing_after = spacing_after;
-        self
-    }
-
-    fn symbol_text(&self) -> &'static str {
-        self.symbol_override.unwrap_or_else(|| self.kind.symbol())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SendState {
     Idle,
     Pending,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Info,
+    Success,
+    Warning,
+    Error,
+    Muted,
+}
+
+impl Tone {
+    fn color(self) -> Color {
+        match self {
+            Self::Info => Color::Cyan,
+            Self::Success => Color::Green,
+            Self::Warning => Color::Yellow,
+            Self::Error => Color::Red,
+            Self::Muted => Color::DarkGray,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThreadState {
+    Active,
+    Idle,
+}
+
+impl ThreadState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Active => "ACTIVE",
+            Self::Idle => "IDLE",
+        }
+    }
+
+    fn tone(self) -> Tone {
+        match self {
+            Self::Active => Tone::Success,
+            Self::Idle => Tone::Muted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolStatus {
+    Running,
+    Ok,
+    Failed,
+    Error,
+    TimedOut,
+}
+
+impl ToolStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Running => "RUN",
+            Self::Ok => "OK",
+            Self::Failed => "FAIL",
+            Self::Error => "ERR",
+            Self::TimedOut => "TIME",
+        }
+    }
+
+    fn tone(self) -> Tone {
+        match self {
+            Self::Running => Tone::Info,
+            Self::Ok => Tone::Success,
+            Self::Failed => Tone::Warning,
+            Self::Error => Tone::Error,
+            Self::TimedOut => Tone::Warning,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PanelId {
+    Prompt,
+    Response,
+    PreviousResponse,
+    Workspace,
+}
+
+#[derive(Debug, Clone)]
+struct TimelineEntry {
+    timestamp: String,
+    actor: String,
+    detail: String,
+    tone: Tone,
+}
+
+#[derive(Debug, Clone)]
+struct ThreadView {
+    name: String,
+    action: String,
+    state: ThreadState,
+    updated_at: String,
+    episodes: i64,
+    summary: String,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveTool {
+    thread_name: Option<String>,
+    name: String,
+    target: String,
+    started_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ToolRecord {
+    thread_name: Option<String>,
+    name: String,
+    target: String,
+    status: ToolStatus,
+    duration: Duration,
+    summary: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CheckSlot {
+    Tests,
+    Lint,
+    Format,
+    Build,
+    Last,
+}
+
+impl CheckSlot {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tests => "tests",
+            Self::Lint => "lint",
+            Self::Format => "format",
+            Self::Build => "build",
+            Self::Last => "last",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CheckRecord {
+    status: ToolStatus,
+    target: String,
+    summary: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ChecksState {
+    slots: HashMap<CheckSlot, CheckRecord>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GitStatusCounts {
+    modified: usize,
+    staged: usize,
+    untracked: usize,
+    added: usize,
+    deleted: usize,
+    renamed: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ChangedFileStat {
+    status: String,
+    path: String,
+    additions: Option<u64>,
+    deletions: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspaceSnapshot {
+    host_root: Option<PathBuf>,
+    workspace_display: String,
+    repo_label: Option<String>,
+    branch: Option<String>,
+    last_commit: Option<String>,
+    counts: GitStatusCounts,
+    changed_files: Vec<ChangedFileStat>,
+    total_additions: u64,
+    total_deletions: u64,
+    error: Option<String>,
+}
+
+impl WorkspaceSnapshot {
+    fn load(workspace_display: &str, host_root: Option<&Path>) -> Self {
+        let Some(cwd) = host_root else {
+            return Self {
+                host_root: None,
+                workspace_display: workspace_display.to_string(),
+                repo_label: None,
+                branch: None,
+                last_commit: None,
+                counts: GitStatusCounts::default(),
+                changed_files: Vec::new(),
+                total_additions: 0,
+                total_deletions: 0,
+                error: Some(format!(
+                    "workspace '{}' is sandbox-only; host-side inspection unavailable",
+                    workspace_display
+                )),
+            };
+        };
+
+        let root = run_git(cwd, &["rev-parse", "--show-toplevel"]).and_then(|path| {
+            if path.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(path))
+            }
+        });
+
+        let branch = run_git(cwd, &["branch", "--show-current"]).filter(|value| !value.is_empty());
+        let last_commit =
+            run_git(cwd, &["log", "-1", "--pretty=format:%h %s"]).filter(|value| !value.is_empty());
+        let remote = run_git(cwd, &["config", "--get", "remote.origin.url"]);
+        let repo_label = remote.as_deref().and_then(parse_remote_label).or_else(|| {
+            root.as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_string())
+        });
+
+        let status_raw = match run_git(cwd, &["status", "--porcelain"]) {
+            Some(value) => value,
+            None => {
+                return Self {
+                    host_root: Some(cwd.to_path_buf()),
+                    workspace_display: workspace_display.to_string(),
+                    repo_label,
+                    branch,
+                    last_commit,
+                    counts: GitStatusCounts::default(),
+                    changed_files: Vec::new(),
+                    total_additions: 0,
+                    total_deletions: 0,
+                    error: Some("git status unavailable".to_string()),
+                };
+            }
+        };
+
+        let diff_raw = run_git(cwd, &["diff", "--numstat"]).unwrap_or_default();
+        let cached_raw = run_git(cwd, &["diff", "--cached", "--numstat"]).unwrap_or_default();
+
+        let (mut counts, mut file_map) = parse_status_porcelain(&status_raw);
+        let (diff_map, total_additions, total_deletions) =
+            parse_numstat_pairs(&diff_raw, &cached_raw);
+        for (path, (additions, deletions)) in diff_map {
+            let entry = file_map
+                .entry(path.clone())
+                .or_insert_with(|| ChangedFileStat {
+                    status: "MOD".to_string(),
+                    path,
+                    additions: None,
+                    deletions: None,
+                });
+            if let Some(value) = additions {
+                entry.additions = Some(entry.additions.unwrap_or(0).saturating_add(value));
+            }
+            if let Some(value) = deletions {
+                entry.deletions = Some(entry.deletions.unwrap_or(0).saturating_add(value));
+            }
+        }
+
+        let mut changed_files: Vec<ChangedFileStat> = file_map.into_values().collect();
+        changed_files.sort_by(|left, right| {
+            let left_delta = left
+                .additions
+                .unwrap_or(0)
+                .saturating_add(left.deletions.unwrap_or(0));
+            let right_delta = right
+                .additions
+                .unwrap_or(0)
+                .saturating_add(right.deletions.unwrap_or(0));
+            right_delta
+                .cmp(&left_delta)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+
+        counts.modified = counts.modified.max(
+            changed_files
+                .iter()
+                .filter(|item| item.status == "MOD")
+                .count(),
+        );
+
+        Self {
+            host_root: Some(cwd.to_path_buf()),
+            workspace_display: workspace_display.to_string(),
+            repo_label,
+            branch,
+            last_commit,
+            counts,
+            changed_files,
+            total_additions,
+            total_deletions,
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WrappedRow {
+    logical_line: usize,
+    start_char: usize,
+    end_char: usize,
+    text: String,
+}
+
+#[derive(Debug, Clone)]
+struct PanelView {
+    id: PanelId,
+    inner: Rect,
+    logical_lines: Vec<String>,
+    rows: Vec<WrappedRow>,
+    scroll_offset: usize,
+    visible_rows: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SelectionPoint {
+    panel: PanelId,
+    logical_line: usize,
+    char_index: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SelectionState {
+    anchor: SelectionPoint,
+    focus: SelectionPoint,
+    dragging: bool,
+}
+
 struct App {
+    metadata: TuiMetadata,
+    inspect_root: Option<PathBuf>,
+    project_tree_root: Option<PathBuf>,
     composer: TextArea<'static>,
     send_state: SendState,
     quit: bool,
     pending_error_reported: bool,
-    working_frame: usize,
+    launched_at: Instant,
     working_started_at: Option<Instant>,
+    working_frame: usize,
+    restored_message_count: usize,
+    last_prompt: Option<String>,
+    last_response: Option<String>,
+    previous_response: Option<String>,
+    timeline: VecDeque<TimelineEntry>,
+    threads: HashMap<String, ThreadView>,
+    active_tools: HashMap<String, ActiveTool>,
+    recent_tools: VecDeque<ToolRecord>,
+    checks: ChecksState,
+    workspace: WorkspaceSnapshot,
+    project_tree: Vec<String>,
+    panel_scrolls: HashMap<PanelId, usize>,
+    panel_views: HashMap<PanelId, PanelView>,
+    selection: Option<SelectionState>,
 }
 
 impl App {
-    fn new() -> Self {
-        Self {
+    fn new(metadata: TuiMetadata, restored_messages: &[Message]) -> Self {
+        let inspect_root = metadata.workspace_host_path.clone();
+        let workspace = WorkspaceSnapshot::load(&metadata.cwd, inspect_root.as_deref());
+        let project_tree_root = workspace.host_root.clone();
+
+        let mut panel_scrolls = HashMap::new();
+        panel_scrolls.insert(PanelId::Prompt, 0);
+        panel_scrolls.insert(PanelId::Response, 0);
+        panel_scrolls.insert(PanelId::PreviousResponse, 0);
+        panel_scrolls.insert(PanelId::Workspace, 0);
+
+        let mut app = Self {
+            metadata,
+            inspect_root,
+            project_tree_root,
             composer: build_composer(),
             send_state: SendState::Idle,
             quit: false,
             pending_error_reported: false,
-            working_frame: 0,
+            launched_at: Instant::now(),
             working_started_at: None,
+            working_frame: 0,
+            restored_message_count: restored_messages.len(),
+            last_prompt: None,
+            last_response: None,
+            previous_response: None,
+            timeline: VecDeque::new(),
+            threads: HashMap::new(),
+            active_tools: HashMap::new(),
+            recent_tools: VecDeque::new(),
+            checks: ChecksState::default(),
+            workspace,
+            project_tree: Vec::new(),
+            panel_scrolls,
+            panel_views: HashMap::new(),
+            selection: None,
+        };
+
+        app.refresh_project_tree();
+        app.hydrate_threads_from_store();
+        app.hydrate_from_messages(restored_messages);
+        if app.restored_message_count > 0 {
+            app.push_timeline(
+                "system",
+                format!(
+                    "restored {} message(s) into the session",
+                    app.restored_message_count
+                ),
+                Tone::Muted,
+            );
         }
+        app
     }
 
     fn prompt(&self) -> String {
@@ -172,110 +502,6 @@ impl App {
         AppAction::None
     }
 
-    fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<UiEntry> {
-        match event {
-            AgentEvent::RunStarted { .. } => Vec::new(),
-            AgentEvent::ModelCallStarted { .. } => Vec::new(),
-            AgentEvent::ToolCallStarted {
-                thread_name,
-                name,
-                args_preview,
-            } => {
-                if thread_name.is_none() && name == "thread" {
-                    return Vec::new();
-                }
-                let title = match thread_name {
-                    Some(thread_name) => format!("{thread_name} · {name}"),
-                    None => name,
-                };
-                vec![UiEntry::new(EntryKind::Tool, title, args_preview)]
-            }
-            AgentEvent::ToolCallFinished {
-                thread_name,
-                name,
-                content_preview,
-                is_error,
-            } => {
-                if thread_name.is_none() && name == "thread" {
-                    return Vec::new();
-                }
-                let kind = if is_error {
-                    self.pending_error_reported = true;
-                    EntryKind::Error
-                } else {
-                    EntryKind::Tool
-                };
-                let title = match thread_name {
-                    Some(thread_name) => format!("{thread_name} · {name}"),
-                    None => name,
-                };
-                vec![UiEntry::new(kind, title, content_preview)]
-            }
-            AgentEvent::ThreadStarted {
-                name,
-                action,
-                source_threads,
-            } => {
-                let body = if source_threads.is_empty() {
-                    format!("action: {action}")
-                } else {
-                    format!(
-                        "action: {action}\nsource threads: {}",
-                        source_threads.join(", ")
-                    )
-                };
-                vec![UiEntry::new(
-                    EntryKind::Thread,
-                    format!("{name} • thread dispatch"),
-                    body,
-                )]
-            }
-            AgentEvent::ThreadLog { name, line } => {
-                vec![UiEntry::new(EntryKind::Log, name, line)]
-            }
-            AgentEvent::ThreadFinished {
-                name,
-                exit_code,
-                timed_out,
-            } => {
-                let body = if timed_out {
-                    "timed out".to_string()
-                } else {
-                    format!("exit code {exit_code}")
-                };
-                vec![UiEntry::new(
-                    EntryKind::Thread,
-                    format!("{name} • thread complete"),
-                    body,
-                )]
-            }
-            AgentEvent::AssistantMessage {
-                thread_name,
-                content,
-            } => {
-                match thread_name {
-                    Some(thread_name) => vec![UiEntry::new(
-                        EntryKind::Assistant,
-                        format!("{thread_name} • retained episode"),
-                        truncate_episode_preview(&content),
-                    )
-                    .muted_body()],
-                    None => vec![UiEntry::new(EntryKind::Assistant, "response", content)
-                        .with_spacing_after(2)],
-                }
-            }
-            AgentEvent::Error {
-                thread_name,
-                message,
-            } => {
-                self.pending_error_reported = true;
-                let title = thread_name.unwrap_or_else(|| "run".to_string());
-                vec![UiEntry::new(EntryKind::Error, title, message)]
-            }
-            AgentEvent::RunFinished { .. } => Vec::new(),
-        }
-    }
-
     fn handle_key_event(&mut self, key: KeyEvent) -> AppAction {
         if key.kind == KeyEventKind::Release {
             return AppAction::None;
@@ -291,11 +517,27 @@ impl App {
                 AppAction::Quit
             }
             KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            } => {
+                self.scroll_panel(PanelId::Response, -3);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            } => {
+                self.scroll_panel(PanelId::Response, 3);
+                AppAction::None
+            }
+            KeyEvent {
                 code: KeyCode::Enter,
                 modifiers,
                 ..
             } if modifiers.contains(KeyModifiers::SHIFT) => {
-                self.composer.insert_newline();
+                if matches!(self.send_state, SendState::Idle) {
+                    self.composer.insert_newline();
+                }
                 AppAction::None
             }
             KeyEvent {
@@ -315,76 +557,1061 @@ impl App {
                 AppAction::Submit(prompt)
             }
             _ => {
-                self.composer.input(key);
+                if matches!(self.send_state, SendState::Idle) {
+                    self.composer.input(key);
+                }
                 AppAction::None
             }
         }
     }
 
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(point) = self.selection_point_at(mouse.column, mouse.row) {
+                    self.selection = Some(SelectionState {
+                        anchor: point.clone(),
+                        focus: point,
+                        dragging: true,
+                    });
+                } else {
+                    self.selection = None;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let panel = self
+                    .selection
+                    .as_ref()
+                    .map(|selection| selection.anchor.panel);
+                if let Some(panel) = panel {
+                    self.autoscroll_drag_selection(panel, mouse.column, mouse.row);
+                    let point = self.selection_point_for_panel(panel, mouse.column, mouse.row);
+                    if let Some(selection) = self.selection.as_mut() {
+                        if let Some(point) = point {
+                            selection.focus = point;
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(selection) = self.selection.as_mut() {
+                    selection.dragging = false;
+                }
+                self.copy_selection_to_clipboard();
+            }
+            MouseEventKind::ScrollUp => {
+                if let Some(panel) = self.panel_at(mouse.column, mouse.row) {
+                    self.scroll_panel(panel, -3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(panel) = self.panel_at(mouse.column, mouse.row) {
+                    self.scroll_panel(panel, 3);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn hydrate_from_messages(&mut self, messages: &[Message]) {
+        for message in messages {
+            match message {
+                Message::User { content } => self.last_prompt = Some(content.clone()),
+                Message::Assistant {
+                    content: Some(content),
+                    ..
+                } => {
+                    if let Some(previous) = self.last_response.replace(content.clone()) {
+                        self.previous_response = Some(previous);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn hydrate_threads_from_store(&mut self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        let Ok(threads) = store::list_threads(&self.metadata.store_path, session_id) else {
+            return;
+        };
+
+        for thread in threads {
+            let entry = self
+                .threads
+                .entry(thread.name.clone())
+                .or_insert_with(|| ThreadView {
+                    name: thread.name.clone(),
+                    action: thread
+                        .latest_action
+                        .clone()
+                        .unwrap_or_else(|| "retained history".to_string()),
+                    state: ThreadState::Idle,
+                    updated_at: short_clock(&thread.updated_at),
+                    episodes: thread.episode_count,
+                    summary: format!("{} episode(s)", thread.episode_count),
+                });
+            if matches!(entry.state, ThreadState::Idle) {
+                if let Some(action) = thread.latest_action {
+                    entry.action = action;
+                }
+                entry.updated_at = short_clock(&thread.updated_at);
+                entry.episodes = thread.episode_count;
+                entry.summary = format!("{} episode(s)", thread.episode_count);
+            }
+        }
+    }
+
+    fn refresh_workspace(&mut self) {
+        self.workspace = WorkspaceSnapshot::load(&self.metadata.cwd, self.inspect_root.as_deref());
+        self.project_tree_root = self.workspace.host_root.clone();
+    }
+
+    fn refresh_project_tree(&mut self) {
+        self.project_tree = self
+            .project_tree_root
+            .as_ref()
+            .map(|path| build_project_tree(path, TREE_DEPTH, TREE_LINES))
+            .unwrap_or_default();
+    }
+
+    fn note_prompt_submitted(&mut self, prompt: &str) {
+        self.last_prompt = Some(prompt.to_string());
+        self.panel_scrolls.insert(PanelId::Prompt, 0);
+        self.push_timeline(
+            "user",
+            format!("prompt • {}", fit_text(prompt, 110)),
+            Tone::Info,
+        );
+    }
+
+    fn note_send_error(&mut self, error: String) {
+        self.pending_error_reported = true;
+        self.push_timeline("send", format!("error • {error}"), Tone::Error);
+    }
+
+    fn apply_agent_event(&mut self, event: AgentEvent) {
+        match event {
+            AgentEvent::RunStarted {
+                thread_name,
+                prompt_preview,
+            } => {
+                if thread_name.is_none() {
+                    self.last_prompt = Some(prompt_preview.clone());
+                }
+                let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
+                self.push_timeline(
+                    actor,
+                    format!("run started • {}", prompt_preview),
+                    Tone::Muted,
+                );
+            }
+            AgentEvent::ModelCallStarted {
+                thread_name,
+                iteration,
+            } => {
+                let actor = thread_name.unwrap_or_else(|| "model".to_string());
+                self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
+            }
+            AgentEvent::ToolCallStarted {
+                thread_name,
+                call_id,
+                name,
+                args_preview,
+            } => {
+                if thread_name.is_none() && name == "thread" {
+                    return;
+                }
+
+                self.active_tools.insert(
+                    call_id,
+                    ActiveTool {
+                        thread_name: thread_name.clone(),
+                        name: name.clone(),
+                        target: args_preview.clone(),
+                        started_at: Instant::now(),
+                    },
+                );
+                let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
+                self.push_timeline(actor, format!("{name} • {args_preview}"), Tone::Info);
+            }
+            AgentEvent::ToolCallFinished {
+                thread_name,
+                call_id,
+                name,
+                content_preview,
+                is_error,
+            } => {
+                if thread_name.is_none() && name == "thread" {
+                    return;
+                }
+
+                let actor = thread_name
+                    .clone()
+                    .unwrap_or_else(|| "orchestrator".to_string());
+                let active = self.active_tools.remove(&call_id);
+                let duration = active
+                    .as_ref()
+                    .map(|tool| tool.started_at.elapsed())
+                    .unwrap_or_default();
+                let target = active
+                    .as_ref()
+                    .map(|tool| tool.target.clone())
+                    .unwrap_or_default();
+                let status = classify_tool_status(is_error, &content_preview);
+                let record = ToolRecord {
+                    thread_name: active
+                        .as_ref()
+                        .and_then(|tool| tool.thread_name.clone())
+                        .or(thread_name.clone()),
+                    name: active
+                        .as_ref()
+                        .map(|tool| tool.name.clone())
+                        .unwrap_or_else(|| name.clone()),
+                    target: target.clone(),
+                    status,
+                    duration,
+                    summary: content_preview.clone(),
+                };
+                self.recent_tools.push_front(record.clone());
+                while self.recent_tools.len() > TOOL_HISTORY_LIMIT {
+                    self.recent_tools.pop_back();
+                }
+                self.update_checks(&record);
+
+                if matches!(record.name.as_str(), "write" | "edit")
+                    || record.name == "bash"
+                    || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
+                {
+                    self.refresh_workspace();
+                    self.refresh_project_tree();
+                }
+
+                let detail = if target.is_empty() {
+                    record.summary.clone()
+                } else {
+                    format!("{target} • {}", record.summary)
+                };
+                self.push_timeline(actor, format!("{name} • {detail}"), status.tone());
+            }
+            AgentEvent::ThreadStarted {
+                name,
+                action,
+                source_threads,
+            } => {
+                self.threads.insert(
+                    name.clone(),
+                    ThreadView {
+                        name: name.clone(),
+                        action: action.clone(),
+                        state: ThreadState::Active,
+                        updated_at: utc_hms(),
+                        episodes: self
+                            .threads
+                            .get(&name)
+                            .map(|thread| thread.episodes)
+                            .unwrap_or(0),
+                        summary: "running".to_string(),
+                    },
+                );
+
+                let detail = if source_threads.is_empty() {
+                    format!("thread dispatch • action: {action}")
+                } else {
+                    format!(
+                        "thread dispatch • action: {} • sources: {}",
+                        action,
+                        source_threads.join(", ")
+                    )
+                };
+                self.push_timeline(name, detail, Tone::Success);
+            }
+            AgentEvent::ThreadLog { name, line } => {
+                self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
+            }
+            AgentEvent::ThreadFinished {
+                name,
+                exit_code,
+                timed_out,
+            } => {
+                let entry = self
+                    .threads
+                    .entry(name.clone())
+                    .or_insert_with(|| ThreadView {
+                        name: name.clone(),
+                        action: "thread run".to_string(),
+                        state: ThreadState::Idle,
+                        updated_at: utc_hms(),
+                        episodes: 0,
+                        summary: String::new(),
+                    });
+                entry.state = ThreadState::Idle;
+                entry.updated_at = utc_hms();
+                entry.summary = if timed_out {
+                    "timed out".to_string()
+                } else {
+                    format!("exit {exit_code}")
+                };
+
+                self.refresh_workspace();
+                self.refresh_project_tree();
+                self.hydrate_threads_from_store();
+
+                let detail = if timed_out {
+                    "thread complete • timed out".to_string()
+                } else {
+                    format!("thread complete • exit {exit_code}")
+                };
+                self.push_timeline(
+                    name,
+                    detail,
+                    if timed_out {
+                        Tone::Warning
+                    } else {
+                        Tone::Success
+                    },
+                );
+            }
+            AgentEvent::AssistantMessage {
+                thread_name,
+                content,
+            } => match thread_name {
+                Some(thread_name) => {
+                    if let Some(thread) = self.threads.get_mut(&thread_name) {
+                        thread.updated_at = utc_hms();
+                        thread.summary = truncate_episode_preview(&content);
+                    }
+                    self.push_timeline(
+                        thread_name,
+                        format!(
+                            "retained episode • {}",
+                            fit_text(&truncate_episode_preview(&content), 110)
+                        ),
+                        Tone::Muted,
+                    );
+                }
+                None => {
+                    if let Some(previous) = self.last_response.replace(content.clone()) {
+                        self.previous_response = Some(previous);
+                    }
+                    self.panel_scrolls.insert(PanelId::Response, 0);
+                    self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
+                    self.push_timeline(
+                        "assistant",
+                        format!("reply • {}", fit_text(&content, 110)),
+                        Tone::Success,
+                    );
+                }
+            },
+            AgentEvent::Error {
+                thread_name,
+                message,
+            } => {
+                self.pending_error_reported = true;
+                let actor = thread_name.unwrap_or_else(|| "run".to_string());
+                self.push_timeline(actor, format!("error • {message}"), Tone::Error);
+            }
+            AgentEvent::RunFinished { thread_name } => {
+                let actor = thread_name.unwrap_or_else(|| "run".to_string());
+                self.push_timeline(actor, "run finished".to_string(), Tone::Muted);
+            }
+        }
+    }
+
+    fn update_checks(&mut self, record: &ToolRecord) {
+        if record.name != "bash" {
+            return;
+        }
+
+        let check = CheckRecord {
+            status: record.status,
+            target: record.target.clone(),
+            summary: record.summary.clone(),
+        };
+        let slot = classify_check_slot(&record.target);
+        self.checks.slots.insert(slot, check.clone());
+        self.checks.slots.insert(CheckSlot::Last, check);
+    }
+
+    fn push_timeline(&mut self, actor: impl Into<String>, detail: impl Into<String>, tone: Tone) {
+        self.timeline.push_back(TimelineEntry {
+            timestamp: utc_hms(),
+            actor: actor.into(),
+            detail: detail.into(),
+            tone,
+        });
+        while self.timeline.len() > TIMELINE_LIMIT {
+            self.timeline.pop_front();
+        }
+    }
+
+    fn active_thread_count(&self) -> usize {
+        self.threads
+            .values()
+            .filter(|thread| matches!(thread.state, ThreadState::Active))
+            .count()
+    }
+
     fn render(&mut self, frame: &mut ratatui::Frame) {
-        self.render_composer(frame, frame.area());
+        self.panel_views.clear();
+
+        let area = frame.area();
+        if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
+            self.render_too_small(frame, area);
+            return;
+        }
+
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(12),
+                Constraint::Length(COMPOSER_HEIGHT),
+            ])
+            .split(area);
+
+        self.render_header(frame, sections[0]);
+
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(27),
+                Constraint::Percentage(43),
+                Constraint::Percentage(30),
+            ])
+            .split(sections[1]);
+
+        self.render_left_column(frame, body[0]);
+        self.render_center_column(frame, body[1]);
+        self.render_right_column(frame, body[2]);
+        self.render_composer(frame, sections[2]);
+    }
+
+    fn render_too_small(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("NAC");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Terminal too small for the managed dashboard.",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(format!(
+                "Resize to at least {}x{}.",
+                MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT
+            )),
+        ];
+        if let Some(prompt) = self.last_prompt.as_deref() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("last prompt ", Style::default().fg(Color::DarkGray)),
+                Span::raw(fit_text(prompt, inner.width.saturating_sub(12) as usize)),
+            ]));
+        }
+
+        frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    }
+
+    fn render_header(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("NAC");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let repo = self
+            .workspace
+            .repo_label
+            .as_deref()
+            .unwrap_or("no git repo");
+        let branch = self.workspace.branch.as_deref().unwrap_or("detached");
+        let workspace = compact_path(&self.metadata.cwd, 28);
+        let session = self
+            .metadata
+            .session_id
+            .as_deref()
+            .map(short_session)
+            .unwrap_or_else(|| "-".to_string());
+        let elapsed = format_elapsed(self.launched_at.elapsed());
+        let run_state = if matches!(self.send_state, SendState::Pending) {
+            ("RUNNING", Tone::Success)
+        } else {
+            ("IDLE", Tone::Muted)
+        };
+
+        let top = Line::from(vec![
+            Span::styled("repo ", Style::default().fg(Color::DarkGray)),
+            Span::styled(repo.to_string(), Style::default().fg(Color::White)),
+            Span::styled("  |  branch ", Style::default().fg(Color::DarkGray)),
+            Span::styled(branch.to_string(), Style::default().fg(Color::White)),
+            Span::styled("  |  workspace ", Style::default().fg(Color::DarkGray)),
+            Span::styled(workspace, Style::default().fg(Color::White)),
+            Span::styled("  |  session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session, Style::default().fg(Color::White)),
+            Span::styled("  |  model ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                fit_text(&self.metadata.model, 22),
+                Style::default().fg(Color::White),
+            ),
+        ]);
+
+        let bottom = Line::from(vec![
+            status_span(run_state.0, run_state.1),
+            Span::styled("  sandbox ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.sandbox_status.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  backend ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.backend.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  agents ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.agents_md_status.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  threads ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{}/{}", self.active_thread_count(), self.threads.len()),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  elapsed ", Style::default().fg(Color::DarkGray)),
+            Span::styled(elapsed, Style::default().fg(Color::White)),
+            Span::styled(
+                "  |  mouse drag copies pane text",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+
+        frame.render_widget(Paragraph::new(Text::from(vec![top, bottom])), inner);
+    }
+
+    fn render_left_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(10),
+                Constraint::Min(10),
+                Constraint::Length(6),
+            ])
+            .split(area);
+
+        self.render_prompt_panel(frame, sections[0]);
+        self.render_workspace_panel(frame, sections[1]);
+        self.render_hotkeys_panel(frame, sections[2]);
+    }
+
+    fn render_center_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Length(6),
+                Constraint::Min(14),
+                Constraint::Length(8),
+            ])
+            .split(area);
+
+        self.render_threads_panel(frame, sections[0]);
+        self.render_events_panel(frame, sections[1]);
+        self.render_response_panel(frame, sections[2]);
+        self.render_previous_response_panel(frame, sections[3]);
+    }
+
+    fn render_right_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Min(8),
+                Constraint::Length(5),
+            ])
+            .split(area);
+
+        self.render_tools_panel(frame, sections[0]);
+        self.render_file_changes_panel(frame, sections[1]);
+        self.render_checks_panel(frame, sections[2]);
+    }
+
+    fn render_prompt_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = match self.last_prompt.as_deref() {
+            Some(prompt) => split_preserving_empty(prompt),
+            None => vec!["Waiting for the first orchestrator prompt.".to_string()],
+        };
+        self.render_selectable_panel(frame, area, PanelId::Prompt, "PROMPT", lines);
+    }
+
+    fn render_workspace_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let mut lines = Vec::new();
+        lines.push(format!("workspace  {}", self.workspace.workspace_display));
+        match self.workspace.host_root.as_ref() {
+            Some(path) => lines.push(format!("source     {}", path.display())),
+            None => lines.push("source     sandbox-only".to_string()),
+        }
+        if let Some(repo) = self.workspace.repo_label.as_deref() {
+            lines.push(format!("repo       {}", repo));
+        }
+        if let Some(branch) = self.workspace.branch.as_deref() {
+            lines.push(format!("branch     {}", branch));
+        }
+        if let Some(last_commit) = self.workspace.last_commit.as_deref() {
+            lines.push(format!("last       {}", last_commit));
+        }
+        if let Some(error) = self.workspace.error.as_deref() {
+            lines.push(format!("note       {}", error));
+        } else {
+            lines.push(format!(
+                "changes    m:{} s:{} ?:{} +{} -{}",
+                self.workspace.counts.modified,
+                self.workspace.counts.staged,
+                self.workspace.counts.untracked,
+                self.workspace.total_additions,
+                self.workspace.total_deletions
+            ));
+            if !self.project_tree.is_empty() {
+                lines.push(String::new());
+                lines.push("tree".to_string());
+                lines.extend(self.project_tree.iter().cloned());
+            }
+        }
+
+        self.render_selectable_panel(frame, area, PanelId::Workspace, "WORKSPACE", lines);
+    }
+
+    fn render_hotkeys_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = vec![
+            Line::from("Enter        run prompt"),
+            Line::from("Shift+Enter  newline"),
+            Line::from("PageUp/Down  scroll response"),
+            Line::from("Mouse wheel  scroll hovered pane"),
+        ];
+        render_lines_panel(frame, area, "HOTKEYS", lines);
+    }
+
+    fn render_threads_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let state_width = 8usize;
+        let thread_width = width.min(18).max(10);
+        let updated_width = 8usize;
+        let action_width = width
+            .saturating_sub(state_width + thread_width + updated_width + 6)
+            .max(8);
+
+        let mut lines = vec![header_line(
+            &[
+                ("STATE", state_width),
+                ("THREAD", thread_width),
+                ("ACTION", action_width),
+                ("UPDATED", updated_width),
+            ],
+            width,
+        )];
+
+        let mut threads: Vec<&ThreadView> = self.threads.values().collect();
+        threads.sort_by(|left, right| {
+            matches!(right.state, ThreadState::Active)
+                .cmp(&matches!(left.state, ThreadState::Active))
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+
+        if threads.is_empty() {
+            lines.push(Line::from("No threads in this session yet."));
+        } else {
+            for thread in threads.into_iter().take(6) {
+                let name = fit_text(&thread.name, thread_width);
+                let action = fit_text(&thread.action, action_width);
+                let updated = fit_text(&thread.updated_at, updated_width);
+                lines.push(Line::from(vec![
+                    status_span(thread.state.label(), thread.state.tone()),
+                    Span::raw(" "),
+                    Span::raw(pad_to(
+                        "",
+                        state_width.saturating_sub(thread.state.label().len()),
+                    )),
+                    Span::raw("  "),
+                    Span::raw(pad_cell(&name, thread_width)),
+                    Span::raw("  "),
+                    Span::raw(pad_cell(&action, action_width)),
+                    Span::raw("  "),
+                    Span::styled(updated, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        }
+
+        render_lines_panel(frame, area, "THREADS", lines);
+    }
+
+    fn render_events_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let height = area.height.saturating_sub(2) as usize;
+        let lines: Vec<Line<'static>> = self
+            .timeline
+            .iter()
+            .rev()
+            .take(height.max(1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|entry| render_event_line(entry, inner_width(area)))
+            .collect();
+
+        let lines = if lines.is_empty() {
+            vec![Line::from(Span::styled(
+                "Waiting for activity.",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            lines
+        };
+
+        render_lines_panel(frame, area, "EVENTS", lines);
+    }
+
+    fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = match self.last_response.as_deref() {
+            Some(response) => split_preserving_empty(response),
+            None => vec!["Waiting for the first orchestrator reply.".to_string()],
+        };
+        self.render_selectable_panel(frame, area, PanelId::Response, "RESPONSE", lines);
+    }
+
+    fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = match self.previous_response.as_deref() {
+            Some(response) => split_preserving_empty(response),
+            None => vec!["No previous orchestrator reply yet.".to_string()],
+        };
+        self.render_selectable_panel(
+            frame,
+            area,
+            PanelId::PreviousResponse,
+            "PREVIOUS RESPONSE",
+            lines,
+        );
+    }
+
+    fn render_tools_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let tool_width = width.min(14).max(9);
+        let duration_width = 8usize;
+        let target_width = width.saturating_sub(tool_width + duration_width + 8).max(8);
+        let mut lines = vec![header_line(
+            &[
+                ("STAT", 5),
+                ("TOOL", tool_width),
+                ("TARGET", target_width),
+                ("TIME", duration_width),
+            ],
+            width,
+        )];
+
+        let mut active: Vec<&ActiveTool> = self.active_tools.values().collect();
+        active.sort_by(|left, right| left.name.cmp(&right.name));
+        for tool in active {
+            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            lines.push(Line::from(vec![
+                status_span(ToolStatus::Running.label(), ToolStatus::Running.tone()),
+                Span::raw(" "),
+                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
+                Span::raw("  "),
+                Span::raw(pad_cell(
+                    &fit_text(&tool.target, target_width),
+                    target_width,
+                )),
+                Span::raw("  "),
+                Span::styled(
+                    pad_cell(&format_duration(tool.started_at.elapsed()), duration_width),
+                    Style::default().fg(Color::Gray),
+                ),
+            ]));
+        }
+
+        for tool in self
+            .recent_tools
+            .iter()
+            .take(area.height.saturating_sub(2) as usize)
+        {
+            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            lines.push(Line::from(vec![
+                status_span(tool.status.label(), tool.status.tone()),
+                Span::raw(" "),
+                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
+                Span::raw("  "),
+                Span::raw(pad_cell(
+                    &fit_text(&tool.target, target_width),
+                    target_width,
+                )),
+                Span::raw("  "),
+                Span::styled(
+                    pad_cell(&format_duration(tool.duration), duration_width),
+                    Style::default().fg(Color::Gray),
+                ),
+            ]));
+        }
+
+        if lines.len() == 1 {
+            lines.push(Line::from("No tool activity yet."));
+        }
+
+        render_lines_panel(frame, area, "TOOLS", lines);
+    }
+
+    fn render_checks_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let mut lines = Vec::new();
+        for slot in [
+            CheckSlot::Tests,
+            CheckSlot::Lint,
+            CheckSlot::Format,
+            CheckSlot::Build,
+            CheckSlot::Last,
+        ] {
+            render_check_line(&mut lines, slot, self.checks.slots.get(&slot), width);
+        }
+        render_lines_panel(frame, area, "CHECKS", lines);
+    }
+
+    fn render_file_changes_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let height = area.height.saturating_sub(2) as usize;
+        let width = inner_width(area);
+        let mut lines = Vec::new();
+
+        if let Some(error) = self.workspace.error.as_deref() {
+            lines.push(Line::from(Span::styled(
+                fit_text(error, width),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if self.workspace.changed_files.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Working tree clean.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            let reserve_total = usize::from(height > 2);
+            let visible_files = height.saturating_sub(reserve_total).min(FILE_CHANGE_LIMIT);
+            for file in self.workspace.changed_files.iter().take(visible_files) {
+                lines.push(render_file_change_line(file, width));
+            }
+            if reserve_total == 1 {
+                lines.push(Line::from(vec![
+                    Span::styled("total", Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("+{}", self.workspace.total_additions),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("-{}", self.workspace.total_deletions),
+                        Style::default().fg(Color::Red),
+                    ),
+                ]));
+            }
+        }
+
+        render_lines_panel(frame, area, "FILE CHANGES", lines);
     }
 
     fn render_composer(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let title = if matches!(self.send_state, SendState::Pending) {
+            "COMPOSER • RUNNING"
+        } else {
+            "COMPOSER"
+        };
+        let block = panel_block(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
         if matches!(self.send_state, SendState::Pending) {
-            self.render_working(frame, area);
+            let elapsed = self
+                .working_started_at
+                .map(|started| started.elapsed())
+                .unwrap_or_default();
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!("{} ", spinner_frame(self.working_frame)),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "orchestrator active",
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format_duration(elapsed), Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(Span::styled(
+                    "composer locked until the current top-level run completes",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(Text::from(lines)), inner);
             return;
         }
-
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-
-        let footer_height = 1;
-        let max_composer_height = area.height.saturating_sub(footer_height).max(1);
-        let content_height = composer_content_height(self.composer.lines(), area.width);
-        let composer_height = content_height.clamp(1, max_composer_height);
-        let composer_area = Rect::new(area.x, area.y, area.width, composer_height);
-        let footer_area = Rect::new(
-            area.x,
-            area.y.saturating_add(composer_height),
-            area.width,
-            footer_height.min(area.height.saturating_sub(composer_height)),
-        );
 
         let view = wrapped_composer_view(
             self.composer.lines(),
             self.composer.cursor(),
-            composer_area.width,
-            composer_area.height,
+            inner.width,
+            inner.height,
         );
 
-        let paragraph = Paragraph::new(Text::from(view.lines.clone()))
-            .style(Style::default().fg(Color::White));
-        frame.render_widget(paragraph, composer_area);
+        frame.render_widget(
+            Paragraph::new(Text::from(view.lines.clone())).style(Style::default().fg(Color::White)),
+            inner,
+        );
         frame.set_cursor_position((
-            composer_area.x + view.cursor_col.min(composer_area.width.saturating_sub(1)),
-            composer_area.y + view.cursor_row.min(composer_area.height.saturating_sub(1)),
+            inner.x + view.cursor_col.min(inner.width.saturating_sub(1)),
+            inner.y + view.cursor_row.min(inner.height.saturating_sub(1)),
         ));
-
-        if footer_area.height > 0 {
-            let footer = Paragraph::new(Line::from(vec![
-                Span::raw(" "),
-                Span::styled("/exit to quit", Style::default().fg(Color::DarkGray)),
-                Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("ctrl-c to force quit", Style::default().fg(Color::DarkGray)),
-            ]));
-            frame.render_widget(footer, footer_area);
-        }
     }
 
-    fn render_working(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        if area.height == 0 {
+    fn render_selectable_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: &'static str,
+        logical_lines: Vec<String>,
+    ) {
+        let block = panel_block(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
             return;
         }
 
-        let elapsed = self
-            .working_started_at
-            .map(|started| started.elapsed())
-            .unwrap_or_default();
-        let status = Paragraph::new(working_line(self.working_frame, elapsed));
-        let line_area = Rect::new(area.x, area.y, area.width, 1);
-        frame.render_widget(status, line_area);
+        let rows = wrap_logical_lines(&logical_lines, inner.width as usize);
+        let total_rows = rows.len().max(1);
+        let visible_rows = inner.height as usize;
+        let max_scroll = total_rows.saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let end = (start + visible_rows).min(rows.len());
+        let visible = rows[start..end].to_vec();
+
+        let selected = selection_bounds_for_panel(self.selection.as_ref(), panel_id);
+        let mut rendered = Vec::new();
+        for row in &visible {
+            rendered.push(render_wrapped_row(row, selected.clone()));
+        }
+        while rendered.len() < visible_rows {
+            rendered.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner,
+                logical_lines: logical_lines.clone(),
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(rendered)), inner);
+    }
+
+    fn selection_point_at(&self, column: u16, row: u16) -> Option<SelectionPoint> {
+        let panel = self.panel_at(column, row)?;
+        self.selection_point_for_panel(panel, column, row)
+    }
+
+    fn panel_at(&self, column: u16, row: u16) -> Option<PanelId> {
+        self.panel_views.iter().find_map(|(panel_id, view)| {
+            contains_point(view.inner, column, row).then_some(*panel_id)
+        })
+    }
+
+    fn selection_point_for_panel(
+        &self,
+        panel: PanelId,
+        column: u16,
+        row: u16,
+    ) -> Option<SelectionPoint> {
+        let view = self.panel_views.get(&panel)?;
+        let clamped_x = column.clamp(view.inner.x, view.inner.right().saturating_sub(1));
+        let clamped_y = row.clamp(view.inner.y, view.inner.bottom().saturating_sub(1));
+        let row_offset = clamped_y.saturating_sub(view.inner.y) as usize;
+        let scroll_offset = self
+            .panel_scrolls
+            .get(&panel)
+            .copied()
+            .unwrap_or(view.scroll_offset);
+        let row_index = (scroll_offset + row_offset).min(view.rows.len().saturating_sub(1));
+        let wrapped = view.rows.get(row_index)?;
+        let width = wrapped.text.chars().count();
+        let col_offset = clamped_x.saturating_sub(view.inner.x) as usize;
+        let char_in_row = col_offset.min(width);
+        Some(SelectionPoint {
+            panel,
+            logical_line: wrapped.logical_line,
+            char_index: wrapped.start_char + char_in_row,
+        })
+    }
+
+    fn autoscroll_drag_selection(&mut self, panel: PanelId, _column: u16, row: u16) {
+        let Some((top, bottom)) = self
+            .panel_views
+            .get(&panel)
+            .map(|view| (view.inner.y, view.inner.bottom().saturating_sub(1)))
+        else {
+            return;
+        };
+
+        if row <= top {
+            self.scroll_panel(panel, -1);
+        } else if row >= bottom {
+            self.scroll_panel(panel, 1);
+        }
+    }
+
+    fn scroll_panel(&mut self, panel: PanelId, delta_lines: isize) {
+        let Some(view) = self.panel_views.get(&panel) else {
+            return;
+        };
+        let max_scroll = view.rows.len().saturating_sub(view.visible_rows);
+        let entry = self.panel_scrolls.entry(panel).or_insert(0);
+        if delta_lines.is_negative() {
+            *entry = entry.saturating_sub(delta_lines.unsigned_abs());
+        } else {
+            *entry = (*entry)
+                .saturating_add(delta_lines as usize)
+                .min(max_scroll);
+        }
+    }
+
+    fn copy_selection_to_clipboard(&mut self) {
+        let Some(selection) = self.selection.as_ref() else {
+            return;
+        };
+        if selection.anchor.panel != selection.focus.panel {
+            return;
+        }
+        let Some(view) = self.panel_views.get(&selection.anchor.panel) else {
+            return;
+        };
+        let text = extract_selection_text(view, selection);
+        if text.is_empty() {
+            return;
+        }
+        let _ = copy_text_to_clipboard(&text);
     }
 }
 
@@ -409,21 +1636,23 @@ pub async fn run(
     agent.set_event_sink(EventSink::channel(event_tx));
     let agent = Arc::new(Mutex::new(agent));
 
-    let running = Arc::new(AtomicBool::new(true));
-    let input_thread = spawn_input_thread(running.clone(), input_tx);
-    let mut animation_tick = time::interval(Duration::from_millis(150));
-    animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    print_preamble_plain(&metadata)?;
-    let mut terminal = ratatui::try_init_with_options(TerminalOptions {
-        viewport: Viewport::Inline(COMPOSER_VIEWPORT_HEIGHT),
-    })?;
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
+
     let keyboard_enhancements_enabled = enable_keyboard_enhancements(&mut terminal);
     let bracketed_paste_enabled = enable_bracketed_paste(&mut terminal);
+    let mouse_capture_enabled = enable_mouse_capture(&mut terminal);
 
-    let mut app = App::new();
-    print_restored_history(&mut terminal, &restored_messages)?;
+    let running = Arc::new(AtomicBool::new(true));
+    let input_thread = spawn_input_thread(running.clone(), input_tx);
+
+    let mut app = App::new(metadata, &restored_messages);
+    let mut animation_tick = time::interval(Duration::from_millis(150));
+    animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     terminal.draw(|frame| app.render(frame))?;
 
     if let Some(prompt) = initial_prompt {
@@ -434,7 +1663,6 @@ pub async fn run(
             &mut app,
             &mut terminal,
         )?;
-        terminal.draw(|frame| app.render(frame))?;
     }
 
     let loop_result = async {
@@ -450,6 +1678,9 @@ pub async fn run(
                                 AppAction::Quit | AppAction::None => {}
                             }
                         }
+                        CrosstermEvent::Mouse(mouse) => {
+                            app.handle_mouse_event(mouse);
+                        }
                         CrosstermEvent::Paste(text) => {
                             let _ = app.handle_paste(&text);
                         }
@@ -458,9 +1689,7 @@ pub async fn run(
                     }
                 }
                 Some(agent_event) = event_rx.recv() => {
-                    for entry in app.apply_agent_event(agent_event) {
-                        print_entry(&mut terminal, &entry)?;
-                    }
+                    app.apply_agent_event(agent_event);
                 }
                 Some(result) = result_rx.recv() => {
                     app.send_state = SendState::Idle;
@@ -472,11 +1701,11 @@ pub async fn run(
                     }
                     if let Err(error) = result {
                         if !app.pending_error_reported {
-                            print_entry(&mut terminal, &UiEntry::new(EntryKind::Error, "send", error))?;
+                            app.note_send_error(error);
                         }
                     }
                 }
-                _ = animation_tick.tick(), if matches!(app.send_state, SendState::Pending) => {
+                _ = animation_tick.tick() => {
                     app.working_frame = app.working_frame.wrapping_add(1);
                 }
             }
@@ -488,7 +1717,7 @@ pub async fn run(
     }
     .await;
 
-    running.store(false, Ordering::SeqCst);
+    running.store(false, AtomicOrdering::SeqCst);
     let _ = input_thread.join();
 
     let cleanup_result = (|| -> io::Result<()> {
@@ -498,8 +1727,11 @@ pub async fn run(
         if bracketed_paste_enabled {
             let _ = crossterm::execute!(terminal.backend_mut(), DisableBracketedPaste);
         }
-        terminal.clear()?;
+        if mouse_capture_enabled {
+            let _ = crossterm::execute!(terminal.backend_mut(), DisableMouseCapture);
+        }
         terminal.show_cursor()?;
+        crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
         disable_raw_mode()
     })();
 
@@ -515,7 +1747,7 @@ fn submit_prompt(
     app: &mut App,
     terminal: &mut UiTerminal,
 ) -> Result<()> {
-    print_entry(terminal, &UiEntry::new(EntryKind::User, "prompt", &prompt))?;
+    app.note_prompt_submitted(&prompt);
     app.clear_composer();
     app.send_state = SendState::Pending;
     app.pending_error_reported = false;
@@ -530,6 +1762,7 @@ fn submit_prompt(
         let _ = result_tx.send(result);
     });
 
+    terminal.draw(|frame| app.render(frame))?;
     Ok(())
 }
 
@@ -537,201 +1770,717 @@ fn build_composer() -> TextArea<'static> {
     TextArea::default()
 }
 
-fn print_entry(terminal: &mut UiTerminal, entry: &UiEntry) -> Result<()> {
-    let width = terminal.size()?.width;
-    if width == 0 {
-        return Ok(());
+fn render_lines_panel(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+) {
+    let block = panel_block(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
     }
-
-    let rendered_lines = wrapped_entry_lines(entry, width);
-    let widget = build_entry_widget(entry, rendered_lines);
-    let body_height = entry_render_height(entry, width);
-    let total_height = body_height.saturating_add(entry.spacing_after);
-    let spacing_after = entry.spacing_after;
-
-    terminal.insert_before(total_height, move |buf| {
-        let area = buf.area;
-        let render_height = area.height.saturating_sub(spacing_after);
-        if render_height == 0 {
-            return;
-        }
-        let render_area = Rect::new(area.x, area.y, area.width, render_height);
-        widget.render(render_area, buf);
-    })?;
-
-    Ok(())
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn print_blank_line(terminal: &mut UiTerminal) -> Result<()> {
-    terminal.insert_before(1, |_| {})?;
-    Ok(())
-}
+fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
+    let (action, detail) = entry
+        .detail
+        .split_once(" • ")
+        .map(|(action, detail)| (action.to_string(), detail.to_string()))
+        .unwrap_or_else(|| (entry.detail.clone(), String::new()));
 
-fn entry_render_height(entry: &UiEntry, width: u16) -> u16 {
-    if width == 0 {
-        return 0;
-    }
+    let timestamp = fit_text(&entry.timestamp, 8);
+    let actor = fit_text(&entry.actor, (width / 5).clamp(8, 16));
+    let action = fit_text(&action, (width / 4).clamp(10, 20));
 
-    wrapped_entry_lines(entry, width).len().max(1) as u16
-}
-
-fn build_entry_widget(entry: &UiEntry, rendered_lines: Vec<String>) -> Paragraph<'static> {
-    let title_style = match entry.kind {
-        EntryKind::Log => Style::default().fg(Color::DarkGray),
-        _ => Style::default().fg(Color::White),
-    };
-    let body_style = if entry.muted_body || entry.kind == EntryKind::Log {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        match entry.kind {
-            EntryKind::Error => Style::default().fg(Color::Gray),
-            _ => Style::default().fg(Color::Gray),
-        }
+    let action_style = match entry.tone {
+        Tone::Muted => Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default()
+            .fg(entry.tone.color())
+            .add_modifier(Modifier::BOLD),
     };
 
-    let mut lines = Vec::new();
-    for (index, line) in rendered_lines.into_iter().enumerate() {
-        let is_title_line = index == 0;
-        if is_title_line {
-            let content = line
-                .strip_prefix(&format!("{} ", entry.symbol_text()))
-                .unwrap_or(&line)
-                .to_string();
+    let prefix_width = timestamp.chars().count()
+        + tone_glyph(entry.tone).chars().count()
+        + actor.chars().count()
+        + action.chars().count()
+        + 10;
+    let detail_width = width.saturating_sub(prefix_width);
+
+    let mut spans = vec![
+        Span::styled(timestamp, Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled(
+            tone_glyph(entry.tone),
+            Style::default().fg(entry.tone.color()),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            actor,
+            Style::default()
+                .fg(actor_color(&entry.actor, entry.tone))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+        Span::styled(action, action_style),
+    ];
+
+    if detail_width > 0 && !detail.is_empty() {
+        spans.push(Span::styled(" • ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            fit_text(&detail, detail_width),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static> {
+    let status_width = 4usize;
+    let delta_width = 6usize;
+    let path_width = width.saturating_sub(status_width + delta_width * 2 + 4);
+    let additions = file
+        .additions
+        .map(|value| format!("+{value}"))
+        .unwrap_or_else(|| "+-".to_string());
+    let deletions = file
+        .deletions
+        .map(|value| format!("-{value}"))
+        .unwrap_or_else(|| "--".to_string());
+
+    Line::from(vec![
+        Span::styled(
+            pad_cell(&file.status, status_width),
+            file_status_style(&file.status),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{additions:>width$}", width = delta_width),
+            Style::default().fg(Color::Green),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{deletions:>width$}", width = delta_width),
+            Style::default().fg(Color::Red),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            compact_path(&file.path, path_width),
+            Style::default().fg(Color::Gray),
+        ),
+    ])
+}
+
+fn panel_block(title: &str) -> Block<'static> {
+    Block::default()
+        .title(Span::styled(
+            format!(" [ {} ] ", title),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+}
+
+fn header_line(columns: &[(&str, usize)], width: usize) -> Line<'static> {
+    let mut content = String::new();
+    for (index, (label, column_width)) in columns.iter().enumerate() {
+        if index > 0 {
+            content.push_str("  ");
+        }
+        content.push_str(&pad_cell(label, *column_width));
+    }
+    Line::from(Span::styled(
+        fit_text(&content, width),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn render_check_line(
+    lines: &mut Vec<Line<'static>>,
+    slot: CheckSlot,
+    record: Option<&CheckRecord>,
+    width: usize,
+) {
+    match record {
+        Some(record) => {
+            let detail = if record.summary.is_empty() {
+                record.target.clone()
+            } else {
+                format!("{} • {}", record.target, record.summary)
+            };
             lines.push(Line::from(vec![
+                status_span(record.status.label(), record.status.tone()),
+                Span::raw(" "),
                 Span::styled(
-                    format!("{} ", entry.symbol_text()),
-                    entry.kind.symbol_style(),
+                    pad_cell(slot.label(), 7),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(content, title_style),
+                Span::raw(" "),
+                Span::raw(fit_text(&detail, width.saturating_sub(14))),
             ]));
+        }
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled("----", Style::default().fg(Color::DarkGray)),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(slot.label(), 7),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" waiting"),
+            ]));
+        }
+    }
+}
+
+fn render_wrapped_row(
+    row: &WrappedRow,
+    selection: Option<(SelectionPoint, SelectionPoint)>,
+) -> Line<'static> {
+    let base_style = Style::default().fg(Color::Gray);
+    let selected_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let Some((start, end)) = selection else {
+        return Line::from(Span::styled(row.text.clone(), base_style));
+    };
+    let Some((selection_start, selection_end)) = selection_overlap_for_row(row, &start, &end)
+    else {
+        return Line::from(Span::styled(row.text.clone(), base_style));
+    };
+
+    if row.text.is_empty() || selection_start == selection_end {
+        return Line::from(Span::styled(row.text.clone(), base_style));
+    }
+
+    let chars: Vec<char> = row.text.chars().collect();
+    let before: String = chars[..selection_start].iter().collect();
+    let selected: String = chars[selection_start..selection_end].iter().collect();
+    let after: String = chars[selection_end..].iter().collect();
+
+    let mut spans = Vec::new();
+    if !before.is_empty() {
+        spans.push(Span::styled(before, base_style));
+    }
+    if !selected.is_empty() {
+        spans.push(Span::styled(selected, selected_style));
+    }
+    if !after.is_empty() {
+        spans.push(Span::styled(after, base_style));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(row.text.clone(), base_style));
+    }
+    Line::from(spans)
+}
+
+fn selection_bounds_for_panel(
+    selection: Option<&SelectionState>,
+    panel: PanelId,
+) -> Option<(SelectionPoint, SelectionPoint)> {
+    let selection = selection?;
+    if selection.anchor.panel != panel || selection.focus.panel != panel {
+        return None;
+    }
+    let (start, end) = ordered_points(&selection.anchor, &selection.focus);
+    Some((start.clone(), end.clone()))
+}
+
+fn ordered_points<'a>(
+    left: &'a SelectionPoint,
+    right: &'a SelectionPoint,
+) -> (&'a SelectionPoint, &'a SelectionPoint) {
+    if compare_points(left, right).is_le() {
+        (left, right)
+    } else {
+        (right, left)
+    }
+}
+
+fn compare_points(left: &SelectionPoint, right: &SelectionPoint) -> Ordering {
+    left.logical_line
+        .cmp(&right.logical_line)
+        .then_with(|| left.char_index.cmp(&right.char_index))
+}
+
+fn selection_overlap_for_row(
+    row: &WrappedRow,
+    start: &SelectionPoint,
+    end: &SelectionPoint,
+) -> Option<(usize, usize)> {
+    if row.logical_line < start.logical_line || row.logical_line > end.logical_line {
+        return None;
+    }
+
+    let row_start = row.start_char;
+    let mut row_end = row.end_char;
+    if row_start == row_end && row.text.is_empty() {
+        row_end = row_start;
+    }
+
+    let selection_start = if row.logical_line == start.logical_line {
+        start.char_index.max(row_start)
+    } else {
+        row_start
+    };
+    let selection_end = if row.logical_line == end.logical_line {
+        end.char_index.min(row_end)
+    } else {
+        row_end
+    };
+
+    if selection_start >= selection_end {
+        return None;
+    }
+
+    Some((
+        selection_start.saturating_sub(row.start_char),
+        selection_end.saturating_sub(row.start_char),
+    ))
+}
+
+fn extract_selection_text(view: &PanelView, selection: &SelectionState) -> String {
+    let (start, end) = ordered_points(&selection.anchor, &selection.focus);
+    if start.panel != view.id || end.panel != view.id {
+        return String::new();
+    }
+    if compare_points(start, end) == Ordering::Equal {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for logical_line in start.logical_line..=end.logical_line {
+        let Some(line) = view.logical_lines.get(logical_line) else {
+            continue;
+        };
+        let line_len = line.chars().count();
+        let start_char = if logical_line == start.logical_line {
+            start.char_index.min(line_len)
+        } else {
+            0
+        };
+        let end_char = if logical_line == end.logical_line {
+            end.char_index.min(line_len)
+        } else {
+            line_len
+        };
+        if end_char > start_char {
+            out.push_str(&slice_chars(line, start_char, end_char));
+        }
+        if logical_line < end.logical_line {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn slice_chars(text: &str, start: usize, end: usize) -> String {
+    text.chars()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect()
+}
+
+fn classify_tool_status(is_error: bool, preview: &str) -> ToolStatus {
+    if is_error {
+        return ToolStatus::Error;
+    }
+    if preview.starts_with("Command timed out after") {
+        return ToolStatus::TimedOut;
+    }
+    if preview.starts_with("Exit code:") {
+        return ToolStatus::Failed;
+    }
+    ToolStatus::Ok
+}
+
+fn classify_check_slot(command: &str) -> CheckSlot {
+    let lower = command.to_lowercase();
+    if contains_any(
+        &lower,
+        &[
+            "cargo test",
+            "pytest",
+            "npm test",
+            "pnpm test",
+            "go test",
+            "vitest",
+            "jest",
+        ],
+    ) {
+        return CheckSlot::Tests;
+    }
+    if contains_any(
+        &lower,
+        &[
+            "clippy",
+            "eslint",
+            "ruff check",
+            "flake8",
+            "golangci-lint",
+            "mypy",
+            "tsc",
+        ],
+    ) {
+        return CheckSlot::Lint;
+    }
+    if contains_any(
+        &lower,
+        &[
+            "cargo fmt",
+            "ruff format",
+            "prettier",
+            "black",
+            "gofmt",
+            "rustfmt",
+        ],
+    ) {
+        return CheckSlot::Format;
+    }
+    if contains_any(
+        &lower,
+        &[
+            "cargo build",
+            "npm run build",
+            "pnpm build",
+            "go build",
+            "uv run build",
+            "make build",
+        ],
+    ) {
+        return CheckSlot::Build;
+    }
+    CheckSlot::Last
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn status_span(label: &str, tone: Tone) -> Span<'static> {
+    Span::styled(
+        label.to_string(),
+        Style::default()
+            .fg(tone.color())
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn tool_label(thread_name: Option<&str>, tool_name: &str) -> String {
+    match thread_name {
+        Some(thread_name) => format!("{thread_name}/{tool_name}"),
+        None => tool_name.to_string(),
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    if duration.as_secs() >= 60 {
+        let minutes = duration.as_secs() / 60;
+        let seconds = duration.as_secs() % 60;
+        format!("{minutes}m{seconds:02}s")
+    } else if duration.as_secs() > 0 {
+        format!("{:.1}s", duration.as_secs_f64())
+    } else {
+        format!("{}ms", duration.as_millis())
+    }
+}
+
+fn format_elapsed(elapsed: Duration) -> String {
+    let total_seconds = elapsed.as_secs();
+    let minutes = total_seconds / 60;
+    let seconds = total_seconds % 60;
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn compact_path(path: &str, max_width: usize) -> String {
+    if path.chars().count() <= max_width {
+        return path.to_string();
+    }
+    if max_width <= 1 {
+        return "…".to_string();
+    }
+    let suffix_len = max_width.saturating_sub(1);
+    let suffix: String = path
+        .chars()
+        .rev()
+        .take(suffix_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("…{suffix}")
+}
+
+fn fit_text(text: &str, max_width: usize) -> String {
+    if text.chars().count() <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+    let mut out = take_chars(text, max_width - 1);
+    out.push('…');
+    out
+}
+
+fn pad_cell(text: &str, width: usize) -> String {
+    format!("{:<width$}", fit_text(text, width), width = width)
+}
+
+fn pad_to(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    format!("{text:<width$}")
+}
+
+fn inner_width(area: Rect) -> usize {
+    area.width.saturating_sub(2) as usize
+}
+
+fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
+    let output = StdCommand::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn parse_remote_label(remote: &str) -> Option<String> {
+    let trimmed = remote.trim().trim_end_matches(".git");
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed.replace(':', "/");
+    let without_scheme = normalized
+        .split_once("://")
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or(normalized);
+    let parts: Vec<&str> = without_scheme
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    Some(format!(
+        "{}/{}",
+        parts[parts.len() - 2],
+        parts[parts.len() - 1]
+    ))
+}
+
+fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, ChangedFileStat>) {
+    let mut counts = GitStatusCounts::default();
+    let mut file_map = HashMap::new();
+
+    for line in raw.lines() {
+        if line.len() < 3 {
             continue;
         }
 
-        if let Some(content) = line.strip_prefix("  ") {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(content.to_string(), body_style),
-            ]));
-        } else {
-            lines.push(Line::from(Span::styled(line, body_style)));
+        let status = &line[..2];
+        let path = line[3..].trim();
+        if path.is_empty() {
+            continue;
         }
-    }
 
-    Paragraph::new(Text::from(lines))
-}
-
-fn wrapped_entry_lines(entry: &UiEntry, width: u16) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-
-    let width = width as usize;
-    if entry.kind == EntryKind::Log {
-        let wrapped = wrap_soft_line(
-            &format!("{} {} {}", entry.symbol_text(), entry.title, entry.body),
-            width,
-        );
-        return if wrapped.is_empty() {
-            vec![String::new()]
+        let normalized_status = if status == "??" {
+            counts.untracked += 1;
+            "??".to_string()
         } else {
-            wrapped
+            let x = status.chars().next().unwrap_or(' ');
+            let y = status.chars().nth(1).unwrap_or(' ');
+            if x != ' ' {
+                counts.staged += 1;
+            }
+            if status.contains('R') {
+                counts.renamed += 1;
+                "REN".to_string()
+            } else if status.contains('A') {
+                counts.added += 1;
+                "ADD".to_string()
+            } else if status.contains('D') {
+                counts.deleted += 1;
+                "DEL".to_string()
+            } else {
+                if x != ' ' || y != ' ' {
+                    counts.modified += 1;
+                }
+                "MOD".to_string()
+            }
         };
+
+        file_map.insert(
+            path.to_string(),
+            ChangedFileStat {
+                status: normalized_status,
+                path: path.to_string(),
+                additions: None,
+                deletions: None,
+            },
+        );
     }
 
-    let mut wrapped = wrap_with_prefix(&format!("{} ", entry.symbol_text()), &entry.title, width);
+    (counts, file_map)
+}
 
-    if !entry.body.is_empty() {
-        for line in entry.body.split('\n') {
-            wrapped.extend(wrap_with_prefix("  ", line, width));
+fn parse_numstat_pairs(
+    raw: &str,
+    cached_raw: &str,
+) -> (HashMap<String, (Option<u64>, Option<u64>)>, u64, u64) {
+    let mut map = HashMap::new();
+    let mut total_additions = 0u64;
+    let mut total_deletions = 0u64;
+
+    for source in [raw, cached_raw] {
+        for line in source.lines() {
+            let mut parts = line.splitn(3, '\t');
+            let additions_raw = parts.next();
+            let deletions_raw = parts.next();
+            let path_raw = parts.next();
+            let (Some(additions_raw), Some(deletions_raw), Some(path_raw)) =
+                (additions_raw, deletions_raw, path_raw)
+            else {
+                continue;
+            };
+
+            let additions = additions_raw.parse::<u64>().ok();
+            let deletions = deletions_raw.parse::<u64>().ok();
+            let path = path_raw.to_string();
+
+            if let Some(value) = additions {
+                total_additions = total_additions.saturating_add(value);
+            }
+            if let Some(value) = deletions {
+                total_deletions = total_deletions.saturating_add(value);
+            }
+
+            let entry = map.entry(path).or_insert((None, None));
+            if let Some(value) = additions {
+                entry.0 = Some(entry.0.unwrap_or(0u64).saturating_add(value));
+            }
+            if let Some(value) = deletions {
+                entry.1 = Some(entry.1.unwrap_or(0u64).saturating_add(value));
+            }
         }
     }
 
-    if wrapped.is_empty() {
-        wrapped.push(String::new());
-    }
-    wrapped
+    (map, total_additions, total_deletions)
 }
 
-fn print_preamble_plain(metadata: &TuiMetadata) -> Result<()> {
-    let mut out = io::stdout().lock();
-    writeln!(out)?;
-    writeln!(
-        out,
-        "{}",
-        format!("● OPENAI_MODEL: {}", metadata.model).dark_grey()
-    )?;
-    if let Some(reasoning_effort) = metadata.reasoning_effort.as_deref() {
-        writeln!(
-            out,
-            "{}",
-            format!("● effort: {}", reasoning_effort).dark_grey()
-        )?;
-    }
-    writeln!(
-        out,
-        "{}",
-        format!("● OPENAI_BASE_URL: {}", metadata.base_url).dark_grey()
-    )?;
-    writeln!(
-        out,
-        "{}",
-        format!("● backend: {}", metadata.backend).dark_grey()
-    )?;
-    writeln!(
-        out,
-        "{}",
-        format!("● sandbox: {}", metadata.sandbox_status).dark_grey()
-    )?;
-    writeln!(
-        out,
-        "{}",
-        format!("● AGENTS.md: {}", metadata.agents_md_status).dark_grey()
-    )?;
-    writeln!(out, "{}", format!("● cwd: {}", metadata.cwd).dark_grey())?;
-    if let Some(session_id) = metadata.session_id.as_deref() {
-        writeln!(
-            out,
-            "{}",
-            format!("● session: {}", short_session(session_id)).dark_grey()
-        )?;
-    }
-    writeln!(out)?;
-    out.flush()?;
-    Ok(())
+fn build_project_tree(root: &Path, max_depth: usize, max_lines: usize) -> Vec<String> {
+    let root_label = root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| root.display().to_string());
+    let mut lines = vec![format!("{root_label}/")];
+    collect_tree_lines(root, "", 0, max_depth, max_lines, &mut lines);
+    lines
 }
 
-fn print_restored_history(terminal: &mut UiTerminal, messages: &[Message]) -> Result<()> {
-    let mut printed_any = false;
-    for message in messages {
-        match message {
-            Message::User { content } => {
-                print_entry(terminal, &UiEntry::new(EntryKind::User, "prompt", content))?;
-                printed_any = true;
-            }
-            Message::Assistant {
-                content: Some(content),
-                ..
-            } => {
-                print_entry(
-                    terminal,
-                    &UiEntry::new(EntryKind::Assistant, "response", content).with_spacing_after(2),
-                )?;
-                printed_any = true;
-            }
-            _ => {}
+fn collect_tree_lines(
+    dir: &Path,
+    prefix: &str,
+    depth: usize,
+    max_depth: usize,
+    max_lines: usize,
+    lines: &mut Vec<String>,
+) {
+    if depth >= max_depth || lines.len() >= max_lines {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            !matches!(
+                name.as_ref(),
+                ".git" | "target" | ".DS_Store" | "node_modules" | ".idea"
+            )
+        })
+        .collect();
+    entries.sort_by(|left, right| {
+        let left_is_dir = left
+            .file_type()
+            .map(|value| value.is_dir())
+            .unwrap_or(false);
+        let right_is_dir = right
+            .file_type()
+            .map(|value| value.is_dir())
+            .unwrap_or(false);
+        right_is_dir
+            .cmp(&left_is_dir)
+            .then_with(|| left.file_name().cmp(&right.file_name()))
+    });
+
+    let entries: Vec<_> = entries
+        .into_iter()
+        .take(max_lines.saturating_sub(lines.len()))
+        .collect();
+    let entry_count = entries.len();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let is_last = index + 1 == entry_count;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_dir = entry
+            .file_type()
+            .map(|value| value.is_dir())
+            .unwrap_or(false);
+        let connector = if is_last { "└── " } else { "├── " };
+        lines.push(format!(
+            "{}{}{}{}",
+            prefix,
+            connector,
+            name,
+            if is_dir { "/" } else { "" }
+        ));
+        if is_dir && lines.len() < max_lines {
+            let next_prefix = if is_last {
+                format!("{prefix}    ")
+            } else {
+                format!("{prefix}│   ")
+            };
+            collect_tree_lines(
+                &entry.path(),
+                &next_prefix,
+                depth + 1,
+                max_depth,
+                max_lines,
+                lines,
+            );
         }
     }
-    if printed_any {
-        print_blank_line(terminal)?;
-    }
-    Ok(())
-}
-
-fn persist_session_snapshot(snapshot: &mut SessionSnapshot, agent: &Agent) -> Result<()> {
-    let refreshed = sessions::refresh_snapshot(snapshot, agent.messages.clone());
-    sessions::save_session(&refreshed)?;
-    *snapshot = refreshed;
-    Ok(())
 }
 
 struct WrappedComposerView {
@@ -813,18 +2562,82 @@ fn wrapped_composer_view(
     }
 }
 
-fn composer_content_height(lines: &[String], width: u16) -> u16 {
-    if lines.len() == 1 && lines.first().is_some_and(|line| line.is_empty()) {
-        return 1;
+fn wrap_logical_lines(lines: &[String], width: usize) -> Vec<WrappedRow> {
+    let mut rows = Vec::new();
+    for (logical_line, line) in lines.iter().enumerate() {
+        let wrapped = wrap_soft_line_with_ranges(line, width);
+        if wrapped.is_empty() {
+            rows.push(WrappedRow {
+                logical_line,
+                start_char: 0,
+                end_char: 0,
+                text: String::new(),
+            });
+            continue;
+        }
+        for (start_char, end_char, text) in wrapped {
+            rows.push(WrappedRow {
+                logical_line,
+                start_char,
+                end_char,
+                text,
+            });
+        }
+    }
+    if rows.is_empty() {
+        rows.push(WrappedRow {
+            logical_line: 0,
+            start_char: 0,
+            end_char: 0,
+            text: String::new(),
+        });
+    }
+    rows
+}
+
+fn wrap_soft_line_with_ranges(line: &str, width: usize) -> Vec<(usize, usize, String)> {
+    if width == 0 {
+        return vec![(0, 0, String::new())];
+    }
+    if line.is_empty() {
+        return vec![(0, 0, String::new())];
     }
 
-    let width = width.max(1) as usize;
-    let effective_width = width.saturating_sub(composer_prefix_width()).max(1);
-    lines
-        .iter()
-        .map(|line| wrap_soft_line(line, effective_width).len() as u16)
-        .fold(0u16, |acc, count| acc.saturating_add(count))
-        .max(1)
+    let chars: Vec<char> = line.chars().collect();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+
+    while start < chars.len() {
+        let remaining = chars.len() - start;
+        if remaining <= width {
+            segments.push((start, chars.len(), chars[start..].iter().collect()));
+            break;
+        }
+
+        let slice_end = start + width;
+        let mut split = None;
+        for idx in (start..slice_end).rev() {
+            if chars[idx].is_whitespace() {
+                split = Some(idx + 1);
+                break;
+            }
+        }
+
+        let end = split.unwrap_or(slice_end);
+        if end == start {
+            let forced_end = (start + width).min(chars.len());
+            segments.push((start, forced_end, chars[start..forced_end].iter().collect()));
+            start = forced_end;
+        } else {
+            segments.push((start, end, chars[start..end].iter().collect()));
+            start = end;
+        }
+    }
+
+    if segments.is_empty() {
+        segments.push((0, 0, String::new()));
+    }
+    segments
 }
 
 fn composer_prefix_width() -> usize {
@@ -842,7 +2655,9 @@ fn prompt_line(is_first: bool, content: &str) -> Line<'static> {
         ));
         spans.push(Span::styled(
             PROMPT_SEPARATOR,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::styled(
@@ -858,97 +2673,14 @@ fn prompt_line(is_first: bool, content: &str) -> Line<'static> {
 }
 
 fn wrap_soft_line(line: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![String::new()];
-    }
-    if line.is_empty() {
-        return vec![String::new()];
-    }
-
-    let chars: Vec<char> = line.chars().collect();
-    let mut segments = Vec::new();
-    let mut start = 0usize;
-
-    while start < chars.len() {
-        let remaining = chars.len() - start;
-        if remaining <= width {
-            segments.push(chars[start..].iter().collect());
-            break;
-        }
-
-        let slice_end = start + width;
-        let mut split = None;
-        for idx in (start..slice_end).rev() {
-            if chars[idx].is_whitespace() {
-                split = Some(idx + 1);
-                break;
-            }
-        }
-
-        let end = split.unwrap_or(slice_end);
-        if end == start {
-            let forced_end = (start + width).min(chars.len());
-            segments.push(chars[start..forced_end].iter().collect());
-            start = forced_end;
-        } else {
-            segments.push(chars[start..end].iter().collect());
-            start = end;
-        }
-    }
-
-    if segments.is_empty() {
-        segments.push(String::new());
-    }
-
-    segments
+    wrap_soft_line_with_ranges(line, width)
+        .into_iter()
+        .map(|(_, _, text)| text)
+        .collect()
 }
 
-fn wrap_with_prefix(prefix: &str, content: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![String::new()];
-    }
-
-    let prefix_width = prefix.chars().count();
-    if prefix_width >= width {
-        return vec![format!("{prefix}{content}")];
-    }
-
-    let mut wrapped = Vec::new();
-    let effective_width = width - prefix_width;
-    for segment in wrap_soft_line(content, effective_width) {
-        wrapped.push(format!("{prefix}{segment}"));
-    }
-    if wrapped.is_empty() {
-        wrapped.push(prefix.to_string());
-    }
-    wrapped
-}
-
-fn short_session(session_id: &str) -> String {
-    session_id.chars().take(8).collect()
-}
-
-fn working_line(frame: usize, elapsed: Duration) -> Line<'static> {
-    const FRAMES: [&str; 6] = ["●○○○", "○●○○", "○○●○", "○○○●", "○○●○", "○●○○"];
-    let glyphs = FRAMES[frame % FRAMES.len()];
-    let elapsed_text = format_elapsed(elapsed);
-    Line::from(vec![
-        Span::raw("  "),
-        Span::styled("working", Style::default().fg(Color::White)),
-        Span::raw(" "),
-        Span::styled("[", Style::default().fg(Color::DarkGray)),
-        Span::styled(glyphs.to_string(), Style::default().fg(Color::Gray)),
-        Span::styled("]", Style::default().fg(Color::DarkGray)),
-        Span::raw(" "),
-        Span::styled(elapsed_text, Style::default().fg(Color::DarkGray)),
-    ])
-}
-
-fn format_elapsed(elapsed: Duration) -> String {
-    let total_seconds = elapsed.as_secs();
-    let minutes = total_seconds / 60;
-    let seconds = total_seconds % 60;
-    format!("{minutes}m{seconds:02}s")
+fn normalize_paste(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn truncate_episode_preview(content: &str) -> String {
@@ -957,13 +2689,13 @@ fn truncate_episode_preview(content: &str) -> String {
     let mut truncated = false;
 
     for (index, line) in content.split('\n').enumerate() {
-        if index >= EPISODE_PREVIEW_LINE_LIMIT {
+        if index >= 8 {
             truncated = true;
             break;
         }
 
         let line_chars = line.chars().count();
-        let remaining_chars = EPISODE_PREVIEW_CHAR_LIMIT.saturating_sub(char_count);
+        let remaining_chars = 700usize.saturating_sub(char_count);
         if line_chars > remaining_chars {
             lines.push(take_chars(line, remaining_chars));
             truncated = true;
@@ -972,15 +2704,15 @@ fn truncate_episode_preview(content: &str) -> String {
 
         lines.push(line.to_string());
         char_count = char_count.saturating_add(line_chars);
-        if char_count >= EPISODE_PREVIEW_CHAR_LIMIT {
+        if char_count >= 700 {
             truncated = true;
             break;
         }
     }
 
     if lines.is_empty() && !content.is_empty() {
-        lines.push(take_chars(content, EPISODE_PREVIEW_CHAR_LIMIT));
-        truncated = content.chars().count() > EPISODE_PREVIEW_CHAR_LIMIT;
+        lines.push(take_chars(content, 700));
+        truncated = content.chars().count() > 700;
     }
 
     if truncated {
@@ -992,6 +2724,82 @@ fn truncate_episode_preview(content: &str) -> String {
 
 fn take_chars(text: &str, count: usize) -> String {
     text.chars().take(count).collect()
+}
+
+fn split_preserving_empty(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    text.split('\n').map(|line| line.to_string()).collect()
+}
+
+fn short_session(session_id: &str) -> String {
+    session_id.chars().take(8).collect()
+}
+
+fn short_clock(timestamp: &str) -> String {
+    timestamp
+        .rsplit_once(' ')
+        .map(|(_, time)| time.to_string())
+        .unwrap_or_else(|| fit_text(timestamp, 8))
+}
+
+fn utc_hms() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let rem = d.as_secs() % 86_400;
+    let hours = rem / 3_600;
+    let minutes = (rem % 3_600) / 60;
+    let seconds = rem % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn spinner_frame(frame: usize) -> &'static str {
+    const FRAMES: [&str; 8] = ["◐", "◓", "◑", "◒", "◐", "◓", "◑", "◒"];
+    FRAMES[frame % FRAMES.len()]
+}
+
+fn tone_glyph(tone: Tone) -> &'static str {
+    match tone {
+        Tone::Info => "•",
+        Tone::Success => "+",
+        Tone::Warning => "!",
+        Tone::Error => "×",
+        Tone::Muted => "·",
+    }
+}
+
+fn actor_color(actor: &str, tone: Tone) -> Color {
+    if actor == "user" {
+        Color::Yellow
+    } else if actor == "assistant" {
+        Color::Green
+    } else if actor == "orchestrator" || actor.starts_with("coder") {
+        Color::Cyan
+    } else if actor == "model" || actor == "docs" {
+        Color::Magenta
+    } else if actor == "system" {
+        Color::Blue
+    } else if actor == "git" {
+        Color::Green
+    } else if actor.starts_with("tester") {
+        Color::Yellow
+    } else {
+        tone.color()
+    }
+}
+
+fn file_status_style(status: &str) -> Style {
+    let color = match status {
+        "ADD" => Color::Green,
+        "DEL" => Color::Red,
+        "REN" => Color::Magenta,
+        "??" => Color::Cyan,
+        "MOD" => Color::Yellow,
+        _ => Color::Gray,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn enable_keyboard_enhancements(terminal: &mut UiTerminal) -> bool {
@@ -1016,8 +2824,8 @@ fn enable_bracketed_paste(terminal: &mut UiTerminal) -> bool {
     crossterm::execute!(terminal.backend_mut(), EnableBracketedPaste).is_ok()
 }
 
-fn normalize_paste(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
+fn enable_mouse_capture(terminal: &mut UiTerminal) -> bool {
+    crossterm::execute!(terminal.backend_mut(), EnableMouseCapture).is_ok()
 }
 
 fn spawn_input_thread(
@@ -1025,7 +2833,7 @@ fn spawn_input_thread(
     input_tx: mpsc::UnboundedSender<CrosstermEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        while running.load(Ordering::SeqCst) {
+        while running.load(AtomicOrdering::SeqCst) {
             match event::poll(Duration::from_millis(100)) {
                 Ok(true) => match event::read() {
                     Ok(event) => {
@@ -1042,24 +2850,78 @@ fn spawn_input_thread(
     })
 }
 
+fn persist_session_snapshot(snapshot: &mut SessionSnapshot, agent: &Agent) -> Result<()> {
+    let refreshed = sessions::refresh_snapshot(snapshot, agent.messages.clone());
+    sessions::save_session(&refreshed)?;
+    *snapshot = refreshed;
+    Ok(())
+}
+
+fn contains_point(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
+}
+
+fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
+    let mut child = StdCommand::new("pbcopy")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let _ = child.wait()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyEventState;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nac_tui_{label}_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn metadata_for(path: &Path) -> TuiMetadata {
+        TuiMetadata {
+            cwd: path.display().to_string(),
+            workspace_host_path: Some(path.to_path_buf()),
+            store_path: path.join(".nac").join("store.db"),
+            model: "gpt-test".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            backend: "openai-responses".to_string(),
+            reasoning_effort: Some("medium".to_string()),
+            session_id: None,
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+        }
+    }
 
     #[test]
     fn shift_enter_inserts_newline() {
-        let mut app = App::new();
+        let dir = temp_dir("newline");
+        let mut app = App::new(metadata_for(&dir), &[]);
         app.composer.insert_str("hello");
 
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
 
         assert!(matches!(action, AppAction::None));
         assert_eq!(app.prompt(), "hello\n");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn enter_submits_prompt() {
-        let mut app = App::new();
+        let dir = temp_dir("submit");
+        let mut app = App::new(metadata_for(&dir), &[]);
         app.composer.insert_str("hello");
 
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1068,57 +2930,26 @@ mod tests {
             AppAction::Submit(prompt) => assert_eq!(prompt, "hello"),
             _ => panic!("expected submit"),
         }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn slash_exit_quits() {
-        let mut app = App::new();
+        let dir = temp_dir("exit");
+        let mut app = App::new(metadata_for(&dir), &[]);
         app.composer.insert_str("/exit");
 
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(action, AppAction::Quit));
         assert!(app.quit);
-    }
-
-    #[test]
-    fn thread_dispatch_entry_is_labeled_explicitly() {
-        let mut app = App::new();
-        let entries = app.apply_agent_event(AgentEvent::ThreadStarted {
-            name: "auth".to_string(),
-            action: "inspect auth flow".to_string(),
-            source_threads: vec!["tests".to_string()],
-        });
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].title, "auth • thread dispatch");
-    }
-
-    #[test]
-    fn retained_episode_preview_is_truncated() {
-        let mut app = App::new();
-        let long = (0..20)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let entries = app.apply_agent_event(AgentEvent::AssistantMessage {
-            thread_name: Some("auth".to_string()),
-            content: long,
-        });
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].title, "auth • retained episode");
-        assert!(entries[0]
-            .body
-            .contains("[truncated retained episode preview]"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn repeat_backspace_is_processed() {
-        use crossterm::event::KeyEventState;
-
-        let mut app = App::new();
+        let dir = temp_dir("backspace");
+        let mut app = App::new(metadata_for(&dir), &[]);
         app.composer.insert_str("ab");
 
         let action = app.handle_key_event(KeyEvent {
@@ -1130,24 +2961,161 @@ mod tests {
 
         assert!(matches!(action, AppAction::None));
         assert_eq!(app.prompt(), "a");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn multiline_paste_inserts_newlines_without_submit() {
-        let mut app = App::new();
+        let dir = temp_dir("paste");
+        let mut app = App::new(metadata_for(&dir), &[]);
 
         let action = app.handle_paste("hello\nworld");
 
         assert!(matches!(action, AppAction::None));
         assert_eq!(app.prompt(), "hello\nworld");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn pasted_crlf_is_normalized_to_newlines() {
-        let mut app = App::new();
+        let dir = temp_dir("paste-crlf");
+        let mut app = App::new(metadata_for(&dir), &[]);
 
         app.handle_paste("hello\r\nworld\rtest");
 
         assert_eq!(app.prompt(), "hello\nworld\ntest");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn thread_lifecycle_switches_active_to_idle() {
+        let dir = temp_dir("thread");
+        let mut app = App::new(metadata_for(&dir), &[]);
+
+        app.apply_agent_event(AgentEvent::ThreadStarted {
+            name: "auth".to_string(),
+            action: "inspect auth flow".to_string(),
+            source_threads: vec!["tests".to_string()],
+        });
+        let thread = app.threads.get("auth").unwrap();
+        assert_eq!(thread.state, ThreadState::Active);
+        assert_eq!(thread.action, "inspect auth flow");
+
+        app.apply_agent_event(AgentEvent::ThreadFinished {
+            name: "auth".to_string(),
+            exit_code: 0,
+            timed_out: false,
+        });
+        let thread = app.threads.get("auth").unwrap();
+        assert_eq!(thread.state, ThreadState::Idle);
+        assert_eq!(thread.summary, "exit 0");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tool_finishes_into_recent_history() {
+        let dir = temp_dir("tool");
+        let mut app = App::new(metadata_for(&dir), &[]);
+
+        app.apply_agent_event(AgentEvent::ToolCallStarted {
+            thread_name: Some("coder-1".to_string()),
+            call_id: "call-1".to_string(),
+            name: "edit".to_string(),
+            args_preview: "crates/nac/src/tui.rs".to_string(),
+        });
+        app.apply_agent_event(AgentEvent::ToolCallFinished {
+            thread_name: Some("coder-1".to_string()),
+            call_id: "call-1".to_string(),
+            name: "edit".to_string(),
+            content_preview: "ok".to_string(),
+            is_error: false,
+        });
+
+        assert!(app.active_tools.is_empty());
+        assert_eq!(app.recent_tools.len(), 1);
+        assert_eq!(app.recent_tools[0].name, "edit");
+        assert_eq!(app.recent_tools[0].status, ToolStatus::Ok);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn top_level_responses_shift_into_previous_response() {
+        let dir = temp_dir("responses");
+        let mut app = App::new(metadata_for(&dir), &[]);
+
+        app.apply_agent_event(AgentEvent::AssistantMessage {
+            thread_name: None,
+            content: "first reply".to_string(),
+        });
+        assert_eq!(app.last_response.as_deref(), Some("first reply"));
+        assert_eq!(app.previous_response, None);
+
+        app.apply_agent_event(AgentEvent::AssistantMessage {
+            thread_name: None,
+            content: "second reply".to_string(),
+        });
+        assert_eq!(app.last_response.as_deref(), Some("second reply"));
+        assert_eq!(app.previous_response.as_deref(), Some("first reply"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn selection_extract_preserves_original_newlines_only() {
+        let lines = vec![
+            "alpha beta gamma delta".to_string(),
+            "second line".to_string(),
+        ];
+        let rows = wrap_logical_lines(&lines, 8);
+        let view = PanelView {
+            id: PanelId::Response,
+            inner: Rect::new(0, 0, 20, 10),
+            logical_lines: lines,
+            rows,
+            scroll_offset: 0,
+            visible_rows: 10,
+        };
+        let selection = SelectionState {
+            anchor: SelectionPoint {
+                panel: PanelId::Response,
+                logical_line: 0,
+                char_index: 6,
+            },
+            focus: SelectionPoint {
+                panel: PanelId::Response,
+                logical_line: 1,
+                char_index: 6,
+            },
+            dragging: false,
+        };
+
+        let extracted = extract_selection_text(&view, &selection);
+        assert_eq!(extracted, "beta gamma delta\nsecond");
+    }
+
+    #[test]
+    fn workspace_without_host_path_is_unavailable() {
+        let snapshot = WorkspaceSnapshot::load("/workspace/project", None);
+        assert!(snapshot.error.is_some());
+        assert_eq!(snapshot.host_root, None);
+    }
+
+    #[test]
+    fn parse_remote_label_handles_ssh() {
+        assert_eq!(
+            parse_remote_label("git@github.com:sapiosaturn/nac.git").as_deref(),
+            Some("sapiosaturn/nac")
+        );
+    }
+
+    #[test]
+    fn parse_status_porcelain_tracks_untracked_and_staged() {
+        let raw = "M  crates/nac/src/tui.rs\nA  README.md\n?? notes.txt\n";
+        let (counts, files) = parse_status_porcelain(raw);
+
+        assert_eq!(counts.modified, 1);
+        assert_eq!(counts.added, 1);
+        assert_eq!(counts.untracked, 1);
+        assert_eq!(counts.staged, 2);
+        assert!(files.contains_key("notes.txt"));
     }
 }
