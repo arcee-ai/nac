@@ -37,7 +37,6 @@ pub struct AgentConfig {
 
 pub struct Agent {
     client: ModelClient,
-    max_iterations: usize,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
     tool_runtime: ToolRuntime,
@@ -51,11 +50,6 @@ impl Agent {
     }
 
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Self {
-        let max_iterations = std::env::var("AGENT_MAX_ITERATIONS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(100);
-
         let cwd = config.working_directory.clone();
 
         let (system_prompt, mut tool_defs) = match config.mode {
@@ -180,7 +174,6 @@ impl Agent {
 
         Self {
             client,
-            max_iterations,
             messages,
             tool_defs,
             tool_runtime: ToolRuntime {
@@ -229,10 +222,12 @@ impl Agent {
             content: prompt.to_string(),
         });
 
-        for iteration in 0..self.max_iterations {
+        let mut iteration = 0usize;
+        loop {
+            iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),
-                iteration: iteration + 1,
+                iteration,
             });
 
             let response = match self
@@ -305,13 +300,6 @@ impl Agent {
                 });
             }
         }
-
-        let error = anyhow!("Max iterations ({}) reached", self.max_iterations);
-        self.emit(AgentEvent::Error {
-            thread_name: self.thread_name.clone(),
-            message: error.to_string(),
-        });
-        Err(error)
     }
 
     pub fn set_event_sink(&mut self, sink: EventSink) {
@@ -345,8 +333,9 @@ async fn execute_tools_parallel(
         let client = client.clone();
         event_sink.emit(AgentEvent::ToolCallStarted {
             thread_name: thread_name.clone(),
+            call_id: id.clone(),
             name: name.clone(),
-            args_preview: preview(&args_str, 120),
+            args_preview: preview_tool_args(&name, &args_str),
         });
 
         join_set.spawn(async move {
@@ -379,8 +368,9 @@ async fn execute_tools_parallel(
             Ok((index, tool_call_id, tool_name, result)) => {
                 event_sink.emit(AgentEvent::ToolCallFinished {
                     thread_name: thread_name.clone(),
+                    call_id: tool_call_id.clone(),
                     name: tool_name.clone(),
-                    content_preview: preview(first_line(&result.content), 160),
+                    content_preview: preview_tool_result(&tool_name, &result),
                     is_error: result.is_error,
                 });
                 results.push((index, tool_call_id, tool_name, result));
@@ -413,8 +403,118 @@ fn preview(value: &str, max_len: usize) -> String {
     }
 }
 
-fn first_line(value: &str) -> &str {
-    value.lines().next().unwrap_or("")
+fn preview_tool_args(name: &str, args_str: &str) -> String {
+    let parsed = serde_json::from_str::<serde_json::Value>(args_str).ok();
+    match name {
+        "read" | "write" | "edit" => {
+            if let Some(path) = parsed
+                .as_ref()
+                .and_then(|value| value.get("path"))
+                .and_then(|value| value.as_str())
+            {
+                return preview(path, 120);
+            }
+        }
+        "bash" => {
+            if let Some(command) = parsed
+                .as_ref()
+                .and_then(|value| value.get("command"))
+                .and_then(|value| value.as_str())
+            {
+                return preview(command, 120);
+            }
+        }
+        "thread" => {
+            if let Some(value) = parsed.as_ref() {
+                let thread_name = value
+                    .get("name")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or("?");
+                let action = value
+                    .get("action")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or("dispatch");
+                return preview(&format!("{thread_name}: {action}"), 120);
+            }
+        }
+        "activate_skill" => {
+            if let Some(skill) = parsed
+                .as_ref()
+                .and_then(|value| value.get("name"))
+                .and_then(|value| value.as_str())
+            {
+                return preview(skill, 120);
+            }
+        }
+        _ => {}
+    }
+
+    preview(args_str, 120)
+}
+
+fn preview_tool_result(name: &str, result: &ToolResult) -> String {
+    let trimmed = result.content.trim();
+    if trimmed.is_empty() && !result.is_error {
+        return "ok".to_string();
+    }
+
+    let lines: Vec<&str> = result
+        .content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return preview(trimmed, 160);
+    }
+
+    if let Some(summary) = select_summary_line(name, &lines) {
+        return preview(summary, 160);
+    }
+
+    preview(lines[0], 160)
+}
+
+fn select_summary_line<'a>(name: &str, lines: &'a [&'a str]) -> Option<&'a str> {
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|line| line.starts_with("Exit code:"))
+    {
+        return Some(line);
+    }
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|line| line.starts_with("Command timed out after"))
+    {
+        return Some(line);
+    }
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|line| line.contains("test result:"))
+    {
+        return Some(line);
+    }
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|line| line.starts_with("Finished `"))
+    {
+        return Some(line);
+    }
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|line| line.starts_with("error:"))
+    {
+        return Some(line);
+    }
+    if name == "bash" {
+        return lines.last().copied();
+    }
+    None
 }
 
 #[cfg(test)]

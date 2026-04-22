@@ -20,6 +20,7 @@ pub struct ThreadRecord {
     pub created_at: String,
     pub updated_at: String,
     pub episode_count: i64,
+    pub latest_action: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +93,11 @@ pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> 
     let mut stmt = conn.prepare(
         "SELECT t.name, t.session_id, t.created_at, t.updated_at,
                 (SELECT COUNT(*) FROM episodes e
-                 WHERE e.thread_name = t.name AND e.session_id = t.session_id) AS episode_count
+                 WHERE e.thread_name = t.name AND e.session_id = t.session_id) AS episode_count,
+                (SELECT e.action FROM episodes e
+                 WHERE e.thread_name = t.name AND e.session_id = t.session_id
+                 ORDER BY e.id DESC
+                 LIMIT 1) AS latest_action
          FROM threads t
          WHERE t.session_id = ?1
          ORDER BY t.updated_at DESC, t.name ASC",
@@ -107,6 +112,7 @@ pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> 
             created_at: row.get(2)?,
             updated_at: row.get(3)?,
             episode_count: row.get(4)?,
+            latest_action: row.get(5)?,
         });
     }
     Ok(threads)

@@ -19,7 +19,7 @@ use nac::sandbox::{
 use nac::sessions::{self, SessionSnapshot};
 use nac::skills::{self, SkillRegistry};
 use nac::store::{self, WorkerContext};
-use nac::tui::{self, TuiMetadata};
+use nac::tui::{self, TuiMetadata, TuiOutcome};
 use nac::types::Message;
 
 #[derive(Parser)]
@@ -30,6 +30,10 @@ use nac::types::Message;
 )]
 struct RunCli {
     prompt: Option<String>,
+
+    /// Open the interactive session picker instead of starting a fresh session
+    #[arg(long)]
+    resume: bool,
 
     /// Working directory (default: current directory)
     #[arg(short = 'C', long)]
@@ -150,6 +154,8 @@ struct RunConfig {
     session_snapshot: Option<SessionSnapshot>,
     sandbox_status: String,
     agents_md_status: String,
+    workspace_display: String,
+    workspace_host_path: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -169,96 +175,74 @@ async fn run() -> Result<()> {
         }
     }
 
-    let run_config = build_run_config(cli).await?;
-    let use_tui = run_config.mode == AgentMode::Orchestrator
-        && run_config.continue_repl
-        && run_config.managed_worker.is_none()
-        && io::stdin().is_terminal()
-        && io::stdout().is_terminal()
-        && io::stderr().is_terminal();
+    let mut run_state = build_run_state(cli).await?;
 
-    let mut session_snapshot = run_config.session_snapshot.clone();
-    let restored_messages = run_config.agent.messages.clone();
-    let initial_prompt = run_config.initial_prompt.clone();
-
-    if use_tui {
-        let metadata = TuiMetadata {
-            cwd: std::env::current_dir()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|_| ".".to_string()),
-            model: run_config.client.model.clone(),
-            base_url: run_config.client.base_url().to_string(),
-            backend: run_config.client.backend().as_str().to_string(),
-            reasoning_effort: if run_config.client.backend() == BackendKind::OpenAiResponses {
-                run_config
-                    .client
-                    .reasoning_effort()
-                    .map(|effort| effort.as_str().to_string())
-            } else {
-                None
-            },
-            session_id: run_config.session_id.clone(),
-            sandbox_status: run_config.sandbox_status.clone(),
-            agents_md_status: run_config.agents_md_status.clone(),
-        };
-        return tui::run(
-            run_config.agent,
-            initial_prompt,
-            metadata,
-            restored_messages,
-            session_snapshot,
-        )
-        .await;
-    }
-
-    let mut agent = run_config.agent;
-
-    if let Some(prompt) = run_config.initial_prompt {
-        let send_result = agent.send(&prompt).await;
-        if let Some(snapshot) = session_snapshot.as_mut() {
-            persist_session_snapshot(snapshot, &agent)?;
-        }
-        let response = send_result?;
-        if let Some(worker) = &run_config.managed_worker {
-            commit_managed_worker(worker, &response).await?;
-        }
-        println!("{}", response);
-        if !run_config.continue_repl {
-            return Ok(());
-        }
-    }
-
-    let stdin = io::stdin();
     loop {
-        eprint!("\n> ");
-        io::stderr().flush()?;
+        let use_tui = run_state.run_config.mode == AgentMode::Orchestrator
+            && run_state.run_config.continue_repl
+            && run_state.run_config.managed_worker.is_none()
+            && io::stdin().is_terminal()
+            && io::stdout().is_terminal()
+            && io::stderr().is_terminal();
 
-        let mut line = String::new();
-        let bytes = stdin.read_line(&mut line)?;
-        if bytes == 0 {
-            break;
+        if use_tui {
+            let session_snapshot = run_state.run_config.session_snapshot.clone();
+            let restored_messages = run_state.run_config.agent.messages.clone();
+            let initial_prompt = run_state.run_config.initial_prompt.clone();
+            let metadata = TuiMetadata {
+                cwd: run_state.run_config.workspace_display.clone(),
+                workspace_host_path: run_state.run_config.workspace_host_path.clone(),
+                store_path: session_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.store_path.clone())
+                    .unwrap_or_else(store::default_store_path),
+                model: run_state.run_config.client.model.clone(),
+                base_url: run_state.run_config.client.base_url().to_string(),
+                backend: run_state.run_config.client.backend().as_str().to_string(),
+                reasoning_effort: if run_state.run_config.client.backend()
+                    == BackendKind::OpenAiResponses
+                {
+                    run_state
+                        .run_config
+                        .client
+                        .reasoning_effort()
+                        .map(|effort| effort.as_str().to_string())
+                } else {
+                    None
+                },
+                session_id: run_state.run_config.session_id.clone(),
+                sandbox_status: run_state.run_config.sandbox_status.clone(),
+                agents_md_status: run_state.run_config.agents_md_status.clone(),
+            };
+
+            match tui::run(
+                run_state.run_config.agent,
+                initial_prompt,
+                metadata,
+                restored_messages,
+                session_snapshot,
+                run_state.start_in_session_picker,
+            )
+            .await?
+            {
+                TuiOutcome::Exit => return Ok(()),
+                TuiOutcome::ResumeSession(session_id) => {
+                    run_state = RunState {
+                        run_config: build_resume_config_for_session(&session_id).await?,
+                        start_in_session_picker: false,
+                    };
+                    continue;
+                }
+            }
         }
 
-        let input = line.trim();
-        if input.is_empty() {
-            continue;
-        }
-        if input == "/exit" {
-            break;
+        if run_state.start_in_session_picker {
+            anyhow::bail!("--resume requires an interactive terminal");
         }
 
-        let send_result = agent.send(input).await;
-        if let Some(snapshot) = session_snapshot.as_mut() {
-            persist_session_snapshot(snapshot, &agent)?;
-        }
-
-        match send_result {
-            Ok(response) => println!("{}", response),
-            Err(error) => eprintln!("Error: {}", error),
-        }
+        run_non_tui(run_state.run_config).await?;
+        return Ok(());
     }
-
-    Ok(())
 }
 
 fn parse_cli() -> ParsedCli {
@@ -280,10 +264,30 @@ fn parse_cli_from(args: Vec<OsString>) -> ParsedCli {
     }
 }
 
-async fn build_run_config(cli: ParsedCli) -> Result<RunConfig> {
+struct RunState {
+    run_config: RunConfig,
+    start_in_session_picker: bool,
+}
+
+async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
     match cli {
-        ParsedCli::Run(cli) => build_run_cli_config(cli).await,
-        ParsedCli::Resume(cli) => build_resume_config(cli).await,
+        ParsedCli::Run(cli) if cli.resume => {
+            if cli.prompt.is_some() || cli.single || cli.worker || cli.session_id.is_some() {
+                anyhow::bail!("--resume cannot be combined with prompts, workers, or session ids");
+            }
+            Ok(RunState {
+                run_config: build_resume_picker_config(cli).await?,
+                start_in_session_picker: true,
+            })
+        }
+        ParsedCli::Run(cli) => Ok(RunState {
+            run_config: build_run_cli_config(cli).await?,
+            start_in_session_picker: false,
+        }),
+        ParsedCli::Resume(cli) => Ok(RunState {
+            run_config: build_resume_config(cli).await?,
+            start_in_session_picker: false,
+        }),
     }
 }
 
@@ -303,6 +307,11 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(current_directory_display);
+    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir()
+    } else {
+        Some(current_dir.clone())
+    };
     let sandbox_status = sandbox
         .as_ref()
         .map(|session| session.status_text())
@@ -388,6 +397,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
                 session_snapshot: None,
                 sandbox_status,
                 agents_md_status,
+                workspace_display: working_directory.clone(),
+                workspace_host_path: workspace_host_path.clone(),
             });
         }
 
@@ -430,6 +441,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
             session_snapshot: None,
             sandbox_status,
             agents_md_status,
+            workspace_display: working_directory.clone(),
+            workspace_host_path: workspace_host_path.clone(),
         });
     }
 
@@ -456,7 +469,7 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
             initial_messages: Vec::new(),
             thread_name: None,
             event_sink: EventSink::none(),
-            working_directory,
+            working_directory: working_directory.clone(),
             sandbox: sandbox.clone(),
             mcp: None,
             skills: None,
@@ -488,6 +501,60 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         session_snapshot: Some(session_snapshot),
         sandbox_status,
         agents_md_status,
+        workspace_display: working_directory,
+        workspace_host_path,
+    })
+}
+
+async fn build_resume_picker_config(cli: RunCli) -> Result<RunConfig> {
+    let client = ModelClient::from_env_with_overrides(ClientOverrides {
+        base_url: cli.api_base_url,
+        model: cli.api_model,
+        backend: Some(cli.backend),
+        reasoning_effort: cli.reasoning_effort,
+    })?;
+    let current_dir = std::env::current_dir()?;
+    let agents_md = AgentsMdBundle::load(Some(&current_dir))?;
+    let working_directory = current_directory_display();
+    let workspace_host_path = Some(current_dir.clone());
+    let sandbox_status = "off".to_string();
+    let agents_md_status = agents_md.status_text();
+    let store_path = absolute_store_path(
+        &current_dir,
+        cli.store_path.unwrap_or_else(store::default_store_path),
+    );
+    store::initialize(&store_path)?;
+    let agent = Agent::with_config(
+        client.clone(),
+        AgentConfig {
+            mode: AgentMode::Orchestrator,
+            store_path,
+            session_id: None,
+            initial_messages: Vec::new(),
+            thread_name: None,
+            event_sink: EventSink::none(),
+            working_directory: working_directory.clone(),
+            sandbox: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: agents_md.system_message(),
+        },
+    );
+
+    Ok(RunConfig {
+        mode: AgentMode::Orchestrator,
+        agent,
+        initial_prompt: None,
+        continue_repl: true,
+        managed_worker: None,
+        client,
+        session_id: None,
+        session_snapshot: None,
+        sandbox_status,
+        agents_md_status,
+        workspace_display: working_directory,
+        workspace_host_path,
     })
 }
 
@@ -520,6 +587,11 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(current_directory_display);
+    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir()
+    } else {
+        Some(current_dir.clone())
+    };
     let sandbox_status = sandbox
         .as_ref()
         .map(|session| session.status_text())
@@ -536,7 +608,7 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
             initial_messages: Vec::new(),
             thread_name: None,
             event_sink: EventSink::none(),
-            working_directory,
+            working_directory: working_directory.clone(),
             sandbox,
             mcp: None,
             skills: None,
@@ -557,7 +629,17 @@ async fn build_resume_config(cli: ResumeCli) -> Result<RunConfig> {
         session_snapshot: Some(snapshot),
         sandbox_status,
         agents_md_status,
+        workspace_display: working_directory,
+        workspace_host_path,
     })
+}
+
+async fn build_resume_config_for_session(session_id: &str) -> Result<RunConfig> {
+    build_resume_config(ResumeCli {
+        session_id: Some(session_id.to_string()),
+        last: false,
+    })
+    .await
 }
 
 fn effective_agents_md_workspace_dir(
@@ -615,6 +697,58 @@ fn persist_session_snapshot(snapshot: &mut SessionSnapshot, agent: &Agent) -> Re
     let refreshed = sessions::refresh_snapshot(snapshot, agent.messages.clone());
     sessions::save_session(&refreshed)?;
     *snapshot = refreshed;
+    Ok(())
+}
+
+async fn run_non_tui(run_config: RunConfig) -> Result<()> {
+    let mut session_snapshot = run_config.session_snapshot.clone();
+    let mut agent = run_config.agent;
+
+    if let Some(prompt) = run_config.initial_prompt {
+        let send_result = agent.send(&prompt).await;
+        if let Some(snapshot) = session_snapshot.as_mut() {
+            persist_session_snapshot(snapshot, &agent)?;
+        }
+        let response = send_result?;
+        if let Some(worker) = &run_config.managed_worker {
+            commit_managed_worker(worker, &response).await?;
+        }
+        println!("{}", response);
+        if !run_config.continue_repl {
+            return Ok(());
+        }
+    }
+
+    let stdin = io::stdin();
+    loop {
+        eprint!("\n> ");
+        io::stderr().flush()?;
+
+        let mut line = String::new();
+        let bytes = stdin.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
+
+        let input = line.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if input == "/exit" {
+            break;
+        }
+
+        let send_result = agent.send(input).await;
+        if let Some(snapshot) = session_snapshot.as_mut() {
+            persist_session_snapshot(snapshot, &agent)?;
+        }
+
+        match send_result {
+            Ok(response) => println!("{}", response),
+            Err(error) => eprintln!("Error: {}", error),
+        }
+    }
+
     Ok(())
 }
 
@@ -777,6 +911,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_resume_flag_uses_run_cli() {
+        let parsed = parse_cli_from(vec![OsString::from("nac"), OsString::from("--resume")]);
+        match parsed {
+            ParsedCli::Run(run) => assert!(run.resume),
+            ParsedCli::Resume(_) => panic!("expected run cli"),
+        }
+    }
+
     #[tokio::test]
     async fn managed_worker_builds_user_messages_from_self_and_source_threads() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -817,6 +960,7 @@ mod tests {
 
         let cli = RunCli {
             prompt: None,
+            resume: false,
             directory: None,
             single: false,
             worker: true,
@@ -917,6 +1061,7 @@ mod tests {
         let store_path = temp_store_path("orchestrator_session_id");
         let cli = RunCli {
             prompt: None,
+            resume: false,
             directory: None,
             single: false,
             worker: false,

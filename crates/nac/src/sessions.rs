@@ -24,6 +24,19 @@ pub struct SessionSnapshot {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub cwd: PathBuf,
+    pub model: String,
+    pub backend: BackendKind,
+    pub visible_message_count: usize,
+    pub last_user_prompt: Option<String>,
+    pub sandboxed: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedSandboxSpec {
     image: String,
@@ -147,6 +160,60 @@ pub fn load_last_session() -> Result<SessionSnapshot> {
     };
 
     row.into_snapshot()
+}
+
+pub fn list_sessions() -> Result<Vec<SessionSummary>> {
+    let path = sessions_path()?;
+    let conn = open_connection(&path)?;
+    let mut stmt = conn.prepare(
+        "SELECT session_id, cwd, model, base_url, backend, sandbox_json, messages_json, created_at, updated_at
+         FROM sessions
+         ORDER BY updated_at DESC, created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+        ))
+    })?;
+
+    let mut sessions = Vec::new();
+    for row in rows {
+        let (
+            session_id,
+            cwd,
+            model,
+            base_url,
+            backend_raw,
+            sandbox_json,
+            messages_json,
+            created_at,
+            updated_at,
+        ) = row?;
+        let backend = parse_backend(backend_raw, &base_url)?;
+        let messages: Vec<Message> = serde_json::from_str(&messages_json)
+            .context("failed to parse stored session messages")?;
+        sessions.push(SessionSummary {
+            session_id,
+            cwd: PathBuf::from(cwd),
+            model,
+            backend,
+            visible_message_count: visible_message_count(&messages),
+            last_user_prompt: last_user_prompt(&messages),
+            sandboxed: sandbox_json.is_some(),
+            created_at,
+            updated_at,
+        });
+    }
+
+    Ok(sessions)
 }
 
 fn sessions_path() -> Result<PathBuf> {
@@ -422,6 +489,24 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
     }
 }
 
+fn visible_message_count(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .filter(|message| match message {
+            Message::User { .. } => true,
+            Message::Assistant { content, .. } => content.is_some(),
+            _ => false,
+        })
+        .count()
+}
+
+fn last_user_prompt(messages: &[Message]) -> Option<String> {
+    messages.iter().rev().find_map(|message| match message {
+        Message::User { content } => Some(content.clone()),
+        _ => None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,6 +597,84 @@ mod tests {
 
         let loaded = load_last_session().unwrap();
         assert_eq!(loaded.session_id, "session-2");
+
+        match previous_nac_home {
+            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
+            None => unsafe { std::env::remove_var("NAC_HOME") },
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn list_sessions_returns_summaries_in_updated_order() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let home = temp_home("list");
+        let previous_nac_home = std::env::var_os("NAC_HOME");
+        unsafe {
+            std::env::set_var("NAC_HOME", &home);
+        }
+
+        let first = new_snapshot(
+            "session-1".to_string(),
+            PathBuf::from("/repo-one"),
+            PathBuf::from("/repo-one/.nac/store.db"),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            vec![
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "first prompt".to_string(),
+                },
+            ],
+        );
+        create_session(&first).unwrap();
+
+        let second = new_snapshot(
+            "session-2".to_string(),
+            PathBuf::from("/repo-two"),
+            PathBuf::from("/repo-two/.nac/store.db"),
+            "model-b".to_string(),
+            "https://api.fireworks.ai/inference/v1".to_string(),
+            BackendKind::FireworksChat,
+            None,
+            Some(SandboxSpec {
+                image: "python:3.13".to_string(),
+                workdir: PathBuf::from("/workspace"),
+                mounts: Vec::new(),
+                gpu_devices: Vec::new(),
+                shm_size: Some("0".to_string()),
+            }),
+            vec![
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "latest prompt".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("reply".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+            ],
+        );
+        save_session(&second).unwrap();
+
+        let sessions = list_sessions().unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].session_id, "session-2");
+        assert_eq!(sessions[0].visible_message_count, 2);
+        assert_eq!(
+            sessions[0].last_user_prompt.as_deref(),
+            Some("latest prompt")
+        );
+        assert!(sessions[0].sandboxed);
 
         match previous_nac_home {
             Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
