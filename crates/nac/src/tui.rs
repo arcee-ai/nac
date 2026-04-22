@@ -42,8 +42,6 @@ const MIN_TERMINAL_WIDTH: u16 = 72;
 const MIN_TERMINAL_HEIGHT: u16 = 22;
 const TIMELINE_LIMIT: usize = 220;
 const TOOL_HISTORY_LIMIT: usize = 20;
-const TREE_DEPTH: usize = 3;
-const TREE_LINES: usize = 18;
 const FILE_CHANGE_LIMIT: usize = 36;
 const PROMPT_LABEL: &str = "ask";
 const PROMPT_SEPARATOR: &str = " › ";
@@ -246,8 +244,6 @@ struct WorkspaceSnapshot {
     workspace_display: String,
     repo_label: Option<String>,
     branch: Option<String>,
-    last_commit: Option<String>,
-    counts: GitStatusCounts,
     changed_files: Vec<ChangedFileStat>,
     total_additions: u64,
     total_deletions: u64,
@@ -262,8 +258,6 @@ impl WorkspaceSnapshot {
                 workspace_display: workspace_display.to_string(),
                 repo_label: None,
                 branch: None,
-                last_commit: None,
-                counts: GitStatusCounts::default(),
                 changed_files: Vec::new(),
                 total_additions: 0,
                 total_deletions: 0,
@@ -283,8 +277,6 @@ impl WorkspaceSnapshot {
         });
 
         let branch = run_git(cwd, &["branch", "--show-current"]).filter(|value| !value.is_empty());
-        let last_commit =
-            run_git(cwd, &["log", "-1", "--pretty=format:%h %s"]).filter(|value| !value.is_empty());
         let remote = run_git(cwd, &["config", "--get", "remote.origin.url"]);
         let repo_label = remote.as_deref().and_then(parse_remote_label).or_else(|| {
             root.as_ref()
@@ -301,8 +293,6 @@ impl WorkspaceSnapshot {
                     workspace_display: workspace_display.to_string(),
                     repo_label,
                     branch,
-                    last_commit,
-                    counts: GitStatusCounts::default(),
                     changed_files: Vec::new(),
                     total_additions: 0,
                     total_deletions: 0,
@@ -314,7 +304,7 @@ impl WorkspaceSnapshot {
         let diff_raw = run_git(cwd, &["diff", "--numstat"]).unwrap_or_default();
         let cached_raw = run_git(cwd, &["diff", "--cached", "--numstat"]).unwrap_or_default();
 
-        let (mut counts, mut file_map) = parse_status_porcelain(&status_raw);
+        let (_, mut file_map) = parse_status_porcelain(&status_raw);
         let (diff_map, total_additions, total_deletions) =
             parse_numstat_pairs(&diff_raw, &cached_raw);
         for (path, (additions, deletions)) in diff_map {
@@ -349,20 +339,11 @@ impl WorkspaceSnapshot {
                 .then_with(|| left.path.cmp(&right.path))
         });
 
-        counts.modified = counts.modified.max(
-            changed_files
-                .iter()
-                .filter(|item| item.status == "MOD")
-                .count(),
-        );
-
         Self {
             host_root: Some(cwd.to_path_buf()),
             workspace_display: workspace_display.to_string(),
             repo_label,
             branch,
-            last_commit,
-            counts,
             changed_files,
             total_additions,
             total_deletions,
@@ -419,7 +400,6 @@ struct SessionPickerState {
 struct App {
     metadata: TuiMetadata,
     inspect_root: Option<PathBuf>,
-    project_tree_root: Option<PathBuf>,
     composer: TextArea<'static>,
     send_state: SendState,
     quit: bool,
@@ -437,7 +417,6 @@ struct App {
     recent_tools: VecDeque<ToolRecord>,
     checks: ChecksState,
     workspace: WorkspaceSnapshot,
-    project_tree: Vec<String>,
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
     selection: Option<SelectionState>,
@@ -453,7 +432,6 @@ impl App {
     ) -> Self {
         let inspect_root = metadata.workspace_host_path.clone();
         let workspace = WorkspaceSnapshot::load(&metadata.cwd, inspect_root.as_deref());
-        let project_tree_root = workspace.host_root.clone();
 
         let mut panel_scrolls = HashMap::new();
         panel_scrolls.insert(PanelId::Prompt, 0);
@@ -464,7 +442,6 @@ impl App {
         let mut app = Self {
             metadata,
             inspect_root,
-            project_tree_root,
             composer: build_composer(),
             send_state: SendState::Idle,
             quit: false,
@@ -482,7 +459,6 @@ impl App {
             recent_tools: VecDeque::new(),
             checks: ChecksState::default(),
             workspace,
-            project_tree: Vec::new(),
             panel_scrolls,
             panel_views: HashMap::new(),
             selection: None,
@@ -490,7 +466,6 @@ impl App {
             session_picker: SessionPickerState::default(),
         };
 
-        app.refresh_project_tree();
         app.hydrate_threads_from_store();
         app.hydrate_from_messages(restored_messages);
         if app.restored_message_count > 0 {
@@ -808,15 +783,6 @@ impl App {
 
     fn refresh_workspace(&mut self) {
         self.workspace = WorkspaceSnapshot::load(&self.metadata.cwd, self.inspect_root.as_deref());
-        self.project_tree_root = self.workspace.host_root.clone();
-    }
-
-    fn refresh_project_tree(&mut self) {
-        self.project_tree = self
-            .project_tree_root
-            .as_ref()
-            .map(|path| build_project_tree(path, TREE_DEPTH, TREE_LINES))
-            .unwrap_or_default();
     }
 
     fn note_prompt_submitted(&mut self, prompt: &str) {
@@ -928,7 +894,6 @@ impl App {
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
                     self.refresh_workspace();
-                    self.refresh_project_tree();
                 }
 
                 let detail = if target.is_empty() {
@@ -998,7 +963,6 @@ impl App {
                 };
 
                 self.refresh_workspace();
-                self.refresh_project_tree();
                 self.hydrate_threads_from_store();
 
                 let detail = if timed_out {
@@ -1469,7 +1433,7 @@ impl App {
             .split(area);
 
         self.render_prompt_panel(frame, sections[0]);
-        self.render_workspace_panel(frame, sections[1]);
+        self.render_events_panel(frame, sections[1]);
         self.render_hotkeys_panel(frame, sections[2]);
     }
 
@@ -1485,7 +1449,7 @@ impl App {
             .split(area);
 
         self.render_threads_panel(frame, sections[0]);
-        self.render_events_panel(frame, sections[1]);
+        self.render_workspace_panel(frame, sections[1]);
         self.render_response_panel(frame, sections[2]);
         self.render_previous_response_panel(frame, sections[3]);
     }
@@ -1514,38 +1478,24 @@ impl App {
     }
 
     fn render_workspace_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let mut lines = Vec::new();
-        lines.push(format!("workspace  {}", self.workspace.workspace_display));
-        match self.workspace.host_root.as_ref() {
-            Some(path) => lines.push(format!("source     {}", path.display())),
-            None => lines.push("source     sandbox-only".to_string()),
-        }
-        if let Some(repo) = self.workspace.repo_label.as_deref() {
-            lines.push(format!("repo       {}", repo));
-        }
-        if let Some(branch) = self.workspace.branch.as_deref() {
-            lines.push(format!("branch     {}", branch));
-        }
-        if let Some(last_commit) = self.workspace.last_commit.as_deref() {
-            lines.push(format!("last       {}", last_commit));
-        }
-        if let Some(error) = self.workspace.error.as_deref() {
-            lines.push(format!("note       {}", error));
-        } else {
-            lines.push(format!(
-                "changes    m:{} s:{} ?:{} +{} -{}",
-                self.workspace.counts.modified,
-                self.workspace.counts.staged,
-                self.workspace.counts.untracked,
-                self.workspace.total_additions,
-                self.workspace.total_deletions
-            ));
-            if !self.project_tree.is_empty() {
-                lines.push(String::new());
-                lines.push("tree".to_string());
-                lines.extend(self.project_tree.iter().cloned());
-            }
-        }
+        let lines = vec![
+            format!("workspace  {}", self.workspace.workspace_display),
+            match self.workspace.host_root.as_ref() {
+                Some(path) => format!("source     {}", path.display()),
+                None => "source     sandbox-only".to_string(),
+            },
+            format!(
+                "repo       {}",
+                self.workspace
+                    .repo_label
+                    .as_deref()
+                    .unwrap_or("no git repo")
+            ),
+            format!(
+                "branch     {}",
+                self.workspace.branch.as_deref().unwrap_or("detached")
+            ),
+        ];
 
         self.render_selectable_panel(frame, area, PanelId::Workspace, "WORKSPACE", lines);
     }
@@ -2772,95 +2722,6 @@ fn parse_numstat_pairs(
     }
 
     (map, total_additions, total_deletions)
-}
-
-fn build_project_tree(root: &Path, max_depth: usize, max_lines: usize) -> Vec<String> {
-    let root_label = root
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| root.display().to_string());
-    let mut lines = vec![format!("{root_label}/")];
-    collect_tree_lines(root, "", 0, max_depth, max_lines, &mut lines);
-    lines
-}
-
-fn collect_tree_lines(
-    dir: &Path,
-    prefix: &str,
-    depth: usize,
-    max_depth: usize,
-    max_lines: usize,
-    lines: &mut Vec<String>,
-) {
-    if depth >= max_depth || lines.len() >= max_lines {
-        return;
-    }
-
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            !matches!(
-                name.as_ref(),
-                ".git" | "target" | ".DS_Store" | "node_modules" | ".idea"
-            )
-        })
-        .collect();
-    entries.sort_by(|left, right| {
-        let left_is_dir = left
-            .file_type()
-            .map(|value| value.is_dir())
-            .unwrap_or(false);
-        let right_is_dir = right
-            .file_type()
-            .map(|value| value.is_dir())
-            .unwrap_or(false);
-        right_is_dir
-            .cmp(&left_is_dir)
-            .then_with(|| left.file_name().cmp(&right.file_name()))
-    });
-
-    let entries: Vec<_> = entries
-        .into_iter()
-        .take(max_lines.saturating_sub(lines.len()))
-        .collect();
-    let entry_count = entries.len();
-    for (index, entry) in entries.into_iter().enumerate() {
-        let is_last = index + 1 == entry_count;
-        let name = entry.file_name().to_string_lossy().to_string();
-        let is_dir = entry
-            .file_type()
-            .map(|value| value.is_dir())
-            .unwrap_or(false);
-        let connector = if is_last { "└── " } else { "├── " };
-        lines.push(format!(
-            "{}{}{}{}",
-            prefix,
-            connector,
-            name,
-            if is_dir { "/" } else { "" }
-        ));
-        if is_dir && lines.len() < max_lines {
-            let next_prefix = if is_last {
-                format!("{prefix}    ")
-            } else {
-                format!("{prefix}│   ")
-            };
-            collect_tree_lines(
-                &entry.path(),
-                &next_prefix,
-                depth + 1,
-                max_depth,
-                max_lines,
-                lines,
-            );
-        }
-    }
 }
 
 struct WrappedComposerView {
