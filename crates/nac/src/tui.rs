@@ -397,6 +397,13 @@ struct SessionPickerState {
     error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct LifeField {
+    width: usize,
+    height: usize,
+    cells: Vec<bool>,
+}
+
 struct App {
     metadata: TuiMetadata,
     inspect_root: Option<PathBuf>,
@@ -404,9 +411,9 @@ struct App {
     send_state: SendState,
     quit: bool,
     pending_error_reported: bool,
-    launched_at: Instant,
     working_started_at: Option<Instant>,
     working_frame: usize,
+    last_response_duration: Duration,
     restored_message_count: usize,
     last_prompt: Option<String>,
     last_response: Option<String>,
@@ -422,6 +429,7 @@ struct App {
     selection: Option<SelectionState>,
     screen: ScreenMode,
     session_picker: SessionPickerState,
+    life_field: LifeField,
 }
 
 impl App {
@@ -446,9 +454,9 @@ impl App {
             send_state: SendState::Idle,
             quit: false,
             pending_error_reported: false,
-            launched_at: Instant::now(),
             working_started_at: None,
             working_frame: 0,
+            last_response_duration: Duration::default(),
             restored_message_count: visible_restored_message_count(restored_messages),
             last_prompt: None,
             last_response: None,
@@ -464,6 +472,7 @@ impl App {
             selection: None,
             screen: ScreenMode::Dashboard,
             session_picker: SessionPickerState::default(),
+            life_field: LifeField::default(),
         };
 
         app.hydrate_threads_from_store();
@@ -1060,6 +1069,20 @@ impl App {
             .count()
     }
 
+    fn displayed_run_duration(&self) -> Duration {
+        self.working_started_at
+            .map(|started| started.elapsed())
+            .unwrap_or(self.last_response_duration)
+    }
+
+    fn reset_life(&mut self) {
+        self.life_field = LifeField::default();
+    }
+
+    fn advance_life(&mut self) {
+        self.life_field.step(self.working_frame as u64 + 1);
+    }
+
     fn render(&mut self, frame: &mut ratatui::Frame) {
         self.panel_views.clear();
 
@@ -1147,7 +1170,7 @@ impl App {
             .as_deref()
             .map(short_session)
             .unwrap_or_else(|| "-".to_string());
-        let elapsed = format_elapsed(self.launched_at.elapsed());
+        let runtime = format_runtime(self.displayed_run_duration());
         let run_state = if matches!(self.send_state, SendState::Pending) {
             ("RUNNING", Tone::Success)
         } else {
@@ -1192,8 +1215,15 @@ impl App {
                 format!("{}/{}", self.active_thread_count(), self.threads.len()),
                 Style::default().fg(Color::White),
             ),
-            Span::styled("  |  elapsed ", Style::default().fg(Color::DarkGray)),
-            Span::styled(elapsed, Style::default().fg(Color::White)),
+            Span::styled("  |  runtime ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                runtime,
+                Style::default().fg(if matches!(self.send_state, SendState::Pending) {
+                    Color::Green
+                } else {
+                    Color::White
+                }),
+            ),
             Span::styled(
                 "  |  mouse drag copies pane text",
                 Style::default().fg(Color::DarkGray),
@@ -1586,7 +1616,23 @@ impl App {
             lines
         };
 
-        render_lines_panel(frame, area, "EVENTS", lines);
+        let dot_color = if matches!(self.send_state, SendState::Pending) {
+            Color::Green
+        } else {
+            Color::Yellow
+        };
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "EVENTS".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled("●".to_string(), Style::default().fg(dot_color)),
+        ]);
+
+        render_lines_panel_with_title(frame, area, title, lines);
     }
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1594,7 +1640,25 @@ impl App {
             Some(response) => split_preserving_empty(response),
             None => vec!["Waiting for the first orchestrator reply.".to_string()],
         };
-        self.render_selectable_panel(frame, area, PanelId::Response, "RESPONSE", lines);
+        let runtime = format_runtime(self.displayed_run_duration());
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "RESPONSE".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                runtime,
+                Style::default().fg(if matches!(self.send_state, SendState::Pending) {
+                    Color::Green
+                } else {
+                    Color::White
+                }),
+            ),
+        ]);
+        self.render_selectable_panel_with_title(frame, area, PanelId::Response, title, lines);
     }
 
     fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1734,12 +1798,7 @@ impl App {
     }
 
     fn render_composer(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let title = if matches!(self.send_state, SendState::Pending) {
-            "COMPOSER • RUNNING"
-        } else {
-            "COMPOSER"
-        };
-        let block = panel_block(title);
+        let block = panel_block("COMPOSER");
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -1748,33 +1807,18 @@ impl App {
         }
 
         if matches!(self.send_state, SendState::Pending) {
-            let elapsed = self
-                .working_started_at
-                .map(|started| started.elapsed())
-                .unwrap_or_default();
-            let lines = vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("{} ", spinner_frame(self.working_frame)),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "orchestrator active",
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format_duration(elapsed), Style::default().fg(Color::Gray)),
-                ]),
-                Line::from(Span::styled(
-                    "composer locked until the current top-level run completes",
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ];
-            frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+            self.life_field.ensure_size(
+                inner.width as usize * 2,
+                inner.height as usize * 4,
+                self.working_frame as u64,
+            );
+            let lines = self
+                .life_field
+                .render_lines(inner.width as usize, inner.height as usize);
+            frame.render_widget(
+                Paragraph::new(Text::from(lines)).style(Style::default().fg(Color::Green)),
+                inner,
+            );
             return;
         }
 
@@ -1803,7 +1847,24 @@ impl App {
         title: &'static str,
         logical_lines: Vec<String>,
     ) {
-        let block = panel_block(title);
+        self.render_selectable_panel_with_title(
+            frame,
+            area,
+            panel_id,
+            panel_title(title),
+            logical_lines,
+        );
+    }
+
+    fn render_selectable_panel_with_title(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: Line<'static>,
+        logical_lines: Vec<String>,
+    ) {
+        let block = panel_block_with_title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -2022,21 +2083,34 @@ pub async fn run(
                     app.apply_agent_event(agent_event);
                 }
                 Some(result) = result_rx.recv() => {
+                    let completed_duration = app
+                        .working_started_at
+                        .map(|started| started.elapsed())
+                        .unwrap_or_default();
                     app.send_state = SendState::Idle;
                     app.working_frame = 0;
                     app.working_started_at = None;
+                    app.reset_life();
                     if let Some(snapshot) = session_snapshot.as_mut() {
                         let agent = agent.lock().await;
                         persist_session_snapshot(snapshot, &agent)?;
                     }
-                    if let Err(error) = result {
-                        if !app.pending_error_reported {
-                            app.note_send_error(error);
+                    match result {
+                        Ok(_) => {
+                            app.last_response_duration = completed_duration;
+                        }
+                        Err(error) => {
+                            if !app.pending_error_reported {
+                                app.note_send_error(error);
+                            }
                         }
                     }
                 }
                 _ = animation_tick.tick() => {
-                    app.working_frame = app.working_frame.wrapping_add(1);
+                    if matches!(app.send_state, SendState::Pending) {
+                        app.working_frame = app.working_frame.wrapping_add(1);
+                        app.advance_life();
+                    }
                 }
             }
 
@@ -2083,6 +2157,7 @@ fn submit_prompt(
     app.pending_error_reported = false;
     app.working_frame = 0;
     app.working_started_at = Some(Instant::now());
+    app.reset_life();
 
     tokio::spawn(async move {
         let result = {
@@ -2106,13 +2181,165 @@ fn render_lines_panel(
     title: &str,
     lines: Vec<Line<'static>>,
 ) {
-    let block = panel_block(title);
+    render_lines_panel_with_title(frame, area, panel_title(title), lines);
+}
+
+fn render_lines_panel_with_title(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    title: Line<'static>,
+    lines: Vec<Line<'static>>,
+) {
+    let block = panel_block_with_title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+impl LifeField {
+    fn ensure_size(&mut self, width: usize, height: usize, seed: u64) {
+        let width = width.max(2);
+        let height = height.max(4);
+        if self.width == width && self.height == height && !self.cells.is_empty() {
+            return;
+        }
+
+        self.width = width;
+        self.height = height;
+        self.cells = seed_life_cells(width, height, seed);
+    }
+
+    fn step(&mut self, seed: u64) {
+        if self.width == 0 || self.height == 0 || self.cells.is_empty() {
+            return;
+        }
+
+        let mut next = vec![false; self.cells.len()];
+        let mut alive = 0usize;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = self.index(x, y);
+                let neighbors = self.live_neighbor_count(x, y);
+                let next_alive = matches!((self.cells[idx], neighbors), (true, 2 | 3) | (false, 3));
+                next[idx] = next_alive;
+                alive += usize::from(next_alive);
+            }
+        }
+
+        self.cells = if alive == 0 {
+            seed_life_cells(self.width, self.height, seed)
+        } else {
+            next
+        };
+    }
+
+    fn render_lines(&self, char_width: usize, char_height: usize) -> Vec<Line<'static>> {
+        let mut lines = Vec::with_capacity(char_height);
+        for char_y in 0..char_height {
+            let mut text = String::with_capacity(char_width);
+            for char_x in 0..char_width {
+                let dot_x = char_x * 2;
+                let dot_y = char_y * 4;
+                text.push(self.braille_char(dot_x, dot_y));
+            }
+            lines.push(Line::from(Span::raw(text)));
+        }
+        lines
+    }
+
+    fn braille_char(&self, dot_x: usize, dot_y: usize) -> char {
+        let mut bits = 0u32;
+        for local_y in 0..4 {
+            for local_x in 0..2 {
+                let x = dot_x + local_x;
+                let y = dot_y + local_y;
+                if x < self.width && y < self.height && self.cells[self.index(x, y)] {
+                    bits |= match (local_x, local_y) {
+                        (0, 0) => 0x01,
+                        (0, 1) => 0x02,
+                        (0, 2) => 0x04,
+                        (0, 3) => 0x40,
+                        (1, 0) => 0x08,
+                        (1, 1) => 0x10,
+                        (1, 2) => 0x20,
+                        (1, 3) => 0x80,
+                        _ => 0,
+                    };
+                }
+            }
+        }
+        char::from_u32(0x2800 + bits).unwrap_or(' ')
+    }
+
+    fn live_neighbor_count(&self, x: usize, y: usize) -> u8 {
+        let mut count = 0u8;
+        for dy in [-1isize, 0, 1] {
+            for dx in [-1isize, 0, 1] {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let Some(nx) = x.checked_add_signed(dx) else {
+                    continue;
+                };
+                let Some(ny) = y.checked_add_signed(dy) else {
+                    continue;
+                };
+                if nx < self.width && ny < self.height && self.cells[self.index(nx, ny)] {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    fn index(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+}
+
+fn seed_life_cells(width: usize, height: usize, seed: u64) -> Vec<bool> {
+    let mut cells = vec![false; width.saturating_mul(height)];
+    if width == 0 || height == 0 {
+        return cells;
+    }
+
+    let cx = width.saturating_sub(1) as u64;
+    let cy = height.saturating_sub(1) as u64;
+    let max_dist = (cx * cx + cy * cy * 2).max(1);
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = (2 * x as u64).abs_diff(cx);
+            let dy = (2 * y as u64).abs_diff(cy);
+            let dist = (dx * dx + dy * dy * 2).min(max_dist);
+            let bias = max_dist - dist;
+            let threshold = 35 + (bias * 325 / max_dist);
+            let noise = splitmix64(seed ^ ((x as u64) << 32) ^ y as u64) % 1000;
+            cells[y * width + x] = noise < threshold;
+        }
+    }
+
+    if !cells.iter().any(|alive| *alive) {
+        let mid_x = width / 2;
+        let mid_y = height / 2;
+        for (dx, dy) in [(0usize, 0usize), (1, 0), (2, 0), (2, 1), (1, 2)] {
+            let x = (mid_x + dx).min(width.saturating_sub(1));
+            let y = (mid_y + dy).min(height.saturating_sub(1));
+            cells[y * width + x] = true;
+        }
+    }
+
+    cells
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e3779b97f4a7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
 }
 
 fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
@@ -2208,15 +2435,34 @@ fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static
 }
 
 fn panel_block(title: &str) -> Block<'static> {
+    panel_block_with_title(panel_title(title))
+}
+
+fn panel_block_with_title(title: Line<'static>) -> Block<'static> {
     Block::default()
-        .title(Span::styled(
-            format!(" [ {} ] ", title),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
+}
+
+fn panel_title(title: &str) -> Line<'static> {
+    panel_title_segments(vec![Span::styled(
+        title.to_string(),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )])
+}
+
+fn panel_title_segments(segments: Vec<Span<'static>>) -> Line<'static> {
+    let mut spans = Vec::with_capacity(segments.len() + 2);
+    let border_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    spans.push(Span::styled(" [ ", border_style));
+    spans.extend(segments);
+    spans.push(Span::styled(" ] ", border_style));
+    Line::from(spans)
 }
 
 fn header_line(columns: &[(&str, usize)], width: usize) -> Line<'static> {
@@ -2531,11 +2777,12 @@ fn format_duration(duration: Duration) -> String {
     }
 }
 
-fn format_elapsed(elapsed: Duration) -> String {
-    let total_seconds = elapsed.as_secs();
-    let minutes = total_seconds / 60;
+fn format_runtime(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
     let seconds = total_seconds % 60;
-    format!("{minutes:02}:{seconds:02}")
+    format!("{hours:02}h{minutes:02}m{seconds:02}s")
 }
 
 fn compact_path(path: &str, max_width: usize) -> String {
@@ -3009,11 +3256,6 @@ fn utc_hms() -> String {
     let minutes = (rem % 3_600) / 60;
     let seconds = rem % 60;
     format!("{hours:02}:{minutes:02}:{seconds:02}")
-}
-
-fn spinner_frame(frame: usize) -> &'static str {
-    const FRAMES: [&str; 8] = ["◐", "◓", "◑", "◒", "◐", "◓", "◑", "◒"];
-    FRAMES[frame % FRAMES.len()]
 }
 
 fn tone_glyph(tone: Tone) -> &'static str {
