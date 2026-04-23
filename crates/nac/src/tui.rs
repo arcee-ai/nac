@@ -146,6 +146,7 @@ impl ToolStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum PanelId {
     Prompt,
+    Events,
     Threads,
     Response,
     PreviousResponse,
@@ -355,11 +356,18 @@ impl WorkspaceSnapshot {
 }
 
 #[derive(Debug, Clone)]
+struct StyledSegment {
+    text: String,
+    style: Style,
+}
+
+#[derive(Debug, Clone)]
 struct WrappedRow {
     logical_line: usize,
     start_char: usize,
     end_char: usize,
     text: String,
+    spans: Vec<StyledSegment>,
 }
 
 #[derive(Debug, Clone)]
@@ -387,8 +395,16 @@ struct SelectionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusPanel {
+    Events,
+    Response,
+    PreviousResponse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScreenMode {
     Dashboard,
+    Focused(FocusPanel),
     SessionPicker { startup: bool },
 }
 
@@ -448,6 +464,7 @@ impl App {
 
         let mut panel_scrolls = HashMap::new();
         panel_scrolls.insert(PanelId::Prompt, 0);
+        panel_scrolls.insert(PanelId::Events, 0);
         panel_scrolls.insert(PanelId::Threads, 0);
         panel_scrolls.insert(PanelId::Response, 0);
         panel_scrolls.insert(PanelId::PreviousResponse, 0);
@@ -540,17 +557,48 @@ impl App {
                 AppAction::Quit
             }
             KeyEvent {
+                code: KeyCode::Char('e'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Events);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('r'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Response);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('p'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::PreviousResponse);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } if matches!(self.screen, ScreenMode::Focused(_)) => {
+                self.selection = None;
+                self.screen = ScreenMode::Dashboard;
+                AppAction::None
+            }
+            KeyEvent {
                 code: KeyCode::PageUp,
                 ..
             } => {
-                self.scroll_panel(PanelId::Response, -3);
+                self.scroll_panel(self.primary_scroll_panel(), -3);
                 AppAction::None
             }
             KeyEvent {
                 code: KeyCode::PageDown,
                 ..
             } => {
-                self.scroll_panel(PanelId::Response, 3);
+                self.scroll_panel(self.primary_scroll_panel(), 3);
                 AppAction::None
             }
             KeyEvent {
@@ -738,6 +786,27 @@ impl App {
         self.refresh_session_picker();
         self.selection = None;
         self.screen = ScreenMode::SessionPicker { startup };
+    }
+
+    fn toggle_focus_panel(&mut self, panel: FocusPanel) {
+        self.selection = None;
+        self.screen = match self.screen {
+            ScreenMode::Focused(current) if current == panel => ScreenMode::Dashboard,
+            _ => {
+                if matches!(panel, FocusPanel::Events) {
+                    self.panel_scrolls.insert(PanelId::Events, usize::MAX);
+                }
+                ScreenMode::Focused(panel)
+            }
+        };
+    }
+
+    fn primary_scroll_panel(&self) -> PanelId {
+        match self.screen {
+            ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
+            ScreenMode::Focused(FocusPanel::PreviousResponse) => PanelId::PreviousResponse,
+            _ => PanelId::Response,
+        }
     }
 
     fn refresh_session_picker(&mut self) {
@@ -1124,6 +1193,18 @@ impl App {
             return;
         }
 
+        if let ScreenMode::Focused(panel) = self.screen {
+            match panel {
+                FocusPanel::Events => self.render_focused_events(frame, sections[1]),
+                FocusPanel::Response => self.render_focused_response(frame, sections[1]),
+                FocusPanel::PreviousResponse => {
+                    self.render_focused_previous_response(frame, sections[1])
+                }
+            }
+            self.render_composer(frame, sections[2]);
+            return;
+        }
+
         let body = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -1137,6 +1218,37 @@ impl App {
         self.render_center_column(frame, body[1]);
         self.render_right_column(frame, body[2]);
         self.render_composer(frame, sections[2]);
+    }
+
+    fn render_focused_events(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let mut lines: Vec<Line<'static>> = self
+            .timeline
+            .iter()
+            .map(|entry| render_event_line(entry, width))
+            .collect();
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Waiting for activity.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            PanelId::Events,
+            self.events_panel_title(),
+            lines,
+        );
+    }
+
+    fn render_focused_response(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_response_panel(frame, area);
+    }
+
+    fn render_focused_previous_response(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_previous_response_panel(frame, area);
     }
 
     fn render_too_small(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1549,7 +1661,11 @@ impl App {
         let lines = vec![
             Line::from("Enter        run prompt"),
             Line::from("Shift+Enter  newline"),
-            Line::from("PageUp/Down  scroll response"),
+            Line::from("PageUp/Down  scroll focused pane"),
+            Line::from("Ctrl-E       toggle events focus"),
+            Line::from("Ctrl-R       toggle response focus"),
+            Line::from("Ctrl-P       toggle previous response"),
+            Line::from("Esc          back to dashboard"),
             Line::from("Mouse wheel  scroll hovered pane"),
         ];
         render_lines_panel(frame, area, "HOTKEYS", lines);
@@ -1631,29 +1747,15 @@ impl App {
             lines
         };
 
-        let dot_color = if matches!(self.send_state, SendState::Pending) {
-            Color::Green
-        } else {
-            Color::Yellow
-        };
-        let title = panel_title_segments(vec![
-            Span::styled(
-                "EVENTS".to_string(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled("●".to_string(), Style::default().fg(dot_color)),
-        ]);
+        let title = self.events_panel_title();
 
         render_lines_panel_with_title(frame, area, title, lines);
     }
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines = match self.last_response.as_deref() {
-            Some(response) => split_preserving_empty(response),
-            None => vec!["Waiting for the first orchestrator reply.".to_string()],
+            Some(response) => render_markdown_lines(response),
+            None => vec![Line::from("Waiting for the first orchestrator reply.")],
         };
         let runtime = format_runtime(self.displayed_run_duration());
         let title = panel_title_segments(vec![
@@ -1673,21 +1775,39 @@ impl App {
                 }),
             ),
         ]);
-        self.render_selectable_panel_with_title(frame, area, PanelId::Response, title, lines);
+        self.render_selectable_rich_panel_with_title(frame, area, PanelId::Response, title, lines);
     }
 
     fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines = match self.previous_response.as_deref() {
-            Some(response) => split_preserving_empty(response),
-            None => vec!["No previous orchestrator reply yet.".to_string()],
+            Some(response) => render_markdown_lines(response),
+            None => vec![Line::from("No previous orchestrator reply yet.")],
         };
-        self.render_selectable_panel(
+        self.render_selectable_rich_panel(
             frame,
             area,
             PanelId::PreviousResponse,
             "PREVIOUS RESPONSE",
             lines,
         );
+    }
+
+    fn events_panel_title(&self) -> Line<'static> {
+        let dot_color = if matches!(self.send_state, SendState::Pending) {
+            Color::Green
+        } else {
+            Color::Yellow
+        };
+        panel_title_segments(vec![
+            Span::styled(
+                "EVENTS".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled("●".to_string(), Style::default().fg(dot_color)),
+        ])
     }
 
     fn render_tools_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1868,6 +1988,23 @@ impl App {
         );
     }
 
+    fn render_selectable_rich_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: &'static str,
+        lines: Vec<Line<'static>>,
+    ) {
+        self.render_selectable_rich_panel_with_title(
+            frame,
+            area,
+            panel_id,
+            panel_title(title),
+            lines,
+        );
+    }
+
     fn render_selectable_panel_with_title(
         &mut self,
         frame: &mut ratatui::Frame,
@@ -1909,6 +2046,57 @@ impl App {
                 id: panel_id,
                 inner,
                 logical_lines: logical_lines.clone(),
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(rendered)), inner);
+    }
+
+    fn render_selectable_rich_panel_with_title(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: Line<'static>,
+        lines: Vec<Line<'static>>,
+    ) {
+        let block = panel_block_with_title(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let logical_lines: Vec<String> = lines.iter().map(line_to_plain_text).collect();
+        let rows = wrap_styled_lines(&lines, inner.width as usize);
+        let total_rows = rows.len().max(1);
+        let visible_rows = inner.height as usize;
+        let max_scroll = total_rows.saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let end = (start + visible_rows).min(rows.len());
+        let visible = rows[start..end].to_vec();
+
+        let selected = selection_bounds_for_panel(self.selection.as_ref(), panel_id);
+        let mut rendered = Vec::new();
+        for row in &visible {
+            rendered.push(render_wrapped_row(row, selected.clone()));
+        }
+        while rendered.len() < visible_rows {
+            rendered.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner,
+                logical_lines,
                 rows,
                 scroll_offset: *scroll,
                 visible_rows,
@@ -1960,6 +2148,10 @@ impl App {
                 start_char: 0,
                 end_char: text.chars().count(),
                 text: text.clone(),
+                spans: vec![StyledSegment {
+                    text: text.clone(),
+                    style: Style::default().fg(Color::Gray),
+                }],
             })
             .collect();
         if rows.is_empty() {
@@ -1968,6 +2160,7 @@ impl App {
                 start_char: 0,
                 end_char: 0,
                 text: String::new(),
+                spans: Vec::new(),
             });
         }
 
@@ -2886,43 +3079,99 @@ fn render_wrapped_row(
     row: &WrappedRow,
     selection: Option<(SelectionPoint, SelectionPoint)>,
 ) -> Line<'static> {
-    let base_style = Style::default().fg(Color::Gray);
     let selected_style = Style::default()
         .fg(Color::Black)
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
 
     let Some((start, end)) = selection else {
-        return Line::from(Span::styled(row.text.clone(), base_style));
+        if row.spans.is_empty() {
+            return Line::from("");
+        }
+        return Line::from(
+            row.spans
+                .iter()
+                .map(|segment| Span::styled(segment.text.clone(), segment.style))
+                .collect::<Vec<_>>(),
+        );
     };
     let Some((selection_start, selection_end)) = selection_overlap_for_row(row, &start, &end)
     else {
-        return Line::from(Span::styled(row.text.clone(), base_style));
+        if row.spans.is_empty() {
+            return Line::from("");
+        }
+        return Line::from(
+            row.spans
+                .iter()
+                .map(|segment| Span::styled(segment.text.clone(), segment.style))
+                .collect::<Vec<_>>(),
+        );
     };
 
     if row.text.is_empty() || selection_start == selection_end {
-        return Line::from(Span::styled(row.text.clone(), base_style));
+        if row.spans.is_empty() {
+            return Line::from("");
+        }
+        return Line::from(
+            row.spans
+                .iter()
+                .map(|segment| Span::styled(segment.text.clone(), segment.style))
+                .collect::<Vec<_>>(),
+        );
     }
-
-    let chars: Vec<char> = row.text.chars().collect();
-    let before: String = chars[..selection_start].iter().collect();
-    let selected: String = chars[selection_start..selection_end].iter().collect();
-    let after: String = chars[selection_end..].iter().collect();
 
     let mut spans = Vec::new();
-    if !before.is_empty() {
-        spans.push(Span::styled(before, base_style));
-    }
-    if !selected.is_empty() {
-        spans.push(Span::styled(selected, selected_style));
-    }
-    if !after.is_empty() {
-        spans.push(Span::styled(after, base_style));
+    let mut offset = 0usize;
+    for segment in &row.spans {
+        let segment_len = segment.text.chars().count();
+        let segment_start = offset;
+        let segment_end = offset + segment_len;
+        let overlap_start = selection_start.max(segment_start);
+        let overlap_end = selection_end.min(segment_end);
+
+        if overlap_start >= overlap_end {
+            if !segment.text.is_empty() {
+                spans.push(Span::styled(segment.text.clone(), segment.style));
+            }
+            offset = segment_end;
+            continue;
+        }
+
+        let before_len = overlap_start.saturating_sub(segment_start);
+        let selected_len = overlap_end.saturating_sub(overlap_start);
+        let after_len = segment_end.saturating_sub(overlap_end);
+
+        if before_len > 0 {
+            spans.push(Span::styled(
+                take_chars(&segment.text, before_len),
+                segment.style,
+            ));
+        }
+        if selected_len > 0 {
+            let selected_text: String = segment
+                .text
+                .chars()
+                .skip(before_len)
+                .take(selected_len)
+                .collect();
+            spans.push(Span::styled(selected_text, selected_style));
+        }
+        if after_len > 0 {
+            let after_text: String = segment
+                .text
+                .chars()
+                .skip(before_len + selected_len)
+                .take(after_len)
+                .collect();
+            spans.push(Span::styled(after_text, segment.style));
+        }
+        offset = segment_end;
     }
     if spans.is_empty() {
-        spans.push(Span::styled(row.text.clone(), base_style));
+        Line::from("")
+    } else {
+        Line::from(spans)
     }
-    Line::from(spans)
 }
 
 fn selection_bounds_for_panel(
@@ -3438,6 +3687,7 @@ fn wrap_logical_lines(lines: &[String], width: usize) -> Vec<WrappedRow> {
                 start_char: 0,
                 end_char: 0,
                 text: String::new(),
+                spans: Vec::new(),
             });
             continue;
         }
@@ -3446,6 +3696,10 @@ fn wrap_logical_lines(lines: &[String], width: usize) -> Vec<WrappedRow> {
                 logical_line,
                 start_char,
                 end_char,
+                spans: vec![StyledSegment {
+                    text: text.clone(),
+                    style: Style::default().fg(Color::Gray),
+                }],
                 text,
             });
         }
@@ -3456,9 +3710,94 @@ fn wrap_logical_lines(lines: &[String], width: usize) -> Vec<WrappedRow> {
             start_char: 0,
             end_char: 0,
             text: String::new(),
+            spans: Vec::new(),
         });
     }
     rows
+}
+
+fn wrap_styled_lines(lines: &[Line<'static>], width: usize) -> Vec<WrappedRow> {
+    let mut rows = Vec::new();
+    for (logical_line, line) in lines.iter().enumerate() {
+        let plain = line_to_plain_text(line);
+        if plain.is_empty() {
+            rows.push(WrappedRow {
+                logical_line,
+                start_char: 0,
+                end_char: 0,
+                text: String::new(),
+                spans: Vec::new(),
+            });
+            continue;
+        }
+
+        let wrapped_ranges = wrap_soft_line_with_ranges(&plain, width);
+        let chars = flatten_line_chars(line);
+        for (start_char, end_char, text) in wrapped_ranges {
+            rows.push(WrappedRow {
+                logical_line,
+                start_char,
+                end_char,
+                spans: group_styled_chars(&chars[start_char..end_char]),
+                text,
+            });
+        }
+    }
+
+    if rows.is_empty() {
+        rows.push(WrappedRow {
+            logical_line: 0,
+            start_char: 0,
+            end_char: 0,
+            text: String::new(),
+            spans: Vec::new(),
+        });
+    }
+
+    rows
+}
+
+fn flatten_line_chars(line: &Line<'static>) -> Vec<(char, Style)> {
+    let mut chars = Vec::new();
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            chars.push((ch, span.style));
+        }
+    }
+    chars
+}
+
+fn group_styled_chars(chars: &[(char, Style)]) -> Vec<StyledSegment> {
+    let mut segments = Vec::new();
+    let mut current_style = None;
+    let mut current_text = String::new();
+
+    for (ch, style) in chars {
+        match current_style {
+            Some(existing) if existing == *style => current_text.push(*ch),
+            Some(existing) => {
+                segments.push(StyledSegment {
+                    text: std::mem::take(&mut current_text),
+                    style: existing,
+                });
+                current_style = Some(*style);
+                current_text.push(*ch);
+            }
+            None => {
+                current_style = Some(*style);
+                current_text.push(*ch);
+            }
+        }
+    }
+
+    if let Some(style) = current_style {
+        segments.push(StyledSegment {
+            text: current_text,
+            style,
+        });
+    }
+
+    segments
 }
 
 fn wrap_soft_line_with_ranges(line: &str, width: usize) -> Vec<(usize, usize, String)> {
@@ -3584,6 +3923,563 @@ fn truncate_episode_preview(content: &str) -> String {
 
 fn take_chars(text: &str, count: usize) -> String {
     text.chars().take(count).collect()
+}
+
+fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
+    if text.is_empty() {
+        return vec![Line::from("")];
+    }
+
+    let raw_lines: Vec<&str> = text.split('\n').collect();
+    let mut rendered = Vec::new();
+    let mut index = 0usize;
+
+    while index < raw_lines.len() {
+        let raw_line = raw_lines[index];
+        let trimmed = raw_line.trim();
+
+        if let Some(info) = trimmed.strip_prefix("```") {
+            let (next_index, code_lines) =
+                render_markdown_code_block(&raw_lines, index, info.trim().to_string());
+            rendered.extend(code_lines);
+            index = next_index;
+            continue;
+        }
+
+        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index) {
+            rendered.extend(table_lines);
+            index = next_index;
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            rendered.push(Line::from(""));
+            index += 1;
+            continue;
+        }
+
+        if is_markdown_rule(trimmed) {
+            rendered.push(Line::from(Span::styled(
+                "─".repeat(24),
+                Style::default().fg(Color::DarkGray),
+            )));
+            index += 1;
+            continue;
+        }
+
+        if let Some((level, content)) = parse_markdown_heading(trimmed) {
+            rendered.push(render_markdown_heading_line(level, content));
+            index += 1;
+            continue;
+        }
+
+        if let Some((quote_level, content)) = parse_markdown_quote(trimmed) {
+            rendered.push(render_markdown_quote_line(quote_level, content));
+            index += 1;
+            continue;
+        }
+
+        if let Some(line) = render_markdown_list_item(raw_line) {
+            rendered.push(line);
+            index += 1;
+            continue;
+        }
+
+        rendered.push(Line::from(render_inline_markdown(
+            raw_line.trim_end(),
+            Style::default().fg(Color::White),
+        )));
+        index += 1;
+    }
+
+    if rendered.is_empty() {
+        vec![Line::from("")]
+    } else {
+        rendered
+    }
+}
+
+fn is_markdown_rule(line: &str) -> bool {
+    let compact: String = line.chars().filter(|char| !char.is_whitespace()).collect();
+    matches!(compact.as_str(), "---" | "***" | "___")
+}
+
+fn parse_markdown_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|char| *char == '#').count();
+    if !(1..=6).contains(&level) || line.chars().nth(level) != Some(' ') {
+        return None;
+    }
+    Some((level, line[level + 1..].trim()))
+}
+
+fn parse_markdown_quote(line: &str) -> Option<(usize, &str)> {
+    let mut level = 0usize;
+    let mut rest = line;
+    while let Some(stripped) = rest.strip_prefix('>') {
+        level = level.saturating_add(1);
+        rest = stripped.trim_start();
+    }
+    (level > 0).then_some((level, rest))
+}
+
+fn render_markdown_list_item(line: &str) -> Option<Line<'static>> {
+    let indent = line.chars().take_while(|char| char.is_whitespace()).count() / 2;
+    let trimmed = line.trim_start();
+
+    if let Some(content) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        let mut spans = vec![
+            Span::raw("  ".repeat(indent)),
+            Span::styled("• ", Style::default().fg(Color::DarkGray)),
+        ];
+        spans.extend(render_inline_markdown(
+            content.trim_end(),
+            Style::default().fg(Color::White),
+        ));
+        return Some(Line::from(spans));
+    }
+
+    let digits = trimmed
+        .chars()
+        .take_while(|char| char.is_ascii_digit())
+        .count();
+    if digits == 0 {
+        return None;
+    }
+
+    let marker = trimmed.chars().nth(digits)?;
+    if !matches!(marker, '.' | ')') || trimmed.chars().nth(digits + 1) != Some(' ') {
+        return None;
+    }
+
+    let number = &trimmed[..digits];
+    let content = trimmed[digits + 2..].trim_end();
+    let mut spans = vec![
+        Span::raw("  ".repeat(indent)),
+        Span::styled(format!("{number}. "), Style::default().fg(Color::DarkGray)),
+    ];
+    spans.extend(render_inline_markdown(
+        content,
+        Style::default().fg(Color::White),
+    ));
+    Some(Line::from(spans))
+}
+
+fn render_inline_markdown(text: &str, base_style: Style) -> Vec<Span<'static>> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut spans = Vec::new();
+    let mut buffer = String::new();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        if chars[index] == '\\' && index + 1 < chars.len() {
+            buffer.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
+
+        if chars[index] == '!' && index + 1 < chars.len() && chars[index + 1] == '[' {
+            if let Some((next_index, rendered)) =
+                parse_markdown_link(&chars, index + 1, true, base_style)
+            {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                spans.extend(rendered);
+                index = next_index;
+                continue;
+            }
+        }
+
+        if chars[index] == '[' {
+            if let Some((next_index, rendered)) =
+                parse_markdown_link(&chars, index, false, base_style)
+            {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                spans.extend(rendered);
+                index = next_index;
+                continue;
+            }
+        }
+
+        if chars[index] == '`' {
+            if let Some(close_offset) = chars[index + 1..].iter().position(|char| *char == '`') {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                let code: String = chars[index + 1..index + 1 + close_offset].iter().collect();
+                spans.push(Span::styled(code, markdown_code_style()));
+                index += close_offset + 2;
+                continue;
+            }
+            buffer.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        if index + 1 < chars.len()
+            && matches!((chars[index], chars[index + 1]), ('*', '*') | ('_', '_'))
+        {
+            if let Some(close_index) =
+                find_closing_marker(&chars, index + 2, &[chars[index], chars[index + 1]])
+            {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                let inner: String = chars[index + 2..close_index].iter().collect();
+                spans.extend(render_inline_markdown(
+                    &inner,
+                    base_style.add_modifier(Modifier::BOLD),
+                ));
+                index = close_index + 2;
+                continue;
+            }
+        }
+
+        if index + 1 < chars.len() && chars[index] == '~' && chars[index + 1] == '~' {
+            if let Some(close_index) = find_closing_marker(&chars, index + 2, &['~', '~']) {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                let inner: String = chars[index + 2..close_index].iter().collect();
+                spans.extend(render_inline_markdown(
+                    &inner,
+                    base_style.add_modifier(Modifier::CROSSED_OUT),
+                ));
+                index = close_index + 2;
+                continue;
+            }
+        }
+
+        if matches!(chars[index], '*' | '_') {
+            if let Some(close_index) = find_closing_marker(&chars, index + 1, &[chars[index]]) {
+                push_styled_text(&mut spans, &mut buffer, base_style);
+                let inner: String = chars[index + 1..close_index].iter().collect();
+                spans.extend(render_inline_markdown(
+                    &inner,
+                    base_style.add_modifier(Modifier::ITALIC),
+                ));
+                index = close_index + 1;
+                continue;
+            }
+        }
+
+        buffer.push(chars[index]);
+        index += 1;
+    }
+
+    push_styled_text(&mut spans, &mut buffer, base_style);
+    spans
+}
+
+fn parse_markdown_link(
+    chars: &[char],
+    start: usize,
+    is_image: bool,
+    base_style: Style,
+) -> Option<(usize, Vec<Span<'static>>)> {
+    let bracket_start = if is_image { start } else { start };
+    if chars.get(bracket_start)? != &'[' {
+        return None;
+    }
+
+    let label_end = chars[bracket_start + 1..]
+        .iter()
+        .position(|char| *char == ']')?
+        + bracket_start
+        + 1;
+    if chars.get(label_end + 1)? != &'(' {
+        return None;
+    }
+    let target_end = chars[label_end + 2..]
+        .iter()
+        .position(|char| *char == ')')?
+        + label_end
+        + 2;
+
+    let label: String = chars[bracket_start + 1..label_end].iter().collect();
+    let target: String = chars[label_end + 2..target_end].iter().collect();
+    let mut spans = Vec::new();
+    if is_image {
+        spans.push(Span::styled(
+            "image: ".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    if label.trim().is_empty() {
+        spans.push(Span::styled(target.clone(), markdown_link_style()));
+    } else {
+        spans.extend(render_inline_markdown(
+            &label,
+            base_style
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::UNDERLINED),
+        ));
+        spans.push(Span::styled(
+            format!(" <{target}>"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    Some((target_end + 1, spans))
+}
+
+fn render_markdown_heading_line(level: usize, content: &str) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        "#".repeat(level),
+        markdown_heading_hash_style(level),
+    )];
+    spans.push(Span::raw(" "));
+    spans.extend(render_inline_markdown(
+        content,
+        markdown_heading_text_style(level),
+    ));
+    Line::from(spans)
+}
+
+fn render_markdown_quote_line(level: usize, content: &str) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!("{} ", ">".repeat(level)),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )];
+    spans.extend(render_inline_markdown(
+        content,
+        Style::default().fg(Color::Rgb(200, 200, 200)),
+    ));
+    Line::from(spans)
+}
+
+fn render_markdown_code_block(
+    raw_lines: &[&str],
+    start: usize,
+    info: String,
+) -> (usize, Vec<Line<'static>>) {
+    let mut lines = Vec::new();
+    let mut index = start + 1;
+
+    let mut fence = vec![Span::styled(
+        "```".to_string(),
+        Style::default().fg(Color::DarkGray),
+    )];
+    if !info.is_empty() {
+        fence.push(Span::styled(
+            info,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(Line::from(fence));
+
+    while index < raw_lines.len() {
+        let trimmed = raw_lines[index].trim();
+        if trimmed.starts_with("```") {
+            lines.push(Line::from(Span::styled(
+                "```".to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+            return (index + 1, lines);
+        }
+
+        lines.push(Line::from(Span::styled(
+            raw_lines[index].to_string(),
+            markdown_code_style(),
+        )));
+        index += 1;
+    }
+
+    (index, lines)
+}
+
+fn render_markdown_table_block(
+    raw_lines: &[&str],
+    start: usize,
+) -> Option<(usize, Vec<Line<'static>>)> {
+    if start + 1 >= raw_lines.len() {
+        return None;
+    }
+
+    let header = parse_markdown_table_row(raw_lines[start])?;
+    let delimiter = parse_markdown_table_delimiter(raw_lines[start + 1])?;
+    if header.len() != delimiter {
+        return None;
+    }
+
+    let mut rows = Vec::new();
+    let mut index = start + 2;
+    while index < raw_lines.len() {
+        let Some(row) = parse_markdown_table_row(raw_lines[index]) else {
+            break;
+        };
+        if row.len() != delimiter {
+            break;
+        }
+        rows.push(row);
+        index += 1;
+    }
+
+    let header_cells: Vec<String> = header
+        .iter()
+        .map(|cell| inline_plain_text(&render_inline_markdown(cell, Style::default())))
+        .collect();
+    let body_cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| inline_plain_text(&render_inline_markdown(cell, Style::default())))
+                .collect()
+        })
+        .collect();
+
+    let mut widths = vec![0usize; delimiter];
+    for (idx, cell) in header_cells.iter().enumerate() {
+        widths[idx] = widths[idx].max(cell.chars().count());
+    }
+    for row in &body_cells {
+        for (idx, cell) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(cell.chars().count());
+        }
+    }
+
+    let mut lines = Vec::new();
+    lines.push(render_table_border(&widths, '┌', '┬', '┐'));
+    lines.push(render_table_row(
+        &header_cells,
+        &widths,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+    lines.push(render_table_border(&widths, '├', '┼', '┤'));
+    for row in &body_cells {
+        lines.push(render_table_row(
+            row,
+            &widths,
+            Style::default().fg(Color::White),
+        ));
+    }
+    lines.push(render_table_border(&widths, '└', '┴', '┘'));
+
+    Some((index, lines))
+}
+
+fn parse_markdown_table_row(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return None;
+    }
+
+    let inner = trimmed.trim_matches('|');
+    let cells: Vec<String> = inner
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
+    (!cells.is_empty()).then_some(cells)
+}
+
+fn parse_markdown_table_delimiter(line: &str) -> Option<usize> {
+    let cells = parse_markdown_table_row(line)?;
+    let valid = cells.iter().all(|cell| {
+        let compact: String = cell.chars().filter(|char| !char.is_whitespace()).collect();
+        compact.len() >= 3 && compact.trim_matches(':').chars().all(|char| char == '-')
+    });
+    valid.then_some(cells.len())
+}
+
+fn render_table_border(widths: &[usize], left: char, middle: char, right: char) -> Line<'static> {
+    let mut text = String::new();
+    text.push(left);
+    for (index, width) in widths.iter().enumerate() {
+        text.push_str(&"─".repeat(width.saturating_add(2)));
+        if index + 1 < widths.len() {
+            text.push(middle);
+        }
+    }
+    text.push(right);
+    Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
+}
+
+fn render_table_row(cells: &[String], widths: &[usize], cell_style: Style) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        "│".to_string(),
+        Style::default().fg(Color::DarkGray),
+    )];
+    for (index, (cell, width)) in cells.iter().zip(widths.iter()).enumerate() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("{cell:<width$}", width = *width),
+            cell_style,
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            "│".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        if index + 1 == cells.len() {
+            continue;
+        }
+    }
+    Line::from(spans)
+}
+
+fn push_styled_text(spans: &mut Vec<Span<'static>>, buffer: &mut String, style: Style) {
+    if !buffer.is_empty() {
+        spans.push(Span::styled(std::mem::take(buffer), style));
+    }
+}
+
+fn find_closing_marker(chars: &[char], start: usize, marker: &[char]) -> Option<usize> {
+    let width = marker.len();
+    let mut index = start;
+    while index + width <= chars.len() {
+        if chars[index..index + width] == *marker {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn inline_plain_text(spans: &[Span<'static>]) -> String {
+    spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn markdown_heading_hash_style(level: usize) -> Style {
+    let color = match level {
+        1 | 2 => Color::Blue,
+        3 | 4 => Color::DarkGray,
+        _ => Color::Gray,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn markdown_heading_text_style(level: usize) -> Style {
+    match level {
+        1 => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        2 => Style::default()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::BOLD),
+        3 => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    }
+}
+
+fn markdown_code_style() -> Style {
+    Style::default().fg(Color::Yellow)
+}
+
+fn markdown_link_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::UNDERLINED)
 }
 
 fn split_preserving_empty(text: &str) -> Vec<String> {
@@ -3898,6 +4794,60 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_e_toggles_events_focus() {
+        let dir = temp_dir("events-focus");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert!(matches!(action, AppAction::None));
+        assert!(matches!(
+            app.screen,
+            ScreenMode::Focused(FocusPanel::Events)
+        ));
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ctrl_r_focuses_response_and_escape_returns_dashboard() {
+        let dir = temp_dir("response-focus");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(matches!(action, AppAction::None));
+        assert!(matches!(
+            app.screen,
+            ScreenMode::Focused(FocusPanel::Response)
+        ));
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ctrl_p_focuses_previous_response_and_escape_returns_dashboard() {
+        let dir = temp_dir("previous-response-focus");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(matches!(action, AppAction::None));
+        assert!(matches!(
+            app.screen,
+            ScreenMode::Focused(FocusPanel::PreviousResponse)
+        ));
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn thread_lifecycle_switches_active_to_idle() {
         let dir = temp_dir("thread");
         let mut app = App::new(metadata_for(&dir), &[], false);
@@ -4007,6 +4957,27 @@ mod tests {
         let snapshot = WorkspaceSnapshot::load("/workspace/project", None);
         assert!(snapshot.error.is_some());
         assert_eq!(snapshot.host_root, None);
+    }
+
+    #[test]
+    fn markdown_renderer_formats_common_blocks() {
+        let rendered = render_markdown_lines(
+            "# Heading\n- item\n> quote\nLink to [site](https://example.com)\n| Name | Value |\n| --- | --- |\n| one | 1 |\n```rust\nfn main() {}\n```",
+        );
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+
+        assert_eq!(plain[0], "# Heading");
+        assert_eq!(plain[1], "• item");
+        assert_eq!(plain[2], "> quote");
+        assert_eq!(plain[3], "Link to site <https://example.com>");
+        assert_eq!(plain[4], "┌──────┬───────┐");
+        assert_eq!(plain[5], "│ Name │ Value │");
+        assert_eq!(plain[6], "├──────┼───────┤");
+        assert_eq!(plain[7], "│ one  │ 1     │");
+        assert_eq!(plain[8], "└──────┴───────┘");
+        assert_eq!(plain[9], "```rust");
+        assert_eq!(plain[10], "fn main() {}");
+        assert_eq!(plain[11], "```");
     }
 
     #[test]
