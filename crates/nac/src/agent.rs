@@ -128,6 +128,12 @@ impl Agent {
                      later threads to rediscover setup state, verification state, or prior conclusions.\n\
                      Work one bounded unit at a time. Before declaring a task done, use a fresh verification \
                      thread when appropriate instead of relying only on the implementation thread's judgment.\n\
+                     A workset is a durable coordination artifact for multi-step efforts such as batch, plan, \
+                     or review workflows. A workset stores a structured set of items with thread names, scopes, \
+                     statuses, and verification guidance. Use worksets when the user explicitly asks for a \
+                     structured plan or when multi-turn coordination would otherwise become brittle.\n\
+                     Do not create worksets for trivial one-off tasks. When you do create one, make it concise, \
+                     specific, and grounded in named threads and clear scope ownership.\n\
                      Avoid creating extra Markdown documents or notes files unless the user explicitly \
                      asks for them.\n\
                      You may dispatch independent threads in parallel when useful.\n\n\
@@ -135,7 +141,10 @@ impl Agent {
                      - thread(name, action, threads?)\n\
                      - threads()\n\
                      - thread_read(name)\n\
-                     - thread_delete(name)\n\n\
+                     - thread_delete(name)\n\
+                     - workset_define(id, kind, instruction, status, summary, verification_recipe?, items[])\n\
+                     - workset_read(id)\n\
+                     - workset_list(kind?)\n\n\
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",
                     cwd
                 ),

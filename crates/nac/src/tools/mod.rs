@@ -15,6 +15,7 @@ pub mod bash;
 pub mod edit;
 pub mod read;
 pub mod thread;
+pub mod workset;
 pub mod write;
 
 pub struct ToolResult {
@@ -103,6 +104,9 @@ pub fn orchestrator_tool_definitions() -> Vec<ToolDefinition> {
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
+        workset::define_definition(),
+        workset::read_definition(),
+        workset::list_definition(),
     ]
 }
 
@@ -179,6 +183,9 @@ pub async fn execute_tool(
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
         "thread_delete" => thread::execute_thread_delete(args, runtime).await,
+        "workset_define" => workset::execute_define(args, runtime).await,
+        "workset_read" => workset::execute_read(args, runtime).await,
+        "workset_list" => workset::execute_list(args, runtime).await,
         unknown => ToolResult {
             content: format!("Error: unknown tool '{}'", unknown),
             is_error: true,

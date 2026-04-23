@@ -153,6 +153,7 @@ enum PanelId {
     PreviousResponse,
     Workspace,
     Tools,
+    Worksets,
 }
 
 #[derive(Debug, Clone)]
@@ -191,39 +192,6 @@ struct ToolRecord {
     summary: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum CheckSlot {
-    Tests,
-    Lint,
-    Format,
-    Build,
-    Last,
-}
-
-impl CheckSlot {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Tests => "tests",
-            Self::Lint => "lint",
-            Self::Format => "format",
-            Self::Build => "build",
-            Self::Last => "last",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CheckRecord {
-    status: ToolStatus,
-    target: String,
-    summary: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ChecksState {
-    slots: HashMap<CheckSlot, CheckRecord>,
-}
-
 #[derive(Debug, Clone, Default)]
 struct GitStatusCounts {
     modified: usize,
@@ -252,6 +220,45 @@ struct WorkspaceSnapshot {
     total_additions: u64,
     total_deletions: u64,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct WorksetSnapshot {
+    items: Vec<store::WorksetRecord>,
+    error: Option<String>,
+}
+
+impl WorksetSnapshot {
+    fn load(store_path: &Path, session_id: Option<&str>) -> Self {
+        let Some(session_id) = session_id else {
+            return Self {
+                items: Vec::new(),
+                error: Some("no active session".to_string()),
+            };
+        };
+
+        match load_workset_records(store_path, session_id) {
+            Ok(items) => Self { items, error: None },
+            Err(error) => Self {
+                items: Vec::new(),
+                error: Some(error.to_string()),
+            },
+        }
+    }
+}
+
+fn load_workset_records(
+    store_path: &Path,
+    session_id: &str,
+) -> anyhow::Result<Vec<store::WorksetRecord>> {
+    let summaries = store::list_worksets(store_path, session_id, None)?;
+    let mut worksets = Vec::with_capacity(summaries.len());
+    for summary in summaries {
+        if let Some(workset) = store::read_workset(store_path, session_id, &summary.id)? {
+            worksets.push(workset);
+        }
+    }
+    Ok(worksets)
 }
 
 impl WorkspaceSnapshot {
@@ -451,8 +458,8 @@ struct App {
     threads: HashMap<String, ThreadView>,
     active_tools: HashMap<String, ActiveTool>,
     recent_tools: VecDeque<ToolRecord>,
-    checks: ChecksState,
     workspace: WorkspaceSnapshot,
+    worksets: WorksetSnapshot,
     last_workspace_refresh_at: Instant,
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
@@ -471,6 +478,7 @@ impl App {
     ) -> Self {
         let inspect_root = metadata.workspace_host_path.clone();
         let workspace = WorkspaceSnapshot::load(&metadata.cwd, inspect_root.as_deref());
+        let worksets = WorksetSnapshot::load(&metadata.store_path, metadata.session_id.as_deref());
 
         let mut panel_scrolls = HashMap::new();
         panel_scrolls.insert(PanelId::Prompt, 0);
@@ -480,6 +488,7 @@ impl App {
         panel_scrolls.insert(PanelId::PreviousResponse, 0);
         panel_scrolls.insert(PanelId::Workspace, 0);
         panel_scrolls.insert(PanelId::Tools, 0);
+        panel_scrolls.insert(PanelId::Worksets, 0);
 
         let mut app = Self {
             metadata,
@@ -500,8 +509,8 @@ impl App {
             threads: HashMap::new(),
             active_tools: HashMap::new(),
             recent_tools: VecDeque::new(),
-            checks: ChecksState::default(),
             workspace,
+            worksets,
             last_workspace_refresh_at: Instant::now(),
             panel_scrolls,
             panel_views: HashMap::new(),
@@ -700,6 +709,12 @@ impl App {
                             self.clear_composer();
                             return AppAction::None;
                         }
+                        Ok(
+                            SlashCommand::Batch { .. }
+                            | SlashCommand::BatchRun { .. }
+                            | SlashCommand::Plan { .. }
+                            | SlashCommand::Review { .. },
+                        ) => {}
                         Err(message) => {
                             self.show_composer_notice(message, Tone::Warning);
                             return AppAction::None;
@@ -774,7 +789,9 @@ impl App {
     fn hydrate_from_messages(&mut self, messages: &[Message]) {
         for message in messages {
             match message {
-                Message::User { content } => self.last_prompt = Some(content.clone()),
+                Message::User { content } => {
+                    self.last_prompt = Some(display_prompt_from_message(content));
+                }
                 Message::Assistant {
                     content: Some(content),
                     ..
@@ -950,6 +967,13 @@ impl App {
         self.last_workspace_refresh_at = Instant::now();
     }
 
+    fn refresh_worksets(&mut self) {
+        self.worksets = WorksetSnapshot::load(
+            &self.metadata.store_path,
+            self.metadata.session_id.as_deref(),
+        );
+    }
+
     fn maybe_refresh_workspace(&mut self) {
         if self.last_workspace_refresh_at.elapsed() >= WORKSPACE_REFRESH_INTERVAL {
             self.refresh_workspace();
@@ -977,7 +1001,7 @@ impl App {
                 thread_name,
                 prompt_preview,
             } => {
-                if thread_name.is_none() {
+                if thread_name.is_none() && self.last_prompt.is_none() {
                     self.last_prompt = Some(prompt_preview.clone());
                 }
                 let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
@@ -1058,13 +1082,15 @@ impl App {
                 while self.recent_tools.len() > TOOL_HISTORY_LIMIT {
                     self.recent_tools.pop_back();
                 }
-                self.update_checks(&record);
 
                 if matches!(record.name.as_str(), "write" | "edit")
                     || record.name == "bash"
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
                     self.refresh_workspace();
+                }
+                if record.name.starts_with("workset_") {
+                    self.refresh_worksets();
                 }
 
                 let detail = if target.is_empty() {
@@ -1191,25 +1217,13 @@ impl App {
                 self.push_timeline(actor, format!("error • {message}"), Tone::Error);
             }
             AgentEvent::RunFinished { thread_name } => {
+                if thread_name.is_none() {
+                    self.refresh_worksets();
+                }
                 let actor = thread_name.unwrap_or_else(|| "run".to_string());
                 self.push_timeline(actor, "run finished".to_string(), Tone::Muted);
             }
         }
-    }
-
-    fn update_checks(&mut self, record: &ToolRecord) {
-        if record.name != "bash" {
-            return;
-        }
-
-        let check = CheckRecord {
-            status: record.status,
-            target: record.target.clone(),
-            summary: record.summary.clone(),
-        };
-        let slot = classify_check_slot(&record.target);
-        self.checks.slots.insert(slot, check.clone());
-        self.checks.slots.insert(CheckSlot::Last, check);
     }
 
     fn push_timeline(&mut self, actor: impl Into<String>, detail: impl Into<String>, tone: Tone) {
@@ -1697,13 +1711,13 @@ impl App {
             .constraints([
                 Constraint::Length(7),
                 Constraint::Min(8),
-                Constraint::Length(5),
+                Constraint::Length(9),
             ])
             .split(area);
 
         self.render_tools_panel(frame, sections[0]);
-        self.render_file_changes_panel(frame, sections[1]);
-        self.render_checks_panel(frame, sections[2]);
+        self.render_worksets_panel(frame, sections[1]);
+        self.render_file_changes_panel(frame, sections[2]);
     }
 
     fn render_prompt_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1806,6 +1820,18 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" open session picker", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "/batch /batch-run /plan /review",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " create durable worksets",
+                    Style::default().fg(Color::White),
+                ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
@@ -2022,22 +2048,82 @@ impl App {
             lines.push(Line::from("No tool activity yet."));
         }
 
-        self.render_scrollable_lines_panel(frame, area, PanelId::Tools, "TOOLS", lines);
+        render_lines_panel(frame, area, "TOOLS", lines);
     }
 
-    fn render_checks_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_worksets_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let width = inner_width(area);
-        let mut lines = Vec::new();
-        for slot in [
-            CheckSlot::Tests,
-            CheckSlot::Lint,
-            CheckSlot::Format,
-            CheckSlot::Build,
-            CheckSlot::Last,
-        ] {
-            render_check_line(&mut lines, slot, self.checks.slots.get(&slot), width);
+        let kind_width = 6usize;
+        let status_width = 9usize;
+        let count_width = 3usize;
+        let id_width = width
+            .saturating_sub(kind_width + status_width + count_width + 8)
+            .max(8);
+        let mut lines = vec![header_line(
+            &[
+                ("KIND", kind_width),
+                ("STATUS", status_width),
+                ("N", count_width),
+                ("ID", id_width),
+            ],
+            width,
+        )];
+
+        if let Some(error) = self.worksets.error.as_deref() {
+            lines.push(Line::from(Span::styled(
+                fit_text(error, width),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if self.worksets.items.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No worksets yet. Try /batch, /batch-run, /plan, or /review.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for workset in &self.worksets.items {
+                let item_count = workset.items.len();
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        pad_cell(&fit_text(&workset.kind, kind_width), kind_width),
+                        workset_kind_style(&workset.kind),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        pad_cell(&fit_text(&workset.status, status_width), status_width),
+                        workset_status_style(&workset.status),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        pad_cell(&item_count.to_string(), count_width),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        fit_text(&workset.id, id_width),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                if !workset.summary.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        fit_text(&format!("  {}", workset.summary), width),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+                if let Some(recipe) = workset.verification_recipe.as_deref() {
+                    lines.push(Line::from(Span::styled(
+                        fit_text(&format!("  verify {}", one_line(recipe)), width),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+                for item in &workset.items {
+                    lines.extend(render_workset_item_lines(item, width));
+                }
+            }
         }
-        render_lines_panel(frame, area, "CHECKS", lines);
+
+        self.render_scrollable_lines_panel(frame, area, PanelId::Worksets, "WORKSETS", lines);
     }
 
     fn render_file_changes_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -2461,10 +2547,14 @@ enum AppAction {
     ResumeSession(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum SlashCommand {
     Exit,
     Sessions,
+    Batch { instruction: String },
+    BatchRun { instruction: String },
+    Plan { instruction: String },
+    Review { instruction: String },
 }
 
 pub enum TuiOutcome {
@@ -2618,6 +2708,7 @@ fn submit_prompt(
     app: &mut App,
     terminal: &mut UiTerminal,
 ) -> Result<()> {
+    let agent_prompt = expand_user_prompt(&prompt);
     app.note_prompt_submitted(&prompt);
     app.clear_composer();
     app.send_state = SendState::Pending;
@@ -2629,7 +2720,10 @@ fn submit_prompt(
     tokio::spawn(async move {
         let result = {
             let mut agent = agent.lock().await;
-            agent.send(&prompt).await.map_err(|error| error.to_string())
+            agent
+                .send(&agent_prompt)
+                .await
+                .map_err(|error| error.to_string())
         };
         let _ = result_tx.send(result);
     });
@@ -3165,6 +3259,53 @@ fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static
     ])
 }
 
+fn render_workset_item_lines(item: &store::WorksetItemRecord, width: usize) -> Vec<Line<'static>> {
+    let status_width = 9usize;
+    let kind_width = 9usize;
+    let thread_width = width.saturating_sub(status_width + kind_width + 10).max(10);
+    let title_width = width.saturating_sub(2);
+    let scope_width = width.saturating_sub(8);
+    let mut lines = vec![Line::from(vec![
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            pad_cell(&fit_text(&item.status, status_width), status_width),
+            workset_status_style(&item.status),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            pad_cell(&fit_text(&item.item_kind, kind_width), kind_width),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            fit_text(&item.thread_name, thread_width),
+            Style::default().fg(Color::White),
+        ),
+    ])];
+
+    lines.push(Line::from(vec![
+        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            fit_text(&item.title, title_width),
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    if !item.scope.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("    @ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                fit_text(&item.scope, scope_width),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    lines
+}
+
 fn panel_block(title: &str) -> Block<'static> {
     panel_block_with_title(panel_title(title))
 }
@@ -3210,48 +3351,6 @@ fn header_line(columns: &[(&str, usize)], width: usize) -> Line<'static> {
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     ))
-}
-
-fn render_check_line(
-    lines: &mut Vec<Line<'static>>,
-    slot: CheckSlot,
-    record: Option<&CheckRecord>,
-    width: usize,
-) {
-    match record {
-        Some(record) => {
-            let detail = if record.summary.is_empty() {
-                record.target.clone()
-            } else {
-                format!("{} • {}", record.target, record.summary)
-            };
-            lines.push(Line::from(vec![
-                status_span(record.status.label(), record.status.tone()),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(slot.label(), 7),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-                Span::raw(fit_text(&detail, width.saturating_sub(14))),
-            ]));
-        }
-        None => {
-            lines.push(Line::from(vec![
-                Span::styled("----", Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(slot.label(), 7),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" waiting"),
-            ]));
-        }
-    }
 }
 
 fn render_wrapped_row(
@@ -3473,69 +3572,6 @@ fn classify_tool_status(is_error: bool, preview: &str) -> ToolStatus {
     ToolStatus::Ok
 }
 
-fn classify_check_slot(command: &str) -> CheckSlot {
-    let lower = command.to_lowercase();
-    if contains_any(
-        &lower,
-        &[
-            "cargo test",
-            "pytest",
-            "npm test",
-            "pnpm test",
-            "go test",
-            "vitest",
-            "jest",
-        ],
-    ) {
-        return CheckSlot::Tests;
-    }
-    if contains_any(
-        &lower,
-        &[
-            "clippy",
-            "eslint",
-            "ruff check",
-            "flake8",
-            "golangci-lint",
-            "mypy",
-            "tsc",
-        ],
-    ) {
-        return CheckSlot::Lint;
-    }
-    if contains_any(
-        &lower,
-        &[
-            "cargo fmt",
-            "ruff format",
-            "prettier",
-            "black",
-            "gofmt",
-            "rustfmt",
-        ],
-    ) {
-        return CheckSlot::Format;
-    }
-    if contains_any(
-        &lower,
-        &[
-            "cargo build",
-            "npm run build",
-            "pnpm build",
-            "go build",
-            "uv run build",
-            "make build",
-        ],
-    ) {
-        return CheckSlot::Build;
-    }
-    CheckSlot::Last
-}
-
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
-
 fn panel_is_selectable(panel: PanelId) -> bool {
     matches!(
         panel,
@@ -3619,6 +3655,10 @@ fn fit_text(text: &str, max_width: usize) -> String {
     let mut out = take_chars(text, max_width - 1);
     out.push('…');
     out
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn pad_cell(text: &str, width: usize) -> String {
@@ -4058,20 +4098,136 @@ fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>> {
         return None;
     }
 
-    Some(match trimmed {
-        "/exit" => Ok(SlashCommand::Exit),
-        "/sessions" => Ok(SlashCommand::Sessions),
-        _ => {
-            let command = trimmed
-                .lines()
-                .next()
-                .unwrap_or(trimmed)
-                .split_whitespace()
-                .next()
-                .unwrap_or(trimmed);
-            Err(format!("unknown slash command: {command}"))
-        }
+    let body = trimmed.trim_start_matches('/');
+    let name_end = body.find(char::is_whitespace).unwrap_or(body.len());
+    let name = &body[..name_end];
+    let args = body[name_end..].trim();
+
+    Some(match name {
+        "exit" if args.is_empty() => Ok(SlashCommand::Exit),
+        "sessions" if args.is_empty() => Ok(SlashCommand::Sessions),
+        "batch" => parse_workset_slash_command("batch", args, |instruction| SlashCommand::Batch {
+            instruction,
+        }),
+        "batch-run" => parse_workset_slash_command("batch-run", args, |instruction| {
+            SlashCommand::BatchRun { instruction }
+        }),
+        "plan" => parse_workset_slash_command("plan", args, |instruction| SlashCommand::Plan {
+            instruction,
+        }),
+        "review" => parse_workset_slash_command("review", args, |instruction| {
+            SlashCommand::Review { instruction }
+        }),
+        _ => Err(format!("unknown slash command: /{}", name)),
     })
+}
+
+fn parse_workset_slash_command<F>(
+    name: &str,
+    args: &str,
+    constructor: F,
+) -> Result<SlashCommand, String>
+where
+    F: FnOnce(String) -> SlashCommand,
+{
+    if args.is_empty() {
+        Err(format!("usage: /{} <instruction>", name))
+    } else {
+        Ok(constructor(args.to_string()))
+    }
+}
+
+fn expand_user_prompt(prompt: &str) -> String {
+    match parse_slash_command(prompt) {
+        Some(Ok(SlashCommand::Batch { instruction })) => {
+            build_workset_command_prompt("batch", &instruction)
+        }
+        Some(Ok(SlashCommand::BatchRun { instruction })) => {
+            build_workset_command_prompt_with_mode("batch-run", "batch", &instruction, true)
+        }
+        Some(Ok(SlashCommand::Plan { instruction })) => {
+            build_workset_command_prompt("plan", &instruction)
+        }
+        Some(Ok(SlashCommand::Review { instruction })) => {
+            build_workset_command_prompt("review", &instruction)
+        }
+        _ => prompt.to_string(),
+    }
+}
+
+fn build_workset_command_prompt(kind: &str, instruction: &str) -> String {
+    build_workset_command_prompt_with_mode(kind, kind, instruction, false)
+}
+
+fn build_workset_command_prompt_with_mode(
+    command: &str,
+    workset_kind: &str,
+    instruction: &str,
+    auto_execute: bool,
+) -> String {
+    let guidance = match command {
+        "batch" => "Break the work into independently executable units suitable for later parallel thread execution. Favor per-directory or per-module slices over arbitrary file lists, and keep scopes non-overlapping where practical.",
+        "batch-run" => "Break the work into independently executable units suitable for immediate parallel thread execution. Favor per-directory or per-module slices over arbitrary file lists, and keep scopes non-overlapping where practical.",
+        "plan" => "Optimize for a durable execution plan that can survive session boundaries. Sequence items clearly, note dependencies, and only introduce parallel tracks when they materially improve progress.",
+        "review" => "Optimize for code review. Break the requested change into smaller, manageably scoped, human-reviewable items with minimal surface area, explicit risk areas, and concrete verification for each item.",
+        _ => "Create a concise, durable structured plan.",
+    };
+    let execution_guidance = if auto_execute {
+        "- Do planning and research as needed.\n\
+         - Persist the workset with `workset_define` before dispatching mutating implementation threads.\n\
+         - Then execute the workset: dispatch the implementation and verification threads that are ready to run.\n\
+         - Each worker action must include its owned scope and a warning that it is not alone in the codebase and must not overwrite unrelated edits.\n\
+         - You may dispatch independent items in parallel when their scopes are non-overlapping.\n\
+         - End by summarizing what was launched, what completed, and the current workset status.\n"
+    } else {
+        "- Do planning and research only.\n\
+         - You may dispatch research, setup, or verification threads if needed to understand the codebase.\n\
+         - Do not dispatch mutating implementation threads yet.\n\
+         - End by presenting the structured plan in normal prose, explicitly including the chosen workset id and the next sensible approval or execution step.\n"
+    };
+
+    format!(
+        "# Workset Command: /{command}\n\n\
+         The user explicitly invoked the `/{command}` slash command. Treat this as a request to create exactly one durable workset using the `workset_define` tool.\n\n\
+         User instruction:\n\
+         {instruction}\n\n\
+         Requirements:\n\
+         - Research the codebase as needed, using threads for bounded research or setup work when that will materially improve the plan.\n\
+         - Create exactly one workset with `kind: \"{workset_kind}\"`.\n\
+         - Choose a short stable workset id and mention it clearly in your final response.\n\
+         - Persist the workset with `workset_define`, including a concise summary, a verification recipe when you can determine one, and ordered items.\n\
+         - Every workset item must include: `title`, `thread_name`, `scope`, `description`, `item_kind`, `status`, `source_threads`, and optional `last_summary`.\n\
+         - Prefer stable thread names that communicate role and ownership.\n\
+         - Worker threads are not alone in the codebase. Scopes should be explicit, non-overlapping where practical, and written so later execution can warn workers not to trample unrelated edits.\n\
+         - Do not create a workset for trivial one-off work unless the user explicitly asked for one. Here, the user did explicitly ask.\n\n\
+         Guidance for this command:\n\
+         {guidance}\n\n\
+         At this stage:\n\
+         {execution_guidance}"
+    )
+}
+
+fn display_prompt_from_message(content: &str) -> String {
+    workset_command_display_prompt(content).unwrap_or_else(|| content.to_string())
+}
+
+fn workset_command_display_prompt(content: &str) -> Option<String> {
+    let header = content.lines().next()?;
+    let kind = header.strip_prefix("# Workset Command: /")?.trim();
+    if !matches!(kind, "batch" | "batch-run" | "plan" | "review") {
+        return None;
+    }
+    let instruction = content
+        .split_once("User instruction:\n")?
+        .1
+        .split_once("\n\nRequirements:")?
+        .0
+        .trim();
+    if instruction.is_empty() {
+        None
+    } else {
+        Some(format!("/{kind} {instruction}"))
+    }
 }
 
 fn prompt_line(is_first: bool, content: &str, slash_mode: bool) -> Line<'static> {
@@ -4800,6 +4956,28 @@ fn file_status_style(status: &str) -> Style {
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
+fn workset_kind_style(kind: &str) -> Style {
+    let color = match kind {
+        "batch" => Color::Magenta,
+        "plan" => Color::Cyan,
+        "review" => Color::Yellow,
+        _ => Color::Gray,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn workset_status_style(status: &str) -> Style {
+    let color = match status {
+        "done" | "complete" | "completed" => Color::Green,
+        "failed" | "error" => Color::Red,
+        "cancelled" | "skipped" => Color::DarkGray,
+        "running" | "active" => Color::Green,
+        "planned" | "planning" | "awaiting_approval" => Color::Yellow,
+        _ => Color::Gray,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
 fn enable_keyboard_enhancements(terminal: &mut UiTerminal) -> bool {
     let supports = supports_keyboard_enhancement().unwrap_or(false);
     if !supports {
@@ -4932,6 +5110,36 @@ mod tests {
     }
 
     #[test]
+    fn batch_command_submits_raw_prompt() {
+        let dir = temp_dir("batch-submit");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/batch refresh auth flow");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        match action {
+            AppAction::Submit(prompt) => assert_eq!(prompt, "/batch refresh auth flow"),
+            _ => panic!("expected submit"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn batch_run_command_submits_raw_prompt() {
+        let dir = temp_dir("batch-run-submit");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/batch-run refresh auth flow");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        match action {
+            AppAction::Submit(prompt) => assert_eq!(prompt, "/batch-run refresh auth flow"),
+            _ => panic!("expected submit"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn slash_exit_quits() {
         let dir = temp_dir("exit");
         let mut app = App::new(metadata_for(&dir), &[], false);
@@ -5022,6 +5230,187 @@ mod tests {
             .expect("expected composer notice");
         assert_eq!(notice.text, "unknown slash command: /bogus");
         assert_eq!(notice.tone, Tone::Warning);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn review_command_requires_instruction() {
+        let dir = temp_dir("review-usage");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/review");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(action, AppAction::None));
+        let notice = app
+            .composer_notice
+            .as_ref()
+            .expect("expected composer notice");
+        assert_eq!(notice.text, "usage: /review <instruction>");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn batch_command_expands_to_workset_prompt() {
+        let expanded = expand_user_prompt("/batch refresh auth flow");
+
+        assert!(expanded.contains("Workset Command: /batch"));
+        assert!(expanded.contains("workset_define"));
+        assert!(expanded.contains("kind: \"batch\""));
+        assert!(expanded.contains("refresh auth flow"));
+        assert!(expanded.contains("Do not dispatch mutating implementation threads yet."));
+    }
+
+    #[test]
+    fn batch_run_command_expands_to_executing_workset_prompt() {
+        let expanded = expand_user_prompt("/batch-run refresh auth flow");
+
+        assert!(expanded.contains("Workset Command: /batch-run"));
+        assert!(expanded.contains("workset_define"));
+        assert!(expanded.contains("kind: \"batch\""));
+        assert!(expanded.contains("refresh auth flow"));
+        assert!(expanded.contains("Then execute the workset"));
+        assert!(expanded.contains("dispatch the implementation and verification threads"));
+        assert!(!expanded.contains("Do not dispatch mutating implementation threads yet."));
+    }
+
+    fn define_test_workset(path: &Path, session_id: &str, id: &str) {
+        store::define_workset(
+            path,
+            session_id,
+            &store::WorksetDefinition {
+                id: id.to_string(),
+                kind: "batch".to_string(),
+                instruction: "refresh auth flow".to_string(),
+                status: "planned".to_string(),
+                summary: "Reviewable auth work units.".to_string(),
+                verification_recipe: Some("cargo test".to_string()),
+                items: vec![
+                    store::WorksetItemDefinition {
+                        title: "Inspect auth flow".to_string(),
+                        thread_name: "research/auth".to_string(),
+                        scope: "crates/nac/src".to_string(),
+                        description: "Find auth flow entry points.".to_string(),
+                        item_kind: "research".to_string(),
+                        status: "planned".to_string(),
+                        source_threads: Vec::new(),
+                        last_summary: None,
+                    },
+                    store::WorksetItemDefinition {
+                        title: "Apply auth flow update".to_string(),
+                        thread_name: "impl/auth".to_string(),
+                        scope: "crates/nac/src/tui.rs".to_string(),
+                        description: "Make the scoped auth UI change.".to_string(),
+                        item_kind: "implement".to_string(),
+                        status: "planned".to_string(),
+                        source_threads: vec!["research/auth".to_string()],
+                        last_summary: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn app_loads_worksets_for_session() {
+        let dir = temp_dir("workset-panel");
+        let store_path = dir.join("store.db");
+        let session_id = "session-worksets";
+        define_test_workset(&store_path, session_id, "batch-auth");
+        let mut metadata = metadata_for(&dir);
+        metadata.store_path = store_path.clone();
+        metadata.session_id = Some(session_id.to_string());
+
+        let app = App::new(metadata, &[], false);
+
+        assert_eq!(app.worksets.items.len(), 1);
+        assert_eq!(app.worksets.items[0].id, "batch-auth");
+        assert_eq!(app.worksets.items[0].items.len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn workset_tool_finish_refreshes_worksets() {
+        let dir = temp_dir("workset-refresh");
+        let store_path = dir.join("store.db");
+        let session_id = "session-workset-refresh";
+        let mut metadata = metadata_for(&dir);
+        metadata.store_path = store_path.clone();
+        metadata.session_id = Some(session_id.to_string());
+        let mut app = App::new(metadata, &[], false);
+        assert!(app.worksets.items.is_empty());
+
+        define_test_workset(&store_path, session_id, "plan-ui");
+        app.apply_agent_event(AgentEvent::ToolCallFinished {
+            thread_name: None,
+            call_id: "call-workset".to_string(),
+            name: "workset_define".to_string(),
+            content_preview: "Saved workset 'plan-ui' with 1 item(s).".to_string(),
+            is_error: false,
+        });
+
+        assert_eq!(app.worksets.items.len(), 1);
+        assert_eq!(app.worksets.items[0].id, "plan-ui");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn workset_item_lines_include_thread_scope_and_title() {
+        let item = store::WorksetItemRecord {
+            position: 1,
+            title: "Apply auth flow update".to_string(),
+            thread_name: "impl/auth".to_string(),
+            scope: "crates/nac/src/tui.rs".to_string(),
+            description: "Make the scoped auth UI change.".to_string(),
+            item_kind: "implement".to_string(),
+            status: "planned".to_string(),
+            source_threads: vec!["research/auth".to_string()],
+            last_summary: None,
+            updated_at: "2026-04-23 00:00:00".to_string(),
+        };
+
+        let rendered = render_workset_item_lines(&item, 80)
+            .iter()
+            .map(line_to_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("planned"));
+        assert!(rendered.contains("implement"));
+        assert!(rendered.contains("impl/auth"));
+        assert!(rendered.contains("Apply auth flow update"));
+        assert!(rendered.contains("crates/nac/src/tui.rs"));
+    }
+
+    #[test]
+    fn workset_prompt_displays_as_original_slash_command() {
+        let expanded = build_workset_command_prompt("review", "split this into reviewable units");
+        let expanded_run =
+            build_workset_command_prompt_with_mode("batch-run", "batch", "do the sweep", true);
+
+        assert_eq!(
+            display_prompt_from_message(&expanded),
+            "/review split this into reviewable units"
+        );
+        assert_eq!(
+            display_prompt_from_message(&expanded_run),
+            "/batch-run do the sweep"
+        );
+    }
+
+    #[test]
+    fn run_started_does_not_replace_submitted_prompt() {
+        let dir = temp_dir("run-started-prompt");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.note_prompt_submitted("/batch refresh auth flow");
+
+        app.apply_agent_event(AgentEvent::RunStarted {
+            thread_name: None,
+            prompt_preview: "# Workset Command: /batch".to_string(),
+        });
+
+        assert_eq!(app.last_prompt.as_deref(), Some("/batch refresh auth flow"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
