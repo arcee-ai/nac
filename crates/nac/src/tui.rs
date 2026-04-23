@@ -45,6 +45,7 @@ const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
 const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const PROMPT_SEPARATOR: &str = " › ";
+const COMMAND_SEPARATOR: &str = " / ";
 const CONTINUATION_PREFIX: &str = "   ";
 
 type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
@@ -424,10 +425,18 @@ struct LifeField {
     injection_phase: usize,
 }
 
+#[derive(Debug, Clone)]
+struct ComposerNotice {
+    text: String,
+    tone: Tone,
+    expires_at: Instant,
+}
+
 struct App {
     metadata: TuiMetadata,
     inspect_root: Option<PathBuf>,
     composer: TextArea<'static>,
+    composer_notice: Option<ComposerNotice>,
     send_state: SendState,
     quit: bool,
     pending_error_reported: bool,
@@ -476,6 +485,7 @@ impl App {
             metadata,
             inspect_root,
             composer: build_composer(),
+            composer_notice: None,
             send_state: SendState::Idle,
             quit: false,
             pending_error_reported: false,
@@ -526,6 +536,29 @@ impl App {
 
     fn clear_composer(&mut self) {
         self.composer = build_composer();
+        self.composer_notice = None;
+    }
+
+    fn clear_composer_notice(&mut self) {
+        self.composer_notice = None;
+    }
+
+    fn show_composer_notice(&mut self, text: impl Into<String>, tone: Tone) {
+        self.composer_notice = Some(ComposerNotice {
+            text: text.into(),
+            tone,
+            expires_at: Instant::now() + Duration::from_secs(2),
+        });
+    }
+
+    fn maybe_expire_composer_notice(&mut self) {
+        if self
+            .composer_notice
+            .as_ref()
+            .is_some_and(|notice| Instant::now() >= notice.expires_at)
+        {
+            self.composer_notice = None;
+        }
     }
 
     fn handle_paste(&mut self, text: &str) -> AppAction {
@@ -536,6 +569,7 @@ impl App {
             return AppAction::None;
         }
 
+        self.clear_composer_notice();
         self.composer.insert_str(&normalize_paste(text));
         AppAction::None
     }
@@ -654,20 +688,30 @@ impl App {
                 if trimmed.is_empty() || matches!(self.send_state, SendState::Pending) {
                     return AppAction::None;
                 }
-                if trimmed == "/exit" {
-                    self.quit = true;
-                    return AppAction::Quit;
-                }
-                if trimmed == "/sessions" {
-                    self.open_session_picker(false);
-                    self.clear_composer();
-                    return AppAction::None;
+
+                if let Some(command) = parse_slash_command(&prompt) {
+                    match command {
+                        Ok(SlashCommand::Exit) => {
+                            self.quit = true;
+                            return AppAction::Quit;
+                        }
+                        Ok(SlashCommand::Sessions) => {
+                            self.open_session_picker(false);
+                            self.clear_composer();
+                            return AppAction::None;
+                        }
+                        Err(message) => {
+                            self.show_composer_notice(message, Tone::Warning);
+                            return AppAction::None;
+                        }
+                    }
                 }
 
                 AppAction::Submit(prompt)
             }
             _ => {
                 if matches!(self.send_state, SendState::Idle) {
+                    self.clear_composer_notice();
                     self.composer.input(key);
                 }
                 AppAction::None
@@ -2059,21 +2103,45 @@ impl App {
             return;
         }
 
+        self.maybe_expire_composer_notice();
+        let show_notice = self.composer_notice.is_some() && inner.height > 1;
+        let composer_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: inner.height.saturating_sub(u16::from(show_notice)).max(1),
+        };
         let view = wrapped_composer_view(
             self.composer.lines(),
             self.composer.cursor(),
-            inner.width,
-            inner.height,
+            composer_area.width,
+            composer_area.height,
         );
 
         frame.render_widget(
             Paragraph::new(Text::from(view.lines.clone())).style(Style::default().fg(Color::White)),
-            inner,
+            composer_area,
         );
         frame.set_cursor_position((
-            inner.x + view.cursor_col.min(inner.width.saturating_sub(1)),
-            inner.y + view.cursor_row.min(inner.height.saturating_sub(1)),
+            composer_area.x + view.cursor_col.min(composer_area.width.saturating_sub(1)),
+            composer_area.y + view.cursor_row.min(composer_area.height.saturating_sub(1)),
         ));
+
+        if let Some(notice) = self.composer_notice.as_ref().filter(|_| show_notice) {
+            let notice_area = Rect {
+                x: inner.x,
+                y: inner.bottom().saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            };
+            let notice_line = Line::from(Span::styled(
+                fit_text(&notice.text, notice_area.width as usize),
+                Style::default()
+                    .fg(notice.tone.color())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(notice_line), notice_area);
+        }
     }
 
     fn render_selectable_panel(
@@ -2391,6 +2459,12 @@ enum AppAction {
     Quit,
     Submit(String),
     ResumeSession(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlashCommand {
+    Exit,
+    Sessions,
 }
 
 pub enum TuiOutcome {
@@ -3726,10 +3800,11 @@ fn wrapped_composer_view(
     let prefix_width = composer_prefix_width();
     let content_width = width.max(1) as usize;
     let effective_width = content_width.saturating_sub(prefix_width).max(1);
+    let slash_mode = composer_is_slash_mode(lines);
 
     if lines.len() == 1 && lines.first().is_some_and(|line| line.is_empty()) {
         return WrappedComposerView {
-            lines: vec![prompt_line(true, "")],
+            lines: vec![prompt_line(true, "", false)],
             cursor_row: 0,
             cursor_col: prefix_width as u16,
         };
@@ -3741,16 +3816,27 @@ fn wrapped_composer_view(
     let mut cursor_set = false;
 
     for (row, line) in lines.iter().enumerate() {
-        let segments = wrap_soft_line(line, effective_width);
+        let display_line = if slash_mode && row == 0 {
+            line.strip_prefix('/').unwrap_or(line)
+        } else {
+            line.as_str()
+        };
+        let display_cursor = if slash_mode && row == 0 {
+            cursor.1.saturating_sub(1)
+        } else {
+            cursor.1
+        };
+        let segments = wrap_soft_line(display_line, effective_width);
         let mut start = 0usize;
         for (segment_index, segment) in segments.iter().enumerate() {
             let segment_len = segment.chars().count();
             let end = start + segment_len;
             if !cursor_set && row == cursor.0 {
                 let is_last_segment = segment_index + 1 == segments.len();
-                if cursor.1 <= end || is_last_segment {
+                if display_cursor <= end || is_last_segment {
                     cursor_row = visual_lines.len();
-                    cursor_col = prefix_width + cursor.1.saturating_sub(start).min(segment_len);
+                    cursor_col =
+                        prefix_width + display_cursor.saturating_sub(start).min(segment_len);
                     cursor_set = true;
                 }
             }
@@ -3780,7 +3866,7 @@ fn wrapped_composer_view(
         .into_iter()
         .skip(scroll_top)
         .take(height)
-        .map(|(is_first, line)| prompt_line(is_first, &line))
+        .map(|(is_first, line)| prompt_line(is_first, &line, slash_mode))
         .collect();
 
     WrappedComposerView {
@@ -3962,14 +4048,43 @@ fn composer_prefix_width() -> usize {
     PROMPT_SEPARATOR.chars().count()
 }
 
-fn prompt_line(is_first: bool, content: &str) -> Line<'static> {
+fn composer_is_slash_mode(lines: &[String]) -> bool {
+    lines.first().is_some_and(|line| line.starts_with('/'))
+}
+
+fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>> {
+    let trimmed = prompt.trim();
+    if !trimmed.starts_with('/') {
+        return None;
+    }
+
+    Some(match trimmed {
+        "/exit" => Ok(SlashCommand::Exit),
+        "/sessions" => Ok(SlashCommand::Sessions),
+        _ => {
+            let command = trimmed
+                .lines()
+                .next()
+                .unwrap_or(trimmed)
+                .split_whitespace()
+                .next()
+                .unwrap_or(trimmed);
+            Err(format!("unknown slash command: {command}"))
+        }
+    })
+}
+
+fn prompt_line(is_first: bool, content: &str, slash_mode: bool) -> Line<'static> {
     let mut spans = Vec::new();
     if is_first {
+        let (prefix, color) = if slash_mode {
+            (COMMAND_SEPARATOR, Color::Yellow)
+        } else {
+            (PROMPT_SEPARATOR, Color::Cyan)
+        };
         spans.push(Span::styled(
-            PROMPT_SEPARATOR,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            prefix,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::styled(
@@ -3979,7 +4094,11 @@ fn prompt_line(is_first: bool, content: &str) -> Line<'static> {
     }
     spans.push(Span::styled(
         content.to_string(),
-        Style::default().fg(Color::White),
+        Style::default().fg(if slash_mode {
+            Color::Yellow
+        } else {
+            Color::White
+        }),
     ));
     Line::from(spans)
 }
@@ -4863,6 +4982,46 @@ mod tests {
         app.handle_paste("hello\r\nworld\rtest");
 
         assert_eq!(app.prompt(), "hello\nworld\ntest");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn slash_command_mode_uses_command_prefix() {
+        let view = wrapped_composer_view(&["/sessions".to_string()], (0, 9), 20, 4);
+
+        assert_eq!(line_to_plain_text(&view.lines[0]), " / sessions");
+        assert_eq!(view.lines[0].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(view.lines[0].spans[1].style.fg, Some(Color::Yellow));
+        assert_eq!(view.cursor_col, composer_prefix_width() as u16 + 8);
+    }
+
+    #[test]
+    fn normal_prompt_prefix_returns_after_slash_removed() {
+        let slash = wrapped_composer_view(&["/".to_string()], (0, 1), 20, 4);
+        let normal = wrapped_composer_view(&["".to_string()], (0, 0), 20, 4);
+
+        assert_eq!(line_to_plain_text(&slash.lines[0]), " / ");
+        assert_eq!(line_to_plain_text(&normal.lines[0]), " › ");
+        assert_eq!(normal.lines[0].spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(normal.lines[0].spans[1].style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn invalid_slash_command_shows_composer_notice() {
+        let dir = temp_dir("invalid-command");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/bogus");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.prompt(), "/bogus");
+        let notice = app
+            .composer_notice
+            .as_ref()
+            .expect("expected composer notice");
+        assert_eq!(notice.text, "unknown slash command: /bogus");
+        assert_eq!(notice.tone, Tone::Warning);
         let _ = std::fs::remove_dir_all(dir);
     }
 
