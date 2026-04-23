@@ -448,6 +448,7 @@ struct App {
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
     selection: Option<SelectionState>,
+    help_visible: bool,
     screen: ScreenMode,
     session_picker: SessionPickerState,
     life_field: LifeField,
@@ -495,6 +496,7 @@ impl App {
             panel_scrolls,
             panel_views: HashMap::new(),
             selection: None,
+            help_visible: false,
             screen: ScreenMode::Dashboard,
             session_picker: SessionPickerState::default(),
             life_field: LifeField::default(),
@@ -527,7 +529,7 @@ impl App {
     }
 
     fn handle_paste(&mut self, text: &str) -> AppAction {
-        if matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+        if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
             return AppAction::None;
         }
         if matches!(self.send_state, SendState::Pending) {
@@ -547,6 +549,30 @@ impl App {
             return self.handle_session_picker_key_event(key);
         }
 
+        if self.help_visible {
+            return match key {
+                KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers,
+                    ..
+                } if modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.quit = true;
+                    AppAction::Quit
+                }
+                KeyEvent {
+                    code: KeyCode::Esc, ..
+                }
+                | KeyEvent {
+                    code: KeyCode::Char('?'),
+                    ..
+                } => {
+                    self.help_visible = false;
+                    AppAction::None
+                }
+                _ => AppAction::None,
+            };
+        }
+
         match key {
             KeyEvent {
                 code: KeyCode::Char('c'),
@@ -555,6 +581,14 @@ impl App {
             } if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.quit = true;
                 AppAction::Quit
+            }
+            KeyEvent {
+                code: KeyCode::Char('?'),
+                ..
+            } if self.prompt().is_empty() => {
+                self.selection = None;
+                self.help_visible = true;
+                AppAction::None
             }
             KeyEvent {
                 code: KeyCode::Char('e'),
@@ -642,7 +676,7 @@ impl App {
     }
 
     fn handle_mouse_event(&mut self, mouse: MouseEvent) {
-        if matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+        if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
             return;
         }
 
@@ -1202,6 +1236,9 @@ impl App {
                 }
             }
             self.render_composer(frame, sections[2]);
+            if self.help_visible {
+                self.render_help_overlay(frame, sections[1]);
+            }
             return;
         }
 
@@ -1218,6 +1255,10 @@ impl App {
         self.render_center_column(frame, body[1]);
         self.render_right_column(frame, body[2]);
         self.render_composer(frame, sections[2]);
+
+        if self.help_visible {
+            self.render_help_overlay(frame, sections[1]);
+        }
     }
 
     fn render_focused_events(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1582,16 +1623,11 @@ impl App {
     fn render_left_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(10),
-                Constraint::Min(10),
-                Constraint::Length(6),
-            ])
+            .constraints([Constraint::Length(10), Constraint::Min(10)])
             .split(area);
 
         self.render_prompt_panel(frame, sections[0]);
         self.render_events_panel(frame, sections[1]);
-        self.render_hotkeys_panel(frame, sections[2]);
     }
 
     fn render_center_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1657,18 +1693,87 @@ impl App {
         self.render_selectable_panel(frame, area, PanelId::Workspace, "WORKSPACE", lines);
     }
 
-    fn render_hotkeys_panel(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_help_overlay(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let overlay_width = area.width.saturating_sub(12).min(68).max(44);
+        let overlay_height = area.height.saturating_sub(8).min(16).max(12);
+        let overlay = centered_rect(overlay_width, overlay_height, area);
+        let block = panel_block("HELP");
+        let inner = block.inner(overlay);
+        frame.render_widget(Clear, overlay);
+        frame.render_widget(block, overlay);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
         let lines = vec![
-            Line::from("Enter        run prompt"),
-            Line::from("Shift+Enter  newline"),
-            Line::from("PageUp/Down  scroll focused pane"),
-            Line::from("Ctrl-E       toggle events focus"),
-            Line::from("Ctrl-R       toggle response focus"),
-            Line::from("Ctrl-P       toggle previous response"),
-            Line::from("Esc          back to dashboard"),
-            Line::from("Mouse wheel  scroll hovered pane"),
+            Line::from(vec![
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" run prompt", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Shift+Enter",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" newline", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Ctrl-E / Ctrl-R / Ctrl-P",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " focus events / response / previous",
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "PageUp / PageDown",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" scroll focused pane", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Mouse wheel",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" scroll hovered pane", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "/sessions",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" open session picker", Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "? or Esc closes this overlay.",
+                Style::default().fg(Color::DarkGray),
+            )),
         ];
-        render_lines_panel(frame, area, "HOTKEYS", lines);
+
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false }),
+            inner,
+        );
     }
 
     fn render_threads_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -3457,6 +3562,14 @@ fn inner_width(area: Rect) -> usize {
     area.width.saturating_sub(2) as usize
 }
 
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let overlay_width = width.min(area.width);
+    let overlay_height = height.min(area.height);
+    let x = area.x + area.width.saturating_sub(overlay_width) / 2;
+    let y = area.y + area.height.saturating_sub(overlay_height) / 2;
+    Rect::new(x, y, overlay_width, overlay_height)
+}
+
 fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
     let output = StdCommand::new("git")
         .args(args)
@@ -4790,6 +4903,34 @@ mod tests {
             app.screen,
             ScreenMode::SessionPicker { startup: false }
         ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn question_mark_toggles_help_when_composer_is_empty() {
+        let dir = temp_dir("help-toggle");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.help_visible);
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert!(matches!(action, AppAction::None));
+        assert!(!app.help_visible);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn question_mark_inserts_into_nonempty_composer() {
+        let dir = temp_dir("help-literal-question-mark");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("why");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.prompt(), "why?");
+        assert!(!app.help_visible);
         let _ = std::fs::remove_dir_all(dir);
     }
 
