@@ -43,6 +43,8 @@ const MIN_TERMINAL_HEIGHT: u16 = 22;
 const TIMELINE_LIMIT: usize = 220;
 const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
+const ACTIVE_WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
+const IDLE_WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const PROMPT_SEPARATOR: &str = " › ";
 const CONTINUATION_PREFIX: &str = "   ";
 
@@ -427,6 +429,7 @@ struct App {
     recent_tools: VecDeque<ToolRecord>,
     checks: ChecksState,
     workspace: WorkspaceSnapshot,
+    last_workspace_refresh_at: Instant,
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
     selection: Option<SelectionState>,
@@ -472,6 +475,7 @@ impl App {
             recent_tools: VecDeque::new(),
             checks: ChecksState::default(),
             workspace,
+            last_workspace_refresh_at: Instant::now(),
             panel_scrolls,
             panel_views: HashMap::new(),
             selection: None,
@@ -797,6 +801,19 @@ impl App {
 
     fn refresh_workspace(&mut self) {
         self.workspace = WorkspaceSnapshot::load(&self.metadata.cwd, self.inspect_root.as_deref());
+        self.last_workspace_refresh_at = Instant::now();
+    }
+
+    fn maybe_refresh_workspace(&mut self) {
+        let refresh_interval = if matches!(self.send_state, SendState::Pending) {
+            ACTIVE_WORKSPACE_REFRESH_INTERVAL
+        } else {
+            IDLE_WORKSPACE_REFRESH_INTERVAL
+        };
+
+        if self.last_workspace_refresh_at.elapsed() >= refresh_interval {
+            self.refresh_workspace();
+        }
     }
 
     fn note_prompt_submitted(&mut self, prompt: &str) {
@@ -2195,6 +2212,7 @@ pub async fn run(
                         app.working_frame = app.working_frame.wrapping_add(1);
                         app.advance_life();
                     }
+                    app.maybe_refresh_workspace();
                 }
             }
 
