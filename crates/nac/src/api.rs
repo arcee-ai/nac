@@ -14,6 +14,9 @@ use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition, Usage};
 #[value(rename_all = "kebab-case")]
 pub enum BackendKind {
     Auto,
+    #[serde(rename = "deepseek-chat")]
+    #[value(name = "deepseek-chat")]
+    DeepSeekChat,
     FireworksChat,
     #[serde(rename = "openai-responses")]
     #[value(name = "openai-responses")]
@@ -24,6 +27,7 @@ impl BackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
+            Self::DeepSeekChat => "deepseek-chat",
             Self::FireworksChat => "fireworks-chat",
             Self::OpenAiResponses => "openai-responses",
         }
@@ -99,22 +103,26 @@ impl ModelClient {
     }
 
     pub fn from_env_with_overrides(overrides: ClientOverrides) -> Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| anyhow!("OPENAI_API_KEY environment variable is not set"))?;
+        let requested_backend = overrides.backend.unwrap_or(BackendKind::Auto);
         let base_url = overrides.base_url.unwrap_or_else(|| {
-            std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
+            std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| {
+                default_base_url_for_backend_hint(requested_backend).to_string()
+            })
         });
-        let backend = match overrides.backend.unwrap_or(BackendKind::Auto) {
+        let backend = match requested_backend {
             BackendKind::Auto => detect_backend(&base_url)?,
             explicit => explicit,
         };
+        let api_key = api_key_for_backend(backend)?;
         let model = overrides.model.unwrap_or_else(|| {
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
         });
-        let reasoning_effort = overrides
-            .reasoning_effort
-            .or_else(|| default_reasoning_effort(backend));
+        let reasoning_effort = match backend {
+            BackendKind::DeepSeekChat => None,
+            _ => overrides
+                .reasoning_effort
+                .or_else(|| default_reasoning_effort(backend)),
+        };
 
         Ok(Self {
             client: Client::new(),
@@ -133,6 +141,7 @@ impl ModelClient {
     ) -> Result<ModelTurnResponse> {
         match self.backend {
             BackendKind::Auto => unreachable!("backend auto should be resolved at client creation"),
+            BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
             BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
             BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
         }
@@ -207,7 +216,19 @@ impl ModelClient {
         }
 
         let value = self.post_json_with_retry(&url, &request).await?;
-        parse_fireworks_response(&value, &url)
+        parse_chat_completions_response(&value, &url)
+    }
+
+    async fn send_deepseek_chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let request = deepseek_chat_request(&self.model, &messages, &tools);
+
+        let value = self.post_json_with_retry(&url, &request).await?;
+        parse_chat_completions_response(&value, &url)
     }
 
     async fn send_openai_responses(
@@ -300,6 +321,7 @@ impl ModelClient {
 
 fn default_model_for_backend(backend: BackendKind) -> String {
     match backend {
+        BackendKind::DeepSeekChat => "deepseek-v4-pro".to_string(),
         BackendKind::OpenAiResponses => "gpt-5.4".to_string(),
         BackendKind::FireworksChat => "gpt-5.4".to_string(),
         BackendKind::Auto => unreachable!("auto backend does not have a default model"),
@@ -309,8 +331,28 @@ fn default_model_for_backend(backend: BackendKind) -> String {
 fn default_reasoning_effort(backend: BackendKind) -> Option<ReasoningEffort> {
     match backend {
         BackendKind::OpenAiResponses => Some(ReasoningEffort::Xhigh),
+        BackendKind::DeepSeekChat => None,
         BackendKind::FireworksChat => None,
         BackendKind::Auto => None,
+    }
+}
+
+fn default_base_url_for_backend_hint(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::DeepSeekChat => "https://api.deepseek.com",
+        BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
+            "https://api.openai.com/v1"
+        }
+    }
+}
+
+fn api_key_for_backend(backend: BackendKind) -> Result<String> {
+    match backend {
+        BackendKind::Auto
+        | BackendKind::DeepSeekChat
+        | BackendKind::FireworksChat
+        | BackendKind::OpenAiResponses => std::env::var("OPENAI_API_KEY")
+            .map_err(|_| anyhow!("OPENAI_API_KEY environment variable is not set")),
     }
 }
 
@@ -324,12 +366,15 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
     if host.contains("fireworks.ai") {
         return Ok(BackendKind::FireworksChat);
     }
+    if host == "api.deepseek.com" {
+        return Ok(BackendKind::DeepSeekChat);
+    }
     if host == "api.openai.com" {
         return Ok(BackendKind::OpenAiResponses);
     }
 
     Err(anyhow!(
-        "could not infer backend from '{}'; pass --backend fireworks-chat or --backend openai-responses",
+        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, or --backend openai-responses",
         base_url
     ))
 }
@@ -381,6 +426,26 @@ fn openai_responses_tool_to_value(tool: &ToolDefinition) -> Value {
         "description": tool.function.description,
         "parameters": tool.function.parameters,
     })
+}
+
+fn deepseek_chat_request(model: &str, messages: &[Message], tools: &[ToolDefinition]) -> Value {
+    let mut request = json!({
+        "model": model,
+        "messages": messages
+            .iter()
+            .map(fireworks_message_to_value)
+            .collect::<Vec<_>>(),
+        "thinking": {
+            "type": "enabled",
+        },
+        "reasoning_effort": "max",
+    });
+
+    if !tools.is_empty() {
+        request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+    }
+
+    request
 }
 
 fn responses_input_items(messages: &[Message]) -> Vec<Value> {
@@ -442,7 +507,7 @@ fn responses_input_items(messages: &[Message]) -> Vec<Value> {
     items
 }
 
-fn parse_fireworks_response(value: &Value, url: &str) -> Result<ModelTurnResponse> {
+fn parse_chat_completions_response(value: &Value, url: &str) -> Result<ModelTurnResponse> {
     let choices = value
         .get("choices")
         .and_then(Value::as_array)
@@ -453,12 +518,19 @@ fn parse_fireworks_response(value: &Value, url: &str) -> Result<ModelTurnRespons
     let message = choice
         .get("message")
         .ok_or_else(|| anyhow!("Response from {} did not include a message", url))?;
-    let tool_calls = message
-        .get("tool_calls")
-        .cloned()
-        .map(serde_json::from_value::<Vec<ToolCall>>)
-        .transpose()
-        .map_err(|e| anyhow!("Failed to parse tool calls from {}: {}", url, e))?;
+    let tool_calls = match message.get("tool_calls") {
+        Some(Value::Array(_)) => Some(
+            serde_json::from_value::<Vec<ToolCall>>(message["tool_calls"].clone())
+                .map_err(|e| anyhow!("Failed to parse tool calls from {}: {}", url, e))?,
+        ),
+        Some(Value::Null) | None => None,
+        Some(_) => {
+            return Err(anyhow!(
+                "Response from {} included tool_calls in an unsupported format",
+                url
+            ))
+        }
+    };
 
     Ok(ModelTurnResponse {
         assistant: AssistantTurn {
@@ -675,6 +747,14 @@ impl ModelClient {
 mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
+    use std::ffi::OsString;
+
+    fn restore_env(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
 
     #[test]
     fn test_missing_api_key_error() {
@@ -701,7 +781,41 @@ mod tests {
             unsafe {
                 std::env::set_var("OPENAI_API_KEY", key);
             }
+        } else {
+            unsafe {
+                std::env::remove_var("OPENAI_API_KEY");
+            }
         }
+    }
+
+    #[test]
+    fn explicit_deepseek_backend_defaults_to_deepseek_url_and_model() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        let original_base_url = std::env::var_os("OPENAI_BASE_URL");
+        let original_model = std::env::var_os("OPENAI_MODEL");
+
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_openai_key");
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("OPENAI_MODEL");
+        }
+
+        let client = ModelClient::from_env_with_overrides(ClientOverrides {
+            backend: Some(BackendKind::DeepSeekChat),
+            ..ClientOverrides::default()
+        })
+        .unwrap();
+
+        assert_eq!(client.base_url(), "https://api.deepseek.com");
+        assert_eq!(client.backend(), BackendKind::DeepSeekChat);
+        assert_eq!(client.model, "deepseek-v4-pro");
+        assert_eq!(client.reasoning_effort(), None);
+
+        restore_env("OPENAI_API_KEY", original_openai_key);
+        restore_env("OPENAI_BASE_URL", original_base_url);
+        restore_env("OPENAI_MODEL", original_model);
     }
 
     #[test]
@@ -714,7 +828,55 @@ mod tests {
             detect_backend("https://api.fireworks.ai/inference/v1").unwrap(),
             BackendKind::FireworksChat
         );
+        assert_eq!(
+            detect_backend("https://api.deepseek.com").unwrap(),
+            BackendKind::DeepSeekChat
+        );
         assert!(detect_backend("https://example.com/v1").is_err());
+    }
+
+    #[test]
+    fn deepseek_chat_request_enables_max_thinking_and_preserves_reasoning() {
+        let request = deepseek_chat_request(
+            "deepseek-v4-pro",
+            &[Message::Assistant {
+                content: Some("calling a tool".to_string()),
+                reasoning_text: Some("need current context".to_string()),
+                reasoning_details: None,
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    call_type: "function".to_string(),
+                    function: FunctionCall {
+                        name: "read".to_string(),
+                        arguments: "{\"path\":\"src/main.rs\"}".to_string(),
+                    },
+                }]),
+            }],
+            &[ToolDefinition {
+                def_type: "function".to_string(),
+                function: crate::types::FunctionDef {
+                    name: "read".to_string(),
+                    description: "Read a file".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
+            }],
+        );
+
+        assert_eq!(request["model"], "deepseek-v4-pro");
+        assert_eq!(request["thinking"]["type"], "enabled");
+        assert_eq!(request["reasoning_effort"], "max");
+        assert!(request.get("temperature").is_none());
+        assert_eq!(
+            request["messages"][0]["reasoning_content"],
+            "need current context"
+        );
+        assert_eq!(request["tools"][0]["type"], "function");
     }
 
     #[test]
@@ -752,6 +914,42 @@ mod tests {
         assert_eq!(items[2]["type"], "function_call");
         assert_eq!(items[3]["role"], "assistant");
         assert_eq!(items[4]["type"], "function_call_output");
+    }
+
+    #[test]
+    fn parses_deepseek_chat_output() {
+        let parsed = parse_chat_completions_response(
+            &json!({
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "done",
+                            "reasoning_content": "worked through it",
+                            "tool_calls": null
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                    "completion_tokens_details": {
+                        "reasoning_tokens": 9
+                    }
+                }
+            }),
+            "https://api.deepseek.com/chat/completions",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.assistant.content.as_deref(), Some("done"));
+        assert_eq!(
+            parsed.assistant.reasoning_text.as_deref(),
+            Some("worked through it")
+        );
+        assert!(parsed.assistant.tool_calls.is_none());
+        assert_eq!(parsed.usage.reasoning_tokens, Some(9));
     }
 
     #[test]

@@ -469,6 +469,7 @@ impl SessionRow {
 
 fn parse_backend(raw: Option<String>, base_url: &str) -> Result<BackendKind> {
     match raw.as_deref() {
+        Some("deepseek-chat") => Ok(BackendKind::DeepSeekChat),
         Some("fireworks-chat") => Ok(BackendKind::FireworksChat),
         Some("openai-responses") => Ok(BackendKind::OpenAiResponses),
         Some(other) => Err(anyhow!("unsupported stored backend '{}'", other)),
