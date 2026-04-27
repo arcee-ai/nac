@@ -319,7 +319,7 @@ impl WorkspaceSnapshot {
             let entry = file_map
                 .entry(path.clone())
                 .or_insert_with(|| ChangedFileStat {
-                    status: "MOD".to_string(),
+                    status: "M".to_string(),
                     path,
                     additions: None,
                     deletions: None,
@@ -3304,7 +3304,7 @@ fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static
 
     Line::from(vec![
         Span::styled(
-            pad_cell(&file.status, status_width),
+            file.status.clone(),
             file_status_style(&file.status),
         ),
         Span::raw(" "),
@@ -3809,7 +3809,7 @@ fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Change
 
         let normalized_status = if status == "??" {
             counts.untracked += 1;
-            "??".to_string()
+            "?".to_string()
         } else {
             let x = status.chars().next().unwrap_or(' ');
             let y = status.chars().nth(1).unwrap_or(' ');
@@ -3818,18 +3818,18 @@ fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Change
             }
             if status.contains('R') {
                 counts.renamed += 1;
-                "REN".to_string()
+                "R".to_string()
             } else if status.contains('A') {
                 counts.added += 1;
-                "ADD".to_string()
+                "A".to_string()
             } else if status.contains('D') {
                 counts.deleted += 1;
-                "DEL".to_string()
+                "D".to_string()
             } else {
                 if x != ' ' || y != ' ' {
                     counts.modified += 1;
                 }
-                "MOD".to_string()
+                "M".to_string()
             }
         };
 
@@ -5012,11 +5012,11 @@ fn actor_color(actor: &str, tone: Tone) -> Color {
 
 fn file_status_style(status: &str) -> Style {
     let color = match status {
-        "ADD" => Color::Green,
-        "DEL" => Color::Red,
-        "REN" => Color::Magenta,
-        "??" => Color::Cyan,
-        "MOD" => Color::Yellow,
+        "A" => Color::Green,
+        "D" => Color::Red,
+        "R" => Color::Magenta,
+        "?" => Color::Cyan,
+        "M" => Color::Yellow,
         _ => Color::Gray,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
