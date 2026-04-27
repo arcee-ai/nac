@@ -14,6 +14,8 @@ use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
+const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
     Worker,
@@ -121,8 +123,8 @@ impl Agent {
                      thread(name, action, threads?, timeout?), the worker for name receives that thread's own retained \
                      history, and if you provide threads, it also receives the latest retained episode from \
                      each named source thread as input for that dispatch. The worker's final response becomes \
-                     the next retained episode for name. The default thread timeout is 3600 seconds; pass \
-                     timeout only when a dispatch genuinely needs a different limit.\n\
+                     the next retained episode for name. The default thread timeout is 3600 seconds, with \
+                     a minimum of 1800 seconds; pass timeout only when a dispatch genuinely needs a different limit.\n\
                      Use this mechanism deliberately. Dispatch work so that important setup, implementation, \
                      and verification threads end by producing a high-signal retained episode that another \
                      thread can act on directly. Avoid dispatches that leave behind weak episodes and force \
@@ -351,6 +353,7 @@ async fn execute_tools_parallel(
             call_id: id.clone(),
             name: name.clone(),
             args_preview: preview_tool_args(&name, &args_str),
+            args_detail: Some(tool_args_detail(&args_str)),
         });
 
         join_set.spawn(async move {
@@ -416,6 +419,10 @@ fn preview(value: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &sanitized[..max_len])
     }
+}
+
+fn tool_args_detail(args: &str) -> String {
+    preview(args, TOOL_ARGS_DETAIL_LIMIT)
 }
 
 fn preview_tool_args(name: &str, args_str: &str) -> String {
@@ -611,5 +618,15 @@ mod tests {
             Message::System { content } => content.contains("<available_skills>"),
             _ => false,
         }));
+    }
+
+    #[test]
+    fn tool_args_detail_is_larger_than_preview_but_bounded() {
+        let args = "x".repeat(TOOL_ARGS_DETAIL_LIMIT + 10);
+        let detail = tool_args_detail(&args);
+
+        assert!(detail.starts_with(&"x".repeat(TOOL_ARGS_DETAIL_LIMIT)));
+        assert!(detail.ends_with("..."));
+        assert_eq!(detail.len(), TOOL_ARGS_DETAIL_LIMIT + 3);
     }
 }

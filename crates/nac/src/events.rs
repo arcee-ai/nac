@@ -19,6 +19,8 @@ pub enum AgentEvent {
         call_id: String,
         name: String,
         args_preview: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args_detail: Option<String>,
     },
     ToolCallFinished {
         thread_name: Option<String>,
@@ -40,6 +42,8 @@ pub enum AgentEvent {
         name: String,
         exit_code: i32,
         timed_out: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_reason: Option<String>,
     },
     AssistantMessage {
         thread_name: Option<String>,

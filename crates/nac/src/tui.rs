@@ -1158,6 +1158,7 @@ impl App {
                 call_id,
                 name,
                 args_preview,
+                ..
             } => {
                 if thread_name.is_none() && name == "thread" {
                     return;
@@ -1274,6 +1275,7 @@ impl App {
                 name,
                 exit_code,
                 timed_out,
+                timeout_reason,
             } => {
                 let entry = self
                     .threads
@@ -1299,7 +1301,13 @@ impl App {
                 self.hydrate_all_episodes();
 
                 let detail = if timed_out {
-                    "thread complete • timed out".to_string()
+                    match timeout_reason {
+                        Some(reason) => format!(
+                            "thread complete • timed out • {}",
+                            fit_text(&reason.replace('\n', " "), 110)
+                        ),
+                        None => "thread complete • timed out".to_string(),
+                    }
                 } else {
                     format!("thread complete • exit {exit_code}")
                 };
@@ -5643,6 +5651,7 @@ mod tests {
             name: "auth".to_string(),
             exit_code: 0,
             timed_out: false,
+            timeout_reason: None,
         });
         let thread = app.threads.get("auth").unwrap();
         assert_eq!(thread.state, ThreadState::Idle);
@@ -5660,6 +5669,7 @@ mod tests {
             call_id: "call-1".to_string(),
             name: "edit".to_string(),
             args_preview: "crates/nac/src/tui.rs".to_string(),
+            args_detail: None,
         });
         app.apply_agent_event(AgentEvent::ToolCallFinished {
             thread_name: Some("coder-1".to_string()),
