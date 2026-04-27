@@ -45,7 +45,6 @@ const TIMELINE_LIMIT: usize = 220;
 const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
 const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
-const WORKING_TIMEOUT: Duration = Duration::from_secs(600);
 const PROMPT_SEPARATOR: &str = " › ";
 const COMMAND_SEPARATOR: &str = " / ";
 const CONTINUATION_PREFIX: &str = "   ";
@@ -3194,10 +3193,10 @@ fn submit_prompt(
     tokio::spawn(async move {
         let result = {
             let mut agent = agent.lock().await;
-            match tokio::time::timeout(WORKING_TIMEOUT, agent.send(&agent_prompt)).await {
-                Ok(send_result) => send_result.map_err(|error| error.to_string()),
-                Err(_elapsed) => Err("Request timed out after 10 minutes".to_string()),
-            }
+            agent
+                .send(&agent_prompt)
+                .await
+                .map_err(|error| error.to_string())
         };
         let _ = tx.send(result);
     });
