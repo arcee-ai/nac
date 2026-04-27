@@ -33,6 +33,7 @@ use tokio::time::{self, MissedTickBehavior};
 
 use crate::agent::Agent;
 use crate::events::{AgentEvent, EventSink};
+use crate::life::LifeField;
 use crate::sessions::{self, SessionSnapshot};
 use crate::store;
 use crate::types::Message;
@@ -426,15 +427,6 @@ struct SessionPickerState {
     error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct LifeField {
-    width: usize,
-    height: usize,
-    cells: Vec<bool>,
-    low_activity_ticks: usize,
-    injection_phase: usize,
-}
-
 #[derive(Debug, Clone)]
 struct ComposerNotice {
     text: String,
@@ -478,6 +470,7 @@ struct App {
     screen: ScreenMode,
     session_picker: SessionPickerState,
     life_field: LifeField,
+    current_prompt: String,
 }
 
 impl App {
@@ -538,6 +531,7 @@ impl App {
             screen: ScreenMode::Dashboard,
             session_picker: SessionPickerState::default(),
             life_field: LifeField::default(),
+            current_prompt: String::new(),
         };
 
         app.hydrate_threads_from_store();
@@ -1399,7 +1393,18 @@ impl App {
     }
 
     fn reset_life(&mut self) {
-        self.life_field = LifeField::default();
+        // Get the panel size from the last render or use defaults
+        let width = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.width as usize * 2)
+            .unwrap_or(160);
+        let height = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.height as usize * 4)
+            .unwrap_or(96);
+        self.life_field = LifeField::from_seed(&self.current_prompt, width, height);
     }
 
     fn advance_life(&mut self) {
@@ -3115,6 +3120,7 @@ fn submit_prompt(
 ) -> Result<()> {
     let agent_prompt = expand_user_prompt(&prompt);
     app.note_prompt_submitted(&prompt);
+    app.current_prompt = prompt;
     app.clear_composer();
     app.send_state = SendState::Pending;
     app.pending_error_reported = false;
@@ -3165,413 +3171,6 @@ fn render_lines_panel_with_title(
     frame.render_widget(Clear, inner);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
-
-impl LifeField {
-    fn ensure_size(&mut self, width: usize, height: usize) {
-        let width = width.max(2);
-        let height = height.max(4);
-        if self.width == width && self.height == height && !self.cells.is_empty() {
-            return;
-        }
-
-        self.width = width;
-        self.height = height;
-        self.cells = seed_life_cells(width, height);
-        self.low_activity_ticks = 0;
-        self.injection_phase = 0;
-    }
-
-    fn step(&mut self) {
-        if self.width == 0 || self.height == 0 || self.cells.is_empty() {
-            return;
-        }
-
-        let mut next = vec![false; self.cells.len()];
-        let mut alive = 0usize;
-        let mut changed = 0usize;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let idx = self.index(x, y);
-                let neighbors = self.live_neighbor_count(x, y);
-                let next_alive =
-                    matches!((self.cells[idx], neighbors), (true, 2 | 3) | (false, 3 | 6));
-                next[idx] = next_alive;
-                alive += usize::from(next_alive);
-                changed += usize::from(self.cells[idx] != next_alive);
-            }
-        }
-
-        self.cells = if alive == 0 {
-            self.low_activity_ticks = 0;
-            self.injection_phase = 0;
-            seed_life_cells(self.width, self.height)
-        } else {
-            let low_activity_threshold = (self.width * self.height / 384).max(6);
-            if changed <= low_activity_threshold {
-                self.low_activity_ticks = self.low_activity_ticks.saturating_add(1);
-            } else {
-                self.low_activity_ticks = 0;
-            }
-
-            if self.low_activity_ticks >= 16 {
-                inject_showcase_layout(&mut next, self.width, self.height, self.injection_phase);
-                self.injection_phase =
-                    (self.injection_phase + 1) % LIFE_INJECTION_LAYOUTS.len().max(1);
-                self.low_activity_ticks = 4;
-            }
-
-            next
-        };
-    }
-
-    fn render_lines(&self, char_width: usize, char_height: usize) -> Vec<Line<'static>> {
-        let mut lines = Vec::with_capacity(char_height);
-        for char_y in 0..char_height {
-            let mut text = String::with_capacity(char_width);
-            for char_x in 0..char_width {
-                let dot_x = char_x * 2;
-                let dot_y = char_y * 4;
-                text.push(self.braille_char(dot_x, dot_y));
-            }
-            lines.push(Line::from(Span::raw(text)));
-        }
-        lines
-    }
-
-    fn braille_char(&self, dot_x: usize, dot_y: usize) -> char {
-        let mut bits = 0u32;
-        for local_y in 0..4 {
-            for local_x in 0..2 {
-                let x = dot_x + local_x;
-                let y = dot_y + local_y;
-                if x < self.width && y < self.height && self.cells[self.index(x, y)] {
-                    bits |= match (local_x, local_y) {
-                        (0, 0) => 0x01,
-                        (0, 1) => 0x02,
-                        (0, 2) => 0x04,
-                        (0, 3) => 0x40,
-                        (1, 0) => 0x08,
-                        (1, 1) => 0x10,
-                        (1, 2) => 0x20,
-                        (1, 3) => 0x80,
-                        _ => 0,
-                    };
-                }
-            }
-        }
-        char::from_u32(0x2800 + bits).unwrap_or(' ')
-    }
-
-    fn live_neighbor_count(&self, x: usize, y: usize) -> u8 {
-        let mut count = 0u8;
-        for dy in [-1isize, 0, 1] {
-            for dx in [-1isize, 0, 1] {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-                let nx = wrap_index(x, dx, self.width);
-                let ny = wrap_index(y, dy, self.height);
-                if self.cells[self.index(nx, ny)] {
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
-    fn index(&self, x: usize, y: usize) -> usize {
-        y * self.width + x
-    }
-}
-
-fn seed_life_cells(width: usize, height: usize) -> Vec<bool> {
-    let mut cells = vec![false; width.saturating_mul(height)];
-    if width == 0 || height == 0 {
-        return cells;
-    }
-
-    inject_showcase_layout(&mut cells, width, height, 0);
-
-    cells
-}
-
-fn inject_showcase_layout(cells: &mut [bool], width: usize, height: usize, phase: usize) {
-    if width == 0 || height == 0 || cells.is_empty() {
-        return;
-    }
-
-    let layouts_len = LIFE_INJECTION_LAYOUTS.len();
-    if layouts_len == 0 {
-        return;
-    }
-
-    for placement in LIFE_INJECTION_LAYOUTS[phase % layouts_len] {
-        inject_pattern(cells, width, height, *placement);
-    }
-}
-
-#[derive(Clone, Copy)]
-struct SeedPattern {
-    width: usize,
-    height: usize,
-    cells: &'static [(usize, usize)],
-}
-
-#[derive(Clone, Copy)]
-struct PatternPlacement {
-    pattern: SeedPattern,
-    dx: isize,
-    dy: isize,
-    rotation: u8,
-    flip: bool,
-}
-
-const GLIDER_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)],
-};
-
-const R_PENTOMINO_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 0), (0, 1), (1, 1), (1, 2)],
-};
-
-const ACORN_PATTERN: SeedPattern = SeedPattern {
-    width: 7,
-    height: 3,
-    cells: &[(1, 0), (3, 1), (0, 2), (1, 2), (4, 2), (5, 2), (6, 2)],
-};
-
-const LWSS_PATTERN: SeedPattern = SeedPattern {
-    width: 5,
-    height: 4,
-    cells: &[
-        (1, 0),
-        (2, 0),
-        (3, 0),
-        (4, 0),
-        (0, 1),
-        (4, 1),
-        (4, 2),
-        (0, 3),
-        (3, 3),
-    ],
-};
-
-const LIFE_LAYOUT_WIDTH_SCALE: isize = 5;
-
-const LIFE_INJECTION_LAYOUTS: &[&[PatternPlacement]] = &[
-    &[
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: -14,
-            dy: -8,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 14,
-            dy: -8,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: -14,
-            dy: 8,
-            rotation: 3,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 14,
-            dy: 8,
-            rotation: 2,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: 0,
-            dy: -1,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -5,
-            dy: 4,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 5,
-            dy: 4,
-            rotation: 2,
-            flip: true,
-        },
-    ],
-    &[
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: -18,
-            dy: -6,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 18,
-            dy: 6,
-            rotation: 2,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: -8,
-            dy: 0,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: 8,
-            dy: 0,
-            rotation: 3,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 0,
-            dy: -12,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 0,
-            dy: 12,
-            rotation: 2,
-            flip: false,
-        },
-    ],
-    &[
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -10,
-            dy: -4,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 10,
-            dy: -4,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -10,
-            dy: 4,
-            rotation: 3,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 10,
-            dy: 4,
-            rotation: 2,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 0,
-            dy: -10,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 0,
-            dy: 10,
-            rotation: 3,
-            flip: false,
-        },
-    ],
-];
-
-fn inject_pattern(cells: &mut [bool], width: usize, height: usize, placement: PatternPlacement) {
-    if width == 0 || height == 0 {
-        return;
-    }
-
-    let center_x = (width / 2) as isize;
-    let center_y = (height / 2) as isize;
-    let anchor_x = center_x + placement.dx.saturating_mul(LIFE_LAYOUT_WIDTH_SCALE);
-    let anchor_y = center_y + placement.dy;
-    let (placed_width, placed_height) = rotated_dimensions(
-        placement.pattern.width,
-        placement.pattern.height,
-        placement.rotation,
-    );
-    let origin_x = anchor_x - placed_width as isize / 2;
-    let origin_y = anchor_y - placed_height as isize / 2;
-
-    for &(x, y) in placement.pattern.cells {
-        let (mut px, py) = rotate_cell(
-            x,
-            y,
-            placement.pattern.width,
-            placement.pattern.height,
-            placement.rotation,
-        );
-        if placement.flip {
-            px = placed_width.saturating_sub(1).saturating_sub(px);
-        }
-        let world_x = wrap_index_signed(origin_x + px as isize, width);
-        let world_y = wrap_index_signed(origin_y + py as isize, height);
-        cells[world_y * width + world_x] = true;
-    }
-}
-
-fn wrap_index(index: usize, delta: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    ((index as isize + delta).rem_euclid(len as isize)) as usize
-}
-
-fn wrap_index_signed(index: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    index.rem_euclid(len as isize) as usize
-}
-
-fn rotated_dimensions(width: usize, height: usize, rotation: u8) -> (usize, usize) {
-    if rotation % 2 == 0 {
-        (width, height)
-    } else {
-        (height, width)
-    }
-}
-
-fn rotate_cell(x: usize, y: usize, width: usize, height: usize, rotation: u8) -> (usize, usize) {
-    match rotation % 4 {
-        0 => (x, y),
-        1 => (height.saturating_sub(1).saturating_sub(y), x),
-        2 => (
-            width.saturating_sub(1).saturating_sub(x),
-            height.saturating_sub(1).saturating_sub(y),
-        ),
-        _ => (y, width.saturating_sub(1).saturating_sub(x)),
-    }
-}
-
 fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
     let (action, detail) = entry
         .detail
