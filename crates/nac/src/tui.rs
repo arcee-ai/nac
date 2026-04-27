@@ -2484,15 +2484,26 @@ impl App {
             }
             if reserve_total == 1 {
                 lines.push(Line::from(vec![
-                    Span::styled("total", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        pad_cell("T", 1),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::raw(" "),
                     Span::styled(
-                        format!("+{}", self.workspace.total_additions),
+                        format!(
+                            "{:>width$}",
+                            format!("+{}", self.workspace.total_additions),
+                            width = 5
+                        ),
                         Style::default().fg(Color::Green),
                     ),
                     Span::raw(" "),
                     Span::styled(
-                        format!("-{}", self.workspace.total_deletions),
+                        format!(
+                            "{:>width$}",
+                            format!("-{}", self.workspace.total_deletions),
+                            width = 5
+                        ),
                         Style::default().fg(Color::Red),
                     ),
                 ]));
@@ -3563,9 +3574,9 @@ fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
 }
 
 fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static> {
-    let status_width = 4usize;
-    let delta_width = 6usize;
-    let path_width = width.saturating_sub(status_width + delta_width * 2 + 4);
+    let status_width = 1usize;
+    let delta_width = 5usize;
+    let path_width = width.saturating_sub(status_width + delta_width * 2 + 3);
     let additions = file
         .additions
         .map(|value| format!("+{value}"))
