@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -147,6 +148,33 @@ pub fn load_worker_context(
         self_episodes,
         source_episodes,
     })
+}
+
+/// Load all episodes for all threads in one query, grouped by thread_name.
+/// Episodes are ordered by id ASC (chronological order).
+pub fn load_all_episodes(
+    store_path: &Path,
+    session_id: &str,
+) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
+    let conn = open_connection(store_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.thread_name, e.session_id, e.action, e.content, e.created_at
+         FROM episodes e
+         INNER JOIN threads t ON e.thread_name = t.name AND e.session_id = t.session_id
+         WHERE e.session_id = ?
+         ORDER BY e.thread_name, e.id",
+    )?;
+    let rows = stmt.query_map(params![session_id], row_to_episode)?;
+
+    let mut grouped: HashMap<String, Vec<EpisodeRecord>> = HashMap::new();
+    for row in rows {
+        let episode = row?;
+        grouped
+            .entry(episode.thread_name.clone())
+            .or_default()
+            .push(episode);
+    }
+    Ok(grouped)
 }
 
 pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> {

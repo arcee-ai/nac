@@ -154,6 +154,8 @@ enum PanelId {
     Workspace,
     Tools,
     Worksets,
+    ThreadList,
+    ThreadEpisodes,
 }
 
 #[derive(Debug, Clone)]
@@ -407,6 +409,7 @@ enum FocusPanel {
     Events,
     Response,
     PreviousResponse,
+    Threads,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,11 +459,18 @@ struct App {
     previous_response: Option<String>,
     timeline: VecDeque<TimelineEntry>,
     threads: HashMap<String, ThreadView>,
+    all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
+    episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
+    response_markdown_cache: Option<(String, Vec<Line<'static>>)>,
+    selected_thread: Option<String>,
     active_tools: HashMap<String, ActiveTool>,
     recent_tools: VecDeque<ToolRecord>,
     workspace: WorkspaceSnapshot,
     worksets: WorksetSnapshot,
     last_workspace_refresh_at: Instant,
+    workspace_tx: Option<mpsc::Sender<WorkspaceSnapshot>>,
+    workspace_rx: Option<mpsc::Receiver<WorkspaceSnapshot>>,
+    workspace_refresh_pending: bool,
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
     selection: Option<SelectionState>,
@@ -489,6 +499,8 @@ impl App {
         panel_scrolls.insert(PanelId::Workspace, 0);
         panel_scrolls.insert(PanelId::Tools, 0);
         panel_scrolls.insert(PanelId::Worksets, 0);
+        panel_scrolls.insert(PanelId::ThreadList, 0);
+        panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
 
         let mut app = Self {
             metadata,
@@ -507,11 +519,18 @@ impl App {
             previous_response: None,
             timeline: VecDeque::new(),
             threads: HashMap::new(),
+            all_episodes: HashMap::new(),
+            episode_markdown_cache: HashMap::new(),
+            response_markdown_cache: None,
+            selected_thread: None,
             active_tools: HashMap::new(),
             recent_tools: VecDeque::new(),
             workspace,
             worksets,
             last_workspace_refresh_at: Instant::now(),
+            workspace_tx: None,
+            workspace_rx: None,
+            workspace_refresh_pending: false,
             panel_scrolls,
             panel_views: HashMap::new(),
             selection: None,
@@ -522,6 +541,7 @@ impl App {
         };
 
         app.hydrate_threads_from_store();
+        app.hydrate_all_episodes();
         app.hydrate_from_messages(restored_messages);
         if app.restored_message_count > 0 {
             app.push_timeline(
@@ -658,10 +678,40 @@ impl App {
                 AppAction::None
             }
             KeyEvent {
+                code: KeyCode::Char('t'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Threads);
+                AppAction::None
+            }
+            KeyEvent {
                 code: KeyCode::Esc, ..
             } if matches!(self.screen, ScreenMode::Focused(_)) => {
                 self.selection = None;
                 self.screen = ScreenMode::Dashboard;
+                AppAction::None
+            }
+            // Navigation in focused Threads mode
+            KeyEvent {
+                code: KeyCode::Up, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_previous_thread();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_next_thread();
                 AppAction::None
             }
             KeyEvent {
@@ -799,6 +849,7 @@ impl App {
                     if let Some(previous) = self.last_response.replace(content.clone()) {
                         self.previous_response = Some(previous);
                     }
+                    self.response_markdown_cache = None;
                 }
                 _ => {}
             }
@@ -891,6 +942,14 @@ impl App {
                 if matches!(panel, FocusPanel::Events) {
                     self.panel_scrolls.insert(PanelId::Events, usize::MAX);
                 }
+                if matches!(panel, FocusPanel::Threads) && self.selected_thread.is_none() {
+                    let names = self.sorted_thread_names();
+                    if !names.is_empty() {
+                        self.selected_thread = Some(names[0].clone());
+                    }
+                    self.panel_scrolls.insert(PanelId::ThreadList, 0);
+                    self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+                }
                 ScreenMode::Focused(panel)
             }
         };
@@ -900,6 +959,7 @@ impl App {
         match self.screen {
             ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
             ScreenMode::Focused(FocusPanel::PreviousResponse) => PanelId::PreviousResponse,
+            ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
             _ => PanelId::Response,
         }
     }
@@ -962,9 +1022,14 @@ impl App {
         }
     }
 
-    fn refresh_workspace(&mut self) {
-        self.workspace = WorkspaceSnapshot::load(&self.metadata.cwd, self.inspect_root.as_deref());
-        self.last_workspace_refresh_at = Instant::now();
+    fn hydrate_all_episodes(&mut self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        if let Ok(episodes) = store::load_all_episodes(&self.metadata.store_path, session_id) {
+            self.all_episodes = episodes;
+        }
+        self.episode_markdown_cache.clear();
     }
 
     fn refresh_worksets(&mut self) {
@@ -976,7 +1041,43 @@ impl App {
 
     fn maybe_refresh_workspace(&mut self) {
         if self.last_workspace_refresh_at.elapsed() >= WORKSPACE_REFRESH_INTERVAL {
-            self.refresh_workspace();
+            self.last_workspace_refresh_at = Instant::now();
+            self.request_workspace_refresh();
+        }
+    }
+
+    fn request_workspace_refresh(&mut self) {
+        if self.workspace_refresh_pending {
+            return;
+        }
+        let tx = match &self.workspace_tx {
+            Some(tx) => tx.clone(),
+            None => return,
+        };
+        let cwd = self.metadata.cwd.clone();
+        let inspect_root = self.inspect_root.clone();
+        self.workspace_refresh_pending = true;
+        tokio::task::spawn_blocking(move || {
+            let snapshot = WorkspaceSnapshot::load(&cwd, inspect_root.as_deref());
+            let _ = tx.blocking_send(snapshot);
+        });
+    }
+
+    fn check_workspace_channel(&mut self) {
+        let rx = match &mut self.workspace_rx {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(snapshot) => {
+                self.workspace = snapshot;
+                self.workspace_refresh_pending = false;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {}
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                self.workspace_rx = None;
+                self.workspace_refresh_pending = false;
+            }
         }
     }
 
@@ -1087,7 +1188,7 @@ impl App {
                     || record.name == "bash"
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
-                    self.refresh_workspace();
+                    self.request_workspace_refresh();
                 }
                 if record.name.starts_with("workset_") {
                     self.refresh_worksets();
@@ -1159,8 +1260,9 @@ impl App {
                     format!("exit {exit_code}")
                 };
 
-                self.refresh_workspace();
+                self.request_workspace_refresh();
                 self.hydrate_threads_from_store();
+                self.hydrate_all_episodes();
 
                 let detail = if timed_out {
                     "thread complete • timed out".to_string()
@@ -1186,6 +1288,7 @@ impl App {
                         thread.updated_at = utc_hms();
                         thread.summary = truncate_episode_preview(&content);
                     }
+                    self.hydrate_all_episodes();
                     self.push_timeline(
                         thread_name,
                         format!(
@@ -1199,6 +1302,7 @@ impl App {
                     if let Some(previous) = self.last_response.replace(content.clone()) {
                         self.previous_response = Some(previous);
                     }
+                    self.response_markdown_cache = None;
                     self.panel_scrolls.insert(PanelId::Response, 0);
                     self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
                     self.push_timeline(
@@ -1243,6 +1347,49 @@ impl App {
             .values()
             .filter(|thread| matches!(thread.state, ThreadState::Active))
             .count()
+    }
+
+    fn sorted_thread_names(&self) -> Vec<String> {
+        let mut threads: Vec<&ThreadView> = self.threads.values().collect();
+        threads.sort_by(|left, right| {
+            matches!(right.state, ThreadState::Active)
+                .cmp(&matches!(left.state, ThreadState::Active))
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        threads.into_iter().map(|t| t.name.clone()).collect()
+    }
+
+    fn select_previous_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = current_idx.saturating_sub(1);
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+    }
+
+    fn select_next_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = (current_idx + 1).min(names.len().saturating_sub(1));
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
     }
 
     fn displayed_run_duration(&self) -> Duration {
@@ -1292,6 +1439,7 @@ impl App {
                 FocusPanel::PreviousResponse => {
                     self.render_focused_previous_response(frame, sections[1])
                 }
+                FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
             }
             self.render_composer(frame, sections[2]);
             if self.help_visible {
@@ -1784,13 +1932,13 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "Ctrl-E / Ctrl-R / Ctrl-P",
+                    "Ctrl-T / Ctrl-E / Ctrl-R / Ctrl-P",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    " focus events / response / previous",
+                    " focus threads / events / response / previous",
                     Style::default().fg(Color::White),
                 ),
             ]),
@@ -1852,7 +2000,7 @@ impl App {
         let thread_width = width.min(18).max(10);
         let updated_width = 8usize;
         let action_width = width
-            .saturating_sub(state_width + thread_width + updated_width + 6)
+            .saturating_sub(state_width + thread_width + updated_width + 3)
             .max(8);
 
         let mut lines = vec![header_line(
@@ -1882,16 +2030,15 @@ impl App {
                 let updated = fit_text(&thread.updated_at, updated_width);
                 lines.push(Line::from(vec![
                     status_span(thread.state.label(), thread.state.tone()),
-                    Span::raw(" "),
                     Span::raw(pad_to(
                         "",
                         state_width.saturating_sub(thread.state.label().len()),
                     )),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::raw(pad_cell(&name, thread_width)),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::raw(pad_cell(&action, action_width)),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(updated, Style::default().fg(Color::DarkGray)),
                 ]));
             }
@@ -1929,7 +2076,18 @@ impl App {
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines = match self.last_response.as_deref() {
-            Some(response) => render_markdown_lines(response),
+            Some(response) => {
+                match &self.response_markdown_cache {
+                    Some((cached_text, cached_lines)) if cached_text == response => {
+                        cached_lines.clone()
+                    }
+                    _ => {
+                        let lines = render_markdown_lines(response);
+                        self.response_markdown_cache = Some((response.to_string(), lines.clone()));
+                        lines
+                    }
+                }
+            }
             None => vec![Line::from("Waiting for the first orchestrator reply.")],
         };
         let runtime = format_runtime(self.displayed_run_duration());
@@ -1967,6 +2125,176 @@ impl App {
         );
     }
 
+    fn render_focused_threads(&mut self, frame: &mut ratatui::Frame, body: Rect) {
+        let left_width = (body.width as f64 * 0.33) as u16;
+        let left_width = left_width.max(20);
+        let right_width = body.width.saturating_sub(left_width + 1);
+
+        let left_area = Rect::new(body.x, body.y, left_width, body.height);
+        let right_area = Rect::new(body.x + left_width + 1, body.y, right_width, body.height);
+
+        self.render_thread_list_pane(frame, left_area);
+        self.render_episode_detail_pane(frame, right_area);
+    }
+
+    fn render_thread_list_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let thread_names = self.sorted_thread_names();
+
+        // Auto-select first thread if nothing selected
+        if self.selected_thread.is_none() && !thread_names.is_empty() {
+            self.selected_thread = Some(thread_names[0].clone());
+        }
+
+        // Auto-scroll to keep selected thread visible
+        if let Some(ref selected) = self.selected_thread {
+            if let Some(pos) = thread_names.iter().position(|n| n == selected) {
+                let scroll = self.panel_scrolls.entry(PanelId::ThreadList).or_insert(0);
+                let visible_height = area.height.saturating_sub(2) as usize;
+                if pos < *scroll {
+                    *scroll = pos;
+                } else if pos >= *scroll + visible_height {
+                    *scroll = pos.saturating_sub(visible_height - 1);
+                }
+            }
+        }
+
+        // Build styled lines for each thread
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let max_name_width = 18usize;
+        let width = inner_width(area);
+
+        for name in &thread_names {
+            let thread = &self.threads[name];
+            let is_selected = self.selected_thread.as_deref() == Some(name.as_str());
+
+            let state_icon = match thread.state {
+                ThreadState::Active => "●",
+                ThreadState::Idle => "○",
+            };
+
+            let state_color = match thread.state {
+                ThreadState::Active => Color::Green,
+                ThreadState::Idle => Color::Gray,
+            };
+
+            let display_name = fit_text(name, max_name_width);
+            let ep_count = format!("{:>3}e", thread.episodes);
+            let action_width = width
+                .saturating_sub(max_name_width + 8);
+            let display_action = fit_text(&thread.action, action_width);
+
+            let line_str = format!(
+                "{} {:<max_name_width$} {}  {}",
+                state_icon,
+                display_name,
+                ep_count,
+                display_action,
+                max_name_width = max_name_width,
+            );
+
+            if is_selected {
+                lines.push(Line::styled(
+                    line_str,
+                    Style::default().fg(Color::White).bg(Color::DarkGray),
+                ));
+            } else {
+                // Style state icon with state color, rest default
+                let mut spans = vec![Span::styled(
+                    state_icon.to_string(),
+                    Style::default().fg(state_color),
+                )];
+                let rest = &line_str[state_icon.len()..];
+                spans.push(Span::raw(rest.to_string()));
+                lines.push(Line::from(spans));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from("No threads yet"));
+        }
+
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadList,
+            panel_title("THREADS"),
+            lines,
+        );
+    }
+
+    fn render_episode_detail_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let episodes = self
+            .selected_thread
+            .as_ref()
+            .and_then(|name| self.all_episodes.get(name));
+
+        let thread_name = self.selected_thread.as_deref().unwrap_or("none");
+
+        let mut combined = String::new();
+
+        if let Some(thread) = self
+            .selected_thread
+            .as_ref()
+            .and_then(|name| self.threads.get(name))
+        {
+            combined.push_str(&format!("# Thread: {}\n", thread.name));
+            combined.push_str(&format!(
+                "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                thread.action, thread.episodes, thread.state, thread.updated_at
+            ));
+            combined.push_str("\n---\n\n");
+        }
+
+        if let Some(eps) = episodes {
+            if eps.is_empty() {
+                combined.push_str("*No episodes yet.*\n");
+            } else {
+                for (i, ep) in eps.iter().enumerate() {
+                    combined.push_str(&format!(
+                        "### Episode {} | {} | action: {}\n\n",
+                        i + 1,
+                        ep.created_at,
+                        ep.action
+                    ));
+                    combined.push_str(&ep.content);
+                    if i < eps.len() - 1 {
+                        combined.push_str("\n\n---\n\n");
+                    }
+                }
+            }
+        } else if self.selected_thread.is_some() {
+            combined.push_str("*Thread is running... no episodes yet.*\n");
+        } else {
+            combined.push_str("*Select a thread to view episodes.*\n");
+        }
+
+        let markdown_lines = match self.episode_markdown_cache.get(thread_name) {
+            Some(cached) => cached.clone(),
+            None => {
+                let lines = render_markdown_lines(&combined);
+                self.episode_markdown_cache
+                    .insert(thread_name.to_string(), lines.clone());
+                lines
+            }
+        };
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "EPISODES — ".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(thread_name.to_string()),
+        ]);
+        self.render_selectable_rich_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadEpisodes,
+            title,
+            markdown_lines,
+        );
+    }
+
     fn events_panel_title(&self) -> Line<'static> {
         let dot_color = if matches!(self.send_state, SendState::Pending) {
             Color::Green
@@ -1988,8 +2316,11 @@ impl App {
     fn render_tools_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let width = inner_width(area);
         let tool_width = width.min(14).max(9);
+        let stat_width = 5usize;
         let duration_width = 8usize;
-        let target_width = width.saturating_sub(tool_width + duration_width + 8).max(8);
+        let target_width = width
+            .saturating_sub(tool_width + stat_width + duration_width + 3) // 3 = three 1-space gaps
+            .max(8);
         let mut lines = vec![header_line(
             &[
                 ("STAT", 5),
@@ -2004,16 +2335,18 @@ impl App {
         active.sort_by(|left, right| left.name.cmp(&right.name));
         for tool in active {
             let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = ToolStatus::Running.label();
             lines.push(Line::from(vec![
-                status_span(ToolStatus::Running.label(), ToolStatus::Running.tone()),
+                status_span(stat_label, ToolStatus::Running.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
                 Span::raw(" "),
                 Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw("  "),
+                Span::raw(" "),
                 Span::raw(pad_cell(
                     &fit_text(&tool.target, target_width),
                     target_width,
                 )),
-                Span::raw("  "),
+                Span::raw(" "),
                 Span::styled(
                     pad_cell(&format_duration(tool.started_at.elapsed()), duration_width),
                     Style::default().fg(Color::Gray),
@@ -2027,16 +2360,18 @@ impl App {
             .take(area.height.saturating_sub(2) as usize)
         {
             let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = tool.status.label();
             lines.push(Line::from(vec![
-                status_span(tool.status.label(), tool.status.tone()),
+                status_span(stat_label, tool.status.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
                 Span::raw(" "),
                 Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw("  "),
+                Span::raw(" "),
                 Span::raw(pad_cell(
                     &fit_text(&tool.target, target_width),
                     target_width,
                 )),
-                Span::raw("  "),
+                Span::raw(" "),
                 Span::styled(
                     pad_cell(&format_duration(tool.duration), duration_width),
                     Style::default().fg(Color::Gray),
@@ -2057,7 +2392,7 @@ impl App {
         let status_width = 9usize;
         let count_width = 3usize;
         let id_width = width
-            .saturating_sub(kind_width + status_width + count_width + 8)
+            .saturating_sub(kind_width + status_width + count_width + 3)
             .max(8);
         let mut lines = vec![header_line(
             &[
@@ -2087,17 +2422,17 @@ impl App {
                         pad_cell(&fit_text(&workset.kind, kind_width), kind_width),
                         workset_kind_style(&workset.kind),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         pad_cell(&fit_text(&workset.status, status_width), status_width),
                         workset_status_style(&workset.status),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         pad_cell(&item_count.to_string(), count_width),
                         Style::default().fg(Color::Gray),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         fit_text(&workset.id, id_width),
                         Style::default()
@@ -2592,6 +2927,9 @@ pub async fn run(
     let input_thread = spawn_input_thread(running.clone(), input_tx);
 
     let mut app = App::new(metadata, &restored_messages, start_in_session_picker);
+    let (ws_tx, ws_rx) = mpsc::channel::<WorkspaceSnapshot>(1);
+    app.workspace_tx = Some(ws_tx);
+    app.workspace_rx = Some(ws_rx);
     let mut animation_tick = time::interval(Duration::from_millis(75));
     animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     terminal.draw(|frame| app.render(frame))?;
@@ -2671,6 +3009,7 @@ pub async fn run(
                 }
             }
 
+            app.check_workspace_channel();
             terminal.draw(|frame| app.render(frame))?;
         }
 
@@ -3196,7 +3535,7 @@ fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
 
     let mut spans = vec![
         Span::styled(timestamp, Style::default().fg(Color::DarkGray)),
-        Span::raw("  "),
+        Span::raw(" "),
         Span::styled(
             tone_glyph(entry.tone),
             Style::default().fg(entry.tone.color()),
@@ -3341,7 +3680,7 @@ fn header_line(columns: &[(&str, usize)], width: usize) -> Line<'static> {
     let mut content = String::new();
     for (index, (label, column_width)) in columns.iter().enumerate() {
         if index > 0 {
-            content.push_str("  ");
+            content.push_str(" ");
         }
         content.push_str(&pad_cell(label, *column_width));
     }
