@@ -825,6 +825,22 @@ impl App {
         }
     }
 
+    fn handle_crossterm_event(&mut self, event: CrosstermEvent) -> Option<AppAction> {
+        match event {
+            CrosstermEvent::Key(key) => Some(self.handle_key_event(key)),
+            CrosstermEvent::Mouse(mouse) => {
+                self.handle_mouse_event(mouse);
+                None
+            }
+            CrosstermEvent::Paste(text) => {
+                let _ = self.handle_paste(&text);
+                None
+            }
+            CrosstermEvent::Resize(_, _) => None,
+            _ => None,
+        }
+    }
+
     fn hydrate_from_messages(&mut self, messages: &[Message]) {
         for message in messages {
             match message {
@@ -3025,28 +3041,45 @@ pub async fn run(
             tokio::select! {
                 event = input_rx.recv() => {
                     match event {
-                        Some(event) => match event {
-                            CrosstermEvent::Key(key) => {
-                                match app.handle_key_event(key) {
+                        Some(event) => {
+                            let mut terminal_action = false;
+                            if let Some(action) = app.handle_crossterm_event(event) {
+                                match action {
                                     AppAction::Submit(prompt) => {
                                         submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
+                                        terminal_action = true;
                                     }
                                     AppAction::ResumeSession(session_id) => {
                                         outcome = TuiOutcome::ResumeSession(session_id);
                                         app.quit = true;
+                                        terminal_action = true;
                                     }
                                     AppAction::Quit | AppAction::None => {}
                                 }
                             }
-                            CrosstermEvent::Mouse(mouse) => {
-                                app.handle_mouse_event(mouse);
+                            if !terminal_action {
+                                while let Ok(next_event) = input_rx.try_recv() {
+                                    if let Some(action) = app.handle_crossterm_event(next_event) {
+                                        match action {
+                                            AppAction::Submit(prompt) => {
+                                                submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
+                                                break;
+                                            }
+                                            AppAction::ResumeSession(session_id) => {
+                                                outcome = TuiOutcome::ResumeSession(session_id);
+                                                app.quit = true;
+                                                break;
+                                            }
+                                            AppAction::Quit => {
+                                                app.quit = true;
+                                                break;
+                                            }
+                                            AppAction::None => {}
+                                        }
+                                    }
+                                }
                             }
-                            CrosstermEvent::Paste(text) => {
-                                let _ = app.handle_paste(&text);
-                            }
-                            CrosstermEvent::Resize(_, _) => {}
-                            _ => {}
-                        },
+                        }
                         None => {
                             eprintln!("ERROR: input thread terminated unexpectedly, shutting down");
                             app.quit = true;
