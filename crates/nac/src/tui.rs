@@ -33,6 +33,7 @@ use tokio::time::{self, MissedTickBehavior};
 
 use crate::agent::Agent;
 use crate::events::{AgentEvent, EventSink};
+use crate::life::LifeField;
 use crate::sessions::{self, SessionSnapshot};
 use crate::store;
 use crate::types::Message;
@@ -62,12 +63,6 @@ pub struct TuiMetadata {
     pub session_id: Option<String>,
     pub sandbox_status: String,
     pub agents_md_status: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SendState {
-    Idle,
-    Pending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +149,8 @@ enum PanelId {
     Workspace,
     Tools,
     Worksets,
+    ThreadList,
+    ThreadEpisodes,
 }
 
 #[derive(Debug, Clone)]
@@ -322,7 +319,7 @@ impl WorkspaceSnapshot {
             let entry = file_map
                 .entry(path.clone())
                 .or_insert_with(|| ChangedFileStat {
-                    status: "MOD".to_string(),
+                    status: "M".to_string(),
                     path,
                     additions: None,
                     deletions: None,
@@ -407,6 +404,7 @@ enum FocusPanel {
     Events,
     Response,
     PreviousResponse,
+    Threads,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -423,15 +421,6 @@ struct SessionPickerState {
     error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct LifeField {
-    width: usize,
-    height: usize,
-    cells: Vec<bool>,
-    low_activity_ticks: usize,
-    injection_phase: usize,
-}
-
 #[derive(Debug, Clone)]
 struct ComposerNotice {
     text: String,
@@ -444,9 +433,8 @@ struct App {
     inspect_root: Option<PathBuf>,
     composer: TextArea<'static>,
     composer_notice: Option<ComposerNotice>,
-    send_state: SendState,
+    result_rx: Option<tokio::sync::oneshot::Receiver<Result<String, String>>>,
     quit: bool,
-    pending_error_reported: bool,
     working_started_at: Option<Instant>,
     working_frame: usize,
     last_response_duration: Duration,
@@ -456,11 +444,19 @@ struct App {
     previous_response: Option<String>,
     timeline: VecDeque<TimelineEntry>,
     threads: HashMap<String, ThreadView>,
+    all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
+    episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
+    response_markdown_cache: Option<(String, Vec<Line<'static>>)>,
+    selected_thread: Option<String>,
     active_tools: HashMap<String, ActiveTool>,
     recent_tools: VecDeque<ToolRecord>,
     workspace: WorkspaceSnapshot,
     worksets: WorksetSnapshot,
     last_workspace_refresh_at: Instant,
+    workspace_tx: Option<mpsc::Sender<WorkspaceSnapshot>>,
+    workspace_rx: Option<mpsc::Receiver<WorkspaceSnapshot>>,
+    workspace_refresh_pending: bool,
+    workspace_refresh_deadline: Option<Instant>,
     panel_scrolls: HashMap<PanelId, usize>,
     panel_views: HashMap<PanelId, PanelView>,
     selection: Option<SelectionState>,
@@ -468,6 +464,7 @@ struct App {
     screen: ScreenMode,
     session_picker: SessionPickerState,
     life_field: LifeField,
+    current_prompt: String,
 }
 
 impl App {
@@ -489,15 +486,16 @@ impl App {
         panel_scrolls.insert(PanelId::Workspace, 0);
         panel_scrolls.insert(PanelId::Tools, 0);
         panel_scrolls.insert(PanelId::Worksets, 0);
+        panel_scrolls.insert(PanelId::ThreadList, 0);
+        panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
 
         let mut app = Self {
             metadata,
             inspect_root,
             composer: build_composer(),
             composer_notice: None,
-            send_state: SendState::Idle,
+            result_rx: None,
             quit: false,
-            pending_error_reported: false,
             working_started_at: None,
             working_frame: 0,
             last_response_duration: Duration::default(),
@@ -507,11 +505,19 @@ impl App {
             previous_response: None,
             timeline: VecDeque::new(),
             threads: HashMap::new(),
+            all_episodes: HashMap::new(),
+            episode_markdown_cache: HashMap::new(),
+            response_markdown_cache: None,
+            selected_thread: None,
             active_tools: HashMap::new(),
             recent_tools: VecDeque::new(),
             workspace,
             worksets,
             last_workspace_refresh_at: Instant::now(),
+            workspace_tx: None,
+            workspace_rx: None,
+            workspace_refresh_pending: false,
+            workspace_refresh_deadline: None,
             panel_scrolls,
             panel_views: HashMap::new(),
             selection: None,
@@ -519,9 +525,11 @@ impl App {
             screen: ScreenMode::Dashboard,
             session_picker: SessionPickerState::default(),
             life_field: LifeField::default(),
+            current_prompt: String::new(),
         };
 
         app.hydrate_threads_from_store();
+        app.hydrate_all_episodes();
         app.hydrate_from_messages(restored_messages);
         if app.restored_message_count > 0 {
             app.push_timeline(
@@ -574,7 +582,7 @@ impl App {
         if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
             return AppAction::None;
         }
-        if matches!(self.send_state, SendState::Pending) {
+        if self.result_rx.is_some() {
             return AppAction::None;
         }
 
@@ -658,10 +666,40 @@ impl App {
                 AppAction::None
             }
             KeyEvent {
+                code: KeyCode::Char('t'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Threads);
+                AppAction::None
+            }
+            KeyEvent {
                 code: KeyCode::Esc, ..
             } if matches!(self.screen, ScreenMode::Focused(_)) => {
                 self.selection = None;
                 self.screen = ScreenMode::Dashboard;
+                AppAction::None
+            }
+            // Navigation in focused Threads mode
+            KeyEvent {
+                code: KeyCode::Up, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_previous_thread();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_next_thread();
                 AppAction::None
             }
             KeyEvent {
@@ -683,7 +721,20 @@ impl App {
                 modifiers,
                 ..
             } if modifiers.contains(KeyModifiers::SHIFT) => {
-                if matches!(self.send_state, SendState::Idle) {
+                if self.result_rx.is_none() {
+                    self.composer.insert_newline();
+                }
+                AppAction::None
+            }
+            // Some terminals encode Shift+Enter as LF, which crossterm reports as Ctrl+J in raw mode.
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if self.result_rx.is_none() {
                     self.composer.insert_newline();
                 }
                 AppAction::None
@@ -694,7 +745,7 @@ impl App {
             } => {
                 let prompt = self.prompt();
                 let trimmed = prompt.trim();
-                if trimmed.is_empty() || matches!(self.send_state, SendState::Pending) {
+                if trimmed.is_empty() || self.result_rx.is_some() {
                     return AppAction::None;
                 }
 
@@ -725,7 +776,7 @@ impl App {
                 AppAction::Submit(prompt)
             }
             _ => {
-                if matches!(self.send_state, SendState::Idle) {
+                if self.result_rx.is_none() {
                     self.clear_composer_notice();
                     self.composer.input(key);
                 }
@@ -786,6 +837,22 @@ impl App {
         }
     }
 
+    fn handle_crossterm_event(&mut self, event: CrosstermEvent) -> Option<AppAction> {
+        match event {
+            CrosstermEvent::Key(key) => Some(self.handle_key_event(key)),
+            CrosstermEvent::Mouse(mouse) => {
+                self.handle_mouse_event(mouse);
+                None
+            }
+            CrosstermEvent::Paste(text) => {
+                let _ = self.handle_paste(&text);
+                None
+            }
+            CrosstermEvent::Resize(_, _) => None,
+            _ => None,
+        }
+    }
+
     fn hydrate_from_messages(&mut self, messages: &[Message]) {
         for message in messages {
             match message {
@@ -799,6 +866,7 @@ impl App {
                     if let Some(previous) = self.last_response.replace(content.clone()) {
                         self.previous_response = Some(previous);
                     }
+                    self.response_markdown_cache = None;
                 }
                 _ => {}
             }
@@ -891,6 +959,14 @@ impl App {
                 if matches!(panel, FocusPanel::Events) {
                     self.panel_scrolls.insert(PanelId::Events, usize::MAX);
                 }
+                if matches!(panel, FocusPanel::Threads) && self.selected_thread.is_none() {
+                    let names = self.sorted_thread_names();
+                    if !names.is_empty() {
+                        self.selected_thread = Some(names[0].clone());
+                    }
+                    self.panel_scrolls.insert(PanelId::ThreadList, 0);
+                    self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+                }
                 ScreenMode::Focused(panel)
             }
         };
@@ -900,6 +976,7 @@ impl App {
         match self.screen {
             ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
             ScreenMode::Focused(FocusPanel::PreviousResponse) => PanelId::PreviousResponse,
+            ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
             _ => PanelId::Response,
         }
     }
@@ -962,9 +1039,14 @@ impl App {
         }
     }
 
-    fn refresh_workspace(&mut self) {
-        self.workspace = WorkspaceSnapshot::load(&self.metadata.cwd, self.inspect_root.as_deref());
-        self.last_workspace_refresh_at = Instant::now();
+    fn hydrate_all_episodes(&mut self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        if let Ok(episodes) = store::load_all_episodes(&self.metadata.store_path, session_id) {
+            self.all_episodes = episodes;
+        }
+        self.episode_markdown_cache.clear();
     }
 
     fn refresh_worksets(&mut self) {
@@ -976,7 +1058,55 @@ impl App {
 
     fn maybe_refresh_workspace(&mut self) {
         if self.last_workspace_refresh_at.elapsed() >= WORKSPACE_REFRESH_INTERVAL {
-            self.refresh_workspace();
+            self.last_workspace_refresh_at = Instant::now();
+            self.request_workspace_refresh();
+        }
+    }
+
+    fn request_workspace_refresh(&mut self) {
+        if self.workspace_refresh_pending {
+            return;
+        }
+        let tx = match &self.workspace_tx {
+            Some(tx) => tx.clone(),
+            None => return,
+        };
+        let cwd = self.metadata.cwd.clone();
+        let inspect_root = self.inspect_root.clone();
+        self.workspace_refresh_pending = true;
+        self.workspace_refresh_deadline = Some(Instant::now() + Duration::from_secs(5));
+        tokio::task::spawn_blocking(move || {
+            let snapshot = WorkspaceSnapshot::load(&cwd, inspect_root.as_deref());
+            let _ = tx.blocking_send(snapshot);
+        });
+    }
+
+    fn check_workspace_channel(&mut self) {
+        let rx = match &mut self.workspace_rx {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(snapshot) => {
+                self.workspace = snapshot;
+                self.workspace_refresh_pending = false;
+                self.workspace_refresh_deadline = None;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {
+                if self.workspace_refresh_pending {
+                    if let Some(deadline) = self.workspace_refresh_deadline {
+                        if Instant::now() >= deadline {
+                            self.workspace_refresh_pending = false;
+                            self.workspace_refresh_deadline = None;
+                        }
+                    }
+                }
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                self.workspace_rx = None;
+                self.workspace_refresh_pending = false;
+                self.workspace_refresh_deadline = None;
+            }
         }
     }
 
@@ -991,7 +1121,6 @@ impl App {
     }
 
     fn note_send_error(&mut self, error: String) {
-        self.pending_error_reported = true;
         self.push_timeline("send", format!("error • {error}"), Tone::Error);
     }
 
@@ -1087,7 +1216,7 @@ impl App {
                     || record.name == "bash"
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
-                    self.refresh_workspace();
+                    self.request_workspace_refresh();
                 }
                 if record.name.starts_with("workset_") {
                     self.refresh_worksets();
@@ -1159,8 +1288,9 @@ impl App {
                     format!("exit {exit_code}")
                 };
 
-                self.refresh_workspace();
+                self.request_workspace_refresh();
                 self.hydrate_threads_from_store();
+                self.hydrate_all_episodes();
 
                 let detail = if timed_out {
                     "thread complete • timed out".to_string()
@@ -1186,6 +1316,7 @@ impl App {
                         thread.updated_at = utc_hms();
                         thread.summary = truncate_episode_preview(&content);
                     }
+                    self.hydrate_all_episodes();
                     self.push_timeline(
                         thread_name,
                         format!(
@@ -1199,6 +1330,7 @@ impl App {
                     if let Some(previous) = self.last_response.replace(content.clone()) {
                         self.previous_response = Some(previous);
                     }
+                    self.response_markdown_cache = None;
                     self.panel_scrolls.insert(PanelId::Response, 0);
                     self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
                     self.push_timeline(
@@ -1212,7 +1344,6 @@ impl App {
                 thread_name,
                 message,
             } => {
-                self.pending_error_reported = true;
                 let actor = thread_name.unwrap_or_else(|| "run".to_string());
                 self.push_timeline(actor, format!("error • {message}"), Tone::Error);
             }
@@ -1245,6 +1376,49 @@ impl App {
             .count()
     }
 
+    fn sorted_thread_names(&self) -> Vec<String> {
+        let mut threads: Vec<&ThreadView> = self.threads.values().collect();
+        threads.sort_by(|left, right| {
+            matches!(right.state, ThreadState::Active)
+                .cmp(&matches!(left.state, ThreadState::Active))
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        threads.into_iter().map(|t| t.name.clone()).collect()
+    }
+
+    fn select_previous_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = current_idx.saturating_sub(1);
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+    }
+
+    fn select_next_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = (current_idx + 1).min(names.len().saturating_sub(1));
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+    }
+
     fn displayed_run_duration(&self) -> Duration {
         self.working_started_at
             .map(|started| started.elapsed())
@@ -1252,7 +1426,18 @@ impl App {
     }
 
     fn reset_life(&mut self) {
-        self.life_field = LifeField::default();
+        // Get the panel size from the last render or use defaults
+        let width = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.width as usize * 2)
+            .unwrap_or(160);
+        let height = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.height as usize * 4)
+            .unwrap_or(96);
+        self.life_field = LifeField::from_seed(&self.current_prompt, width, height);
     }
 
     fn advance_life(&mut self) {
@@ -1292,6 +1477,7 @@ impl App {
                 FocusPanel::PreviousResponse => {
                     self.render_focused_previous_response(frame, sections[1])
                 }
+                FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
             }
             self.render_composer(frame, sections[2]);
             if self.help_visible {
@@ -1397,7 +1583,7 @@ impl App {
             .map(short_session)
             .unwrap_or_else(|| "-".to_string());
         let runtime = format_runtime(self.displayed_run_duration());
-        let run_state = if matches!(self.send_state, SendState::Pending) {
+        let run_state = if self.result_rx.is_some() {
             ("RUNNING", Tone::Success)
         } else {
             ("IDLE", Tone::Muted)
@@ -1444,7 +1630,7 @@ impl App {
             Span::styled("  |  runtime ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 runtime,
-                Style::default().fg(if matches!(self.send_state, SendState::Pending) {
+                Style::default().fg(if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::White
@@ -1610,7 +1796,7 @@ impl App {
             for line in prompt_lines {
                 lines.push(Line::from(Span::styled(
                     line,
-                    Style::default().fg(Color::White),
+                    Style::default().fg(Color::DarkGray),
                 )));
             }
         } else {
@@ -1784,13 +1970,13 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "Ctrl-E / Ctrl-R / Ctrl-P",
+                    "Ctrl-T / Ctrl-E / Ctrl-R / Ctrl-P",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    " focus events / response / previous",
+                    " focus threads / events / response / previous",
                     Style::default().fg(Color::White),
                 ),
             ]),
@@ -1852,7 +2038,7 @@ impl App {
         let thread_width = width.min(18).max(10);
         let updated_width = 8usize;
         let action_width = width
-            .saturating_sub(state_width + thread_width + updated_width + 6)
+            .saturating_sub(state_width + thread_width + updated_width + 3)
             .max(8);
 
         let mut lines = vec![header_line(
@@ -1874,7 +2060,10 @@ impl App {
         });
 
         if threads.is_empty() {
-            lines.push(Line::from("No threads in this session yet."));
+            lines.push(Line::from(Span::styled(
+                "No threads in this session yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
         } else {
             for thread in threads {
                 let name = fit_text(&thread.name, thread_width);
@@ -1882,16 +2071,15 @@ impl App {
                 let updated = fit_text(&thread.updated_at, updated_width);
                 lines.push(Line::from(vec![
                     status_span(thread.state.label(), thread.state.tone()),
-                    Span::raw(" "),
                     Span::raw(pad_to(
                         "",
                         state_width.saturating_sub(thread.state.label().len()),
                     )),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::raw(pad_cell(&name, thread_width)),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::raw(pad_cell(&action, action_width)),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(updated, Style::default().fg(Color::DarkGray)),
                 ]));
             }
@@ -1929,8 +2117,22 @@ impl App {
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines = match self.last_response.as_deref() {
-            Some(response) => render_markdown_lines(response),
-            None => vec![Line::from("Waiting for the first orchestrator reply.")],
+            Some(response) => {
+                match &self.response_markdown_cache {
+                    Some((cached_text, cached_lines)) if cached_text == response => {
+                        cached_lines.clone()
+                    }
+                    _ => {
+                        let lines = render_markdown_lines(response);
+                        self.response_markdown_cache = Some((response.to_string(), lines.clone()));
+                        lines
+                    }
+                }
+            }
+            None => vec![Line::from(Span::styled(
+                "Waiting for the first orchestrator reply.",
+                Style::default().fg(Color::DarkGray),
+            ))],
         };
         let runtime = format_runtime(self.displayed_run_duration());
         let title = panel_title_segments(vec![
@@ -1943,7 +2145,7 @@ impl App {
             Span::raw(" "),
             Span::styled(
                 runtime,
-                Style::default().fg(if matches!(self.send_state, SendState::Pending) {
+                Style::default().fg(if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::Yellow
@@ -1956,7 +2158,10 @@ impl App {
     fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let lines = match self.previous_response.as_deref() {
             Some(response) => render_markdown_lines(response),
-            None => vec![Line::from("No previous orchestrator reply yet.")],
+            None => vec![Line::from(Span::styled(
+                "No previous orchestrator reply yet.",
+                Style::default().fg(Color::DarkGray),
+            ))],
         };
         self.render_selectable_rich_panel(
             frame,
@@ -1967,8 +2172,221 @@ impl App {
         );
     }
 
+    fn render_focused_threads(&mut self, frame: &mut ratatui::Frame, body: Rect) {
+        let left_width = (body.width as f64 * 0.33) as u16;
+        let left_width = left_width.max(20);
+        let right_width = body.width.saturating_sub(left_width + 1);
+
+        let left_area = Rect::new(body.x, body.y, left_width, body.height);
+        let right_area = Rect::new(body.x + left_width + 1, body.y, right_width, body.height);
+
+        self.render_thread_list_pane(frame, left_area);
+        self.render_episode_detail_pane(frame, right_area);
+    }
+
+    fn render_thread_list_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let thread_names = self.sorted_thread_names();
+
+        // Auto-select first thread if nothing selected
+        if self.selected_thread.is_none() && !thread_names.is_empty() {
+            self.selected_thread = Some(thread_names[0].clone());
+        }
+
+        // Auto-scroll to keep selected thread visible
+        if let Some(ref selected) = self.selected_thread {
+            if let Some(pos) = thread_names.iter().position(|n| n == selected) {
+                let scroll = self.panel_scrolls.entry(PanelId::ThreadList).or_insert(0);
+                let visible_height = area.height.saturating_sub(2) as usize;
+                if pos < *scroll {
+                    *scroll = pos;
+                } else if pos >= *scroll + visible_height {
+                    *scroll = pos.saturating_sub(visible_height - 1);
+                }
+            }
+        }
+
+        // Build styled lines for each thread
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let max_name_width = 18usize;
+        let width = inner_width(area);
+
+        for name in &thread_names {
+            let thread = &self.threads[name];
+            let is_selected = self.selected_thread.as_deref() == Some(name.as_str());
+
+            let state_icon = match thread.state {
+                ThreadState::Active => "●",
+                ThreadState::Idle => "○",
+            };
+
+            let state_color = match thread.state {
+                ThreadState::Active => Color::Green,
+                ThreadState::Idle => Color::Gray,
+            };
+
+            let display_name = fit_text(name, max_name_width);
+            let ep_count = format!("{:>3}e", thread.episodes);
+            let action_width = width
+                .saturating_sub(max_name_width + 8);
+            let display_action = fit_text(&thread.action, action_width);
+
+            let line_str = format!(
+                "{} {:<max_name_width$} {}  {}",
+                state_icon,
+                display_name,
+                ep_count,
+                display_action,
+                max_name_width = max_name_width,
+            );
+
+            if is_selected {
+                lines.push(Line::styled(
+                    line_str,
+                    Style::default().fg(Color::White).bg(Color::DarkGray),
+                ));
+            } else {
+                // Style state icon with state color, rest default
+                let mut spans = vec![Span::styled(
+                    state_icon.to_string(),
+                    Style::default().fg(state_color),
+                )];
+                let rest = &line_str[state_icon.len()..];
+                spans.push(Span::raw(rest.to_string()));
+                lines.push(Line::from(spans));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No threads yet",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadList,
+            panel_title("THREADS"),
+            lines,
+        );
+    }
+
+    fn render_episode_detail_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let episodes = self
+            .selected_thread
+            .as_ref()
+            .and_then(|name| self.all_episodes.get(name));
+
+        let thread_name = self.selected_thread.as_deref().unwrap_or("none");
+
+        // Build lines, bypassing the markdown pipeline and cache for empty states
+        // so that placeholder messages use the muted DarkGray style.
+        let lines: Vec<Line<'static>> = if let Some(eps) = episodes {
+            if eps.is_empty() {
+                let mut lines = Vec::new();
+                if let Some(thread) = self
+                    .selected_thread
+                    .as_ref()
+                    .and_then(|name| self.threads.get(name))
+                {
+                    let mut header = String::new();
+                    header.push_str(&format!("# Thread: {}\n", thread.name));
+                    header.push_str(&format!(
+                        "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                        thread.action, thread.episodes, thread.state, thread.updated_at
+                    ));
+                    header.push_str("\n---\n\n");
+                    lines.extend(render_markdown_lines(&header));
+                }
+                lines.push(Line::from(Span::styled(
+                    "No episodes yet.",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines
+            } else {
+                let mut combined = String::new();
+                if let Some(thread) = self
+                    .selected_thread
+                    .as_ref()
+                    .and_then(|name| self.threads.get(name))
+                {
+                    combined.push_str(&format!("# Thread: {}\n", thread.name));
+                    combined.push_str(&format!(
+                        "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                        thread.action, thread.episodes, thread.state, thread.updated_at
+                    ));
+                    combined.push_str("\n---\n\n");
+                }
+                for (i, ep) in eps.iter().enumerate() {
+                    combined.push_str(&format!(
+                        "### Episode {} | {} | action: {}\n\n",
+                        i + 1,
+                        ep.created_at,
+                        ep.action
+                    ));
+                    combined.push_str(&ep.content);
+                    if i < eps.len() - 1 {
+                        combined.push_str("\n\n---\n\n");
+                    }
+                }
+                match self.episode_markdown_cache.get(thread_name) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        let rendered = render_markdown_lines(&combined);
+                        self.episode_markdown_cache
+                            .insert(thread_name.to_string(), rendered.clone());
+                        rendered
+                    }
+                }
+            }
+        } else if self.selected_thread.is_some() {
+            let mut lines = Vec::new();
+            if let Some(thread) = self
+                .selected_thread
+                .as_ref()
+                .and_then(|name| self.threads.get(name))
+            {
+                let mut header = String::new();
+                header.push_str(&format!("# Thread: {}\n", thread.name));
+                header.push_str(&format!(
+                    "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                    thread.action, thread.episodes, thread.state, thread.updated_at
+                ));
+                header.push_str("\n---\n\n");
+                lines.extend(render_markdown_lines(&header));
+            }
+            lines.push(Line::from(Span::styled(
+                "Thread is running... no episodes yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
+            lines
+        } else {
+            vec![Line::from(Span::styled(
+                "Select a thread to view episodes.",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        };
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "EPISODES — ".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(thread_name.to_string()),
+        ]);
+        self.render_selectable_rich_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadEpisodes,
+            title,
+            lines,
+        );
+    }
+
     fn events_panel_title(&self) -> Line<'static> {
-        let dot_color = if matches!(self.send_state, SendState::Pending) {
+        let dot_color = if self.result_rx.is_some() {
             Color::Green
         } else {
             Color::Yellow
@@ -1988,8 +2406,11 @@ impl App {
     fn render_tools_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let width = inner_width(area);
         let tool_width = width.min(14).max(9);
+        let stat_width = 5usize;
         let duration_width = 8usize;
-        let target_width = width.saturating_sub(tool_width + duration_width + 8).max(8);
+        let target_width = width
+            .saturating_sub(tool_width + stat_width + duration_width + 3) // 3 = three 1-space gaps
+            .max(8);
         let mut lines = vec![header_line(
             &[
                 ("STAT", 5),
@@ -2004,16 +2425,18 @@ impl App {
         active.sort_by(|left, right| left.name.cmp(&right.name));
         for tool in active {
             let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = ToolStatus::Running.label();
             lines.push(Line::from(vec![
-                status_span(ToolStatus::Running.label(), ToolStatus::Running.tone()),
+                status_span(stat_label, ToolStatus::Running.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
                 Span::raw(" "),
                 Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw("  "),
-                Span::raw(pad_cell(
-                    &fit_text(&tool.target, target_width),
-                    target_width,
-                )),
-                Span::raw("  "),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&fit_text(&tool.target, target_width), target_width),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(" "),
                 Span::styled(
                     pad_cell(&format_duration(tool.started_at.elapsed()), duration_width),
                     Style::default().fg(Color::Gray),
@@ -2027,16 +2450,18 @@ impl App {
             .take(area.height.saturating_sub(2) as usize)
         {
             let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = tool.status.label();
             lines.push(Line::from(vec![
-                status_span(tool.status.label(), tool.status.tone()),
+                status_span(stat_label, tool.status.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
                 Span::raw(" "),
                 Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw("  "),
-                Span::raw(pad_cell(
-                    &fit_text(&tool.target, target_width),
-                    target_width,
-                )),
-                Span::raw("  "),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&fit_text(&tool.target, target_width), target_width),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(" "),
                 Span::styled(
                     pad_cell(&format_duration(tool.duration), duration_width),
                     Style::default().fg(Color::Gray),
@@ -2045,7 +2470,10 @@ impl App {
         }
 
         if lines.len() == 1 {
-            lines.push(Line::from("No tool activity yet."));
+            lines.push(Line::from(Span::styled(
+                "No tool activity yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
         }
 
         render_lines_panel(frame, area, "TOOLS", lines);
@@ -2057,7 +2485,7 @@ impl App {
         let status_width = 9usize;
         let count_width = 3usize;
         let id_width = width
-            .saturating_sub(kind_width + status_width + count_width + 8)
+            .saturating_sub(kind_width + status_width + count_width + 3)
             .max(8);
         let mut lines = vec![header_line(
             &[
@@ -2076,7 +2504,7 @@ impl App {
             )));
         } else if self.worksets.items.is_empty() {
             lines.push(Line::from(Span::styled(
-                "No worksets yet. Try /batch, /batch-run, /plan, or /review.",
+                "No worksets yet.",
                 Style::default().fg(Color::DarkGray),
             )));
         } else {
@@ -2087,17 +2515,17 @@ impl App {
                         pad_cell(&fit_text(&workset.kind, kind_width), kind_width),
                         workset_kind_style(&workset.kind),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         pad_cell(&fit_text(&workset.status, status_width), status_width),
                         workset_status_style(&workset.status),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         pad_cell(&item_count.to_string(), count_width),
                         Style::default().fg(Color::Gray),
                     ),
-                    Span::raw("  "),
+                    Span::raw(" "),
                     Span::styled(
                         fit_text(&workset.id, id_width),
                         Style::default()
@@ -2149,15 +2577,26 @@ impl App {
             }
             if reserve_total == 1 {
                 lines.push(Line::from(vec![
-                    Span::styled("total", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        pad_cell("T", 1),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::raw(" "),
                     Span::styled(
-                        format!("+{}", self.workspace.total_additions),
+                        format!(
+                            "{:>width$}",
+                            format!("+{}", self.workspace.total_additions),
+                            width = 5
+                        ),
                         Style::default().fg(Color::Green),
                     ),
                     Span::raw(" "),
                     Span::styled(
-                        format!("-{}", self.workspace.total_deletions),
+                        format!(
+                            "{:>width$}",
+                            format!("-{}", self.workspace.total_deletions),
+                            width = 5
+                        ),
                         Style::default().fg(Color::Red),
                     ),
                 ]));
@@ -2176,7 +2615,7 @@ impl App {
             return;
         }
 
-        if matches!(self.send_state, SendState::Pending) {
+        if self.result_rx.is_some() {
             self.life_field
                 .ensure_size(inner.width as usize * 2, inner.height as usize * 4);
             let lines = self
@@ -2572,7 +3011,6 @@ pub async fn run(
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
-    let (result_tx, mut result_rx) = mpsc::unbounded_channel::<Result<String, String>>();
 
     agent.set_event_sink(EventSink::channel(event_tx));
     let agent = Arc::new(Mutex::new(agent));
@@ -2592,6 +3030,9 @@ pub async fn run(
     let input_thread = spawn_input_thread(running.clone(), input_tx);
 
     let mut app = App::new(metadata, &restored_messages, start_in_session_picker);
+    let (ws_tx, ws_rx) = mpsc::channel::<WorkspaceSnapshot>(1);
+    app.workspace_tx = Some(ws_tx);
+    app.workspace_rx = Some(ws_rx);
     let mut animation_tick = time::interval(Duration::from_millis(75));
     animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     terminal.draw(|frame| app.render(frame))?;
@@ -2600,7 +3041,6 @@ pub async fn run(
         submit_prompt(
             prompt,
             agent.clone(),
-            result_tx.clone(),
             &mut app,
             &mut terminal,
         )?;
@@ -2611,59 +3051,90 @@ pub async fn run(
     let loop_result = async {
         while !app.quit {
             tokio::select! {
-                Some(event) = input_rx.recv() => {
+                event = input_rx.recv() => {
                     match event {
-                        CrosstermEvent::Key(key) => {
-                            match app.handle_key_event(key) {
-                                AppAction::Submit(prompt) => {
-                                    submit_prompt(prompt, agent.clone(), result_tx.clone(), &mut app, &mut terminal)?;
+                        Some(event) => {
+                            let mut terminal_action = false;
+                            if let Some(action) = app.handle_crossterm_event(event) {
+                                match action {
+                                    AppAction::Submit(prompt) => {
+                                        submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
+                                        terminal_action = true;
+                                    }
+                                    AppAction::ResumeSession(session_id) => {
+                                        outcome = TuiOutcome::ResumeSession(session_id);
+                                        app.quit = true;
+                                        terminal_action = true;
+                                    }
+                                    AppAction::Quit | AppAction::None => {}
                                 }
-                                AppAction::ResumeSession(session_id) => {
-                                    outcome = TuiOutcome::ResumeSession(session_id);
-                                    app.quit = true;
+                            }
+                            if !terminal_action {
+                                while let Ok(next_event) = input_rx.try_recv() {
+                                    if let Some(action) = app.handle_crossterm_event(next_event) {
+                                        match action {
+                                            AppAction::Submit(prompt) => {
+                                                submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
+                                                break;
+                                            }
+                                            AppAction::ResumeSession(session_id) => {
+                                                outcome = TuiOutcome::ResumeSession(session_id);
+                                                app.quit = true;
+                                                break;
+                                            }
+                                            AppAction::Quit => {
+                                                app.quit = true;
+                                                break;
+                                            }
+                                            AppAction::None => {}
+                                        }
+                                    }
                                 }
-                                AppAction::Quit | AppAction::None => {}
                             }
                         }
-                        CrosstermEvent::Mouse(mouse) => {
-                            app.handle_mouse_event(mouse);
+                        None => {
+                            eprintln!("ERROR: input thread terminated unexpectedly, shutting down");
+                            app.quit = true;
                         }
-                        CrosstermEvent::Paste(text) => {
-                            let _ = app.handle_paste(&text);
-                        }
-                        CrosstermEvent::Resize(_, _) => {}
-                        _ => {}
                     }
                 }
                 Some(agent_event) = event_rx.recv() => {
                     app.apply_agent_event(agent_event);
                 }
-                Some(result) = result_rx.recv() => {
-                    let completed_duration = app
-                        .working_started_at
-                        .map(|started| started.elapsed())
-                        .unwrap_or_default();
-                    app.send_state = SendState::Idle;
-                    app.working_frame = 0;
-                    app.working_started_at = None;
-                    app.reset_life();
-                    if let Some(snapshot) = session_snapshot.as_mut() {
-                        let agent = agent.lock().await;
-                        persist_session_snapshot(snapshot, &agent)?;
+                result = async {
+                    match app.result_rx.as_mut() {
+                        Some(rx) => match rx.await {
+                            Ok(val) => Some(val),
+                            Err(_) => Some(Err("Internal error: agent task terminated unexpectedly".to_string())),
+                        },
+                        None => std::future::pending::<Option<Result<String, String>>>().await,
                     }
-                    match result {
-                        Ok(_) => {
-                            app.last_response_duration = completed_duration;
+                } => {
+                    if let Some(result) = result {
+                        let completed_duration = app
+                            .working_started_at
+                            .map(|started| started.elapsed())
+                            .unwrap_or_default();
+                        app.result_rx = None;
+                        app.working_frame = 0;
+                        app.working_started_at = None;
+                        app.reset_life();
+                        if let Some(snapshot) = session_snapshot.as_mut() {
+                            let agent = agent.lock().await;
+                            persist_session_snapshot(snapshot, &agent)?;
                         }
-                        Err(error) => {
-                            if !app.pending_error_reported {
+                        match result {
+                            Ok(_) => {
+                                app.last_response_duration = completed_duration;
+                            }
+                            Err(error) => {
                                 app.note_send_error(error);
                             }
                         }
                     }
                 }
                 _ = animation_tick.tick() => {
-                    if matches!(app.send_state, SendState::Pending) {
+                    if app.result_rx.is_some() {
                         app.working_frame = app.working_frame.wrapping_add(1);
                         app.advance_life();
                     }
@@ -2671,6 +3142,7 @@ pub async fn run(
                 }
             }
 
+            app.check_workspace_channel();
             terminal.draw(|frame| app.render(frame))?;
         }
 
@@ -2704,18 +3176,19 @@ pub async fn run(
 fn submit_prompt(
     prompt: String,
     agent: Arc<Mutex<Agent>>,
-    result_tx: mpsc::UnboundedSender<Result<String, String>>,
     app: &mut App,
     terminal: &mut UiTerminal,
 ) -> Result<()> {
     let agent_prompt = expand_user_prompt(&prompt);
     app.note_prompt_submitted(&prompt);
+    app.current_prompt = prompt;
     app.clear_composer();
-    app.send_state = SendState::Pending;
-    app.pending_error_reported = false;
     app.working_frame = 0;
     app.working_started_at = Some(Instant::now());
     app.reset_life();
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.result_rx = Some(rx);
 
     tokio::spawn(async move {
         let result = {
@@ -2725,7 +3198,7 @@ fn submit_prompt(
                 .await
                 .map_err(|error| error.to_string())
         };
-        let _ = result_tx.send(result);
+        let _ = tx.send(result);
     });
 
     terminal.draw(|frame| app.render(frame))?;
@@ -2760,413 +3233,6 @@ fn render_lines_panel_with_title(
     frame.render_widget(Clear, inner);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
-
-impl LifeField {
-    fn ensure_size(&mut self, width: usize, height: usize) {
-        let width = width.max(2);
-        let height = height.max(4);
-        if self.width == width && self.height == height && !self.cells.is_empty() {
-            return;
-        }
-
-        self.width = width;
-        self.height = height;
-        self.cells = seed_life_cells(width, height);
-        self.low_activity_ticks = 0;
-        self.injection_phase = 0;
-    }
-
-    fn step(&mut self) {
-        if self.width == 0 || self.height == 0 || self.cells.is_empty() {
-            return;
-        }
-
-        let mut next = vec![false; self.cells.len()];
-        let mut alive = 0usize;
-        let mut changed = 0usize;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let idx = self.index(x, y);
-                let neighbors = self.live_neighbor_count(x, y);
-                let next_alive =
-                    matches!((self.cells[idx], neighbors), (true, 2 | 3) | (false, 3 | 6));
-                next[idx] = next_alive;
-                alive += usize::from(next_alive);
-                changed += usize::from(self.cells[idx] != next_alive);
-            }
-        }
-
-        self.cells = if alive == 0 {
-            self.low_activity_ticks = 0;
-            self.injection_phase = 0;
-            seed_life_cells(self.width, self.height)
-        } else {
-            let low_activity_threshold = (self.width * self.height / 384).max(6);
-            if changed <= low_activity_threshold {
-                self.low_activity_ticks = self.low_activity_ticks.saturating_add(1);
-            } else {
-                self.low_activity_ticks = 0;
-            }
-
-            if self.low_activity_ticks >= 16 {
-                inject_showcase_layout(&mut next, self.width, self.height, self.injection_phase);
-                self.injection_phase =
-                    (self.injection_phase + 1) % LIFE_INJECTION_LAYOUTS.len().max(1);
-                self.low_activity_ticks = 4;
-            }
-
-            next
-        };
-    }
-
-    fn render_lines(&self, char_width: usize, char_height: usize) -> Vec<Line<'static>> {
-        let mut lines = Vec::with_capacity(char_height);
-        for char_y in 0..char_height {
-            let mut text = String::with_capacity(char_width);
-            for char_x in 0..char_width {
-                let dot_x = char_x * 2;
-                let dot_y = char_y * 4;
-                text.push(self.braille_char(dot_x, dot_y));
-            }
-            lines.push(Line::from(Span::raw(text)));
-        }
-        lines
-    }
-
-    fn braille_char(&self, dot_x: usize, dot_y: usize) -> char {
-        let mut bits = 0u32;
-        for local_y in 0..4 {
-            for local_x in 0..2 {
-                let x = dot_x + local_x;
-                let y = dot_y + local_y;
-                if x < self.width && y < self.height && self.cells[self.index(x, y)] {
-                    bits |= match (local_x, local_y) {
-                        (0, 0) => 0x01,
-                        (0, 1) => 0x02,
-                        (0, 2) => 0x04,
-                        (0, 3) => 0x40,
-                        (1, 0) => 0x08,
-                        (1, 1) => 0x10,
-                        (1, 2) => 0x20,
-                        (1, 3) => 0x80,
-                        _ => 0,
-                    };
-                }
-            }
-        }
-        char::from_u32(0x2800 + bits).unwrap_or(' ')
-    }
-
-    fn live_neighbor_count(&self, x: usize, y: usize) -> u8 {
-        let mut count = 0u8;
-        for dy in [-1isize, 0, 1] {
-            for dx in [-1isize, 0, 1] {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-                let nx = wrap_index(x, dx, self.width);
-                let ny = wrap_index(y, dy, self.height);
-                if self.cells[self.index(nx, ny)] {
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
-    fn index(&self, x: usize, y: usize) -> usize {
-        y * self.width + x
-    }
-}
-
-fn seed_life_cells(width: usize, height: usize) -> Vec<bool> {
-    let mut cells = vec![false; width.saturating_mul(height)];
-    if width == 0 || height == 0 {
-        return cells;
-    }
-
-    inject_showcase_layout(&mut cells, width, height, 0);
-
-    cells
-}
-
-fn inject_showcase_layout(cells: &mut [bool], width: usize, height: usize, phase: usize) {
-    if width == 0 || height == 0 || cells.is_empty() {
-        return;
-    }
-
-    let layouts_len = LIFE_INJECTION_LAYOUTS.len();
-    if layouts_len == 0 {
-        return;
-    }
-
-    for placement in LIFE_INJECTION_LAYOUTS[phase % layouts_len] {
-        inject_pattern(cells, width, height, *placement);
-    }
-}
-
-#[derive(Clone, Copy)]
-struct SeedPattern {
-    width: usize,
-    height: usize,
-    cells: &'static [(usize, usize)],
-}
-
-#[derive(Clone, Copy)]
-struct PatternPlacement {
-    pattern: SeedPattern,
-    dx: isize,
-    dy: isize,
-    rotation: u8,
-    flip: bool,
-}
-
-const GLIDER_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)],
-};
-
-const R_PENTOMINO_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 0), (0, 1), (1, 1), (1, 2)],
-};
-
-const ACORN_PATTERN: SeedPattern = SeedPattern {
-    width: 7,
-    height: 3,
-    cells: &[(1, 0), (3, 1), (0, 2), (1, 2), (4, 2), (5, 2), (6, 2)],
-};
-
-const LWSS_PATTERN: SeedPattern = SeedPattern {
-    width: 5,
-    height: 4,
-    cells: &[
-        (1, 0),
-        (2, 0),
-        (3, 0),
-        (4, 0),
-        (0, 1),
-        (4, 1),
-        (4, 2),
-        (0, 3),
-        (3, 3),
-    ],
-};
-
-const LIFE_LAYOUT_WIDTH_SCALE: isize = 5;
-
-const LIFE_INJECTION_LAYOUTS: &[&[PatternPlacement]] = &[
-    &[
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: -14,
-            dy: -8,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 14,
-            dy: -8,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: -14,
-            dy: 8,
-            rotation: 3,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 14,
-            dy: 8,
-            rotation: 2,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: 0,
-            dy: -1,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -5,
-            dy: 4,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 5,
-            dy: 4,
-            rotation: 2,
-            flip: true,
-        },
-    ],
-    &[
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: -18,
-            dy: -6,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 18,
-            dy: 6,
-            rotation: 2,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: -8,
-            dy: 0,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: ACORN_PATTERN,
-            dx: 8,
-            dy: 0,
-            rotation: 3,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 0,
-            dy: -12,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: GLIDER_PATTERN,
-            dx: 0,
-            dy: 12,
-            rotation: 2,
-            flip: false,
-        },
-    ],
-    &[
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -10,
-            dy: -4,
-            rotation: 0,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 10,
-            dy: -4,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: -10,
-            dy: 4,
-            rotation: 3,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: R_PENTOMINO_PATTERN,
-            dx: 10,
-            dy: 4,
-            rotation: 2,
-            flip: true,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 0,
-            dy: -10,
-            rotation: 1,
-            flip: false,
-        },
-        PatternPlacement {
-            pattern: LWSS_PATTERN,
-            dx: 0,
-            dy: 10,
-            rotation: 3,
-            flip: false,
-        },
-    ],
-];
-
-fn inject_pattern(cells: &mut [bool], width: usize, height: usize, placement: PatternPlacement) {
-    if width == 0 || height == 0 {
-        return;
-    }
-
-    let center_x = (width / 2) as isize;
-    let center_y = (height / 2) as isize;
-    let anchor_x = center_x + placement.dx.saturating_mul(LIFE_LAYOUT_WIDTH_SCALE);
-    let anchor_y = center_y + placement.dy;
-    let (placed_width, placed_height) = rotated_dimensions(
-        placement.pattern.width,
-        placement.pattern.height,
-        placement.rotation,
-    );
-    let origin_x = anchor_x - placed_width as isize / 2;
-    let origin_y = anchor_y - placed_height as isize / 2;
-
-    for &(x, y) in placement.pattern.cells {
-        let (mut px, py) = rotate_cell(
-            x,
-            y,
-            placement.pattern.width,
-            placement.pattern.height,
-            placement.rotation,
-        );
-        if placement.flip {
-            px = placed_width.saturating_sub(1).saturating_sub(px);
-        }
-        let world_x = wrap_index_signed(origin_x + px as isize, width);
-        let world_y = wrap_index_signed(origin_y + py as isize, height);
-        cells[world_y * width + world_x] = true;
-    }
-}
-
-fn wrap_index(index: usize, delta: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    ((index as isize + delta).rem_euclid(len as isize)) as usize
-}
-
-fn wrap_index_signed(index: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    index.rem_euclid(len as isize) as usize
-}
-
-fn rotated_dimensions(width: usize, height: usize, rotation: u8) -> (usize, usize) {
-    if rotation % 2 == 0 {
-        (width, height)
-    } else {
-        (height, width)
-    }
-}
-
-fn rotate_cell(x: usize, y: usize, width: usize, height: usize, rotation: u8) -> (usize, usize) {
-    match rotation % 4 {
-        0 => (x, y),
-        1 => (height.saturating_sub(1).saturating_sub(y), x),
-        2 => (
-            width.saturating_sub(1).saturating_sub(x),
-            height.saturating_sub(1).saturating_sub(y),
-        ),
-        _ => (y, width.saturating_sub(1).saturating_sub(x)),
-    }
-}
-
 fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
     let (action, detail) = entry
         .detail
@@ -3196,7 +3262,7 @@ fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
 
     let mut spans = vec![
         Span::styled(timestamp, Style::default().fg(Color::DarkGray)),
-        Span::raw("  "),
+        Span::raw(" "),
         Span::styled(
             tone_glyph(entry.tone),
             Style::default().fg(entry.tone.color()),
@@ -3224,9 +3290,9 @@ fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
 }
 
 fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static> {
-    let status_width = 4usize;
-    let delta_width = 6usize;
-    let path_width = width.saturating_sub(status_width + delta_width * 2 + 4);
+    let status_width = 1usize;
+    let delta_width = 5usize;
+    let path_width = width.saturating_sub(status_width + delta_width * 2 + 3);
     let additions = file
         .additions
         .map(|value| format!("+{value}"))
@@ -3238,7 +3304,7 @@ fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static
 
     Line::from(vec![
         Span::styled(
-            pad_cell(&file.status, status_width),
+            file.status.clone(),
             file_status_style(&file.status),
         ),
         Span::raw(" "),
@@ -3341,7 +3407,7 @@ fn header_line(columns: &[(&str, usize)], width: usize) -> Line<'static> {
     let mut content = String::new();
     for (index, (label, column_width)) in columns.iter().enumerate() {
         if index > 0 {
-            content.push_str("  ");
+            content.push_str(" ");
         }
         content.push_str(&pad_cell(label, *column_width));
     }
@@ -3743,7 +3809,7 @@ fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Change
 
         let normalized_status = if status == "??" {
             counts.untracked += 1;
-            "??".to_string()
+            "?".to_string()
         } else {
             let x = status.chars().next().unwrap_or(' ');
             let y = status.chars().nth(1).unwrap_or(' ');
@@ -3752,18 +3818,18 @@ fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Change
             }
             if status.contains('R') {
                 counts.renamed += 1;
-                "REN".to_string()
+                "R".to_string()
             } else if status.contains('A') {
                 counts.added += 1;
-                "ADD".to_string()
+                "A".to_string()
             } else if status.contains('D') {
                 counts.deleted += 1;
-                "DEL".to_string()
+                "D".to_string()
             } else {
                 if x != ' ' || y != ' ' {
                     counts.modified += 1;
                 }
-                "MOD".to_string()
+                "M".to_string()
             }
         };
 
@@ -4946,11 +5012,11 @@ fn actor_color(actor: &str, tone: Tone) -> Color {
 
 fn file_status_style(status: &str) -> Style {
     let color = match status {
-        "ADD" => Color::Green,
-        "DEL" => Color::Red,
-        "REN" => Color::Magenta,
-        "??" => Color::Cyan,
-        "MOD" => Color::Yellow,
+        "A" => Color::Green,
+        "D" => Color::Red,
+        "R" => Color::Magenta,
+        "?" => Color::Cyan,
+        "M" => Color::Yellow,
         _ => Color::Gray,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -5088,6 +5154,19 @@ mod tests {
         app.composer.insert_str("hello");
 
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.prompt(), "hello\n");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn control_j_inserts_newline_without_deleting_text() {
+        let dir = temp_dir("ctrl-j-newline");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("hello");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
 
         assert!(matches!(action, AppAction::None));
         assert_eq!(app.prompt(), "hello\n");

@@ -4,6 +4,7 @@ pub mod agent;
 pub mod agents_md;
 pub mod api;
 pub mod events;
+pub mod life;
 pub mod mcp;
 pub mod paths;
 pub mod sandbox;
