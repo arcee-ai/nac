@@ -29,7 +29,7 @@ pub fn parse_keys(input: &str) -> Vec<u8> {
 fn expand_key(key: &str) -> Option<Vec<u8>> {
     let u = key.to_uppercase();
     match u.as_str() {
-        "RET" | "RETURN" | "ENTER" => Some(vec![b'\n']),
+        "RET" | "RETURN" | "ENTER" => Some(vec![b'\r']),
         "TAB" => Some(vec![b'\t']),
         "BSPC" | "BACKSPACE" => Some(vec![0x7f]),
         "ESC" | "ESCAPE" => Some(vec![0x1b]),
@@ -70,8 +70,8 @@ mod tests {
 
     #[test]
     fn ret_and_enter() {
-        assert_eq!(parse_keys("ls<RET>"), b"ls\n".to_vec());
-        assert_eq!(parse_keys("pwd<ENTER>"), b"pwd\n".to_vec());
+        assert_eq!(parse_keys("ls<RET>"), b"ls\r".to_vec());
+        assert_eq!(parse_keys("pwd<ENTER>"), b"pwd\r".to_vec());
     }
 
     #[test]
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn mixed() {
-        assert_eq!(parse_keys("cargo build<RET>"), b"cargo build\n".to_vec());
+        assert_eq!(parse_keys("cargo build<RET>"), b"cargo build\r".to_vec());
     }
 
     #[test]
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn case_insensitive() {
-        assert_eq!(parse_keys("<ret>"), b"\n".to_vec());
-        assert_eq!(parse_keys("<Ret>"), b"\n".to_vec());
+        assert_eq!(parse_keys("<ret>"), b"\r".to_vec());
+        assert_eq!(parse_keys("<Ret>"), b"\r".to_vec());
     }
 }

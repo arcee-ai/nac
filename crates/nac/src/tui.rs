@@ -449,7 +449,7 @@ struct App {
     threads: HashMap<String, ThreadView>,
     all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
     episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
-    response_markdown_cache: Option<(String, Vec<Line<'static>>)>,
+    response_markdown_cache: Option<(String, usize, Vec<Line<'static>>)>,
     selected_thread: Option<String>,
     active_tools: HashMap<String, ActiveTool>,
     recent_tools: VecDeque<ToolRecord>,
@@ -2138,15 +2138,19 @@ impl App {
     }
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let lines = match self.last_response.as_deref() {
             Some(response) => {
                 match &self.response_markdown_cache {
-                    Some((cached_text, cached_lines)) if cached_text == response => {
+                    Some((cached_text, cached_width, cached_lines))
+                        if cached_text == response && *cached_width == available_width =>
+                    {
                         cached_lines.clone()
                     }
                     _ => {
-                        let lines = render_markdown_lines(response);
-                        self.response_markdown_cache = Some((response.to_string(), lines.clone()));
+                        let lines = render_markdown_lines(response, Some(available_width));
+                        self.response_markdown_cache =
+                            Some((response.to_string(), available_width, lines.clone()));
                         lines
                     }
                 }
@@ -2178,8 +2182,9 @@ impl App {
     }
 
     fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let lines = match self.previous_response.as_deref() {
-            Some(response) => render_markdown_lines(response),
+            Some(response) => render_markdown_lines(response, Some(available_width)),
             None => vec![Line::from(Span::styled(
                 "No previous orchestrator reply yet.",
                 Style::default().fg(Color::DarkGray),
@@ -2295,6 +2300,7 @@ impl App {
     }
 
     fn render_episode_detail_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let episodes = self
             .selected_thread
             .as_ref()
@@ -2319,7 +2325,7 @@ impl App {
                         thread.action, thread.episodes, thread.state, thread.updated_at
                     ));
                     header.push_str("\n---\n\n");
-                    lines.extend(render_markdown_lines(&header));
+                    lines.extend(render_markdown_lines(&header, Some(available_width)));
                 }
                 lines.push(Line::from(Span::styled(
                     "No episodes yet.",
@@ -2352,12 +2358,13 @@ impl App {
                         combined.push_str("\n\n---\n\n");
                     }
                 }
-                match self.episode_markdown_cache.get(thread_name) {
+                let cache_key = format!("{}:{}", thread_name, available_width);
+                match self.episode_markdown_cache.get(&cache_key) {
                     Some(cached) => cached.clone(),
                     None => {
-                        let rendered = render_markdown_lines(&combined);
+                        let rendered = render_markdown_lines(&combined, Some(available_width));
                         self.episode_markdown_cache
-                            .insert(thread_name.to_string(), rendered.clone());
+                            .insert(cache_key, rendered.clone());
                         rendered
                     }
                 }
@@ -2376,7 +2383,7 @@ impl App {
                     thread.action, thread.episodes, thread.state, thread.updated_at
                 ));
                 header.push_str("\n---\n\n");
-                lines.extend(render_markdown_lines(&header));
+                lines.extend(render_markdown_lines(&header, Some(available_width)));
             }
             lines.push(Line::from(Span::styled(
                 "Thread is running... no episodes yet.",
@@ -4401,7 +4408,7 @@ fn take_chars(text: &str, count: usize) -> String {
     text.chars().take(count).collect()
 }
 
-fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
+fn render_markdown_lines(text: &str, max_width: Option<usize>) -> Vec<Line<'static>> {
     if text.is_empty() {
         return vec![Line::from("")];
     }
@@ -4422,7 +4429,7 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
             continue;
         }
 
-        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index) {
+        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index, max_width) {
             rendered.extend(table_lines);
             index = next_index;
             continue;
@@ -4816,6 +4823,7 @@ fn render_markdown_code_block(
 fn render_markdown_table_block(
     raw_lines: &[&str],
     start: usize,
+    max_width: Option<usize>,
 ) -> Option<(usize, Vec<Line<'static>>)> {
     if start + 1 >= raw_lines.len() {
         return None;
@@ -4853,36 +4861,152 @@ fn render_markdown_table_block(
         })
         .collect();
 
-    let mut widths = vec![0usize; delimiter];
+    // Compute natural column widths (max chars per column)
+    let n_cols = delimiter;
+    let mut natural_widths = vec![0usize; n_cols];
     for (idx, cell) in header_cells.iter().enumerate() {
-        widths[idx] = widths[idx].max(cell.chars().count());
+        natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
     }
     for row in &body_cells {
         for (idx, cell) in row.iter().enumerate() {
-            widths[idx] = widths[idx].max(cell.chars().count());
+            natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
         }
     }
 
+    // Determine final widths — either natural or constrained by max_width
+    let final_widths: Vec<usize> = if let Some(mw) = max_width {
+        let overhead = 3 * n_cols + 1; // │ + space+content+space + separator per column
+        if mw <= overhead {
+            // Viewport too narrow for table structure; use natural widths
+            natural_widths.clone()
+        } else {
+            let available = mw - overhead;
+            let sum_natural: usize = natural_widths.iter().sum();
+            if sum_natural <= available {
+                natural_widths.clone()
+            } else {
+                constrain_widths(&natural_widths, available)
+            }
+        }
+    } else {
+        natural_widths.clone()
+    };
+
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
-    lines.push(render_table_border(&widths, '┌', '┬', '┐'));
-    lines.push(render_table_row(
-        &header_cells,
-        &widths,
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    ));
-    lines.push(render_table_border(&widths, '├', '┼', '┤'));
-    for row in &body_cells {
-        lines.push(render_table_row(
-            row,
-            &widths,
-            Style::default().fg(Color::White),
-        ));
+    lines.push(render_table_border(&final_widths, '┌', '┬', '┐'));
+
+    // Header row — wrap when column widths are constrained
+    if final_widths != natural_widths {
+        let header_wrapped: Vec<Vec<String>> = header_cells
+            .iter()
+            .zip(final_widths.iter())
+            .map(|(cell, &w)| wrap_soft_line(cell, w.max(3)))
+            .collect();
+        lines.extend(render_table_row_multiline(&header_wrapped, &final_widths, header_style));
+    } else {
+        lines.push(render_table_row(&header_cells, &final_widths, header_style));
     }
-    lines.push(render_table_border(&widths, '└', '┴', '┘'));
+    lines.push(render_table_border(&final_widths, '├', '┼', '┤'));
+
+    // Body rows with wrapping support when width is constrained
+    let body_style = Style::default().fg(Color::White);
+    if final_widths != natural_widths {
+        // Widths are constrained — wrap cell contents
+        for row in &body_cells {
+            let cells_wrapped: Vec<Vec<String>> = row
+                .iter()
+                .zip(final_widths.iter())
+                .map(|(cell, &col_width)| {
+                    wrap_soft_line(cell, col_width.max(3))
+                })
+                .collect();
+            lines.extend(render_table_row_multiline(
+                &cells_wrapped,
+                &final_widths,
+                body_style,
+            ));
+        }
+    } else {
+        // Natural widths fit — use single-line rendering (fast path, identical to original behavior)
+        for row in &body_cells {
+            lines.push(render_table_row(row, &final_widths, body_style));
+        }
+    }
+    lines.push(render_table_border(&final_widths, '└', '┴', '┘'));
 
     Some((index, lines))
+}
+
+/// Distribute `available` content width across `n` columns proportionally
+/// to their natural widths, with a minimum of 3 chars per column.
+fn constrain_widths(natural: &[usize], available: usize) -> Vec<usize> {
+    let n = natural.len();
+    let min_width = 3usize;
+    let baseline: usize = n * min_width;
+    if available <= baseline {
+        return vec![min_width; n];
+    }
+    let remaining = available - baseline;
+    let sum_natural: usize = natural.iter().sum();
+    // Allocate proportional shares
+    let mut widths: Vec<usize> = natural
+        .iter()
+        .map(|&nat| {
+            if nat <= min_width {
+                min_width
+            } else {
+                // Proportional allocation of remaining beyond baseline
+                let extra = ((nat - min_width) as f64 / sum_natural.max(1) as f64 * remaining as f64)
+                    .round() as usize;
+                (min_width + extra).min(nat) // cap at natural width
+            }
+        })
+        .collect();
+    // Redistribute any remaining pixels one-by-one to columns that haven't reached their natural width
+    let mut used: usize = widths.iter().sum();
+    while used < available {
+        let mut assigned = false;
+        for i in 0..n {
+            if widths[i] < natural[i] {
+                widths[i] += 1;
+                used += 1;
+                assigned = true;
+                if used >= available {
+                    break;
+                }
+            }
+        }
+        if !assigned {
+            break;
+        }
+    }
+    widths
+}
+
+fn render_table_row_multiline(
+    cells_wrapped: &[Vec<String>],
+    widths: &[usize],
+    cell_style: Style,
+) -> Vec<Line<'static>> {
+    let max_lines = cells_wrapped.iter().map(|c| c.len()).max().unwrap_or(1);
+    let mut result = Vec::new();
+    for line_idx in 0..max_lines {
+        let cells_for_line: Vec<String> = cells_wrapped
+            .iter()
+            .map(|cw| {
+                if line_idx < cw.len() {
+                    cw[line_idx].clone()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        result.push(render_table_row(&cells_for_line, widths, cell_style));
+    }
+    result
 }
 
 fn parse_markdown_table_row(line: &str) -> Option<Vec<String>> {
@@ -5904,6 +6028,7 @@ mod tests {
     fn markdown_renderer_formats_common_blocks() {
         let rendered = render_markdown_lines(
             "# Heading\n- item\n> quote\nLink to [site](https://example.com)\n| Name | Value |\n| --- | --- |\n| one | 1 |\n```rust\nfn main() {}\n```",
+            None,
         );
         let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
 

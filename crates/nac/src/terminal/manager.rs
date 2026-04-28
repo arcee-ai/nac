@@ -67,6 +67,7 @@ impl TerminalManager {
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
         let bytes = parse_keys(input);
+
         {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
@@ -125,7 +126,7 @@ impl TerminalManager {
                 .as_millis()
         );
         let mut session = TerminalSession::spawn(temp_name, cwd, cols, rows, sandbox)?;
-        let bytes = parse_keys(&format!("{}\n", cmd));
+        let bytes = parse_keys(&format!("{}\r", cmd));
         session.write(&bytes)?;
 
         sleep(Duration::from_millis(50)).await;
@@ -184,11 +185,10 @@ impl TerminalManager {
     }
 
     /// Event-driven output collection. Drains the screen on every Notify wake,
-    /// returns when the deadline fires or the buffer stays empty.
-    /// This replaces the old `poll_until_stable` stability-detector loop.
+    /// accumulates all output, returns when the deadline fires or the buffer stays empty.
     async fn collect_output(&self, name: &str, yield_ms: u64, start: Instant) -> Result<String> {
         let deadline = start + Duration::from_millis(yield_ms);
-        let mut last_screen = String::new();
+        let mut output = String::new();
 
         // Clone the Notify handle outside the lock so we can await on it
         let notify = {
@@ -210,12 +210,15 @@ impl TerminalManager {
                 session.read_screen()
             };
 
-            if current != last_screen {
-                last_screen = current;
+            if !current.is_empty() {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&current);
 
                 // Check deadline after draining
                 if Instant::now() >= deadline {
-                    return Ok(last_screen);
+                    return Ok(output);
                 }
 
                 // Got new output; yield to executor then immediately retry drain
@@ -223,10 +226,10 @@ impl TerminalManager {
                 continue;
             }
 
-            // Screen unchanged — wait for more output or deadline
+            // Screen unchanged — wait for remaining deadline
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining == Duration::ZERO {
-                return Ok(last_screen);
+                return Ok(output);
             }
 
             tokio::select! {
@@ -236,7 +239,7 @@ impl TerminalManager {
                 }
                 _ = sleep(remaining) => {
                     // Deadline reached with no new output
-                    return Ok(last_screen);
+                    return Ok(output);
                 }
             }
         }
@@ -250,31 +253,35 @@ impl TerminalManager {
         start: Instant,
     ) -> String {
         let deadline = start + Duration::from_millis(yield_ms);
-        let mut last_screen = String::new();
+        let mut output = String::new();
         let notify = session.output_notify().clone();
 
         loop {
             let current = session.read_screen();
 
-            if current != last_screen {
-                last_screen = current;
+            if !current.is_empty() {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&current);
 
                 if Instant::now() >= deadline {
-                    return last_screen;
+                    return output;
                 }
 
                 tokio::task::yield_now().await;
                 continue;
             }
 
+            // Screen unchanged — wait for remaining deadline
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining == Duration::ZERO {
-                return last_screen;
+                return output;
             }
 
             tokio::select! {
                 _ = notify.notified() => continue,
-                _ = sleep(remaining) => return last_screen,
+                _ = sleep(remaining) => return output,
             }
         }
     }

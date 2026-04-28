@@ -13,7 +13,6 @@ use crate::sandbox::SandboxSession;
 
 pub struct TerminalSession {
     pub name: String,
-    parser: Parser,
     writer: Box<dyn Write + Send>,
     output_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     output_notify: Arc<Notify>,
@@ -26,6 +25,9 @@ pub struct TerminalSession {
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
+    /// Lightweight parser for tracking terminal state (application cursor mode, etc.).
+    /// Not used for output collection — output uses a fresh parser each read_screen call.
+    state: Parser,
 }
 
 impl TerminalSession {
@@ -47,13 +49,14 @@ impl TerminalSession {
             .context("Failed to open PTY pair")?;
 
         let mut cmd = CommandBuilder::new("bash");
-        cmd.env("TERM", "xterm-256color");
+        cmd.env("TERM", "dumb");
         cmd.env("PAGER", "cat");
         cmd.env("GIT_PAGER", "cat");
         cmd.env("GH_PAGER", "cat");
         cmd.env("LANG", "C.UTF-8");
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.env("COLORTERM", "");
+        cmd.env("NO_COLOR", "1");
 
         let resolved_cwd: PathBuf;
 
@@ -70,13 +73,14 @@ impl TerminalSession {
             cmd.arg(&wd);
             cmd.arg(sb.container_name());
             cmd.arg("bash");
-            cmd.env("TERM", "xterm-256color");
+            cmd.env("TERM", "dumb");
             cmd.env("PAGER", "cat");
             cmd.env("GIT_PAGER", "cat");
             cmd.env("GH_PAGER", "cat");
             cmd.env("LANG", "C.UTF-8");
             cmd.env("LC_ALL", "C.UTF-8");
             cmd.env("COLORTERM", "");
+            cmd.env("NO_COLOR", "1");
             resolved_cwd = PathBuf::from(wd);
         } else {
             if let Some(ref p) = cwd {
@@ -102,7 +106,6 @@ impl TerminalSession {
             .take_writer()
             .context("Failed to take PTY writer")?;
 
-        let parser = Parser::new(rows, cols, 0);
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
         let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -128,7 +131,6 @@ impl TerminalSession {
 
         Ok(TerminalSession {
             name,
-            parser,
             writer,
             output_rx: rx,
             output_notify: notify,
@@ -141,6 +143,7 @@ impl TerminalSession {
             cwd: resolved_cwd,
             cols,
             rows,
+            state: Parser::new(rows, cols, 0),
         })
     }
 
@@ -154,15 +157,22 @@ impl TerminalSession {
     }
 
     pub fn read_screen(&mut self) -> String {
-        let mut had_output = false;
+        let mut buf = Vec::new();
         while let Ok(chunk) = self.output_rx.try_recv() {
-            self.parser.process(&chunk);
-            had_output = true;
+            buf.extend_from_slice(&chunk);
         }
-        if had_output {
-            self.last_output_at = Instant::now();
+        if buf.is_empty() {
+            return String::new();
         }
-        Self::screen_to_text(&self.parser)
+        self.last_output_at = Instant::now();
+    
+        // Feed state tracker (for application_cursor, etc.)
+        self.state.process(&buf);
+
+        // Fresh parser per read — strips ANSI, no scrollback accumulation
+        let mut parser = Parser::new(self.rows, self.cols, 0);
+        parser.process(&buf);
+        Self::screen_to_text(&parser)
     }
 
     /// Returns a reference to the Notify that fires when the reader thread
@@ -187,7 +197,7 @@ impl TerminalSession {
     /// application cursor keys mode (DECCKM). When true, arrow keys
     /// should use SS3 sequences (\x1bOA) instead of ANSI (\x1b[A).
     pub fn application_cursor_active(&self) -> bool {
-        self.parser.screen().application_cursor()
+        self.state.screen().application_cursor()
     }
 
     pub fn kill(&mut self) -> Result<()> {
@@ -233,10 +243,12 @@ impl TerminalSession {
         }
     }
 
-    fn screen_to_text(parser: &Parser) -> String {
+    fn screen_to_text(parser: &vt100::Parser) -> String {
         let screen = parser.screen();
         let (_rows, cols) = screen.size();
-        let rows: Vec<String> = screen.rows(0, cols).collect();
+        let rows: Vec<String> = screen
+            .rows(0, cols)
+            .collect();
         let mut lines: Vec<String> = rows
             .into_iter()
             .map(|row| row.trim_end().to_string())
@@ -252,5 +264,45 @@ impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.writer.flush();
         self.alive.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screen_to_text_visible_only() {
+        // Even with many lines fed to a scrollback-capable parser,
+        // screen_to_text only returns the visible screen rows.
+        let mut parser = Parser::new(5, 40, 100);
+        for i in 1..=25 {
+            parser.process(format!("line{}\r\n", i).as_bytes());
+        }
+        // screen_to_text takes &Parser, visible screen is 5 rows.
+        // The trailing \r\n after line25 scrolls the screen, pushing
+        // line21 into scrollback. Visible: lines 22-25 (4 rows).
+        let text = TerminalSession::screen_to_text(&parser);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 4, "got {}: {:?}", lines.len(), lines);
+        for i in 0..4 {
+            let expected = format!("line{}", 22 + i);
+            assert_eq!(lines[i], expected, "line {} mismatch", i);
+        }
+    }
+
+    #[test]
+    fn screen_to_text_empty() {
+        let parser = Parser::new(24, 80, 100);
+        let text = TerminalSession::screen_to_text(&parser);
+        assert!(text.is_empty(), "Expected empty, got: {:?}", text);
+    }
+
+    #[test]
+    fn screen_to_text_single_line() {
+        let mut parser = Parser::new(24, 80, 100);
+        parser.process(b"hello\r\n");
+        let text = TerminalSession::screen_to_text(&parser);
+        assert_eq!(text, "hello");
     }
 }
