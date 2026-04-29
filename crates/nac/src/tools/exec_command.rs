@@ -17,7 +17,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         function: FunctionDef {
             name: "exec_command".to_string(),
             description: "Execute a shell command.\n\n\
-Use tty=false (default) for one-shot commands like `cargo build`, `npm test`, `git status`, `ls`, etc. \
+Use tty=false (default) as the bash tool for one-shot shell commands like `cargo build`, `npm test`, `git status`, `ls`, etc. \
 The command runs to completion, returns output + exit code, and treats yield_time_ms as a timeout.\n\n\
 Use tty=true for:\n\
 - Interactive REPLs (python, node, etc.)\n\
@@ -32,7 +32,7 @@ When tty=true, you get a session_name back. Use write_stdin to continue interact
                 "properties": {
                     "cmd": { "type": "string", "description": "Shell command to execute" },
                     "workdir": { "type": "string", "description": "Working directory for the command (default: project root)" },
-                    "tty": { "type": "boolean", "description": "Allocate a PTY for interactive/persistent use (default: false)" },
+                    "tty": { "type": "boolean", "description": "Use false as the bash tool for one-shot shell commands; use true for an interactive/persistent PTY session (default: false)" },
                     "yield_time_ms": { "type": "number", "description": "For tty=false, command timeout in milliseconds (default: 30000, max: 30000). For tty=true, maximum time to wait for terminal output without killing the session (default: 500, max: 30000)." },
                     "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000, head-tail truncated if exceeded)" }
                 },

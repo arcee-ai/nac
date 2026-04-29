@@ -1223,8 +1223,7 @@ impl App {
                     self.recent_tools.pop_back();
                 }
 
-                if matches!(record.name.as_str(), "write" | "edit")
-                    || record.name == "bash"
+                if matches!(record.name.as_str(), "write" | "edit" | "exec_command")
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
                     self.request_workspace_refresh();

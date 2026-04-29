@@ -12,7 +12,6 @@ use crate::skills::SkillRegistry;
 use crate::terminal::TerminalManager;
 use crate::types::ToolDefinition;
 
-pub mod bash;
 pub mod edit;
 pub mod exec_command;
 pub mod read;
@@ -84,18 +83,6 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
                     "new_text": { "type": "string", "description": "Replacement text" }
                 },
                 "required": ["path", "old_text", "new_text"]
-            }),
-        ),
-        def(
-            "bash",
-            "Execute a shell command and return output. For one-shot commands. For interactive or multi-step shell work, prefer exec_command with tty=true instead.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Shell command to execute" },
-                    "timeout": { "type": "integer", "description": "Timeout in seconds (default 300)" }
-                },
-                "required": ["command"]
             }),
         ),
     ];
@@ -186,7 +173,6 @@ pub async fn execute_tool(
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,
-        "bash" => bash::execute(args, runtime).await,
         "exec_command" => {
             match exec_command::execute_exec_command(&args, runtime).await {
                 Ok(content) => ToolResult { content, is_error: false },

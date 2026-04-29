@@ -85,7 +85,7 @@ impl Agent {
                      Do not dump raw tool traces. Do not restate borrowed context unless it materially affected \
                      the outcome of this dispatch.\n\n\
                      You have access to a persistent terminal via exec_command and write_stdin.\n\
-                     - Use exec_command with tty=false for quick one-shot commands; yield_time_ms is the command timeout for this mode.\n\
+                     - Use exec_command with tty=false for quick commands, like a one-shot bash tool; yield_time_ms is the command timeout for this mode.\n\
                      - Use exec_command with tty=true to create a persistent shell session. You'll get a session_name back.\n\
                      - For tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.\n\
                      - Use write_stdin to send input to that session and read output.\n\
@@ -449,10 +449,10 @@ fn preview_tool_args(name: &str, args_str: &str) -> String {
                 return preview(path, 120);
             }
         }
-        "bash" => {
+        "exec_command" => {
             if let Some(command) = parsed
                 .as_ref()
-                .and_then(|value| value.get("command"))
+                .and_then(|value| value.get("cmd"))
                 .and_then(|value| value.as_str())
             {
                 return preview(command, 120);
@@ -492,6 +492,12 @@ fn preview_tool_result(name: &str, result: &ToolResult) -> String {
         return "ok".to_string();
     }
 
+    if name == "exec_command" {
+        if let Some(summary) = preview_exec_command_result(trimmed) {
+            return preview(&summary, 160);
+        }
+    }
+
     let lines: Vec<&str> = result
         .content
         .lines()
@@ -509,7 +515,7 @@ fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     preview(lines[0], 160)
 }
 
-fn select_summary_line<'a>(name: &str, lines: &'a [&'a str]) -> Option<&'a str> {
+fn select_summary_line<'a>(_name: &str, lines: &'a [&'a str]) -> Option<&'a str> {
     if let Some(line) = lines
         .iter()
         .copied()
@@ -545,10 +551,35 @@ fn select_summary_line<'a>(name: &str, lines: &'a [&'a str]) -> Option<&'a str> 
     {
         return Some(line);
     }
-    if name == "bash" {
-        return lines.last().copied();
-    }
     None
+}
+
+fn preview_exec_command_result(content: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok()?;
+    let output = parsed
+        .get("output")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    let output_lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let summary = select_summary_line("exec_command_output", &output_lines)
+        .or_else(|| output_lines.last().copied());
+    let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
+
+    match (exit_code, summary) {
+        (Some(0), Some(summary)) => Some(summary.to_string()),
+        (Some(code), Some(summary)) => Some(format!("exit {code}: {summary}")),
+        (Some(code), None) => Some(format!("exit {code}")),
+        (None, Some(summary)) => Some(summary.to_string()),
+        (None, None) => parsed
+            .get("session_name")
+            .and_then(|value| value.as_str())
+            .map(|session| format!("session {session}")),
+    }
 }
 
 #[cfg(test)]
@@ -561,6 +592,43 @@ mod tests {
         let agent = Agent::default(client);
         assert!(!agent.messages.is_empty());
         assert!(!agent.tool_defs.is_empty());
+    }
+
+    #[test]
+    fn exec_command_result_preview_uses_output_field() {
+        let result = ToolResult {
+            content: serde_json::json!({
+                "output": "line one\nline two\n",
+                "exit_code": 0,
+                "session_name": null,
+                "wall_time_ms": 1,
+                "output_truncated": false,
+            })
+            .to_string(),
+            is_error: false,
+        };
+
+        assert_eq!(preview_tool_result("exec_command", &result), "line two");
+    }
+
+    #[test]
+    fn exec_command_result_preview_includes_nonzero_exit() {
+        let result = ToolResult {
+            content: serde_json::json!({
+                "output": "failure\n",
+                "exit_code": 7,
+                "session_name": null,
+                "wall_time_ms": 1,
+                "output_truncated": false,
+            })
+            .to_string(),
+            is_error: false,
+        };
+
+        assert_eq!(
+            preview_tool_result("exec_command", &result),
+            "exit 7: failure"
+        );
     }
 
     #[test]
