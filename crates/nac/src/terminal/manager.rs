@@ -1,17 +1,45 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::{Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
+use crate::process::{isolate_process_group, terminate_child_tree};
 use crate::sandbox::SandboxSession;
 
 use super::keyparse::parse_keys;
 use super::session::TerminalSession;
 use super::{TerminalInfo, TerminalOutput};
+
+const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
+if command -v setsid >/dev/null 2>&1; then
+  setsid bash -c "$1" &
+else
+  set -m
+  bash -c "$1" &
+fi
+pid=$!
+printf '%s' "$pid" > "$pidfile"
+wait "$pid"
+status=$?
+rm -f "$pidfile"
+exit "$status""#;
+
+const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
+pid=$(cat "$pidfile" 2>/dev/null) || exit 0
+if [ -n "$pid" ]; then
+  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  sleep 0.5
+  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+fi
+rm -f "$pidfile""#;
 
 #[derive(Clone)]
 pub struct TerminalManager {
@@ -35,7 +63,6 @@ impl TerminalManager {
         rows: u16,
         sandbox: Option<&SandboxSession>,
     ) -> Result<TerminalInfo> {
-        // Remove and kill existing session with same name — drop lock before awaiting kill
         let old = {
             let mut sessions = self.sessions.lock().await;
             sessions.remove(&name)
@@ -44,7 +71,6 @@ impl TerminalManager {
             let _ = old.kill().await;
         }
 
-        // Evict oldest sessions if at capacity — collect first, kill after dropping lock
         let evicted: Vec<TerminalSession> = {
             let mut sessions = self.sessions.lock().await;
             let mut evicted = Vec::new();
@@ -88,34 +114,52 @@ impl TerminalManager {
             let session = sessions
                 .get_mut(name)
                 .with_context(|| format!("terminal session '{}' not found", name))?;
-            let bytes = if session.application_cursor_active() {
-                translate_cursor_keys_to_application(&bytes)
-            } else {
-                bytes
-            };
-            session.write(&bytes)?;
+            session.refresh_status();
+            if !session.is_alive() && !bytes.is_empty() {
+                return Err(anyhow!("terminal session '{}' has already exited", name));
+            }
+            if !bytes.is_empty() {
+                session.write(&bytes)?;
+            }
         }
 
-        // Small grace period for the process to react to input
-        sleep(Duration::from_millis(50)).await;
+        if !bytes.is_empty() {
+            sleep(Duration::from_millis(50)).await;
+        }
 
-        // Event-driven output collection
         let output = self.collect_output(name, yield_ms, start).await?;
 
-        // Check alive, cleanup dead session
-        let alive = {
-            let sessions = self.sessions.lock().await;
-            sessions.get(name).map_or(false, |s| s.is_alive())
+        let ended_session = {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = sessions.get_mut(name) {
+                session.refresh_status();
+                if session.is_alive() {
+                    None
+                } else {
+                    sessions.remove(name)
+                }
+            } else {
+                None
+            }
         };
-        if !alive {
-            self.remove(name).await.ok();
-        }
+
+        let (session_name, exit_code) = if let Some(mut session) = ended_session {
+            (
+                None,
+                session
+                    .wait_for_exit_code()
+                    .await
+                    .or_else(|| session.exit_code()),
+            )
+        } else {
+            (Some(name.to_string()), None)
+        };
 
         let (output_text, truncated) = head_tail_truncate(&output, max_output);
         Ok(TerminalOutput {
             output: output_text,
-            exit_code: None,
-            session_name: Some(name.to_string()),
+            exit_code,
+            session_name,
             wall_time_ms: start.elapsed().as_millis() as u64,
             output_truncated: truncated,
         })
@@ -125,33 +169,33 @@ impl TerminalManager {
         &self,
         cmd: &str,
         cwd: Option<PathBuf>,
-        cols: u16,
-        rows: u16,
+        _cols: u16,
+        _rows: u16,
         yield_ms: u64,
         max_output: usize,
         sandbox: Option<&SandboxSession>,
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
-        let temp_name = format!(
-            "_oneshot_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
-        let mut session = TerminalSession::spawn(temp_name, cwd, cols, rows, sandbox)?;
-        let bytes = parse_keys(&format!("{}\r", cmd));
-        session.write(&bytes)?;
+        let outcome = run_pipe_command(cmd, cwd, Duration::from_millis(yield_ms), sandbox).await?;
+        let (exit_code, combined) = match outcome {
+            PipeCommandOutcome::Completed(output) => {
+                let mut combined = String::new();
+                combined.push_str(&String::from_utf8_lossy(&output.stdout));
+                combined.push_str(&String::from_utf8_lossy(&output.stderr));
+                (Some(output.status.code().unwrap_or(-1)), combined)
+            }
+            PipeCommandOutcome::TimedOut { stdout, stderr } => {
+                let mut combined = format!("Command timed out after {yield_ms}ms\n");
+                combined.push_str(&String::from_utf8_lossy(&stdout));
+                combined.push_str(&String::from_utf8_lossy(&stderr));
+                (None, combined)
+            }
+        };
 
-        sleep(Duration::from_millis(50)).await;
-
-        let output = Self::collect_output_direct(&mut session, yield_ms, start).await;
-
-        let (output_text, truncated) = head_tail_truncate(&output, max_output);
-        let _ = session.kill().await;
+        let (output_text, truncated) = head_tail_truncate(&combined, max_output);
         Ok(TerminalOutput {
             output: output_text,
-            exit_code: None,
+            exit_code,
             session_name: None,
             wall_time_ms: start.elapsed().as_millis() as u64,
             output_truncated: truncated,
@@ -180,16 +224,22 @@ impl TerminalManager {
     }
 
     pub async fn list(&self) -> Vec<TerminalInfo> {
-        let sessions = self.sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
         sessions
-            .iter()
-            .map(|(name, s)| self.session_info(name, s))
+            .iter_mut()
+            .map(|(name, s)| {
+                s.refresh_status();
+                self.session_info(name, s)
+            })
             .collect()
     }
 
     pub async fn get(&self, name: &str) -> Option<TerminalInfo> {
-        let sessions = self.sessions.lock().await;
-        sessions.get(name).map(|s| self.session_info(&s.name, s))
+        let mut sessions = self.sessions.lock().await;
+        sessions.get_mut(name).map(|s| {
+            s.refresh_status();
+            self.session_info(&s.name, s)
+        })
     }
 
     fn session_info(&self, name: &str, session: &TerminalSession) -> TerminalInfo {
@@ -204,13 +254,10 @@ impl TerminalManager {
         }
     }
 
-    /// Event-driven output collection. Drains the screen on every Notify wake,
-    /// accumulates all output, returns when the deadline fires or the buffer stays empty.
     async fn collect_output(&self, name: &str, yield_ms: u64, start: Instant) -> Result<String> {
         let deadline = start + Duration::from_millis(yield_ms);
         let mut output = String::new();
 
-        // Clone the Notify handle outside the lock so we can await on it
         let notify = {
             let sessions = self.sessions.lock().await;
             sessions
@@ -221,139 +268,175 @@ impl TerminalManager {
         };
 
         loop {
-            // Drain all available output — brief lock; also capture alive flag
             let (current, alive) = {
                 let mut sessions = self.sessions.lock().await;
                 let session = sessions
                     .get_mut(name)
                     .ok_or_else(|| anyhow!("session vanished"))?;
-                let current = session.read_screen();
+                session.refresh_status();
+                let current = session.read_output();
                 let alive = session.is_alive();
                 (current, alive)
             };
 
             if !current.is_empty() {
-                if !output.is_empty() {
-                    output.push('\n');
-                }
                 output.push_str(&current);
-
-                // Check deadline after draining
                 if Instant::now() >= deadline {
                     return Ok(output);
                 }
-
-                // Got new output; yield to executor then immediately retry drain
                 tokio::task::yield_now().await;
                 continue;
             }
 
-            // No new output — if process is dead and we have output, return early
-            if !alive && !output.is_empty() {
+            if !alive {
                 return Ok(output);
             }
 
-            // Screen unchanged — wait for remaining deadline
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining == Duration::ZERO {
                 return Ok(output);
-            }
-
-            tokio::select! {
-                _ = notify.notified() => {
-                    // More output arrived; loop will drain it
-                    continue;
-                }
-                _ = sleep(remaining) => {
-                    // Deadline reached with no new output
-                    return Ok(output);
-                }
-            }
-        }
-    }
-
-    /// Variant of `collect_output` for one-shot sessions that aren't in the
-    /// sessions HashMap. Takes a direct `&mut TerminalSession` reference.
-    async fn collect_output_direct(
-        session: &mut TerminalSession,
-        yield_ms: u64,
-        start: Instant,
-    ) -> String {
-        let deadline = start + Duration::from_millis(yield_ms);
-        let mut output = String::new();
-        let notify = session.output_notify().clone();
-
-        loop {
-            let current = session.read_screen();
-            let alive = session.is_alive();
-
-            if !current.is_empty() {
-                if !output.is_empty() {
-                    output.push('\n');
-                }
-                output.push_str(&current);
-
-                if Instant::now() >= deadline {
-                    return output;
-                }
-
-                tokio::task::yield_now().await;
-                continue;
-            }
-
-            // No new output — if process is dead and we have output, return early
-            if !alive && !output.is_empty() {
-                return output;
-            }
-
-            // Screen unchanged — wait for remaining deadline
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining == Duration::ZERO {
-                return output;
             }
 
             tokio::select! {
                 _ = notify.notified() => continue,
-                _ = sleep(remaining) => return output,
+                _ = sleep(remaining) => return Ok(output),
             }
         }
     }
 }
 
-/// Translate ANSI cursor key sequences to application (SS3) sequences.
-/// ANSI: ESC [ A/B/C/D  →  SS3: ESC O A/B/C/D
-fn translate_cursor_keys_to_application(data: &[u8]) -> Vec<u8> {
-    if data.len() < 3 {
-        return data.to_vec();
-    }
-    let mut result = Vec::with_capacity(data.len());
-    let mut i = 0;
-    while i < data.len() {
-        if i + 2 < data.len()
-            && data[i] == 0x1b
-            && data[i + 1] == 0x5b // '['
-            && (data[i + 2] == 0x41
-                || data[i + 2] == 0x42
-                || data[i + 2] == 0x43
-                || data[i + 2] == 0x44)
-        {
-            // ANSI cursor: ESC [ X  →  SS3 cursor: ESC O X
-            result.push(0x1b);
-            result.push(0x4f); // 'O' instead of '['
-            result.push(data[i + 2]);
-            i += 3;
-        } else {
-            result.push(data[i]);
-            i += 1;
+async fn run_pipe_command(
+    cmd: &str,
+    cwd: Option<PathBuf>,
+    timeout_duration: Duration,
+    sandbox: Option<&SandboxSession>,
+) -> Result<PipeCommandOutcome> {
+    let sandbox_pidfile = sandbox.map(|_| make_sandbox_pidfile());
+    let mut command = if let Some(sb) = sandbox {
+        let mut command = Command::new("podman");
+        command.arg("exec").arg("--workdir");
+        let wd = cwd
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| sb.workdir_display());
+        command.arg(wd);
+        for (key, value) in terminal_env() {
+            command.arg("--env").arg(format!("{key}={value}"));
         }
-    }
-    result
+        command
+            .arg(sb.container_name())
+            .arg("bash")
+            .arg("-lc")
+            .arg(SANDBOX_EXEC_WRAPPER)
+            .arg("nac-exec")
+            .arg(cmd)
+            .arg(sandbox_pidfile.as_deref().expect("sandbox pidfile exists"));
+        isolate_process_group(&mut command);
+        command
+    } else {
+        let mut command = Command::new("bash");
+        command.arg("-c").arg(cmd);
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        for (key, value) in terminal_env() {
+            command.env(key, value);
+        }
+        isolate_process_group(&mut command);
+        command
+    };
+
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().context("failed to spawn command")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture command stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture command stderr"))?;
+
+    let stdout_handle = tokio::spawn(read_all(stdout));
+    let stderr_handle = tokio::spawn(read_all(stderr));
+
+    let status = match timeout(timeout_duration, child.wait()).await {
+        Ok(status) => status.context("failed to wait for command")?,
+        Err(_) => {
+            if let (Some(sb), Some(pidfile)) = (sandbox, sandbox_pidfile.as_deref()) {
+                terminate_sandbox_command(sb, pidfile).await;
+            }
+            terminate_child_tree(&mut child).await;
+            return Ok(PipeCommandOutcome::TimedOut {
+                stdout: stdout_handle.await.unwrap_or_default(),
+                stderr: stderr_handle.await.unwrap_or_default(),
+            });
+        }
+    };
+    Ok(PipeCommandOutcome::Completed(Output {
+        status,
+        stdout: stdout_handle.await.unwrap_or_default(),
+        stderr: stderr_handle.await.unwrap_or_default(),
+    }))
+}
+
+async fn terminate_sandbox_command(sandbox: &SandboxSession, pidfile: &str) {
+    let mut command = Command::new("podman");
+    command
+        .arg("exec")
+        .arg(sandbox.container_name())
+        .arg("sh")
+        .arg("-c")
+        .arg(SANDBOX_KILL_WRAPPER)
+        .arg("nac-kill")
+        .arg(pidfile)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let _ = timeout(Duration::from_secs(2), command.status()).await;
+}
+
+fn make_sandbox_pidfile() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
+}
+
+enum PipeCommandOutcome {
+    Completed(Output),
+    TimedOut { stdout: Vec<u8>, stderr: Vec<u8> },
+}
+
+async fn read_all<R>(mut reader: R) -> Vec<u8>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut output = Vec::new();
+    let _ = reader.read_to_end(&mut output).await;
+    output
+}
+
+fn terminal_env() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("TERM", "dumb"),
+        ("PAGER", "cat"),
+        ("GIT_PAGER", "cat"),
+        ("GH_PAGER", "cat"),
+        ("LANG", "C.UTF-8"),
+        ("LC_ALL", "C.UTF-8"),
+        ("COLORTERM", ""),
+        ("NO_COLOR", "1"),
+    ]
 }
 
 fn head_tail_truncate(text: &str, max_chars: usize) -> (String, bool) {
     if text.len() <= max_chars {
         return (text.to_string(), false);
     }
+    if max_chars == 0 {
+        return (String::new(), true);
+    }
+
     let half = max_chars / 2;
     let head = if let Some(idx) = text.char_indices().nth(half).map(|(i, _)| i) {
         &text[..idx]
@@ -370,10 +453,41 @@ fn head_tail_truncate(text: &str, max_chars: usize) -> (String, bool) {
         text.len()
     };
     let truncated = format!(
-        "{}…\n…[{} chars truncated]…\n{}",
+        "{}...\n...[{} chars truncated]...\n{}",
         head,
         text.len().saturating_sub(max_chars),
         &text[tail_start..]
     );
     (truncated, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sandbox::{
+        SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    };
+
+    #[test]
+    fn sandbox_pidfile_path_is_container_tmp_path() {
+        let path = make_sandbox_pidfile();
+        assert!(path.starts_with("/tmp/nac-exec-"));
+        assert!(path.ends_with(".pid"));
+    }
+
+    #[test]
+    fn sandbox_wrappers_track_and_kill_process_group() {
+        assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidfile\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("kill -TERM \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+
+        let _sandbox = SandboxSession::new_for_test(SandboxSpec {
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: Vec::new(),
+            workdir: DEFAULT_SANDBOX_WORKDIR.into(),
+            gpu_devices: Vec::new(),
+            shm_size: None,
+        });
+    }
 }

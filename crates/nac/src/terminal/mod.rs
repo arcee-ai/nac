@@ -1,10 +1,10 @@
-mod session;
-mod manager;
 mod keyparse;
+mod manager;
+mod session;
 
+pub use keyparse::parse_keys;
 pub use manager::TerminalManager;
 pub use session::TerminalSession;
-pub use keyparse::parse_keys;
 
 use serde::Serialize;
 use std::path::PathBuf;

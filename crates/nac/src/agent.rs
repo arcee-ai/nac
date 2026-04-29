@@ -85,8 +85,9 @@ impl Agent {
                      Do not dump raw tool traces. Do not restate borrowed context unless it materially affected \
                      the outcome of this dispatch.\n\n\
                      You have access to a persistent terminal via exec_command and write_stdin.\n\
-                     - Use exec_command with tty=false for quick one-shot commands.\n\
+                     - Use exec_command with tty=false for quick one-shot commands; yield_time_ms is the command timeout for this mode.\n\
                      - Use exec_command with tty=true to create a persistent shell session. You'll get a session_name back.\n\
+                     - For tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.\n\
                      - Use write_stdin to send input to that session and read output.\n\
                      - Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Use them for multi-step workflows.\n\
                      - Always prefer write_stdin with empty chars to poll for output from a running command before sending new input.\n\

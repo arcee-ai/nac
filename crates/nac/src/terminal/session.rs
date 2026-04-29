@@ -1,20 +1,22 @@
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use tokio::sync::{mpsc, Notify};
-use vt100::Parser;
+use tokio::sync::Notify;
 
 use crate::sandbox::SandboxSession;
+
+const MAX_SESSION_OUTPUT_BYTES: usize = 1024 * 1024;
 
 pub struct TerminalSession {
     pub name: String,
     writer: Box<dyn Write + Send>,
-    output_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    output: Arc<StdMutex<OutputBuffer>>,
     output_notify: Arc<Notify>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     _pty_pair: portable_pty::PtyPair,
@@ -22,12 +24,10 @@ pub struct TerminalSession {
     pub created_at: Instant,
     pub last_output_at: Instant,
     alive: Arc<AtomicBool>,
+    exit_code: Option<i32>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
-    /// Lightweight parser for tracking terminal state (application cursor mode, etc.).
-    /// Not used for output collection — output uses a fresh parser each read_screen call.
-    state: Parser,
 }
 
 impl TerminalSession {
@@ -49,19 +49,13 @@ impl TerminalSession {
             .context("Failed to open PTY pair")?;
 
         let mut cmd = CommandBuilder::new("bash");
-        cmd.env("TERM", "dumb");
-        cmd.env("PAGER", "cat");
-        cmd.env("GIT_PAGER", "cat");
-        cmd.env("GH_PAGER", "cat");
-        cmd.env("LANG", "C.UTF-8");
-        cmd.env("LC_ALL", "C.UTF-8");
-        cmd.env("COLORTERM", "");
-        cmd.env("NO_COLOR", "1");
+        for (key, value) in terminal_env() {
+            cmd.env(key, value);
+        }
 
         let resolved_cwd: PathBuf;
 
         if let Some(sb) = sandbox {
-            // Build: podman exec -it --workdir <workdir> <container> bash
             cmd = CommandBuilder::new("podman");
             cmd.arg("exec");
             cmd.arg("-it");
@@ -71,16 +65,12 @@ impl TerminalSession {
                 None => sb.workdir_display(),
             };
             cmd.arg(&wd);
+            for (key, value) in terminal_env() {
+                cmd.arg("--env");
+                cmd.arg(format!("{key}={value}"));
+            }
             cmd.arg(sb.container_name());
             cmd.arg("bash");
-            cmd.env("TERM", "dumb");
-            cmd.env("PAGER", "cat");
-            cmd.env("GIT_PAGER", "cat");
-            cmd.env("GH_PAGER", "cat");
-            cmd.env("LANG", "C.UTF-8");
-            cmd.env("LC_ALL", "C.UTF-8");
-            cmd.env("COLORTERM", "");
-            cmd.env("NO_COLOR", "1");
             resolved_cwd = PathBuf::from(wd);
         } else {
             if let Some(ref p) = cwd {
@@ -108,7 +98,8 @@ impl TerminalSession {
 
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
-        let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let output = Arc::new(StdMutex::new(OutputBuffer::new(MAX_SESSION_OUTPUT_BYTES)));
+        let output_clone = output.clone();
         let notify = Arc::new(Notify::new());
         let notify_clone = notify.clone();
 
@@ -123,7 +114,9 @@ impl TerminalSession {
                         break;
                     }
                     Ok(n) => {
-                        let _ = tx.send(buf[..n].to_vec());
+                        if let Ok(mut output) = output_clone.lock() {
+                            output.push(&buf[..n]);
+                        }
                         notify_clone.notify_one();
                     }
                 }
@@ -133,7 +126,7 @@ impl TerminalSession {
         Ok(TerminalSession {
             name,
             writer,
-            output_rx: rx,
+            output,
             output_notify: notify,
             child,
             _pty_pair: pty_pair,
@@ -141,10 +134,10 @@ impl TerminalSession {
             created_at: Instant::now(),
             last_output_at: Instant::now(),
             alive,
+            exit_code: None,
             cwd: resolved_cwd,
             cols,
             rows,
-            state: Parser::new(rows, cols, 0),
         })
     }
 
@@ -157,33 +150,41 @@ impl TerminalSession {
         Ok(())
     }
 
-    pub fn read_screen(&mut self) -> String {
-        let mut buf = Vec::new();
-        while let Ok(chunk) = self.output_rx.try_recv() {
-            buf.extend_from_slice(&chunk);
-        }
+    pub fn read_output(&mut self) -> String {
+        let buf = self
+            .output
+            .lock()
+            .map(|mut output| output.take())
+            .unwrap_or_default();
         if buf.is_empty() {
             return String::new();
         }
         self.last_output_at = Instant::now();
-    
-        // Feed state tracker (for application_cursor, etc.)
-        self.state.process(&buf);
-
-        // Fresh parser per read — strips ANSI, no scrollback accumulation
-        let mut parser = Parser::new(self.rows, self.cols, 0);
-        parser.process(&buf);
-        Self::screen_to_text(&parser)
+        String::from_utf8_lossy(&buf).into_owned()
     }
 
-    /// Returns a reference to the Notify that fires when the reader thread
-    /// pushes new output chunks into the channel.
     pub fn output_notify(&self) -> &Arc<Notify> {
         &self.output_notify
     }
 
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
+    }
+
+    pub fn refresh_status(&mut self) {
+        if self.exit_code.is_some() {
+            self.alive.store(false, Ordering::SeqCst);
+            return;
+        }
+
+        if let Ok(Some(status)) = self.child.try_wait() {
+            self.exit_code = Some(status.exit_code() as i32);
+            self.alive.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
     }
 
     pub fn idle_duration(&self) -> Duration {
@@ -194,18 +195,10 @@ impl TerminalSession {
         self.child.process_id()
     }
 
-    /// Check if the terminal application (e.g., less) has enabled
-    /// application cursor keys mode (DECCKM). When true, arrow keys
-    /// should use SS3 sequences (\x1bOA) instead of ANSI (\x1b[A).
-    pub fn application_cursor_active(&self) -> bool {
-        self.state.screen().application_cursor()
-    }
-
     pub async fn kill(&mut self) -> Result<()> {
         self.kill_process_group();
-        // Wait briefly for SIGTERM to take effect
         tokio::time::sleep(Duration::from_millis(500)).await;
-        // Check if still alive, escalate to SIGKILL
+
         #[cfg(unix)]
         if let Some(pid) = self.child.process_id() {
             unsafe {
@@ -215,9 +208,21 @@ impl TerminalSession {
                 }
             }
         }
+
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
         Ok(())
+    }
+
+    pub async fn wait_for_exit_code(&mut self) -> Option<i32> {
+        for _ in 0..10 {
+            self.refresh_status();
+            if self.exit_code.is_some() {
+                return self.exit_code;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        self.exit_code
     }
 
     #[cfg(unix)]
@@ -238,7 +243,10 @@ impl TerminalSession {
     async fn reap_child(&mut self) {
         for _ in 0..10 {
             match self.child.try_wait() {
-                Ok(Some(_)) => return,
+                Ok(Some(status)) => {
+                    self.exit_code = Some(status.exit_code() as i32);
+                    return;
+                }
                 Ok(None) => tokio::time::sleep(Duration::from_millis(100)).await,
                 Err(_) => break,
             }
@@ -246,26 +254,14 @@ impl TerminalSession {
         let _ = self.child.kill();
         for _ in 0..20 {
             match self.child.try_wait() {
-                Ok(Some(_)) | Err(_) => return,
+                Ok(Some(status)) => {
+                    self.exit_code = Some(status.exit_code() as i32);
+                    return;
+                }
                 Ok(None) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(_) => return,
             }
         }
-    }
-
-    fn screen_to_text(parser: &vt100::Parser) -> String {
-        let screen = parser.screen();
-        let (_rows, cols) = screen.size();
-        let rows: Vec<String> = screen
-            .rows(0, cols)
-            .collect();
-        let mut lines: Vec<String> = rows
-            .into_iter()
-            .map(|row| row.trim_end().to_string())
-            .collect();
-        while lines.last().map_or(false, |l| l.is_empty()) {
-            lines.pop();
-        }
-        lines.join("\n")
     }
 }
 
@@ -277,42 +273,76 @@ impl Drop for TerminalSession {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn terminal_env() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("TERM", "dumb"),
+        ("PAGER", "cat"),
+        ("GIT_PAGER", "cat"),
+        ("GH_PAGER", "cat"),
+        ("LANG", "C.UTF-8"),
+        ("LC_ALL", "C.UTF-8"),
+        ("COLORTERM", ""),
+        ("NO_COLOR", "1"),
+    ]
+}
 
-    #[test]
-    fn screen_to_text_visible_only() {
-        // Even with many lines fed to a scrollback-capable parser,
-        // screen_to_text only returns the visible screen rows.
-        let mut parser = Parser::new(5, 40, 100);
-        for i in 1..=25 {
-            parser.process(format!("line{}\r\n", i).as_bytes());
-        }
-        // screen_to_text takes &Parser, visible screen is 5 rows.
-        // The trailing \r\n after line25 scrolls the screen, pushing
-        // line21 into scrollback. Visible: lines 22-25 (4 rows).
-        let text = TerminalSession::screen_to_text(&parser);
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines.len(), 4, "got {}: {:?}", lines.len(), lines);
-        for i in 0..4 {
-            let expected = format!("line{}", 22 + i);
-            assert_eq!(lines[i], expected, "line {} mismatch", i);
+struct OutputBuffer {
+    bytes: VecDeque<u8>,
+    capacity: usize,
+    dropped_bytes: usize,
+}
+
+impl OutputBuffer {
+    fn new(capacity: usize) -> Self {
+        Self {
+            bytes: VecDeque::with_capacity(capacity.min(8192)),
+            capacity,
+            dropped_bytes: 0,
         }
     }
 
-    #[test]
-    fn screen_to_text_empty() {
-        let parser = Parser::new(24, 80, 100);
-        let text = TerminalSession::screen_to_text(&parser);
-        assert!(text.is_empty(), "Expected empty, got: {:?}", text);
+    fn push(&mut self, chunk: &[u8]) {
+        if self.capacity == 0 {
+            self.dropped_bytes = self.dropped_bytes.saturating_add(chunk.len());
+            return;
+        }
+
+        if chunk.len() >= self.capacity {
+            let dropped = self
+                .bytes
+                .len()
+                .saturating_add(chunk.len())
+                .saturating_sub(self.capacity);
+            self.dropped_bytes = self.dropped_bytes.saturating_add(dropped);
+            self.bytes.clear();
+            self.bytes
+                .extend(chunk[chunk.len() - self.capacity..].iter().copied());
+            return;
+        }
+
+        let overflow = self
+            .bytes
+            .len()
+            .saturating_add(chunk.len())
+            .saturating_sub(self.capacity);
+        if overflow > 0 {
+            for _ in 0..overflow {
+                self.bytes.pop_front();
+            }
+            self.dropped_bytes = self.dropped_bytes.saturating_add(overflow);
+        }
+        self.bytes.extend(chunk.iter().copied());
     }
 
-    #[test]
-    fn screen_to_text_single_line() {
-        let mut parser = Parser::new(24, 80, 100);
-        parser.process(b"hello\r\n");
-        let text = TerminalSession::screen_to_text(&parser);
-        assert_eq!(text, "hello");
+    fn take(&mut self) -> Vec<u8> {
+        let mut out = Vec::new();
+        if self.dropped_bytes > 0 {
+            out.extend_from_slice(
+                format!("\n...[{} bytes omitted]...\n", self.dropped_bytes).as_bytes(),
+            );
+            self.dropped_bytes = 0;
+        }
+        out.extend(self.bytes.drain(..));
+        out
     }
 }
