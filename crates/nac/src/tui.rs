@@ -4829,54 +4829,67 @@ fn render_markdown_table_block(
     }
 
     let header = parse_markdown_table_row(raw_lines[start])?;
-    let delimiter = parse_markdown_table_delimiter(raw_lines[start + 1])?;
-    if header.len() != delimiter {
-        return None;
-    }
 
-    let mut rows = Vec::new();
-    let mut index = start + 2;
+    let (n_cols, mut rows, mut index) =
+        if let Some(delimiter) = parse_markdown_table_delimiter(raw_lines[start + 1]) {
+            if header.len() != delimiter {
+                return None;
+            }
+            (delimiter, Vec::new(), start + 2)
+        } else if header.len() >= 2 {
+            let second = parse_markdown_table_row_smart(raw_lines[start + 1], header.len())?;
+            (header.len(), vec![second], start + 2)
+        } else {
+            return None;
+        };
+
     while index < raw_lines.len() {
-        let Some(row) = parse_markdown_table_row(raw_lines[index]) else {
+        let Some(row) = parse_markdown_table_row_smart(raw_lines[index], n_cols) else {
             break;
         };
-        if row.len() != delimiter {
-            break;
-        }
         rows.push(row);
         index += 1;
     }
 
-    let header_cells: Vec<String> = header
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let body_style = Style::default().fg(Color::White);
+
+    let header_spans: Vec<Vec<Span<'static>>> = header
         .iter()
-        .map(|cell| inline_plain_text(&render_inline_markdown(cell, Style::default())))
+        .map(|cell| render_inline_markdown(cell, header_style))
         .collect();
-    let body_cells: Vec<Vec<String>> = rows
+    let body_spans: Vec<Vec<Vec<Span<'static>>>> = rows
         .iter()
         .map(|row| {
             row.iter()
-                .map(|cell| inline_plain_text(&render_inline_markdown(cell, Style::default())))
+                .map(|cell| render_inline_markdown(cell, body_style))
                 .collect()
         })
         .collect();
+    let header_cells: Vec<String> = header_spans
+        .iter()
+        .map(|spans| inline_plain_text(spans))
+        .collect();
+    let body_cells: Vec<Vec<String>> = body_spans
+        .iter()
+        .map(|row| row.iter().map(|spans| inline_plain_text(spans)).collect())
+        .collect();
 
-    // Compute natural column widths (max chars per column)
-    let n_cols = delimiter;
     let mut natural_widths = vec![0usize; n_cols];
     for (idx, cell) in header_cells.iter().enumerate() {
-        natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
+        natural_widths[idx] = natural_widths[idx].max(display_width(cell));
     }
     for row in &body_cells {
         for (idx, cell) in row.iter().enumerate() {
-            natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
+            natural_widths[idx] = natural_widths[idx].max(display_width(cell));
         }
     }
 
-    // Determine final widths — either natural or constrained by max_width
     let final_widths: Vec<usize> = if let Some(mw) = max_width {
-        let overhead = 3 * n_cols + 1; // │ + space+content+space + separator per column
+        let overhead = 3 * n_cols + 1;
         if mw <= overhead {
-            // Viewport too narrow for table structure; use natural widths
             natural_widths.clone()
         } else {
             let available = mw - overhead;
@@ -4891,47 +4904,45 @@ fn render_markdown_table_block(
         natural_widths.clone()
     };
 
-    let header_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
     lines.push(render_table_border(&final_widths, '┌', '┬', '┐'));
 
-    // Header row — wrap when column widths are constrained
-    if final_widths != natural_widths {
+    if final_widths == natural_widths {
+        lines.push(render_table_row_styled(
+            &header_spans,
+            &final_widths,
+            header_style,
+        ));
+    } else {
         let header_wrapped: Vec<Vec<String>> = header_cells
             .iter()
             .zip(final_widths.iter())
             .map(|(cell, &w)| wrap_soft_line(cell, w.max(3)))
             .collect();
-        lines.extend(render_table_row_multiline(&header_wrapped, &final_widths, header_style));
-    } else {
-        lines.push(render_table_row(&header_cells, &final_widths, header_style));
+        lines.extend(render_table_row_multiline(
+            &header_wrapped,
+            &final_widths,
+            header_style,
+        ));
     }
     lines.push(render_table_border(&final_widths, '├', '┼', '┤'));
 
-    // Body rows with wrapping support when width is constrained
-    let body_style = Style::default().fg(Color::White);
-    if final_widths != natural_widths {
-        // Widths are constrained — wrap cell contents
+    if final_widths == natural_widths {
+        for row in &body_spans {
+            lines.push(render_table_row_styled(row, &final_widths, body_style));
+        }
+    } else {
         for row in &body_cells {
             let cells_wrapped: Vec<Vec<String>> = row
                 .iter()
                 .zip(final_widths.iter())
-                .map(|(cell, &col_width)| {
-                    wrap_soft_line(cell, col_width.max(3))
-                })
+                .map(|(cell, &col_width)| wrap_soft_line(cell, col_width.max(3)))
                 .collect();
             lines.extend(render_table_row_multiline(
                 &cells_wrapped,
                 &final_widths,
                 body_style,
             ));
-        }
-    } else {
-        // Natural widths fit — use single-line rendering (fast path, identical to original behavior)
-        for row in &body_cells {
-            lines.push(render_table_row(row, &final_widths, body_style));
         }
     }
     lines.push(render_table_border(&final_widths, '└', '┴', '┘'));
@@ -5014,12 +5025,155 @@ fn parse_markdown_table_row(line: &str) -> Option<Vec<String>> {
         return None;
     }
 
-    let inner = trimmed.trim_matches('|');
-    let cells: Vec<String> = inner
-        .split('|')
-        .map(|cell| cell.trim().to_string())
-        .collect();
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut found_separator = false;
+    let mut escaped = false;
+    let mut in_code = false;
+
+    for char in trimmed.chars() {
+        if escaped {
+            current.push('\\');
+            current.push(char);
+            escaped = false;
+            continue;
+        }
+
+        if char == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if char == '`' {
+            in_code = !in_code;
+            current.push(char);
+            continue;
+        }
+
+        if char == '|' && !in_code {
+            found_separator = true;
+            cells.push(current.trim().to_string());
+            current.clear();
+            continue;
+        }
+
+        current.push(char);
+    }
+
+    if escaped {
+        current.push('\\');
+    }
+
+    if !found_separator {
+        return None;
+    }
+
+    cells.push(current.trim().to_string());
+
+    if trimmed.starts_with('|') {
+        cells.remove(0);
+    }
+    if has_unescaped_trailing_pipe(trimmed) {
+        cells.pop();
+    }
+
     (!cells.is_empty()).then_some(cells)
+}
+
+fn has_unescaped_trailing_pipe(text: &str) -> bool {
+    if !text.ends_with('|') {
+        return false;
+    }
+
+    let backslashes = text[..text.len() - 1]
+        .chars()
+        .rev()
+        .take_while(|char| *char == '\\')
+        .count();
+    backslashes % 2 == 0
+}
+
+/// Smart table row parser that handles pipe characters (`|`) in cell content.
+///
+/// When a row has *more* columns than `expected`, it looks for "delimiter-like"
+/// cells (whose non-whitespace characters are only `-` and `:`, e.g. `---`,
+/// `:---:`) and merges each run of them with their immediate left and right
+/// non-delimiter neighbours, joining with `|` to reconstruct the original cell
+/// text that was split apart by the naive parser.
+///
+/// Returns `Some(cells)` if the row can be parsed to exactly `expected` columns,
+/// either directly or after merging; returns `None` otherwise.
+fn parse_markdown_table_row_smart(line: &str, expected: usize) -> Option<Vec<String>> {
+    let cells = parse_markdown_table_row(line)?;
+
+    if cells.len() == expected {
+        return Some(cells);
+    }
+
+    // Fewer columns than expected: cannot recover.
+    if cells.len() < expected {
+        return None;
+    }
+
+    // Helper: is a cell delimiter-like?
+    let is_delim_like = |cell: &str| -> bool {
+        let compact: String = cell.chars().filter(|c| !c.is_whitespace()).collect();
+        !compact.is_empty() && compact.chars().all(|c| c == '-' || c == ':')
+    };
+
+    // Merge delimiter runs with their neighbours.
+    // Strategy: walk left-to-right. When we encounter a delimiter-like cell,
+    // consume the entire contiguous run. Pop the preceding cell from `result`
+    // (the left neighbour, if any) and check the cell after the run (the right
+    // neighbour, if it exists and is non-delimiter). Join these three segments
+    // with `|` into one cell.
+    let mut result: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < cells.len() {
+        if is_delim_like(&cells[i]) {
+            let run_start = i;
+            while i < cells.len() && is_delim_like(&cells[i]) {
+                i += 1;
+            }
+            let run_end = i; // exclusive
+
+            // Left neighbour: the cell immediately before the run.
+            let left = result.pop();
+
+            // Right neighbour: the first non-delimiter cell after the run.
+            let right = if run_end < cells.len() && !is_delim_like(&cells[run_end]) {
+                let right_cell = cells[run_end].clone();
+                i = run_end + 1; // consume the right neighbour
+                Some(right_cell)
+            } else {
+                None
+            };
+
+            // Reconstruct the original cell by joining with `|`
+            let mut parts: Vec<&str> = Vec::new();
+            if let Some(ref l) = left {
+                parts.push(l.as_str());
+            }
+            for j in run_start..run_end {
+                parts.push(&cells[j]);
+            }
+            if let Some(ref r) = right {
+                parts.push(r.as_str());
+            }
+
+            result.push(parts.join("|"));
+        } else {
+            result.push(cells[i].clone());
+            i += 1;
+        }
+    }
+
+    if result.len() == expected {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 fn parse_markdown_table_delimiter(line: &str) -> Option<usize> {
@@ -5044,27 +5198,47 @@ fn render_table_border(widths: &[usize], left: char, middle: char, right: char) 
     Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
 }
 
-fn render_table_row(cells: &[String], widths: &[usize], cell_style: Style) -> Line<'static> {
+/// Render a table row where each cell is a collection of pre-styled spans
+/// (preserving inline markdown formatting like bold, italic, links, code).
+fn render_table_row_styled(
+    cells: &[Vec<Span<'static>>],
+    widths: &[usize],
+    cell_base_style: Style,
+) -> Line<'static> {
     let mut spans = vec![Span::styled(
         "│".to_string(),
         Style::default().fg(Color::DarkGray),
     )];
-    for (index, (cell, width)) in cells.iter().zip(widths.iter()).enumerate() {
+    for (cell_spans, &width) in cells.iter().zip(widths.iter()) {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format!("{cell:<width$}", width = *width),
-            cell_style,
-        ));
+        let plain_len: usize = cell_spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum();
+        let padding = width.saturating_sub(plain_len);
+        // Push each styled span, preserving its original formatting
+        for s in cell_spans {
+            spans.push(s.clone());
+        }
+        // Pad the remaining column width with spaces in the base cell style
+        if padding > 0 {
+            spans.push(Span::styled(" ".repeat(padding), cell_base_style));
+        }
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             "│".to_string(),
             Style::default().fg(Color::DarkGray),
         ));
-        if index + 1 == cells.len() {
-            continue;
-        }
     }
     Line::from(spans)
+}
+
+fn render_table_row(cells: &[String], widths: &[usize], cell_style: Style) -> Line<'static> {
+    let styled_cells: Vec<Vec<Span<'static>>> = cells
+        .iter()
+        .map(|cell| vec![Span::styled(cell.clone(), cell_style)])
+        .collect();
+    render_table_row_styled(&styled_cells, widths, cell_style)
 }
 
 fn push_styled_text(spans: &mut Vec<Span<'static>>, buffer: &mut String, style: Style) {
@@ -5133,6 +5307,10 @@ fn inline_plain_text(spans: &[Span<'static>]) -> String {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("")
+}
+
+fn display_width(text: &str) -> usize {
+    Span::raw(text.to_string()).width()
 }
 
 fn markdown_heading_hash_style(level: usize) -> Style {
@@ -6063,5 +6241,122 @@ mod tests {
         assert_eq!(counts.untracked, 1);
         assert_eq!(counts.staged, 2);
         assert!(files.contains_key("notes.txt"));
+    }
+
+    #[test]
+    fn markdown_table_without_delimiter_renders_as_table() {
+        // LLMs frequently omit the `|---|---|` delimiter row.
+        // The renderer should fall back to treating two consecutive
+        // pipe-delimited rows with matching column counts as a table.
+        let rendered =
+            render_markdown_lines("| Name | Value |\n| one  | 1     |\n| two  | 2     |", None);
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+
+        // Should produce box-drawing table borders, not raw pipe text
+        assert_eq!(plain[0], "┌──────┬───────┐");
+        assert_eq!(plain[1], "│ Name │ Value │");
+        assert_eq!(plain[2], "├──────┼───────┤");
+        assert_eq!(plain[3], "│ one  │ 1     │");
+        assert_eq!(plain[4], "│ two  │ 2     │");
+        assert_eq!(plain[5], "└──────┴───────┘");
+    }
+
+    #[test]
+    fn markdown_table_without_delimiter_single_column_skips_fallback() {
+        // Single-column pipe-delimited text is ambiguous (could be inline
+        // pipe emphasis). Require at least two columns for the fallback.
+        let rendered = render_markdown_lines("| single |\n| column |", None);
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+        // Should render as plain paragraphs (raw pipes), not a table
+        assert!(
+            plain.iter().any(|l| l.contains('|')),
+            "single-column pipe lines should fall through to paragraph rendering"
+        );
+    }
+
+    #[test]
+    fn markdown_table_row_respects_escaped_and_code_pipes() {
+        assert_eq!(
+            parse_markdown_table_row(r"| a \| b | `x|y` | c |"),
+            Some(vec![
+                r"a \| b".to_string(),
+                "`x|y`".to_string(),
+                "c".to_string()
+            ])
+        );
+        assert_eq!(
+            parse_markdown_table_row(r"a | b \|"),
+            Some(vec!["a".to_string(), r"b \|".to_string()])
+        );
+    }
+
+    #[test]
+    fn markdown_table_preserves_inline_styles_in_cells() {
+        let rendered = render_markdown_lines(
+            "| Col A |\n| --- |\n| **bold** text |\n| [site](https://example.com) |",
+            None,
+        );
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+        assert_eq!(plain[3], "│ bold text                  │");
+        assert_eq!(plain[4], "│ site <https://example.com> │");
+
+        let has_bold = rendered[3]
+            .spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::BOLD));
+        assert!(has_bold, "cell with **bold** should contain a BOLD span");
+
+        let has_underlined = rendered[4]
+            .spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::UNDERLINED));
+        assert!(
+            has_underlined,
+            "cell with [link]() should contain an UNDERLINED span"
+        );
+    }
+
+    #[test]
+    fn markdown_table_keeps_rows_with_escaped_pipes_in_same_table() {
+        let rendered = render_markdown_lines(
+            "| Feature | Input syntax | Status |\n\
+|---|---|---|\n\
+| Standard table | \\| a \\| b \\| with \\|---\\| row | ✅ Working |\n\
+| Bold text | **double asterisks** | ✅ Preserved |\n\
+| Italic text | *single asterisks* | ✅ Preserved |\n\
+| inline code | `backticks` | ✅ Preserved |\n\
+| Links <https://example.com> | [text](url) | ✅ Preserved |\n\
+| Pipes in cells: |---| | Literal \\| in content | ✅ Not split |",
+            None,
+        );
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+
+        assert_eq!(plain.iter().filter(|line| line.starts_with('┌')).count(), 1);
+        assert!(!plain
+            .iter()
+            .any(|line| line.starts_with("| Standard table")));
+        assert!(plain.iter().any(
+            |line| line.contains("Standard table") && line.contains("| a | b | with |---| row")
+        ));
+        assert!(plain
+            .iter()
+            .any(|line| line.contains("Pipes in cells:|---|")
+                && line.contains("Literal | in content")));
+    }
+
+    #[test]
+    fn markdown_table_uses_terminal_display_width_for_emoji() {
+        let rendered = render_markdown_lines(
+            "| Emoji | Meaning |\n\
+| 🔴 | High severity |\n\
+| 🟡 | Medium severity |\n\
+| ⚪ | Low / cosmetic |\n\
+| ✅ | Verified fixed |",
+            None,
+        );
+        let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
+        let widths: Vec<usize> = plain.iter().map(|line| display_width(line)).collect();
+
+        assert!(widths.iter().all(|width| *width == widths[0]));
     }
 }
