@@ -1709,13 +1709,15 @@ impl App {
     }
 
     fn render_session_picker(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let sections = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .split(area);
+        let left_width = (area.width as f64 * 0.33) as u16;
+        let left_width = left_width.max(20);
+        let right_width = area.width.saturating_sub(left_width + 1);
 
-        self.render_session_picker_list(frame, sections[0]);
-        self.render_session_picker_detail(frame, sections[1]);
+        let left_area = Rect::new(area.x, area.y, left_width, area.height);
+        let right_area = Rect::new(area.x + left_width + 1, area.y, right_width, area.height);
+
+        self.render_session_picker_list(frame, left_area);
+        self.render_session_picker_detail(frame, right_area);
     }
 
     fn render_session_picker_list(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1738,18 +1740,25 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             )));
         } else {
-            for (index, session) in self
+            let visible_height = inner.height as usize;
+            let start = self
+                .session_picker
+                .selected
+                .saturating_sub(visible_height.saturating_sub(1));
+            for (offset, session) in self
                 .session_picker
                 .sessions
                 .iter()
-                .take(inner.height as usize)
+                .skip(start)
+                .take(visible_height)
                 .enumerate()
             {
+                let index = start + offset;
                 let selected = index == self.session_picker.selected;
                 let style = if selected {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Cyan)
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
@@ -1759,13 +1768,28 @@ impl App {
                     &session.cwd.display().to_string(),
                     inner.width.saturating_sub(24) as usize,
                 );
-                lines.push(Line::from(vec![
-                    Span::styled(if selected { "› " } else { "  " }, style),
-                    Span::styled(format!("{}  ", short_timestamp(&session.updated_at)), style),
-                    Span::styled(session_label, style),
-                    Span::styled("  ", style),
-                    Span::styled(cwd_label, style),
-                ]));
+                if selected {
+                    lines.push(Line::styled(
+                        format!(
+                            "› {}  {:<18}  {}",
+                            short_timestamp(&session.updated_at),
+                            session_label,
+                            cwd_label,
+                        ),
+                        style,
+                    ));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{}  ", short_timestamp(&session.updated_at)),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(format!("{:<18}", session_label), style),
+                        Span::raw("  "),
+                        Span::styled(cwd_label, Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
             }
         }
 
@@ -1773,101 +1797,59 @@ impl App {
     }
 
     fn render_session_picker_detail(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let block = panel_block("SESSION DETAIL");
+        let selected_session = self
+            .session_picker
+            .sessions
+            .get(self.session_picker.selected);
+        let title = match selected_session {
+            Some(session) => panel_title_segments(vec![
+                Span::styled(
+                    "SESSION — ".to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(short_session(&session.session_id)),
+            ]),
+            None => panel_title("SESSION"),
+        };
+        let block = panel_block_with_title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 {
             return;
         }
 
-        let mut lines = Vec::new();
-        if let Some(session) = self
-            .session_picker
-            .sessions
-            .get(self.session_picker.selected)
-        {
-            lines.push(Line::from(vec![
-                Span::styled("session  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.session_id.clone(),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("updated  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.updated_at.clone(),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("created  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.created_at.clone(),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("cwd      ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    compact_path(
-                        &session.cwd.display().to_string(),
-                        inner.width.saturating_sub(9) as usize,
-                    ),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("model    ", Style::default().fg(Color::DarkGray)),
-                Span::styled(session.model.clone(), Style::default().fg(Color::White)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("backend  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.backend.as_str().to_string(),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("sandbox  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    if session.sandboxed { "on" } else { "off" },
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("messages ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.visible_message_count.to_string(),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "last prompt",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            let prompt_lines = session
+        let lines = if let Some(session) = selected_session {
+            let last_prompt = session
                 .last_user_prompt
                 .as_deref()
-                .map(split_preserving_empty)
-                .unwrap_or_else(|| vec!["No user prompt recorded.".to_string()]);
-            for line in prompt_lines {
-                lines.push(Line::from(Span::styled(
-                    line,
-                    Style::default().fg(Color::DarkGray),
-                )));
-            }
+                .unwrap_or("No user prompt recorded.");
+            let detail = format!(
+                "# Session: {}\n\
+                 Updated: {}  |  Created: {}  |  Messages: {}  |  Sandbox: {}\n\
+                 Model: {}  |  Backend: {}\n\
+                 Cwd: {}\n\n\
+                 ---\n\n\
+                 ### Last prompt\n\n\
+                 {}",
+                session.session_id,
+                session.updated_at,
+                session.created_at,
+                session.visible_message_count,
+                if session.sandboxed { "on" } else { "off" },
+                session.model,
+                session.backend.as_str(),
+                session.cwd.display(),
+                last_prompt,
+            );
+            render_markdown_lines(&detail, Some(inner.width as usize))
         } else {
-            lines.push(Line::from(Span::styled(
+            vec![Line::from(Span::styled(
                 "Select a session to inspect.",
                 Style::default().fg(Color::DarkGray),
-            )));
-        }
+            ))]
+        };
 
         frame.render_widget(
             Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false }),
