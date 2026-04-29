@@ -109,6 +109,7 @@ mod tests {
             mcp: None,
             skills: None,
             activated_skills: Arc::new(Mutex::new(HashSet::new())),
+            terminal_manager: crate::terminal::TerminalManager::new(),
         }
     }
 

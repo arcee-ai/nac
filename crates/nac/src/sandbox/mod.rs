@@ -37,6 +37,10 @@ impl SandboxSession {
         Ok(Self { inner })
     }
 
+    pub fn container_name(&self) -> &str {
+        self.inner.container_name()
+    }
+
     pub fn workdir_display(&self) -> String {
         self.inner.spec().workdir.display().to_string()
     }

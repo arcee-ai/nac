@@ -684,14 +684,16 @@ mod tests {
         trace.observe(&AgentEvent::ToolCallStarted {
             thread_name: Some("impl/auth".to_string()),
             call_id: "call_123".to_string(),
-            name: "bash".to_string(),
+            name: "exec_command".to_string(),
             args_preview: "cargo test -p nac".to_string(),
-            args_detail: Some(r#"{"command":"cargo test -p nac","timeout":300}"#.to_string()),
+            args_detail: Some(
+                r#"{"cmd":"cargo test -p nac","tty":false,"yield_time_ms":300000}"#.to_string(),
+            ),
         });
 
         assert_eq!(
             trace.timeout_reason(),
-            "The thread timed out at a tool call.\nTool call: bash call_123\narguments: {\"command\":\"cargo test -p nac\",\"timeout\":300}"
+            "The thread timed out at a tool call.\nTool call: exec_command call_123\narguments: {\"cmd\":\"cargo test -p nac\",\"tty\":false,\"yield_time_ms\":300000}"
         );
     }
 }

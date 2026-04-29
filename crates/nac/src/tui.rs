@@ -166,7 +166,8 @@ struct ThreadView {
     name: String,
     action: String,
     state: ThreadState,
-    updated_at: String,
+    updated_at: String,     // Human-readable display (e.g., "14:32:05")
+    updated_at_ts: u64,     // Unix timestamp for correct numeric sorting
     episodes: i64,
     summary: String,
 }
@@ -448,7 +449,7 @@ struct App {
     threads: HashMap<String, ThreadView>,
     all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
     episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
-    response_markdown_cache: Option<(String, Vec<Line<'static>>)>,
+    response_markdown_cache: Option<(String, usize, Vec<Line<'static>>)>,
     selected_thread: Option<String>,
     active_tools: HashMap<String, ActiveTool>,
     recent_tools: VecDeque<ToolRecord>,
@@ -1018,6 +1019,7 @@ impl App {
         };
 
         for thread in threads {
+            let ts = parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
             let entry = self
                 .threads
                 .entry(thread.name.clone())
@@ -1029,6 +1031,7 @@ impl App {
                         .unwrap_or_else(|| "retained history".to_string()),
                     state: ThreadState::Idle,
                     updated_at: short_clock(&thread.updated_at),
+                    updated_at_ts: ts,
                     episodes: thread.episode_count,
                     summary: format!("{} episode(s)", thread.episode_count),
                 });
@@ -1037,6 +1040,7 @@ impl App {
                     entry.action = action;
                 }
                 entry.updated_at = short_clock(&thread.updated_at);
+                entry.updated_at_ts = parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
                 entry.episodes = thread.episode_count;
                 entry.summary = format!("{} episode(s)", thread.episode_count);
             }
@@ -1219,8 +1223,7 @@ impl App {
                     self.recent_tools.pop_back();
                 }
 
-                if matches!(record.name.as_str(), "write" | "edit")
-                    || record.name == "bash"
+                if matches!(record.name.as_str(), "write" | "edit" | "exec_command")
                     || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
                 {
                     self.request_workspace_refresh();
@@ -1248,6 +1251,7 @@ impl App {
                         action: action.clone(),
                         state: ThreadState::Active,
                         updated_at: utc_hms(),
+                        updated_at_ts: current_unix_ts(),
                         episodes: self
                             .threads
                             .get(&name)
@@ -1285,11 +1289,13 @@ impl App {
                         action: "thread run".to_string(),
                         state: ThreadState::Idle,
                         updated_at: utc_hms(),
+                        updated_at_ts: current_unix_ts(),
                         episodes: 0,
                         summary: String::new(),
                     });
                 entry.state = ThreadState::Idle;
                 entry.updated_at = utc_hms();
+                entry.updated_at_ts = current_unix_ts();
                 entry.summary = if timed_out {
                     "timed out".to_string()
                 } else {
@@ -1328,6 +1334,7 @@ impl App {
                 Some(thread_name) => {
                     if let Some(thread) = self.threads.get_mut(&thread_name) {
                         thread.updated_at = utc_hms();
+                        thread.updated_at_ts = current_unix_ts();
                         thread.summary = truncate_episode_preview(&content);
                     }
                     self.hydrate_all_episodes();
@@ -1395,7 +1402,7 @@ impl App {
         threads.sort_by(|left, right| {
             matches!(right.state, ThreadState::Active)
                 .cmp(&matches!(left.state, ThreadState::Active))
-                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| right.updated_at_ts.cmp(&left.updated_at_ts))
                 .then_with(|| left.name.cmp(&right.name))
         });
         threads.into_iter().map(|t| t.name.clone()).collect()
@@ -2069,7 +2076,7 @@ impl App {
         threads.sort_by(|left, right| {
             matches!(right.state, ThreadState::Active)
                 .cmp(&matches!(left.state, ThreadState::Active))
-                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| right.updated_at_ts.cmp(&left.updated_at_ts))
                 .then_with(|| left.name.cmp(&right.name))
         });
 
@@ -2130,15 +2137,19 @@ impl App {
     }
 
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let lines = match self.last_response.as_deref() {
             Some(response) => {
                 match &self.response_markdown_cache {
-                    Some((cached_text, cached_lines)) if cached_text == response => {
+                    Some((cached_text, cached_width, cached_lines))
+                        if cached_text == response && *cached_width == available_width =>
+                    {
                         cached_lines.clone()
                     }
                     _ => {
-                        let lines = render_markdown_lines(response);
-                        self.response_markdown_cache = Some((response.to_string(), lines.clone()));
+                        let lines = render_markdown_lines(response, Some(available_width));
+                        self.response_markdown_cache =
+                            Some((response.to_string(), available_width, lines.clone()));
                         lines
                     }
                 }
@@ -2170,8 +2181,9 @@ impl App {
     }
 
     fn render_previous_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let lines = match self.previous_response.as_deref() {
-            Some(response) => render_markdown_lines(response),
+            Some(response) => render_markdown_lines(response, Some(available_width)),
             None => vec![Line::from(Span::styled(
                 "No previous orchestrator reply yet.",
                 Style::default().fg(Color::DarkGray),
@@ -2287,6 +2299,7 @@ impl App {
     }
 
     fn render_episode_detail_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
         let episodes = self
             .selected_thread
             .as_ref()
@@ -2311,7 +2324,7 @@ impl App {
                         thread.action, thread.episodes, thread.state, thread.updated_at
                     ));
                     header.push_str("\n---\n\n");
-                    lines.extend(render_markdown_lines(&header));
+                    lines.extend(render_markdown_lines(&header, Some(available_width)));
                 }
                 lines.push(Line::from(Span::styled(
                     "No episodes yet.",
@@ -2344,12 +2357,13 @@ impl App {
                         combined.push_str("\n\n---\n\n");
                     }
                 }
-                match self.episode_markdown_cache.get(thread_name) {
+                let cache_key = format!("{}:{}", thread_name, available_width);
+                match self.episode_markdown_cache.get(&cache_key) {
                     Some(cached) => cached.clone(),
                     None => {
-                        let rendered = render_markdown_lines(&combined);
+                        let rendered = render_markdown_lines(&combined, Some(available_width));
                         self.episode_markdown_cache
-                            .insert(thread_name.to_string(), rendered.clone());
+                            .insert(cache_key, rendered.clone());
                         rendered
                     }
                 }
@@ -2368,7 +2382,7 @@ impl App {
                     thread.action, thread.episodes, thread.state, thread.updated_at
                 ));
                 header.push_str("\n---\n\n");
-                lines.extend(render_markdown_lines(&header));
+                lines.extend(render_markdown_lines(&header, Some(available_width)));
             }
             lines.push(Line::from(Span::styled(
                 "Thread is running... no episodes yet.",
@@ -4393,7 +4407,7 @@ fn take_chars(text: &str, count: usize) -> String {
     text.chars().take(count).collect()
 }
 
-fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
+fn render_markdown_lines(text: &str, max_width: Option<usize>) -> Vec<Line<'static>> {
     if text.is_empty() {
         return vec![Line::from("")];
     }
@@ -4414,7 +4428,7 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
             continue;
         }
 
-        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index) {
+        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index, max_width) {
             rendered.extend(table_lines);
             index = next_index;
             continue;
@@ -4584,25 +4598,60 @@ fn render_inline_markdown(text: &str, base_style: Style) -> Vec<Span<'static>> {
             continue;
         }
 
+        // Three-char delimiter: ___text___ or ***text*** → bold+italic
+        // Must be exactly 3 of the same char (not 4+, which falls through to two-char bold).
+        if index + 2 < chars.len()
+            && chars[index] == chars[index + 1]
+            && chars[index + 1] == chars[index + 2]
+            && matches!(chars[index], '*' | '_')
+            && (index + 3 >= chars.len() || chars[index + 3] != chars[index])
+        {
+            let can_open = is_left_flanking(&chars, index, 3)
+                && (chars[index] != '_' || !is_right_flanking(&chars, index, 3));
+            if can_open {
+                if let Some(close_index) =
+                    find_closing_marker(&chars, index + 3, &[chars[index]; 3], true)
+                {
+                    push_styled_text(&mut spans, &mut buffer, base_style);
+                    let inner: String = chars[index + 3..close_index].iter().collect();
+                    spans.extend(render_inline_markdown(
+                        &inner,
+                        base_style
+                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::ITALIC),
+                    ));
+                    index = close_index + 3;
+                    continue;
+                }
+            }
+        }
+
         if index + 1 < chars.len()
             && matches!((chars[index], chars[index + 1]), ('*', '*') | ('_', '_'))
         {
-            if let Some(close_index) =
-                find_closing_marker(&chars, index + 2, &[chars[index], chars[index + 1]])
-            {
-                push_styled_text(&mut spans, &mut buffer, base_style);
-                let inner: String = chars[index + 2..close_index].iter().collect();
-                spans.extend(render_inline_markdown(
-                    &inner,
-                    base_style.add_modifier(Modifier::BOLD),
-                ));
-                index = close_index + 2;
-                continue;
+            let can_open = is_left_flanking(&chars, index, 2)
+                && (chars[index] != '_' || !is_right_flanking(&chars, index, 2));
+            if can_open {
+                if let Some(close_index) = find_closing_marker(
+                    &chars,
+                    index + 2,
+                    &[chars[index], chars[index + 1]],
+                    true,
+                ) {
+                    push_styled_text(&mut spans, &mut buffer, base_style);
+                    let inner: String = chars[index + 2..close_index].iter().collect();
+                    spans.extend(render_inline_markdown(
+                        &inner,
+                        base_style.add_modifier(Modifier::BOLD),
+                    ));
+                    index = close_index + 2;
+                    continue;
+                }
             }
         }
 
         if index + 1 < chars.len() && chars[index] == '~' && chars[index + 1] == '~' {
-            if let Some(close_index) = find_closing_marker(&chars, index + 2, &['~', '~']) {
+            if let Some(close_index) = find_closing_marker(&chars, index + 2, &['~', '~'], false) {
                 push_styled_text(&mut spans, &mut buffer, base_style);
                 let inner: String = chars[index + 2..close_index].iter().collect();
                 spans.extend(render_inline_markdown(
@@ -4615,15 +4664,28 @@ fn render_inline_markdown(text: &str, base_style: Style) -> Vec<Span<'static>> {
         }
 
         if matches!(chars[index], '*' | '_') {
-            if let Some(close_index) = find_closing_marker(&chars, index + 1, &[chars[index]]) {
-                push_styled_text(&mut spans, &mut buffer, base_style);
-                let inner: String = chars[index + 1..close_index].iter().collect();
-                spans.extend(render_inline_markdown(
-                    &inner,
-                    base_style.add_modifier(Modifier::ITALIC),
-                ));
-                index = close_index + 1;
+            // Don't treat as a single-char delimiter if part of a multi-char run
+            // (e.g. the second '_' in '__'). The multi-char checks above handle those.
+            if index > 0 && chars[index - 1] == chars[index] {
+                buffer.push(chars[index]);
+                index += 1;
                 continue;
+            }
+            let can_open = is_left_flanking(&chars, index, 1)
+                && (chars[index] != '_' || !is_right_flanking(&chars, index, 1));
+            if can_open {
+                if let Some(close_index) =
+                    find_closing_marker(&chars, index + 1, &[chars[index]], true)
+                {
+                    push_styled_text(&mut spans, &mut buffer, base_style);
+                    let inner: String = chars[index + 1..close_index].iter().collect();
+                    spans.extend(render_inline_markdown(
+                        &inner,
+                        base_style.add_modifier(Modifier::ITALIC),
+                    ));
+                    index = close_index + 1;
+                    continue;
+                }
             }
         }
 
@@ -4694,8 +4756,8 @@ fn render_markdown_heading_line(level: usize, content: &str) -> Line<'static> {
         markdown_heading_hash_style(level),
     )];
     spans.push(Span::raw(" "));
-    spans.extend(render_inline_markdown(
-        content,
+    spans.push(Span::styled(
+        content.to_string(),
         markdown_heading_text_style(level),
     ));
     Line::from(spans)
@@ -4760,6 +4822,7 @@ fn render_markdown_code_block(
 fn render_markdown_table_block(
     raw_lines: &[&str],
     start: usize,
+    max_width: Option<usize>,
 ) -> Option<(usize, Vec<Line<'static>>)> {
     if start + 1 >= raw_lines.len() {
         return None;
@@ -4797,36 +4860,152 @@ fn render_markdown_table_block(
         })
         .collect();
 
-    let mut widths = vec![0usize; delimiter];
+    // Compute natural column widths (max chars per column)
+    let n_cols = delimiter;
+    let mut natural_widths = vec![0usize; n_cols];
     for (idx, cell) in header_cells.iter().enumerate() {
-        widths[idx] = widths[idx].max(cell.chars().count());
+        natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
     }
     for row in &body_cells {
         for (idx, cell) in row.iter().enumerate() {
-            widths[idx] = widths[idx].max(cell.chars().count());
+            natural_widths[idx] = natural_widths[idx].max(cell.chars().count());
         }
     }
 
+    // Determine final widths — either natural or constrained by max_width
+    let final_widths: Vec<usize> = if let Some(mw) = max_width {
+        let overhead = 3 * n_cols + 1; // │ + space+content+space + separator per column
+        if mw <= overhead {
+            // Viewport too narrow for table structure; use natural widths
+            natural_widths.clone()
+        } else {
+            let available = mw - overhead;
+            let sum_natural: usize = natural_widths.iter().sum();
+            if sum_natural <= available {
+                natural_widths.clone()
+            } else {
+                constrain_widths(&natural_widths, available)
+            }
+        }
+    } else {
+        natural_widths.clone()
+    };
+
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
-    lines.push(render_table_border(&widths, '┌', '┬', '┐'));
-    lines.push(render_table_row(
-        &header_cells,
-        &widths,
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    ));
-    lines.push(render_table_border(&widths, '├', '┼', '┤'));
-    for row in &body_cells {
-        lines.push(render_table_row(
-            row,
-            &widths,
-            Style::default().fg(Color::White),
-        ));
+    lines.push(render_table_border(&final_widths, '┌', '┬', '┐'));
+
+    // Header row — wrap when column widths are constrained
+    if final_widths != natural_widths {
+        let header_wrapped: Vec<Vec<String>> = header_cells
+            .iter()
+            .zip(final_widths.iter())
+            .map(|(cell, &w)| wrap_soft_line(cell, w.max(3)))
+            .collect();
+        lines.extend(render_table_row_multiline(&header_wrapped, &final_widths, header_style));
+    } else {
+        lines.push(render_table_row(&header_cells, &final_widths, header_style));
     }
-    lines.push(render_table_border(&widths, '└', '┴', '┘'));
+    lines.push(render_table_border(&final_widths, '├', '┼', '┤'));
+
+    // Body rows with wrapping support when width is constrained
+    let body_style = Style::default().fg(Color::White);
+    if final_widths != natural_widths {
+        // Widths are constrained — wrap cell contents
+        for row in &body_cells {
+            let cells_wrapped: Vec<Vec<String>> = row
+                .iter()
+                .zip(final_widths.iter())
+                .map(|(cell, &col_width)| {
+                    wrap_soft_line(cell, col_width.max(3))
+                })
+                .collect();
+            lines.extend(render_table_row_multiline(
+                &cells_wrapped,
+                &final_widths,
+                body_style,
+            ));
+        }
+    } else {
+        // Natural widths fit — use single-line rendering (fast path, identical to original behavior)
+        for row in &body_cells {
+            lines.push(render_table_row(row, &final_widths, body_style));
+        }
+    }
+    lines.push(render_table_border(&final_widths, '└', '┴', '┘'));
 
     Some((index, lines))
+}
+
+/// Distribute `available` content width across `n` columns proportionally
+/// to their natural widths, with a minimum of 3 chars per column.
+fn constrain_widths(natural: &[usize], available: usize) -> Vec<usize> {
+    let n = natural.len();
+    let min_width = 3usize;
+    let baseline: usize = n * min_width;
+    if available <= baseline {
+        return vec![min_width; n];
+    }
+    let remaining = available - baseline;
+    let sum_natural: usize = natural.iter().sum();
+    // Allocate proportional shares
+    let mut widths: Vec<usize> = natural
+        .iter()
+        .map(|&nat| {
+            if nat <= min_width {
+                min_width
+            } else {
+                // Proportional allocation of remaining beyond baseline
+                let extra = ((nat - min_width) as f64 / sum_natural.max(1) as f64 * remaining as f64)
+                    .round() as usize;
+                (min_width + extra).min(nat) // cap at natural width
+            }
+        })
+        .collect();
+    // Redistribute any remaining pixels one-by-one to columns that haven't reached their natural width
+    let mut used: usize = widths.iter().sum();
+    while used < available {
+        let mut assigned = false;
+        for i in 0..n {
+            if widths[i] < natural[i] {
+                widths[i] += 1;
+                used += 1;
+                assigned = true;
+                if used >= available {
+                    break;
+                }
+            }
+        }
+        if !assigned {
+            break;
+        }
+    }
+    widths
+}
+
+fn render_table_row_multiline(
+    cells_wrapped: &[Vec<String>],
+    widths: &[usize],
+    cell_style: Style,
+) -> Vec<Line<'static>> {
+    let max_lines = cells_wrapped.iter().map(|c| c.len()).max().unwrap_or(1);
+    let mut result = Vec::new();
+    for line_idx in 0..max_lines {
+        let cells_for_line: Vec<String> = cells_wrapped
+            .iter()
+            .map(|cw| {
+                if line_idx < cw.len() {
+                    cw[line_idx].clone()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        result.push(render_table_row(&cells_for_line, widths, cell_style));
+    }
+    result
 }
 
 fn parse_markdown_table_row(line: &str) -> Option<Vec<String>> {
@@ -4894,16 +5073,58 @@ fn push_styled_text(spans: &mut Vec<Span<'static>>, buffer: &mut String, style: 
     }
 }
 
-fn find_closing_marker(chars: &[char], start: usize, marker: &[char]) -> Option<usize> {
+fn find_closing_marker(chars: &[char], start: usize, marker: &[char], require_right_flanking: bool) -> Option<usize> {
     let width = marker.len();
     let mut index = start;
     while index + width <= chars.len() {
-        if chars[index..index + width] == *marker {
+        if chars[index..index + width] == *marker
+            && (!require_right_flanking || is_right_flanking(chars, index, width))
+        {
             return Some(index);
         }
         index += 1;
     }
     None
+}
+
+/// Check if a delimiter run at `idx` is left-flanking per CommonMark §6.2.
+fn is_left_flanking(chars: &[char], idx: usize, run_len: usize) -> bool {
+    let after_idx = idx + run_len;
+    if after_idx >= chars.len() {
+        return false;
+    }
+    let after = chars[after_idx];
+    if after.is_whitespace() {
+        return false;
+    }
+    if !after.is_ascii_punctuation() {
+        return true;
+    }
+    if idx == 0 {
+        return true;
+    }
+    let before = chars[idx - 1];
+    before.is_whitespace() || before.is_ascii_punctuation()
+}
+
+/// Check if a delimiter run at `idx` is right-flanking per CommonMark §6.2.
+fn is_right_flanking(chars: &[char], idx: usize, run_len: usize) -> bool {
+    if idx == 0 {
+        return false;
+    }
+    let before = chars[idx - 1];
+    if before.is_whitespace() {
+        return false;
+    }
+    if !before.is_ascii_punctuation() {
+        return true;
+    }
+    let after_idx = idx + run_len;
+    if after_idx >= chars.len() {
+        return true;
+    }
+    let after = chars[after_idx];
+    after.is_whitespace() || after.is_ascii_punctuation()
 }
 
 fn inline_plain_text(spans: &[Span<'static>]) -> String {
@@ -4992,6 +5213,61 @@ fn utc_hms() -> String {
     let minutes = (rem % 3_600) / 60;
     let seconds = rem % 60;
     format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+/// Returns current Unix timestamp in seconds, for numeric thread sorting.
+fn current_unix_ts() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Parse a timestamp string (format: "YYYY-MM-DD HH:MM:SS") to Unix timestamp.
+/// Returns None if parsing fails.
+fn parse_timestamp_to_unix(ts: &str) -> Option<u64> {
+    let parts: Vec<&str> = ts.split_whitespace().collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let date_parts: Vec<&str> = parts[0].split('-').collect();
+    let time_parts: Vec<&str> = parts[1].split(':').collect();
+
+    if date_parts.len() != 3 || time_parts.len() != 3 {
+        return None;
+    }
+
+    let year: u64 = date_parts[0].parse().ok()?;
+    let month: u64 = date_parts[1].parse().ok()?;
+    let day: u64 = date_parts[2].parse().ok()?;
+    let hour: u64 = time_parts[0].parse().ok()?;
+    let minute: u64 = time_parts[1].parse().ok()?;
+    let second: u64 = time_parts[2].parse().ok()?;
+
+    let mut days_since_epoch: u64 = 0;
+    for y in 1970..year {
+        days_since_epoch += if is_leap_year(y) { 366 } else { 365 };
+    }
+
+    let month_days = [
+        31,
+        if is_leap_year(year) { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    for m in 0..(month - 1) as usize {
+        days_since_epoch += month_days[m];
+    }
+    days_since_epoch += day - 1;
+
+    let secs_per_day: u64 = 86_400;
+    let secs_of_day = hour * 3_600 + minute * 60 + second;
+
+    Some(days_since_epoch * secs_per_day + secs_of_day)
+}
+
+fn is_leap_year(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 fn tone_glyph(tone: Tone) -> &'static str {
@@ -5751,6 +6027,7 @@ mod tests {
     fn markdown_renderer_formats_common_blocks() {
         let rendered = render_markdown_lines(
             "# Heading\n- item\n> quote\nLink to [site](https://example.com)\n| Name | Value |\n| --- | --- |\n| one | 1 |\n```rust\nfn main() {}\n```",
+            None,
         );
         let plain: Vec<String> = rendered.iter().map(line_to_plain_text).collect();
 
