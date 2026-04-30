@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Write};
+use std::io::{self};
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
+use std::process::Command as StdCommand;
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc,
@@ -470,6 +470,7 @@ struct App {
     session_picker: SessionPickerState,
     life_field: LifeField,
     current_prompt: String,
+    clipboard: Option<arboard::Clipboard>,
 }
 
 impl App {
@@ -532,6 +533,7 @@ impl App {
             session_picker: SessionPickerState::default(),
             life_field: LifeField::default(),
             current_prompt: String::new(),
+            clipboard: arboard::Clipboard::new().ok(),
         };
 
         app.hydrate_threads_from_store();
@@ -793,6 +795,21 @@ impl App {
                 }
 
                 AppAction::Submit(prompt)
+            }
+            // Cmd+C (macOS) or Super+C: copy selection, don't type "c"
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::SUPER)
+                && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.copy_selection_to_clipboard();
+                AppAction::None
+            }
+            // All other SUPER-modified keys: don't type into composer
+            KeyEvent { modifiers, .. } if modifiers.contains(KeyModifiers::SUPER) => {
+                AppAction::None
             }
             _ => {
                 if self.result_rx.is_none() {
@@ -3016,7 +3033,9 @@ impl App {
         if text.is_empty() {
             return;
         }
-        let _ = copy_text_to_clipboard(&text);
+        if let Some(ref mut clipboard) = self.clipboard {
+            let _ = copy_text_to_clipboard(clipboard, &text);
+        }
     }
 }
 
@@ -5719,17 +5738,9 @@ fn contains_point(area: Rect, column: u16, row: u16) -> bool {
     column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
 }
 
-fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
-    let mut child = StdCommand::new("pbcopy")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(text.as_bytes())?;
-    }
-    let _ = child.wait()?;
-    Ok(())
+fn copy_text_to_clipboard(clipboard: &mut arboard::Clipboard, text: &str) -> io::Result<()> {
+    clipboard.set_text(text)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 #[cfg(test)]
