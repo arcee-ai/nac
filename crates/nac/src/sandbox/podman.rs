@@ -125,7 +125,7 @@ impl PodmanSession {
         stdin: Option<Vec<u8>>,
     ) -> Result<std::process::Output> {
         let mut command = Command::new("podman");
-        command.args(self.exec_args(program, args, stdin.is_some(), false));
+        command.args(self.exec_args(program, args, stdin.is_some(), false, None, &[]));
 
         if stdin.is_some() {
             command.stdin(Stdio::piped());
@@ -155,18 +155,7 @@ impl PodmanSession {
         envs: &[(String, String)],
     ) -> Command {
         let mut command = Command::new("podman");
-        command
-            .arg("exec")
-            .arg("-i")
-            .arg("--workdir")
-            .arg(&self.spec.workdir);
-        for (key, value) in envs {
-            command.arg("--env").arg(format!("{key}={value}"));
-        }
-        command.arg(&self.container_name).arg(program);
-        for arg in args {
-            command.arg(arg);
-        }
+        command.args(self.exec_args(program, args, true, false, None, envs));
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());
@@ -179,20 +168,7 @@ impl PodmanSession {
         envs: &[(String, String)],
     ) -> PtyCommandBuilder {
         let mut cmd = PtyCommandBuilder::new("podman");
-        cmd.arg("exec");
-        cmd.arg("-it");
-        cmd.arg("--workdir");
-        let wd = match cwd {
-            Some(p) => p.display().to_string(),
-            None => self.spec.workdir.display().to_string(),
-        };
-        cmd.arg(&wd);
-        for (key, value) in envs {
-            cmd.arg("--env");
-            cmd.arg(format!("{key}={value}"));
-        }
-        cmd.arg(&self.container_name);
-        cmd.arg("bash");
+        cmd.args(self.exec_args("bash", &[], true, true, cwd, envs));
         cmd
     }
 
@@ -203,23 +179,15 @@ impl PodmanSession {
         envs: &[(String, String)],
     ) -> (Command, String) {
         let pidfile = make_sandbox_pidfile();
+        let pipe_args = vec![
+            "-lc".to_string(),
+            SANDBOX_EXEC_WRAPPER.to_string(),
+            "nac-exec".to_string(),
+            cmd_str.to_string(),
+            pidfile.clone(),
+        ];
         let mut command = Command::new("podman");
-        command.arg("exec").arg("--workdir");
-        let wd = cwd
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| self.spec.workdir.display().to_string());
-        command.arg(&wd);
-        for (key, value) in envs {
-            command.arg("--env").arg(format!("{key}={value}"));
-        }
-        command
-            .arg(&self.container_name)
-            .arg("bash")
-            .arg("-lc")
-            .arg(SANDBOX_EXEC_WRAPPER)
-            .arg("nac-exec")
-            .arg(cmd_str)
-            .arg(&pidfile);
+        command.args(self.exec_args("bash", &pipe_args, false, false, cwd, envs));
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -243,18 +211,27 @@ impl PodmanSession {
         Ok(())
     }
 
-    fn exec_args(&self, program: &str, args: &[String], interactive: bool, tty: bool) -> Vec<OsString> {
-        let mut command_args = vec![
-            OsString::from("exec"),
-            OsString::from("--workdir"),
-            OsString::from(self.spec.workdir.display().to_string()),
-        ];
+    fn exec_args(&self, program: &str, args: &[String], interactive: bool, tty: bool, cwd: Option<&Path>, envs: &[(String, String)]) -> Vec<OsString> {
+        let mut command_args = vec![OsString::from("exec")];
+
+        let wd = cwd
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| self.spec.workdir.display().to_string());
+        command_args.push(OsString::from("--workdir"));
+        command_args.push(OsString::from(wd));
+
+        for (key, value) in envs {
+            command_args.push(OsString::from("--env"));
+            command_args.push(OsString::from(format!("{key}={value}")));
+        }
+
         if interactive {
             command_args.push(OsString::from("-i"));
         }
         if tty {
             command_args.push(OsString::from("-t"));
         }
+
         command_args.push(OsString::from(self.container_name.clone()));
         command_args.push(OsString::from(program));
         for arg in args {
@@ -567,6 +544,8 @@ mod tests {
             &["-c".to_string(), "print('hi')".to_string()],
             true,
             false,
+            None,
+            &[],
         );
         let rendered: Vec<String> = args
             .into_iter()
@@ -584,6 +563,8 @@ mod tests {
             &["-lc".to_string(), "pwd".to_string()],
             false,
             false,
+            None,
+            &[],
         );
         let rendered: Vec<String> = args
             .into_iter()
@@ -600,6 +581,8 @@ mod tests {
             &[],
             true,
             true,
+            None,
+            &[],
         );
         let rendered: Vec<String> = args
             .into_iter()

@@ -56,15 +56,14 @@ impl TerminalSession {
         let resolved_cwd: PathBuf;
 
         if let Some(sb) = sandbox {
+            // resolved_cwd mirrors the --workdir fallback inside terminal_pty_command.
+            // Both use cwd if provided, otherwise the sandbox workdir. Keep these in sync.
             resolved_cwd = match cwd.as_ref() {
                 Some(p) => p.clone(),
                 None => PathBuf::from(sb.workdir_display()),
             };
 
-            let envs: Vec<(String, String)> = terminal_env()
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
+            let envs = terminal_env_owned();
 
             cmd = sb.terminal_pty_command(cwd.as_deref(), &envs);
         } else {
@@ -279,6 +278,10 @@ pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
         ("COLORTERM", ""),
         ("NO_COLOR", "1"),
     ]
+}
+
+pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
+    terminal_env().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
 struct OutputBuffer {

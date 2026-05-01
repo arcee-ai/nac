@@ -14,7 +14,7 @@ use crate::process::{isolate_process_group, terminate_child_tree};
 use crate::sandbox::SandboxSession;
 
 use super::keyparse::parse_keys;
-use super::session::{terminal_env, TerminalSession};
+use super::session::{terminal_env, terminal_env_owned, TerminalSession};
 use super::{TerminalInfo, TerminalOutput};
 
 #[derive(Clone)]
@@ -289,10 +289,7 @@ async fn run_pipe_command(
 ) -> Result<PipeCommandOutcome> {
     let mut sandbox_pidfile: Option<String> = None;
     let mut command = if let Some(sb) = sandbox {
-        let envs: Vec<(String, String)> = terminal_env()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let envs = terminal_env_owned();
         let (mut command, pidfile) = sb.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
         sandbox_pidfile = Some(pidfile);
         isolate_process_group(&mut command);
@@ -407,10 +404,7 @@ mod tests {
             shm_size: None,
         });
 
-        let envs: Vec<(String, String)> = terminal_env()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let envs = terminal_env_owned();
         let (command, pidfile) =
             sandbox.terminal_pipe_command("echo hello", None, &envs);
 
