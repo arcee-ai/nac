@@ -167,8 +167,8 @@ struct ThreadView {
     name: String,
     action: String,
     state: ThreadState,
-    updated_at: String,     // Human-readable display (e.g., "14:32:05")
-    updated_at_ts: u64,     // Unix timestamp for correct numeric sorting
+    updated_at: String, // Human-readable display (e.g., "14:32:05")
+    updated_at_ts: u64, // Unix timestamp for correct numeric sorting
     episodes: i64,
     summary: String,
 }
@@ -1095,7 +1095,8 @@ impl App {
                     entry.action = action;
                 }
                 entry.updated_at = short_clock(&thread.updated_at);
-                entry.updated_at_ts = parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
+                entry.updated_at_ts =
+                    parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
                 entry.episodes = thread.episode_count;
                 entry.summary = format!("{} episode(s)", thread.episode_count);
             }
@@ -1106,9 +1107,9 @@ impl App {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return;
         };
-        if let Ok(episodes) =
-            tokio::task::block_in_place(|| store::load_all_episodes(&self.metadata.store_path, session_id))
-        {
+        if let Ok(episodes) = tokio::task::block_in_place(|| {
+            store::load_all_episodes(&self.metadata.store_path, session_id)
+        }) {
             self.all_episodes = episodes;
         }
         self.episode_markdown_cache.clear();
@@ -2173,21 +2174,19 @@ impl App {
     fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let available_width = area.width.saturating_sub(2) as usize;
         let lines = match self.last_response.as_deref() {
-            Some(response) => {
-                match &self.response_markdown_cache {
-                    Some((cached_text, cached_width, cached_lines))
-                        if cached_text == response && *cached_width == available_width =>
-                    {
-                        cached_lines.clone()
-                    }
-                    _ => {
-                        let lines = render_markdown_lines(response, Some(available_width));
-                        self.response_markdown_cache =
-                            Some((response.to_string(), available_width, lines.clone()));
-                        lines
-                    }
+            Some(response) => match &self.response_markdown_cache {
+                Some((cached_text, cached_width, cached_lines))
+                    if cached_text == response && *cached_width == available_width =>
+                {
+                    cached_lines.clone()
                 }
-            }
+                _ => {
+                    let lines = render_markdown_lines(response, Some(available_width));
+                    self.response_markdown_cache =
+                        Some((response.to_string(), available_width, lines.clone()));
+                    lines
+                }
+            },
             None => vec![Line::from(Span::styled(
                 "Waiting for the first orchestrator reply.",
                 Style::default().fg(Color::DarkGray),
@@ -2286,8 +2285,7 @@ impl App {
 
             let display_name = fit_text(name, max_name_width);
             let ep_count = format!("{:>3}e", thread.episodes);
-            let action_width = width
-                .saturating_sub(max_name_width + 8);
+            let action_width = width.saturating_sub(max_name_width + 8);
             let display_action = fit_text(&thread.action, action_width);
 
             let line_str = format!(
@@ -2636,10 +2634,7 @@ impl App {
             }
             if reserve_total == 1 {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        pad_cell("T", 1),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(pad_cell("T", 1), Style::default().fg(Color::DarkGray)),
                     Span::raw(" "),
                     Span::styled(
                         format!(
@@ -3121,12 +3116,7 @@ pub async fn run(
     terminal.draw(|frame| app.render(frame))?;
 
     if let Some(prompt) = initial_prompt {
-        submit_prompt(
-            prompt,
-            agent.clone(),
-            &mut app,
-            &mut terminal,
-        )?;
+        submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
     }
 
     let mut outcome = TuiOutcome::Exit;
@@ -3393,10 +3383,7 @@ fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static
         .unwrap_or_else(|| "--".to_string());
 
     Line::from(vec![
-        Span::styled(
-            file.status.clone(),
-            file_status_style(&file.status),
-        ),
+        Span::styled(file.status.clone(), file_status_style(&file.status)),
         Span::raw(" "),
         Span::styled(
             format!("{additions:>width$}", width = delta_width),
@@ -4599,7 +4586,9 @@ fn render_markdown_lines(text: &str, max_width: Option<usize>) -> Vec<Line<'stat
             continue;
         }
 
-        if let Some((next_index, table_lines)) = render_markdown_table_block(&raw_lines, index, max_width) {
+        if let Some((next_index, table_lines)) =
+            render_markdown_table_block(&raw_lines, index, max_width)
+        {
             rendered.extend(table_lines);
             index = next_index;
             continue;
@@ -4803,12 +4792,9 @@ fn render_inline_markdown(text: &str, base_style: Style) -> Vec<Span<'static>> {
             let can_open = is_left_flanking(&chars, index, 2)
                 && (chars[index] != '_' || !is_right_flanking(&chars, index, 2));
             if can_open {
-                if let Some(close_index) = find_closing_marker(
-                    &chars,
-                    index + 2,
-                    &[chars[index], chars[index + 1]],
-                    true,
-                ) {
+                if let Some(close_index) =
+                    find_closing_marker(&chars, index + 2, &[chars[index], chars[index + 1]], true)
+                {
                     push_styled_text(&mut spans, &mut buffer, base_style);
                     let inner: String = chars[index + 2..close_index].iter().collect();
                     spans.extend(render_inline_markdown(
@@ -5140,7 +5126,8 @@ fn constrain_widths(natural: &[usize], available: usize) -> Vec<usize> {
                 min_width
             } else {
                 // Proportional allocation of remaining beyond baseline
-                let extra = ((nat - min_width) as f64 / sum_natural.max(1) as f64 * remaining as f64)
+                let extra = ((nat - min_width) as f64 / sum_natural.max(1) as f64
+                    * remaining as f64)
                     .round() as usize;
                 (min_width + extra).min(nat) // cap at natural width
             }
@@ -5418,7 +5405,12 @@ fn push_styled_text(spans: &mut Vec<Span<'static>>, buffer: &mut String, style: 
     }
 }
 
-fn find_closing_marker(chars: &[char], start: usize, marker: &[char], require_right_flanking: bool) -> Option<usize> {
+fn find_closing_marker(
+    chars: &[char],
+    start: usize,
+    marker: &[char],
+    require_right_flanking: bool,
+) -> Option<usize> {
     let width = marker.len();
     let mut index = start;
     while index + width <= chars.len() {
@@ -5532,9 +5524,11 @@ fn visible_restored_message_count(messages: &[Message]) -> usize {
         .iter()
         .filter(|message| match message {
             Message::User { .. } => true,
-            Message::Assistant { content, tool_calls, .. } => {
-                content.is_some() && tool_calls.as_ref().map_or(true, |tc| tc.is_empty())
-            }
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => content.is_some() && tool_calls.as_ref().map_or(true, |tc| tc.is_empty()),
             _ => false,
         })
         .count()
@@ -5604,7 +5598,16 @@ fn parse_timestamp_to_unix(ts: &str) -> Option<u64> {
     let month_days = [
         31,
         if is_leap_year(year) { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     for m in 0..(month - 1) as usize {
         days_since_epoch += month_days[m];
@@ -5726,10 +5729,7 @@ fn spawn_input_thread(
 async fn persist_session_snapshot(snapshot: &mut SessionSnapshot, agent: &Agent) -> Result<()> {
     let refreshed = sessions::refresh_snapshot(snapshot, agent.messages.clone());
     let snapshot_for_blocking = refreshed.clone();
-    tokio::task::spawn_blocking(move || {
-        sessions::save_session(&snapshot_for_blocking)
-    })
-    .await??;
+    tokio::task::spawn_blocking(move || sessions::save_session(&snapshot_for_blocking)).await??;
     *snapshot = refreshed;
     Ok(())
 }
@@ -5739,7 +5739,8 @@ fn contains_point(area: Rect, column: u16, row: u16) -> bool {
 }
 
 fn copy_text_to_clipboard(clipboard: &mut arboard::Clipboard, text: &str) -> io::Result<()> {
-    clipboard.set_text(text)
+    clipboard
+        .set_text(text)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 

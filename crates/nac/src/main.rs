@@ -698,10 +698,7 @@ async fn commit_managed_worker(worker: &ManagedWorkerConfig, response: &str) -> 
 async fn persist_session_snapshot(snapshot: &mut SessionSnapshot, agent: &Agent) -> Result<()> {
     let refreshed = sessions::refresh_snapshot(snapshot, agent.messages.clone());
     let snapshot_for_blocking = refreshed.clone();
-    tokio::task::spawn_blocking(move || {
-        sessions::save_session(&snapshot_for_blocking)
-    })
-    .await??;
+    tokio::task::spawn_blocking(move || sessions::save_session(&snapshot_for_blocking)).await??;
     *snapshot = refreshed;
     Ok(())
 }

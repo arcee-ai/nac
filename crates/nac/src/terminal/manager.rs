@@ -405,8 +405,7 @@ mod tests {
         });
 
         let envs = terminal_env_owned();
-        let (command, pidfile) =
-            sandbox.terminal_pipe_command("echo hello", None, &envs);
+        let (command, pidfile) = sandbox.terminal_pipe_command("echo hello", None, &envs);
 
         assert!(pidfile.starts_with("/tmp/nac-exec-"));
         assert!(pidfile.ends_with(".pid"));

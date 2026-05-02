@@ -495,9 +495,11 @@ fn visible_message_count(messages: &[Message]) -> usize {
         .iter()
         .filter(|message| match message {
             Message::User { .. } => true,
-            Message::Assistant { content, tool_calls, .. } => {
-                content.is_some() && tool_calls.as_ref().map_or(true, |tc| tc.is_empty())
-            }
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => content.is_some() && tool_calls.as_ref().map_or(true, |tc| tc.is_empty()),
             _ => false,
         })
         .count()

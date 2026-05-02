@@ -211,7 +211,15 @@ impl PodmanSession {
         Ok(())
     }
 
-    fn exec_args(&self, program: &str, args: &[String], interactive: bool, tty: bool, cwd: Option<&Path>, envs: &[(String, String)]) -> Vec<OsString> {
+    fn exec_args(
+        &self,
+        program: &str,
+        args: &[String],
+        interactive: bool,
+        tty: bool,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+    ) -> Vec<OsString> {
         let mut command_args = vec![OsString::from("exec")];
 
         let wd = cwd
@@ -576,14 +584,7 @@ mod tests {
 
     #[test]
     fn exec_args_includes_it_flags_when_interactive_and_tty() {
-        let args = sample_session().exec_args(
-            "bash",
-            &[],
-            true,
-            true,
-            None,
-            &[],
-        );
+        let args = sample_session().exec_args("bash", &[], true, true, None, &[]);
         let rendered: Vec<String> = args
             .into_iter()
             .map(|value| value.to_string_lossy().to_string())

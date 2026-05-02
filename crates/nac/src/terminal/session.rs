@@ -281,7 +281,10 @@ pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
 }
 
 pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
-    terminal_env().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    terminal_env()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 struct OutputBuffer {
