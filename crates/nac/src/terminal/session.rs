@@ -1,3 +1,5 @@
+#[cfg(all(unix, not(target_os = "macos")))]
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -25,6 +27,7 @@ pub struct TerminalSession {
     pub last_output_at: Instant,
     alive: Arc<AtomicBool>,
     exit_code: Option<i32>,
+    sandbox_cleanup: Option<(SandboxSession, String)>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -54,24 +57,21 @@ impl TerminalSession {
         }
 
         let resolved_cwd: PathBuf;
+        let mut sandbox_cleanup = None;
 
         if let Some(sb) = sandbox {
-            cmd = CommandBuilder::new("podman");
-            cmd.arg("exec");
-            cmd.arg("-it");
-            cmd.arg("--workdir");
-            let wd = match &cwd {
-                Some(p) => p.display().to_string(),
-                None => sb.workdir_display(),
+            // resolved_cwd mirrors the --workdir fallback inside terminal_pty_command.
+            // Both use cwd if provided, otherwise the sandbox workdir. Keep these in sync.
+            resolved_cwd = match cwd.as_ref() {
+                Some(p) => p.clone(),
+                None => PathBuf::from(sb.workdir_display()),
             };
-            cmd.arg(&wd);
-            for (key, value) in terminal_env() {
-                cmd.arg("--env");
-                cmd.arg(format!("{key}={value}"));
-            }
-            cmd.arg(sb.container_name());
-            cmd.arg("bash");
-            resolved_cwd = PathBuf::from(wd);
+
+            let envs = terminal_env_owned();
+
+            let (sandbox_cmd, pidfile) = sb.terminal_pty_command(cwd.as_deref(), &envs);
+            cmd = sandbox_cmd;
+            sandbox_cleanup = Some((sb.clone(), pidfile));
         } else {
             if let Some(ref p) = cwd {
                 cmd.cwd(p);
@@ -135,6 +135,7 @@ impl TerminalSession {
             last_output_at: Instant::now(),
             alive,
             exit_code: None,
+            sandbox_cleanup,
             cwd: resolved_cwd,
             cols,
             rows,
@@ -196,17 +197,24 @@ impl TerminalSession {
     }
 
     pub async fn kill(&mut self) -> Result<()> {
-        self.kill_process_group();
+        if let Some((sandbox, pidfile)) = &self.sandbox_cleanup {
+            let _ = sandbox.terminal_pipe_kill(pidfile).await;
+        }
+
+        #[cfg(unix)]
+        let descendants = self.child_descendant_pids();
+        #[cfg(unix)]
+        {
+            signal_pids(&descendants, libc::SIGTERM);
+            self.signal_process_group(libc::SIGTERM);
+        }
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         #[cfg(unix)]
-        if let Some(pid) = self.child.process_id() {
-            unsafe {
-                let pgid = libc::getpgid(pid as libc::pid_t);
-                if pgid > 0 && libc::kill(-pgid, 0) == 0 {
-                    libc::kill(-pgid, libc::SIGKILL);
-                }
-            }
+        {
+            signal_pids(&descendants, libc::SIGKILL);
+            self.signal_descendants(libc::SIGKILL);
+            self.signal_process_group(libc::SIGKILL);
         }
 
         self.reap_child().await;
@@ -226,19 +234,35 @@ impl TerminalSession {
     }
 
     #[cfg(unix)]
-    fn kill_process_group(&self) {
+    fn child_descendant_pids(&self) -> Vec<libc::pid_t> {
+        let Some(pid) = self.child.process_id() else {
+            return Vec::new();
+        };
+        descendant_pids(pid as libc::pid_t)
+    }
+
+    #[cfg(unix)]
+    fn signal_descendants(&self, signal: libc::c_int) {
+        signal_pids(&self.child_descendant_pids(), signal);
+    }
+
+    #[cfg(not(unix))]
+    fn signal_descendants(&self, _signal: i32) {}
+
+    #[cfg(unix)]
+    fn signal_process_group(&self, signal: libc::c_int) {
         if let Some(pid) = self.child.process_id() {
             unsafe {
                 let pgid = libc::getpgid(pid as libc::pid_t);
                 if pgid > 0 {
-                    libc::kill(-pgid, libc::SIGTERM);
+                    libc::kill(-pgid, signal);
                 }
             }
         }
     }
 
     #[cfg(not(unix))]
-    fn kill_process_group(&self) {}
+    fn signal_process_group(&self, _signal: i32) {}
 
     async fn reap_child(&mut self) {
         for _ in 0..10 {
@@ -268,12 +292,148 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.writer.flush();
-        self.kill_process_group();
+        #[cfg(unix)]
+        {
+            self.signal_descendants(libc::SIGTERM);
+            self.signal_process_group(libc::SIGTERM);
+        }
         self.alive.store(false, Ordering::SeqCst);
     }
 }
 
-fn terminal_env() -> &'static [(&'static str, &'static str)] {
+#[cfg(unix)]
+fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
+    #[cfg(target_os = "macos")]
+    {
+        return descendant_pids_macos(root);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        descendant_pids_from_pairs(root, process_parent_pairs())
+    }
+}
+
+#[cfg(unix)]
+fn signal_pids(pids: &[libc::pid_t], signal: libc::c_int) {
+    for &pid in pids {
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn descendant_pids_from_pairs(
+    root: libc::pid_t,
+    pairs: Vec<(libc::pid_t, libc::pid_t)>,
+) -> Vec<libc::pid_t> {
+    let mut children: HashMap<libc::pid_t, Vec<libc::pid_t>> = HashMap::new();
+
+    for (pid, ppid) in pairs {
+        children.entry(ppid).or_default().push(pid);
+    }
+
+    let mut found = Vec::new();
+    let mut queue = VecDeque::from([root]);
+    while let Some(parent) = queue.pop_front() {
+        let Some(direct_children) = children.get(&parent) else {
+            continue;
+        };
+        for &child in direct_children {
+            if child <= 1 || found.contains(&child) {
+                continue;
+            }
+            found.push(child);
+            queue.push_back(child);
+        }
+    }
+    found
+}
+
+#[cfg(target_os = "macos")]
+fn descendant_pids_macos(root: libc::pid_t) -> Vec<libc::pid_t> {
+    let mut found = Vec::new();
+    let mut queue = VecDeque::from([root]);
+    while let Some(parent) = queue.pop_front() {
+        for child in direct_child_pids_macos(parent) {
+            if child <= 1 || found.contains(&child) {
+                continue;
+            }
+            found.push(child);
+            queue.push_back(child);
+        }
+    }
+    found
+}
+
+#[cfg(target_os = "macos")]
+fn direct_child_pids_macos(parent: libc::pid_t) -> Vec<libc::pid_t> {
+    let mut capacity = 32usize;
+    loop {
+        let mut pids = vec![0 as libc::pid_t; capacity];
+        let returned = unsafe {
+            libc::proc_listchildpids(
+                parent,
+                pids.as_mut_ptr().cast(),
+                (capacity * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
+            )
+        };
+        if returned <= 0 {
+            return Vec::new();
+        }
+
+        let count = (returned as usize).min(capacity);
+        pids.truncate(count);
+        let children = pids.into_iter().filter(|pid| *pid > 1).collect::<Vec<_>>();
+        if children.len() < capacity || capacity >= 4096 {
+            return children;
+        }
+        capacity *= 2;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
+    let mut pairs = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return pairs;
+    };
+
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|value| value.parse::<libc::pid_t>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        let Some((_, rest)) = stat.rsplit_once(") ") else {
+            continue;
+        };
+        let mut fields = rest.split_whitespace();
+        let _state = fields.next();
+        let Some(ppid) = fields
+            .next()
+            .and_then(|value| value.parse::<libc::pid_t>().ok())
+        else {
+            continue;
+        };
+        pairs.push((pid, ppid));
+    }
+
+    pairs
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
+    Vec::new()
+}
+
+pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
     &[
         ("TERM", "dumb"),
         ("PAGER", "cat"),
@@ -284,6 +444,13 @@ fn terminal_env() -> &'static [(&'static str, &'static str)] {
         ("COLORTERM", ""),
         ("NO_COLOR", "1"),
     ]
+}
+
+pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
+    terminal_env()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 struct OutputBuffer {
@@ -344,5 +511,68 @@ impl OutputBuffer {
         }
         out.extend(self.bytes.drain(..));
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn process_exists(pid: u32) -> bool {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    #[cfg(unix)]
+    fn parse_child_pid(output: &str) -> Option<u32> {
+        output.lines().find_map(|line| {
+            line.split_once("NAC_CHILD:").and_then(|(_, rest)| {
+                rest.chars()
+                    .take_while(|ch| ch.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            })
+        })
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn kill_removes_background_jobs_from_pty_shell() {
+        let mut session = TerminalSession::spawn("test".to_string(), None, 120, 40, None).unwrap();
+        session.write(b"sleep 30 & echo NAC_CHILD:$!\r").unwrap();
+
+        let mut output = String::new();
+        let mut child_pid = None;
+        for _ in 0..40 {
+            output.push_str(&session.read_output());
+            child_pid = parse_child_pid(&output);
+            if child_pid.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
+        assert!(
+            process_exists(child_pid),
+            "background child exited too early"
+        );
+
+        session.kill().await.unwrap();
+
+        let mut still_running = false;
+        for _ in 0..40 {
+            still_running = process_exists(child_pid);
+            if !still_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if still_running {
+            unsafe {
+                libc::kill(child_pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+        assert!(!still_running, "background child survived PTY cleanup");
     }
 }

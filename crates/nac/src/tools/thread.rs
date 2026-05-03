@@ -212,23 +212,22 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
-    let threads = match tokio::task::spawn_blocking(move || {
-        store::list_threads(&store_path, &sid)
-    }).await {
-        Ok(Ok(threads)) => threads,
-        Ok(Err(error)) => {
-            return ToolResult {
-                content: format!("Error listing threads: {}", error),
-                is_error: true,
+    let threads =
+        match tokio::task::spawn_blocking(move || store::list_threads(&store_path, &sid)).await {
+            Ok(Ok(threads)) => threads,
+            Ok(Err(error)) => {
+                return ToolResult {
+                    content: format!("Error listing threads: {}", error),
+                    is_error: true,
+                }
             }
-        }
-        Err(join_error) => {
-            return ToolResult {
-                content: format!("Internal error listing threads: {}", join_error),
-                is_error: true,
+            Err(join_error) => {
+                return ToolResult {
+                    content: format!("Internal error listing threads: {}", join_error),
+                    is_error: true,
+                }
             }
-        }
-    };
+        };
 
     if threads.is_empty() {
         return ToolResult {
@@ -267,9 +266,7 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match tokio::task::spawn_blocking(move || {
-        store::thread_read(&store_path, &sid, &tname)
-    }).await {
+    match tokio::task::spawn_blocking(move || store::thread_read(&store_path, &sid, &tname)).await {
         Ok(Ok(episodes)) => ToolResult {
             content: store::render_thread_document(&thread_name, &episodes),
             is_error: false,
@@ -279,7 +276,10 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: format!("Internal error reading thread '{}': {}", thread_name, join_error),
+            content: format!(
+                "Internal error reading thread '{}': {}",
+                thread_name, join_error
+            ),
             is_error: true,
         },
     }
@@ -308,9 +308,8 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match tokio::task::spawn_blocking(move || {
-        store::delete_thread(&store_path, &sid, &tname)
-    }).await {
+    match tokio::task::spawn_blocking(move || store::delete_thread(&store_path, &sid, &tname)).await
+    {
         Ok(Ok(true)) => ToolResult {
             content: format!(
                 "Deleted thread '{}' and its retained episodes.",
@@ -327,7 +326,10 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: format!("Internal error deleting thread '{}': {}", thread_name, join_error),
+            content: format!(
+                "Internal error deleting thread '{}': {}",
+                thread_name, join_error
+            ),
             is_error: true,
         },
     }

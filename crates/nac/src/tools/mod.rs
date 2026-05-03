@@ -173,18 +173,26 @@ pub async fn execute_tool(
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,
-        "exec_command" => {
-            match exec_command::execute_exec_command(&args, runtime).await {
-                Ok(content) => ToolResult { content, is_error: false },
-                Err(e) => ToolResult { content: format!("Error: {:#}", e), is_error: true },
-            }
-        }
-        "write_stdin" => {
-            match exec_command::execute_write_stdin(&args, runtime).await {
-                Ok(content) => ToolResult { content, is_error: false },
-                Err(e) => ToolResult { content: format!("Error: {:#}", e), is_error: true },
-            }
-        }
+        "exec_command" => match exec_command::execute_exec_command(&args, runtime).await {
+            Ok(content) => ToolResult {
+                content,
+                is_error: false,
+            },
+            Err(e) => ToolResult {
+                content: format!("Error: {:#}", e),
+                is_error: true,
+            },
+        },
+        "write_stdin" => match exec_command::execute_write_stdin(&args, runtime).await {
+            Ok(content) => ToolResult {
+                content,
+                is_error: false,
+            },
+            Err(e) => ToolResult {
+                content: format!("Error: {:#}", e),
+                is_error: true,
+            },
+        },
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,

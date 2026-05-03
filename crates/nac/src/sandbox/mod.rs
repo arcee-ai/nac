@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use portable_pty::CommandBuilder as PtyCommandBuilder;
 
 mod podman;
 
@@ -128,6 +129,27 @@ impl SandboxSession {
         envs: &[(String, String)],
     ) -> tokio::process::Command {
         self.inner.child_process_command(program, args, envs)
+    }
+
+    pub fn terminal_pty_command(
+        &self,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+    ) -> (PtyCommandBuilder, String) {
+        self.inner.terminal_pty_command(cwd, envs)
+    }
+
+    pub fn terminal_pipe_command(
+        &self,
+        cmd: &str,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+    ) -> (tokio::process::Command, String) {
+        self.inner.terminal_pipe_command(cmd, cwd, envs)
+    }
+
+    pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+        self.inner.terminal_pipe_kill(pidfile).await
     }
 
     #[cfg(test)]

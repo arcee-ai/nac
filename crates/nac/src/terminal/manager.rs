@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,31 +14,8 @@ use crate::process::{isolate_process_group, terminate_child_tree};
 use crate::sandbox::SandboxSession;
 
 use super::keyparse::parse_keys;
-use super::session::TerminalSession;
+use super::session::{terminal_env, terminal_env_owned, TerminalSession};
 use super::{TerminalInfo, TerminalOutput};
-
-const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
-if command -v setsid >/dev/null 2>&1; then
-  setsid bash -c "$1" &
-else
-  set -m
-  bash -c "$1" &
-fi
-pid=$!
-printf '%s' "$pid" > "$pidfile"
-wait "$pid"
-status=$?
-rm -f "$pidfile"
-exit "$status""#;
-
-const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-pid=$(cat "$pidfile" 2>/dev/null) || exit 0
-if [ -n "$pid" ]; then
-  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-  sleep 0.5
-  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-fi
-rm -f "$pidfile""#;
 
 #[derive(Clone)]
 pub struct TerminalManager {
@@ -311,26 +287,11 @@ async fn run_pipe_command(
     timeout_duration: Duration,
     sandbox: Option<&SandboxSession>,
 ) -> Result<PipeCommandOutcome> {
-    let sandbox_pidfile = sandbox.map(|_| make_sandbox_pidfile());
+    let mut sandbox_pidfile: Option<String> = None;
     let mut command = if let Some(sb) = sandbox {
-        let mut command = Command::new("podman");
-        command.arg("exec").arg("--workdir");
-        let wd = cwd
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| sb.workdir_display());
-        command.arg(wd);
-        for (key, value) in terminal_env() {
-            command.arg("--env").arg(format!("{key}={value}"));
-        }
-        command
-            .arg(sb.container_name())
-            .arg("bash")
-            .arg("-lc")
-            .arg(SANDBOX_EXEC_WRAPPER)
-            .arg("nac-exec")
-            .arg(cmd)
-            .arg(sandbox_pidfile.as_deref().expect("sandbox pidfile exists"));
+        let envs = terminal_env_owned();
+        let (mut command, pidfile) = sb.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
+        sandbox_pidfile = Some(pidfile);
         isolate_process_group(&mut command);
         command
     } else {
@@ -364,7 +325,7 @@ async fn run_pipe_command(
         Ok(status) => status.context("failed to wait for command")?,
         Err(_) => {
             if let (Some(sb), Some(pidfile)) = (sandbox, sandbox_pidfile.as_deref()) {
-                terminate_sandbox_command(sb, pidfile).await;
+                let _ = sb.terminal_pipe_kill(pidfile).await;
             }
             terminate_child_tree(&mut child).await;
             return Ok(PipeCommandOutcome::TimedOut {
@@ -380,28 +341,6 @@ async fn run_pipe_command(
     }))
 }
 
-async fn terminate_sandbox_command(sandbox: &SandboxSession, pidfile: &str) {
-    let mut command = Command::new("podman");
-    command
-        .arg("exec")
-        .arg(sandbox.container_name())
-        .arg("sh")
-        .arg("-c")
-        .arg(SANDBOX_KILL_WRAPPER)
-        .arg("nac-kill")
-        .arg(pidfile)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    let _ = timeout(Duration::from_secs(2), command.status()).await;
-}
-
-fn make_sandbox_pidfile() -> String {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
-}
-
 enum PipeCommandOutcome {
     Completed(Output),
     TimedOut { stdout: Vec<u8>, stderr: Vec<u8> },
@@ -414,19 +353,6 @@ where
     let mut output = Vec::new();
     let _ = reader.read_to_end(&mut output).await;
     output
-}
-
-fn terminal_env() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("TERM", "dumb"),
-        ("PAGER", "cat"),
-        ("GIT_PAGER", "cat"),
-        ("GH_PAGER", "cat"),
-        ("LANG", "C.UTF-8"),
-        ("LC_ALL", "C.UTF-8"),
-        ("COLORTERM", ""),
-        ("NO_COLOR", "1"),
-    ]
 }
 
 fn head_tail_truncate(text: &str, max_chars: usize) -> (String, bool) {
@@ -469,25 +395,24 @@ mod tests {
     };
 
     #[test]
-    fn sandbox_pidfile_path_is_container_tmp_path() {
-        let path = make_sandbox_pidfile();
-        assert!(path.starts_with("/tmp/nac-exec-"));
-        assert!(path.ends_with(".pid"));
-    }
-
-    #[test]
-    fn sandbox_wrappers_track_and_kill_process_group() {
-        assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
-        assert!(SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidfile\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -TERM \"-$pid\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
-
-        let _sandbox = SandboxSession::new_for_test(SandboxSpec {
+    fn terminal_pipe_command_delegates_to_sandbox_session() {
+        let sandbox = SandboxSession::new_for_test(SandboxSpec {
             image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: Vec::new(),
             workdir: DEFAULT_SANDBOX_WORKDIR.into(),
             gpu_devices: Vec::new(),
             shm_size: None,
         });
+
+        let envs = terminal_env_owned();
+        let (command, pidfile) = sandbox.terminal_pipe_command("echo hello", None, &envs);
+
+        assert!(pidfile.starts_with("/tmp/nac-exec-"));
+        assert!(pidfile.ends_with(".pid"));
+
+        let debug = format!("{command:?}");
+        assert!(debug.contains("podman"), "expected podman command: {debug}");
+        assert!(debug.contains("exec"), "expected exec subcommand: {debug}");
+        assert!(debug.contains("TERM=dumb"), "expected TERM=dumb: {debug}");
     }
 }
