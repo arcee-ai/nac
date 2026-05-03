@@ -1,23 +1,4 @@
-//! Conway's Game of Life implementation for TUI background animation.
-//!
-//! This module provides a cellular automaton simulation using Braille patterns
-//! for rendering. It includes various seed patterns (gliders, spaceships, etc.)
-//! and automatic pattern injection when activity becomes low.
-
-use rand::rngs::StdRng;
-use rand::RngExt;
-use rand::SeedableRng;
-use ratatui::text::{Line, Span};
-
-/// Generate a deterministic seed from prompt and dimensions
-pub fn hash_seed(prompt: &str, width: usize, height: usize, version: &str) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(version.as_bytes());
-    hasher.update(prompt.as_bytes());
-    hasher.update(&width.to_le_bytes());
-    hasher.update(&height.to_le_bytes());
-    hasher.finalize().into()
-}
+use super::*;
 
 /// Configuration for the Life simulation injector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -156,139 +137,15 @@ impl ZoneStats {
     }
 }
 
-/// A predefined seed pattern for the Game of Life.
-#[derive(Clone, Copy, Debug)]
-pub struct SeedPattern {
-    /// Width of the pattern in cells.
-    pub width: usize,
-    /// Height of the pattern in cells.
-    pub height: usize,
-    /// Coordinates of live cells within the pattern bounds.
-    pub cells: &'static [(usize, usize)],
-}
-
-/// Placement configuration for injecting a pattern into the life field.
-#[derive(Clone, Copy, Debug)]
-pub struct PatternPlacement {
-    /// The pattern to place.
-    pub pattern: SeedPattern,
-    /// Horizontal offset from center (scaled by LIFE_LAYOUT_WIDTH_SCALE).
-    pub dx: isize,
-    /// Vertical offset from center.
-    pub dy: isize,
-    /// Rotation in 90-degree increments (0-3).
-    pub rotation: u8,
-    /// Whether to flip horizontally after rotation.
-    pub flip: bool,
-}
-
-/// The glider pattern - a small spaceship that moves diagonally.
-pub const GLIDER_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)],
-};
-
-/// The R-pentomino pattern - a small methuselah that evolves for many generations.
-pub const R_PENTOMINO_PATTERN: SeedPattern = SeedPattern {
-    width: 3,
-    height: 3,
-    cells: &[(1, 0), (2, 0), (0, 1), (1, 1), (1, 2)],
-};
-
-/// The acorn pattern - a methuselah that evolves for 5206 generations.
-pub const ACORN_PATTERN: SeedPattern = SeedPattern {
-    width: 7,
-    height: 3,
-    cells: &[(1, 0), (3, 1), (0, 2), (1, 2), (4, 2), (5, 2), (6, 2)],
-};
-
-/// The lightweight spaceship (LWSS) pattern - moves orthogonally.
-pub const LWSS_PATTERN: SeedPattern = SeedPattern {
-    width: 5,
-    height: 4,
-    cells: &[
-        (1, 0),
-        (2, 0),
-        (3, 0),
-        (4, 0),
-        (0, 1),
-        (4, 1),
-        (4, 2),
-        (0, 3),
-        (3, 3),
-    ],
-};
-
-/// Small random blob pattern (4x4) for variety
-pub const RANDOM_BLOB_4X4: SeedPattern = SeedPattern {
-    width: 4,
-    height: 4,
-    cells: &[
-        (1, 0),
-        (2, 0),
-        (0, 1),
-        (3, 1),
-        (1, 2),
-        (2, 2),
-        (0, 3),
-        (3, 3),
-    ],
-};
-
-/// Medium random blob pattern (5x5) for variety
-pub const RANDOM_BLOB_5X5: SeedPattern = SeedPattern {
-    width: 5,
-    height: 5,
-    cells: &[
-        (1, 0),
-        (3, 0),
-        (0, 1),
-        (2, 1),
-        (4, 1),
-        (1, 2),
-        (3, 2),
-        (0, 3),
-        (2, 3),
-        (4, 3),
-        (1, 4),
-        (3, 4),
-    ],
-};
-
-/// Large random blob pattern (6x6) for variety
-pub const RANDOM_BLOB_6X6: SeedPattern = SeedPattern {
-    width: 6,
-    height: 6,
-    cells: &[
-        (1, 0),
-        (4, 0),
-        (0, 1),
-        (2, 1),
-        (3, 1),
-        (5, 1),
-        (1, 2),
-        (4, 2),
-        (1, 3),
-        (4, 3),
-        (0, 4),
-        (2, 4),
-        (3, 4),
-        (5, 4),
-        (1, 5),
-        (4, 5),
-    ],
-};
-
 /// The Game of Life field state.
 #[derive(Debug)]
 pub struct LifeField {
     /// Width of the field in cells.
-    width: usize,
+    pub(super) width: usize,
     /// Height of the field in cells.
-    height: usize,
+    pub(super) height: usize,
     /// Cell states - true for alive, false for dead.
-    cells: Vec<bool>,
+    pub(super) cells: Vec<bool>,
     /// Counter for consecutive ticks with low activity.
     low_activity_ticks: usize,
     /// Current phase for pattern injection rotation.
@@ -565,67 +422,6 @@ impl LifeField {
         if self.generation % self.config.prune_interval == 0 {
             self.prune_dense_areas();
         }
-    }
-
-    /// Renders the field as a vector of ratatui Lines using Braille characters.
-    ///
-    /// Each Braille character represents a 2x4 block of cells, allowing for
-    /// compact display of the life field.
-    ///
-    /// # Arguments
-    /// * `char_width` - Width in characters (each char is 2 cells wide)
-    /// * `char_height` - Height in characters (each char is 4 cells tall)
-    ///
-    /// # Returns
-    /// Vector of Lines representing the rendered field
-    pub fn render_lines(&self, char_width: usize, char_height: usize) -> Vec<Line<'static>> {
-        let mut lines = Vec::with_capacity(char_height);
-        for char_y in 0..char_height {
-            let mut text = String::with_capacity(char_width);
-            for char_x in 0..char_width {
-                let dot_x = char_x * 2;
-                let dot_y = char_y * 4;
-                text.push(self.braille_char(dot_x, dot_y));
-            }
-            lines.push(Line::from(Span::raw(text)));
-        }
-        lines
-    }
-
-    /// Generates a Braille character representing a 2x4 cell block.
-    ///
-    /// Braille dots are mapped to cell positions:
-    /// - Dots 1-4 map to left column (top to bottom)
-    /// - Dots 5-8 map to right column (top to bottom)
-    ///
-    /// # Arguments
-    /// * `dot_x` - X coordinate of the left cell in the block
-    /// * `dot_y` - Y coordinate of the top cell in the block
-    ///
-    /// # Returns
-    /// A Braille Unicode character (U+2800 to U+28FF)
-    pub fn braille_char(&self, dot_x: usize, dot_y: usize) -> char {
-        let mut bits = 0u32;
-        for local_y in 0..4 {
-            for local_x in 0..2 {
-                let x = dot_x + local_x;
-                let y = dot_y + local_y;
-                if x < self.width && y < self.height && self.cells[self.index(x, y)] {
-                    bits |= match (local_x, local_y) {
-                        (0, 0) => 0x01,
-                        (0, 1) => 0x02,
-                        (0, 2) => 0x04,
-                        (0, 3) => 0x40,
-                        (1, 0) => 0x08,
-                        (1, 1) => 0x10,
-                        (1, 2) => 0x20,
-                        (1, 3) => 0x80,
-                        _ => 0,
-                    };
-                }
-            }
-        }
-        char::from_u32(0x2800 + bits).unwrap_or(' ')
     }
 
     /// Counts the number of live neighbors for a cell.
@@ -1237,82 +1033,5 @@ impl LifeField {
     /// Get configuration
     pub fn config(&self) -> &LifeConfig {
         &self.config
-    }
-}
-
-/// Wraps an index with a delta, handling toroidal boundaries.
-///
-/// # Arguments
-/// * `index` - Starting index
-/// * `delta` - Offset to apply (can be negative)
-/// * `len` - Length of the dimension
-///
-/// # Returns
-/// Wrapped index within [0, len)
-pub fn wrap_index(index: usize, delta: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    ((index as isize + delta).rem_euclid(len as isize)) as usize
-}
-
-/// Wraps a signed index, handling toroidal boundaries.
-///
-/// # Arguments
-/// * `index` - Signed index (can be negative)
-/// * `len` - Length of the dimension
-///
-/// # Returns
-/// Wrapped index within [0, len)
-pub fn wrap_index_signed(index: isize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    index.rem_euclid(len as isize) as usize
-}
-
-/// Calculates dimensions after rotation.
-///
-/// # Arguments
-/// * `width` - Original width
-/// * `height` - Original height
-/// * `rotation` - Rotation in 90-degree increments (0-3)
-///
-/// # Returns
-/// (width, height) after rotation
-pub fn rotated_dimensions(width: usize, height: usize, rotation: u8) -> (usize, usize) {
-    if rotation % 2 == 0 {
-        (width, height)
-    } else {
-        (height, width)
-    }
-}
-
-/// Rotates a cell coordinate within a pattern.
-///
-/// # Arguments
-/// * `x` - Original X coordinate
-/// * `y` - Original Y coordinate
-/// * `width` - Pattern width
-/// * `height` - Pattern height
-/// * `rotation` - Rotation in 90-degree increments (0-3)
-///
-/// # Returns
-/// Rotated (x, y) coordinates
-pub fn rotate_cell(
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    rotation: u8,
-) -> (usize, usize) {
-    match rotation % 4 {
-        0 => (x, y),
-        1 => (height.saturating_sub(1).saturating_sub(y), x),
-        2 => (
-            width.saturating_sub(1).saturating_sub(x),
-            height.saturating_sub(1).saturating_sub(y),
-        ),
-        _ => (y, width.saturating_sub(1).saturating_sub(x)),
     }
 }
