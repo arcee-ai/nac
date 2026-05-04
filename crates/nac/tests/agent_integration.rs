@@ -1,4 +1,4 @@
-use nac::{agent::Agent, api::ModelClient};
+use nac::{agent::Agent, model::ModelClient};
 
 #[tokio::test]
 #[ignore = "requires OPENAI_API_KEY"]

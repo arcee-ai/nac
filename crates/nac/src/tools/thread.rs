@@ -9,8 +9,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use crate::api::ModelClient;
 use crate::events::{decode_stderr_event, AgentEvent};
+use crate::model::ModelClient;
 use crate::process::{isolate_process_group, terminate_child_tree};
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};

@@ -1,0 +1,2616 @@
+use super::*;
+
+pub(super) struct App {
+    pub(super) metadata: TuiMetadata,
+    pub(super) inspect_root: Option<PathBuf>,
+    pub(super) composer: TextArea<'static>,
+    pub(super) composer_notice: Option<ComposerNotice>,
+    pub(super) result_rx: Option<tokio::sync::oneshot::Receiver<Result<String, String>>>,
+    pub(super) quit: bool,
+    pub(super) working_started_at: Option<Instant>,
+    pub(super) working_frame: usize,
+    pub(super) last_response_duration: Duration,
+    pub(super) restored_message_count: usize,
+    pub(super) last_prompt: Option<String>,
+    pub(super) last_response: Option<String>,
+    pub(super) previous_response: Option<String>,
+    pub(super) timeline: VecDeque<TimelineEntry>,
+    pub(super) threads: HashMap<String, ThreadView>,
+    pub(super) all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
+    pub(super) episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
+    pub(super) response_markdown_cache: Option<(String, usize, Vec<Line<'static>>)>,
+    pub(super) selected_thread: Option<String>,
+    pub(super) active_tools: HashMap<String, ActiveTool>,
+    pub(super) recent_tools: VecDeque<ToolRecord>,
+    pub(super) workspace: WorkspaceSnapshot,
+    pub(super) worksets: WorksetSnapshot,
+    pub(super) last_workspace_refresh_at: Instant,
+    pub(super) workspace_tx: Option<mpsc::Sender<WorkspaceSnapshot>>,
+    pub(super) workspace_rx: Option<mpsc::Receiver<WorkspaceSnapshot>>,
+    pub(super) workspace_refresh_pending: bool,
+    pub(super) workspace_refresh_deadline: Option<Instant>,
+    pub(super) panel_scrolls: HashMap<PanelId, usize>,
+    pub(super) panel_views: HashMap<PanelId, PanelView>,
+    pub(super) suppress_mouse_scroll_until: Option<Instant>,
+    pub(super) selection: Option<SelectionState>,
+    pub(super) help_visible: bool,
+    pub(super) screen: ScreenMode,
+    pub(super) session_picker: SessionPickerState,
+    pub(super) life_field: LifeField,
+    pub(super) current_prompt: String,
+    pub(super) clipboard: Option<arboard::Clipboard>,
+}
+
+impl App {
+    pub(super) fn new(
+        metadata: TuiMetadata,
+        restored_messages: &[Message],
+        start_in_session_picker: bool,
+    ) -> Self {
+        let inspect_root = metadata.workspace_host_path.clone();
+        let workspace = WorkspaceSnapshot::load(&metadata.cwd, inspect_root.as_deref());
+        let worksets = WorksetSnapshot::load(&metadata.store_path, metadata.session_id.as_deref());
+
+        let mut panel_scrolls = HashMap::new();
+        panel_scrolls.insert(PanelId::Prompt, 0);
+        panel_scrolls.insert(PanelId::Events, 0);
+        panel_scrolls.insert(PanelId::Threads, 0);
+        panel_scrolls.insert(PanelId::Response, 0);
+        panel_scrolls.insert(PanelId::PreviousResponse, 0);
+        panel_scrolls.insert(PanelId::Workspace, 0);
+        panel_scrolls.insert(PanelId::Tools, 0);
+        panel_scrolls.insert(PanelId::Worksets, 0);
+        panel_scrolls.insert(PanelId::ThreadList, 0);
+        panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+
+        let mut app = Self {
+            metadata,
+            inspect_root,
+            composer: build_composer(),
+            composer_notice: None,
+            result_rx: None,
+            quit: false,
+            working_started_at: None,
+            working_frame: 0,
+            last_response_duration: Duration::default(),
+            restored_message_count: visible_restored_message_count(restored_messages),
+            last_prompt: None,
+            last_response: None,
+            previous_response: None,
+            timeline: VecDeque::new(),
+            threads: HashMap::new(),
+            all_episodes: HashMap::new(),
+            episode_markdown_cache: HashMap::new(),
+            response_markdown_cache: None,
+            selected_thread: None,
+            active_tools: HashMap::new(),
+            recent_tools: VecDeque::new(),
+            workspace,
+            worksets,
+            last_workspace_refresh_at: Instant::now(),
+            workspace_tx: None,
+            workspace_rx: None,
+            workspace_refresh_pending: false,
+            workspace_refresh_deadline: None,
+            panel_scrolls,
+            panel_views: HashMap::new(),
+            suppress_mouse_scroll_until: None,
+            selection: None,
+            help_visible: false,
+            screen: ScreenMode::Dashboard,
+            session_picker: SessionPickerState::default(),
+            life_field: LifeField::default(),
+            current_prompt: String::new(),
+            clipboard: arboard::Clipboard::new().ok(),
+        };
+
+        app.hydrate_threads_from_store();
+        app.hydrate_all_episodes();
+        app.hydrate_from_messages(restored_messages);
+        if app.restored_message_count > 0 {
+            app.push_timeline(
+                "system",
+                format!(
+                    "restored {} message(s) into the session",
+                    app.restored_message_count
+                ),
+                Tone::Muted,
+            );
+        }
+        if start_in_session_picker {
+            app.open_session_picker(true);
+        }
+        app
+    }
+
+    pub(super) fn prompt(&self) -> String {
+        self.composer.lines().join("\n")
+    }
+
+    pub(super) fn clear_composer(&mut self) {
+        self.composer = build_composer();
+        self.composer_notice = None;
+    }
+
+    pub(super) fn clear_composer_notice(&mut self) {
+        self.composer_notice = None;
+    }
+
+    pub(super) fn show_composer_notice(&mut self, text: impl Into<String>, tone: Tone) {
+        self.composer_notice = Some(ComposerNotice {
+            text: text.into(),
+            tone,
+            expires_at: Instant::now() + Duration::from_secs(2),
+        });
+    }
+
+    pub(super) fn maybe_expire_composer_notice(&mut self) {
+        if self
+            .composer_notice
+            .as_ref()
+            .is_some_and(|notice| Instant::now() >= notice.expires_at)
+        {
+            self.composer_notice = None;
+        }
+    }
+
+    pub(super) fn handle_paste(&mut self, text: &str) -> AppAction {
+        if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+            return AppAction::None;
+        }
+        if self.result_rx.is_some() {
+            return AppAction::None;
+        }
+
+        self.clear_composer_notice();
+        self.composer.insert_str(&normalize_paste(text));
+        AppAction::None
+    }
+
+    pub(super) fn scroll_reset_state(&self) -> (ScreenMode, bool, Option<String>, usize) {
+        (
+            self.screen,
+            self.help_visible,
+            self.selected_thread.clone(),
+            self.session_picker.selected,
+        )
+    }
+
+    pub(super) fn handle_key_event(&mut self, key: KeyEvent) -> AppAction {
+        let before = self.scroll_reset_state();
+        let action = self.handle_key_event_inner(key);
+        if self.scroll_reset_state() != before {
+            self.request_scroll_event_reset();
+        }
+        action
+    }
+
+    pub(super) fn handle_key_event_inner(&mut self, key: KeyEvent) -> AppAction {
+        if key.kind == KeyEventKind::Release {
+            return AppAction::None;
+        }
+
+        if matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+            return self.handle_session_picker_key_event(key);
+        }
+
+        if self.help_visible {
+            return match key {
+                KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers,
+                    ..
+                } if modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.quit = true;
+                    AppAction::Quit
+                }
+                KeyEvent {
+                    code: KeyCode::Esc, ..
+                }
+                | KeyEvent {
+                    code: KeyCode::Char('?'),
+                    ..
+                } => {
+                    self.help_visible = false;
+                    AppAction::None
+                }
+                _ => AppAction::None,
+            };
+        }
+
+        match key {
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.quit = true;
+                AppAction::Quit
+            }
+            KeyEvent {
+                code: KeyCode::Char('?'),
+                ..
+            } if self.prompt().is_empty() => {
+                self.selection = None;
+                self.help_visible = true;
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('e'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Events);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('r'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Response);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('p'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::PreviousResponse);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('t'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Threads);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } if matches!(self.screen, ScreenMode::Focused(_)) => {
+                self.selection = None;
+                self.screen = ScreenMode::Dashboard;
+                AppAction::None
+            }
+            // Navigation in focused Threads mode
+            KeyEvent {
+                code: KeyCode::Up, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_previous_thread();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Threads)) => {
+                self.select_next_thread();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            } => {
+                self.scroll_panel(self.primary_scroll_panel(), -3);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            } => {
+                self.scroll_panel(self.primary_scroll_panel(), 3);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::SHIFT) => {
+                if self.result_rx.is_none() {
+                    self.composer.insert_newline();
+                }
+                AppAction::None
+            }
+            // Some terminals encode Shift+Enter as LF, which crossterm reports as Ctrl+J in raw mode.
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if self.result_rx.is_none() {
+                    self.composer.insert_newline();
+                }
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                let prompt = self.prompt();
+                let trimmed = prompt.trim();
+                if trimmed.is_empty() || self.result_rx.is_some() {
+                    return AppAction::None;
+                }
+
+                if let Some(command) = parse_slash_command(&prompt) {
+                    match command {
+                        Ok(SlashCommand::Exit) => {
+                            self.quit = true;
+                            return AppAction::Quit;
+                        }
+                        Ok(SlashCommand::Sessions) => {
+                            self.open_session_picker(false);
+                            self.clear_composer();
+                            return AppAction::None;
+                        }
+                        Ok(SlashCommand::Plan { .. } | SlashCommand::Run { .. }) => {}
+                        Err(message) => {
+                            self.show_composer_notice(message, Tone::Warning);
+                            return AppAction::None;
+                        }
+                    }
+                }
+
+                AppAction::Submit(prompt)
+            }
+            // Cmd+C (macOS) or Super+C: copy selection, don't type "c"
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::SUPER)
+                && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.copy_selection_to_clipboard();
+                AppAction::None
+            }
+            // All other SUPER-modified keys: don't type into composer
+            KeyEvent { modifiers, .. } if modifiers.contains(KeyModifiers::SUPER) => {
+                AppAction::None
+            }
+            _ => {
+                if self.result_rx.is_none() {
+                    self.clear_composer_notice();
+                    self.composer.input(key);
+                }
+                AppAction::None
+            }
+        }
+    }
+
+    pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+            return;
+        }
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(point) = self.selection_point_at(mouse.column, mouse.row) {
+                    self.selection = Some(SelectionState {
+                        anchor: point.clone(),
+                        focus: point,
+                        dragging: true,
+                    });
+                } else {
+                    self.selection = None;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let panel = self
+                    .selection
+                    .as_ref()
+                    .map(|selection| selection.anchor.panel);
+                if let Some(panel) = panel {
+                    self.autoscroll_drag_selection(panel, mouse.column, mouse.row);
+                    let point = self.selection_point_for_panel(panel, mouse.column, mouse.row);
+                    if let Some(selection) = self.selection.as_mut() {
+                        if let Some(point) = point {
+                            selection.focus = point;
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(selection) = self.selection.as_mut() {
+                    selection.dragging = false;
+                }
+                self.copy_selection_to_clipboard();
+            }
+            MouseEventKind::ScrollUp => {
+                if !self.suppressing_mouse_scroll() {
+                    if let Some(panel) = self.panel_at(mouse.column, mouse.row) {
+                        self.scroll_panel(panel, -3);
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if !self.suppressing_mouse_scroll() {
+                    if let Some(panel) = self.panel_at(mouse.column, mouse.row) {
+                        self.scroll_panel(panel, 3);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_crossterm_event(&mut self, event: CrosstermEvent) -> Option<AppAction> {
+        match event {
+            CrosstermEvent::Key(key) => Some(self.handle_key_event(key)),
+            CrosstermEvent::Mouse(mouse) => {
+                self.handle_mouse_event(mouse);
+                None
+            }
+            CrosstermEvent::Paste(text) => {
+                let _ = self.handle_paste(&text);
+                None
+            }
+            CrosstermEvent::Resize(_, _) => None,
+            _ => None,
+        }
+    }
+
+    pub(super) fn hydrate_from_messages(&mut self, messages: &[Message]) {
+        for message in messages {
+            match message {
+                Message::User { content } => {
+                    self.last_prompt = Some(display_prompt_from_message(content));
+                }
+                Message::Assistant {
+                    content: Some(content),
+                    tool_calls,
+                    ..
+                } if tool_calls.as_ref().map_or(true, |tc| tc.is_empty()) => {
+                    if let Some(previous) = self.last_response.replace(content.clone()) {
+                        self.previous_response = Some(previous);
+                    }
+                    self.response_markdown_cache = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn handle_session_picker_key_event(&mut self, key: KeyEvent) -> AppAction {
+        match key {
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.quit = true;
+                AppAction::Quit
+            }
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('q'),
+                ..
+            } => {
+                if matches!(self.screen, ScreenMode::SessionPicker { startup: true }) {
+                    self.quit = true;
+                    AppAction::Quit
+                } else {
+                    self.screen = ScreenMode::Dashboard;
+                    AppAction::None
+                }
+            }
+            KeyEvent {
+                code: KeyCode::Up, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            } => {
+                self.session_picker.selected = self.session_picker.selected.saturating_sub(1);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            } => {
+                if !self.session_picker.sessions.is_empty() {
+                    self.session_picker.selected = self
+                        .session_picker
+                        .selected
+                        .saturating_add(1)
+                        .min(self.session_picker.sessions.len().saturating_sub(1));
+                }
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('r'),
+                ..
+            } => {
+                self.refresh_session_picker();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => self
+                .session_picker
+                .sessions
+                .get(self.session_picker.selected)
+                .map(|session| AppAction::ResumeSession(session.session_id.clone()))
+                .unwrap_or(AppAction::None),
+            _ => AppAction::None,
+        }
+    }
+
+    pub(super) fn open_session_picker(&mut self, startup: bool) {
+        self.refresh_session_picker();
+        self.selection = None;
+        self.screen = ScreenMode::SessionPicker { startup };
+    }
+
+    pub(super) fn toggle_focus_panel(&mut self, panel: FocusPanel) {
+        self.selection = None;
+        self.screen = match self.screen {
+            ScreenMode::Focused(current) if current == panel => ScreenMode::Dashboard,
+            _ => {
+                if matches!(panel, FocusPanel::Events) {
+                    self.panel_scrolls.insert(PanelId::Events, usize::MAX);
+                }
+                if matches!(panel, FocusPanel::Threads) && self.selected_thread.is_none() {
+                    let names = self.sorted_thread_names();
+                    if !names.is_empty() {
+                        self.selected_thread = Some(names[0].clone());
+                    }
+                    self.panel_scrolls.insert(PanelId::ThreadList, 0);
+                    self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+                }
+                ScreenMode::Focused(panel)
+            }
+        };
+    }
+
+    pub(super) fn primary_scroll_panel(&self) -> PanelId {
+        match self.screen {
+            ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
+            ScreenMode::Focused(FocusPanel::PreviousResponse) => PanelId::PreviousResponse,
+            ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
+            _ => PanelId::Response,
+        }
+    }
+
+    pub(super) fn request_scroll_event_reset(&mut self) {
+        self.suppress_mouse_scroll_until = Some(Instant::now() + VIEW_CHANGE_SCROLL_SUPPRESS);
+    }
+
+    pub(super) fn suppressing_mouse_scroll(&mut self) -> bool {
+        let Some(until) = self.suppress_mouse_scroll_until else {
+            return false;
+        };
+
+        if Instant::now() < until {
+            return true;
+        }
+
+        self.suppress_mouse_scroll_until = None;
+        false
+    }
+
+    pub(super) fn refresh_session_picker(&mut self) {
+        match tokio::task::block_in_place(|| sessions::list_sessions()) {
+            Ok(sessions) => {
+                let current_session = self.metadata.session_id.as_deref();
+                let selected = current_session
+                    .and_then(|current| {
+                        sessions
+                            .iter()
+                            .position(|session| session.session_id == current)
+                    })
+                    .unwrap_or(0);
+                self.session_picker.sessions = sessions;
+                self.session_picker.selected =
+                    selected.min(self.session_picker.sessions.len().saturating_sub(1));
+                self.session_picker.error = None;
+            }
+            Err(error) => {
+                self.session_picker.sessions.clear();
+                self.session_picker.selected = 0;
+                self.session_picker.error = Some(error.to_string());
+            }
+        }
+    }
+
+    pub(super) fn hydrate_threads_from_store(&mut self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        let Ok(threads) = tokio::task::block_in_place(|| {
+            store::list_threads(&self.metadata.store_path, session_id)
+        }) else {
+            return;
+        };
+
+        for thread in threads {
+            let ts = parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
+            let entry = self
+                .threads
+                .entry(thread.name.clone())
+                .or_insert_with(|| ThreadView {
+                    name: thread.name.clone(),
+                    action: thread
+                        .latest_action
+                        .clone()
+                        .unwrap_or_else(|| "retained history".to_string()),
+                    state: ThreadState::Idle,
+                    updated_at: short_clock(&thread.updated_at),
+                    updated_at_ts: ts,
+                    episodes: thread.episode_count,
+                    summary: format!("{} episode(s)", thread.episode_count),
+                });
+            if matches!(entry.state, ThreadState::Idle) {
+                if let Some(action) = thread.latest_action {
+                    entry.action = action;
+                }
+                entry.updated_at = short_clock(&thread.updated_at);
+                entry.updated_at_ts =
+                    parse_timestamp_to_unix(&thread.updated_at).unwrap_or_else(current_unix_ts);
+                entry.episodes = thread.episode_count;
+                entry.summary = format!("{} episode(s)", thread.episode_count);
+            }
+        }
+    }
+
+    pub(super) fn hydrate_all_episodes(&mut self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        if let Ok(episodes) = tokio::task::block_in_place(|| {
+            store::load_all_episodes(&self.metadata.store_path, session_id)
+        }) {
+            self.all_episodes = episodes;
+        }
+        self.episode_markdown_cache.clear();
+    }
+
+    pub(super) fn refresh_worksets(&mut self) {
+        self.worksets = WorksetSnapshot::load(
+            &self.metadata.store_path,
+            self.metadata.session_id.as_deref(),
+        );
+    }
+
+    pub(super) fn maybe_refresh_workspace(&mut self) {
+        if self.last_workspace_refresh_at.elapsed() >= WORKSPACE_REFRESH_INTERVAL {
+            self.last_workspace_refresh_at = Instant::now();
+            self.request_workspace_refresh();
+        }
+    }
+
+    pub(super) fn request_workspace_refresh(&mut self) {
+        if self.workspace_refresh_pending {
+            return;
+        }
+        let tx = match &self.workspace_tx {
+            Some(tx) => tx.clone(),
+            None => return,
+        };
+        let cwd = self.metadata.cwd.clone();
+        let inspect_root = self.inspect_root.clone();
+        self.workspace_refresh_pending = true;
+        self.workspace_refresh_deadline = Some(Instant::now() + Duration::from_secs(5));
+        tokio::task::spawn_blocking(move || {
+            let snapshot = WorkspaceSnapshot::load(&cwd, inspect_root.as_deref());
+            let _ = tx.blocking_send(snapshot);
+        });
+    }
+
+    pub(super) fn check_workspace_channel(&mut self) {
+        let rx = match &mut self.workspace_rx {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(snapshot) => {
+                self.workspace = snapshot;
+                self.workspace_refresh_pending = false;
+                self.workspace_refresh_deadline = None;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {
+                if self.workspace_refresh_pending {
+                    if let Some(deadline) = self.workspace_refresh_deadline {
+                        if Instant::now() >= deadline {
+                            self.workspace_refresh_pending = false;
+                            self.workspace_refresh_deadline = None;
+                        }
+                    }
+                }
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                self.workspace_rx = None;
+                self.workspace_refresh_pending = false;
+                self.workspace_refresh_deadline = None;
+            }
+        }
+    }
+
+    pub(super) fn note_prompt_submitted(&mut self, prompt: &str) {
+        self.last_prompt = Some(prompt.to_string());
+        self.panel_scrolls.insert(PanelId::Prompt, 0);
+        self.push_timeline(
+            "user",
+            format!("prompt • {}", fit_text(prompt, 110)),
+            Tone::Info,
+        );
+    }
+
+    pub(super) fn note_send_error(&mut self, error: String) {
+        self.push_timeline("send", format!("error • {error}"), Tone::Error);
+    }
+
+    pub(super) fn apply_agent_event(&mut self, event: AgentEvent) {
+        match event {
+            AgentEvent::RunStarted {
+                thread_name,
+                prompt_preview,
+            } => {
+                if thread_name.is_none() && self.last_prompt.is_none() {
+                    self.last_prompt = Some(prompt_preview.clone());
+                }
+                let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
+                self.push_timeline(
+                    actor,
+                    format!("run started • {}", prompt_preview),
+                    Tone::Muted,
+                );
+            }
+            AgentEvent::ModelCallStarted {
+                thread_name,
+                iteration,
+            } => {
+                let actor = thread_name.unwrap_or_else(|| "model".to_string());
+                self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
+            }
+            AgentEvent::ToolCallStarted {
+                thread_name,
+                call_id,
+                name,
+                args_preview,
+                ..
+            } => {
+                if thread_name.is_none() && name == "thread" {
+                    return;
+                }
+
+                self.active_tools.insert(
+                    call_id,
+                    ActiveTool {
+                        thread_name: thread_name.clone(),
+                        name: name.clone(),
+                        target: args_preview.clone(),
+                        started_at: Instant::now(),
+                    },
+                );
+                let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
+                self.push_timeline(actor, format!("{name} • {args_preview}"), Tone::Info);
+            }
+            AgentEvent::ToolCallFinished {
+                thread_name,
+                call_id,
+                name,
+                content_preview,
+                is_error,
+            } => {
+                if thread_name.is_none() && name == "thread" {
+                    return;
+                }
+
+                let actor = thread_name
+                    .clone()
+                    .unwrap_or_else(|| "orchestrator".to_string());
+                let active = self.active_tools.remove(&call_id);
+                let duration = active
+                    .as_ref()
+                    .map(|tool| tool.started_at.elapsed())
+                    .unwrap_or_default();
+                let target = active
+                    .as_ref()
+                    .map(|tool| tool.target.clone())
+                    .unwrap_or_default();
+                let status = classify_tool_status(is_error, &content_preview);
+                let record = ToolRecord {
+                    thread_name: active
+                        .as_ref()
+                        .and_then(|tool| tool.thread_name.clone())
+                        .or(thread_name.clone()),
+                    name: active
+                        .as_ref()
+                        .map(|tool| tool.name.clone())
+                        .unwrap_or_else(|| name.clone()),
+                    target: target.clone(),
+                    status,
+                    duration,
+                    summary: content_preview.clone(),
+                };
+                self.recent_tools.push_front(record.clone());
+                while self.recent_tools.len() > TOOL_HISTORY_LIMIT {
+                    self.recent_tools.pop_back();
+                }
+
+                if matches!(record.name.as_str(), "write" | "edit" | "exec_command")
+                    || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
+                {
+                    self.request_workspace_refresh();
+                }
+                if record.name.starts_with("workset_") {
+                    self.refresh_worksets();
+                }
+
+                let detail = if target.is_empty() {
+                    record.summary.clone()
+                } else {
+                    format!("{target} • {}", record.summary)
+                };
+                self.push_timeline(actor, format!("{name} • {detail}"), status.tone());
+            }
+            AgentEvent::ThreadStarted {
+                name,
+                action,
+                source_threads,
+            } => {
+                self.threads.insert(
+                    name.clone(),
+                    ThreadView {
+                        name: name.clone(),
+                        action: action.clone(),
+                        state: ThreadState::Active,
+                        updated_at: utc_hms(),
+                        updated_at_ts: current_unix_ts(),
+                        episodes: self
+                            .threads
+                            .get(&name)
+                            .map(|thread| thread.episodes)
+                            .unwrap_or(0),
+                        summary: "running".to_string(),
+                    },
+                );
+
+                let detail = if source_threads.is_empty() {
+                    format!("thread dispatch • action: {action}")
+                } else {
+                    format!(
+                        "thread dispatch • action: {} • sources: {}",
+                        action,
+                        source_threads.join(", ")
+                    )
+                };
+                self.push_timeline(name, detail, Tone::Success);
+            }
+            AgentEvent::ThreadLog { name, line } => {
+                self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
+            }
+            AgentEvent::ThreadFinished {
+                name,
+                exit_code,
+                timed_out,
+                timeout_reason,
+            } => {
+                let entry = self
+                    .threads
+                    .entry(name.clone())
+                    .or_insert_with(|| ThreadView {
+                        name: name.clone(),
+                        action: "thread run".to_string(),
+                        state: ThreadState::Idle,
+                        updated_at: utc_hms(),
+                        updated_at_ts: current_unix_ts(),
+                        episodes: 0,
+                        summary: String::new(),
+                    });
+                entry.state = ThreadState::Idle;
+                entry.updated_at = utc_hms();
+                entry.updated_at_ts = current_unix_ts();
+                entry.summary = if timed_out {
+                    "timed out".to_string()
+                } else {
+                    format!("exit {exit_code}")
+                };
+
+                self.request_workspace_refresh();
+                self.hydrate_threads_from_store();
+                self.hydrate_all_episodes();
+
+                let detail = if timed_out {
+                    match timeout_reason {
+                        Some(reason) => format!(
+                            "thread complete • timed out • {}",
+                            fit_text(&reason.replace('\n', " "), 110)
+                        ),
+                        None => "thread complete • timed out".to_string(),
+                    }
+                } else {
+                    format!("thread complete • exit {exit_code}")
+                };
+                self.push_timeline(
+                    name,
+                    detail,
+                    if timed_out {
+                        Tone::Warning
+                    } else {
+                        Tone::Success
+                    },
+                );
+            }
+            AgentEvent::AssistantMessage {
+                thread_name,
+                content,
+            } => match thread_name {
+                Some(thread_name) => {
+                    if let Some(thread) = self.threads.get_mut(&thread_name) {
+                        thread.updated_at = utc_hms();
+                        thread.updated_at_ts = current_unix_ts();
+                        thread.summary = truncate_episode_preview(&content);
+                    }
+                    self.hydrate_all_episodes();
+                    self.push_timeline(
+                        thread_name,
+                        format!(
+                            "retained episode • {}",
+                            fit_text(&truncate_episode_preview(&content), 110)
+                        ),
+                        Tone::Muted,
+                    );
+                }
+                None => {
+                    if let Some(previous) = self.last_response.replace(content.clone()) {
+                        self.previous_response = Some(previous);
+                    }
+                    self.response_markdown_cache = None;
+                    self.panel_scrolls.insert(PanelId::Response, 0);
+                    self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
+                    self.push_timeline(
+                        "assistant",
+                        format!("reply • {}", fit_text(&content, 110)),
+                        Tone::Success,
+                    );
+                }
+            },
+            AgentEvent::Error {
+                thread_name,
+                message,
+            } => {
+                let actor = thread_name.unwrap_or_else(|| "run".to_string());
+                self.push_timeline(actor, format!("error • {message}"), Tone::Error);
+            }
+            AgentEvent::RunFinished { thread_name } => {
+                if thread_name.is_none() {
+                    self.refresh_worksets();
+                }
+                let actor = thread_name.unwrap_or_else(|| "run".to_string());
+                self.push_timeline(actor, "run finished".to_string(), Tone::Muted);
+            }
+        }
+    }
+
+    pub(super) fn push_timeline(
+        &mut self,
+        actor: impl Into<String>,
+        detail: impl Into<String>,
+        tone: Tone,
+    ) {
+        self.timeline.push_back(TimelineEntry {
+            timestamp: utc_hms(),
+            actor: actor.into(),
+            detail: detail.into(),
+            tone,
+        });
+        while self.timeline.len() > TIMELINE_LIMIT {
+            self.timeline.pop_front();
+        }
+    }
+
+    pub(super) fn active_thread_count(&self) -> usize {
+        self.threads
+            .values()
+            .filter(|thread| matches!(thread.state, ThreadState::Active))
+            .count()
+    }
+
+    pub(super) fn sorted_thread_names(&self) -> Vec<String> {
+        let mut threads: Vec<&ThreadView> = self.threads.values().collect();
+        threads.sort_by(|left, right| {
+            matches!(right.state, ThreadState::Active)
+                .cmp(&matches!(left.state, ThreadState::Active))
+                .then_with(|| right.updated_at_ts.cmp(&left.updated_at_ts))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        threads.into_iter().map(|t| t.name.clone()).collect()
+    }
+
+    pub(super) fn select_previous_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = current_idx.saturating_sub(1);
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+    }
+
+    pub(super) fn select_next_thread(&mut self) {
+        let names = self.sorted_thread_names();
+        if names.is_empty() {
+            self.selected_thread = None;
+            return;
+        }
+        let current_idx = self
+            .selected_thread
+            .as_ref()
+            .and_then(|sel| names.iter().position(|n| n == sel))
+            .unwrap_or(0);
+        let new_idx = (current_idx + 1).min(names.len().saturating_sub(1));
+        self.selected_thread = Some(names[new_idx].clone());
+        self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+    }
+
+    pub(super) fn displayed_run_duration(&self) -> Duration {
+        self.working_started_at
+            .map(|started| started.elapsed())
+            .unwrap_or(self.last_response_duration)
+    }
+
+    pub(super) fn reset_life(&mut self) {
+        // Get the panel size from the last render or use defaults
+        let width = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.width as usize * 2)
+            .unwrap_or(160);
+        let height = self
+            .panel_views
+            .get(&PanelId::Prompt)
+            .map(|p| p.inner.height as usize * 4)
+            .unwrap_or(96);
+        self.life_field = LifeField::from_seed(&self.current_prompt, width, height);
+    }
+
+    pub(super) fn advance_life(&mut self) {
+        self.life_field.step();
+    }
+
+    pub(super) fn render(&mut self, frame: &mut ratatui::Frame) {
+        self.panel_views.clear();
+
+        let area = frame.area();
+        if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
+            self.render_too_small(frame, area);
+            return;
+        }
+
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(12),
+                Constraint::Length(COMPOSER_HEIGHT),
+            ])
+            .split(area);
+
+        self.render_header(frame, sections[0]);
+
+        if matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+            self.render_session_picker(frame, sections[1]);
+            self.render_session_picker_footer(frame, sections[2]);
+            return;
+        }
+
+        if let ScreenMode::Focused(panel) = self.screen {
+            match panel {
+                FocusPanel::Events => self.render_focused_events(frame, sections[1]),
+                FocusPanel::Response => self.render_focused_response(frame, sections[1]),
+                FocusPanel::PreviousResponse => {
+                    self.render_focused_previous_response(frame, sections[1])
+                }
+                FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
+            }
+            self.render_composer(frame, sections[2]);
+            if self.help_visible {
+                self.render_help_overlay(frame, sections[1]);
+            }
+            return;
+        }
+
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(27),
+                Constraint::Percentage(43),
+                Constraint::Percentage(30),
+            ])
+            .split(sections[1]);
+
+        self.render_left_column(frame, body[0]);
+        self.render_center_column(frame, body[1]);
+        self.render_right_column(frame, body[2]);
+        self.render_composer(frame, sections[2]);
+
+        if self.help_visible {
+            self.render_help_overlay(frame, sections[1]);
+        }
+    }
+
+    pub(super) fn render_focused_events(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let mut lines: Vec<Line<'static>> = self
+            .timeline
+            .iter()
+            .map(|entry| render_event_line(entry, width))
+            .collect();
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Waiting for activity.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            PanelId::Events,
+            self.events_panel_title(),
+            lines,
+        );
+    }
+
+    pub(super) fn render_focused_response(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_response_panel(frame, area);
+    }
+
+    pub(super) fn render_focused_previous_response(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+    ) {
+        self.render_previous_response_panel(frame, area);
+    }
+
+    pub(super) fn render_too_small(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("NAC");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Terminal too small for the managed dashboard.",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(format!(
+                "Resize to at least {}x{}.",
+                MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT
+            )),
+        ];
+        if let Some(prompt) = self.last_prompt.as_deref() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("last prompt ", Style::default().fg(Color::DarkGray)),
+                Span::raw(fit_text(prompt, inner.width.saturating_sub(12) as usize)),
+            ]));
+        }
+
+        frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    }
+
+    pub(super) fn render_header(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("NAC");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let repo = self
+            .workspace
+            .repo_label
+            .as_deref()
+            .unwrap_or("no git repo");
+        let branch = self.workspace.branch.as_deref().unwrap_or("detached");
+        let workspace = compact_path(&self.metadata.cwd, 28);
+        let session = self
+            .metadata
+            .session_id
+            .as_deref()
+            .map(short_session)
+            .unwrap_or_else(|| "-".to_string());
+        let runtime = format_runtime(self.displayed_run_duration());
+        let run_state = if self.result_rx.is_some() {
+            ("RUNNING", Tone::Success)
+        } else {
+            ("IDLE", Tone::Muted)
+        };
+
+        let top = Line::from(vec![
+            Span::styled("repo ", Style::default().fg(Color::DarkGray)),
+            Span::styled(repo.to_string(), Style::default().fg(Color::White)),
+            Span::styled("  |  branch ", Style::default().fg(Color::DarkGray)),
+            Span::styled(branch.to_string(), Style::default().fg(Color::White)),
+            Span::styled("  |  workspace ", Style::default().fg(Color::DarkGray)),
+            Span::styled(workspace, Style::default().fg(Color::White)),
+            Span::styled("  |  session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session, Style::default().fg(Color::White)),
+            Span::styled("  |  model ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.model.clone(),
+                Style::default().fg(Color::White),
+            ),
+        ]);
+
+        let bottom = Line::from(vec![
+            status_span(run_state.0, run_state.1),
+            Span::styled("  sandbox ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.sandbox_status.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  backend ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.backend.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  agents ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.metadata.agents_md_status.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  threads ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{}/{}", self.active_thread_count(), self.threads.len()),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  |  runtime ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                runtime,
+                Style::default().fg(if self.result_rx.is_some() {
+                    Color::Green
+                } else {
+                    Color::White
+                }),
+            ),
+            Span::styled(
+                "  |  mouse drag copies pane text",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+
+        frame.render_widget(Paragraph::new(Text::from(vec![top, bottom])), inner);
+    }
+
+    pub(super) fn render_session_picker(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let left_width = (area.width as f64 * 0.33) as u16;
+        let left_width = left_width.max(20);
+        let right_width = area.width.saturating_sub(left_width + 1);
+
+        let left_area = Rect::new(area.x, area.y, left_width, area.height);
+        let right_area = Rect::new(area.x + left_width + 1, area.y, right_width, area.height);
+
+        self.render_session_picker_list(frame, left_area);
+        self.render_session_picker_detail(frame, right_area);
+    }
+
+    pub(super) fn render_session_picker_list(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("SESSIONS");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let mut lines = Vec::new();
+        if let Some(error) = self.session_picker.error.as_deref() {
+            lines.push(Line::from(Span::styled(
+                fit_text(error, inner.width as usize),
+                Style::default().fg(Color::Red),
+            )));
+        } else if self.session_picker.sessions.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No resumable sessions found.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            let visible_height = inner.height as usize;
+            let start = self
+                .session_picker
+                .selected
+                .saturating_sub(visible_height.saturating_sub(1));
+            for (offset, session) in self
+                .session_picker
+                .sessions
+                .iter()
+                .skip(start)
+                .take(visible_height)
+                .enumerate()
+            {
+                let index = start + offset;
+                let selected = index == self.session_picker.selected;
+                let style = if selected {
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let session_label = fit_text(&session.session_id, 18);
+                let cwd_label = compact_path(
+                    &session.cwd.display().to_string(),
+                    inner.width.saturating_sub(24) as usize,
+                );
+                if selected {
+                    lines.push(Line::styled(
+                        format!(
+                            "› {}  {:<18}  {}",
+                            short_timestamp(&session.updated_at),
+                            session_label,
+                            cwd_label,
+                        ),
+                        style,
+                    ));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{}  ", short_timestamp(&session.updated_at)),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(format!("{:<18}", session_label), style),
+                        Span::raw("  "),
+                        Span::styled(cwd_label, Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
+            }
+        }
+
+        frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    }
+
+    pub(super) fn render_session_picker_detail(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let selected_session = self
+            .session_picker
+            .sessions
+            .get(self.session_picker.selected);
+        let title = match selected_session {
+            Some(session) => panel_title_segments(vec![
+                Span::styled(
+                    "SESSION — ".to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(short_session(&session.session_id)),
+            ]),
+            None => panel_title("SESSION"),
+        };
+        let block = panel_block_with_title(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let lines = if let Some(session) = selected_session {
+            let last_prompt = session
+                .last_user_prompt
+                .as_deref()
+                .unwrap_or("No user prompt recorded.");
+            let detail = format!(
+                "# Session: {}\n\
+                 Updated: {}  |  Created: {}  |  Messages: {}  |  Sandbox: {}\n\
+                 Model: {}  |  Backend: {}\n\
+                 Cwd: {}\n\n\
+                 ---\n\n\
+                 ### Last prompt\n\n\
+                 {}",
+                session.session_id,
+                session.updated_at,
+                session.created_at,
+                session.visible_message_count,
+                if session.sandboxed { "on" } else { "off" },
+                session.model,
+                session.backend.as_str(),
+                session.cwd.display(),
+                last_prompt,
+            );
+            render_markdown_lines(&detail, Some(inner.width as usize))
+        } else {
+            vec![Line::from(Span::styled(
+                "Select a session to inspect.",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        };
+
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false }),
+            inner,
+        );
+    }
+
+    pub(super) fn render_session_picker_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let title = if matches!(self.screen, ScreenMode::SessionPicker { startup: true }) {
+            "RESUME"
+        } else {
+            "SESSIONS"
+        };
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" resume  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "↑/↓",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "r",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" refresh  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    if matches!(self.screen, ScreenMode::SessionPicker { startup: true }) {
+                        " exit"
+                    } else {
+                        " back"
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]),
+            Line::from(Span::styled(
+                "Use /sessions from the composer to return here later.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        render_lines_panel(frame, area, title, lines);
+    }
+
+    pub(super) fn render_left_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(10), Constraint::Min(10)])
+            .split(area);
+
+        self.render_prompt_panel(frame, sections[0]);
+        self.render_events_panel(frame, sections[1]);
+    }
+
+    pub(super) fn render_center_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Length(6),
+                Constraint::Min(14),
+                Constraint::Length(8),
+            ])
+            .split(area);
+
+        self.render_threads_panel(frame, sections[0]);
+        self.render_workspace_panel(frame, sections[1]);
+        self.render_response_panel(frame, sections[2]);
+        self.render_previous_response_panel(frame, sections[3]);
+    }
+
+    pub(super) fn render_right_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Min(8),
+                Constraint::Length(9),
+            ])
+            .split(area);
+
+        self.render_tools_panel(frame, sections[0]);
+        self.render_worksets_panel(frame, sections[1]);
+        self.render_file_changes_panel(frame, sections[2]);
+    }
+
+    pub(super) fn render_prompt_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = match self.last_prompt.as_deref() {
+            Some(prompt) => split_preserving_empty(prompt),
+            None => vec!["Waiting for the first orchestrator prompt.".to_string()],
+        };
+        self.render_selectable_panel(frame, area, PanelId::Prompt, "PROMPT", lines);
+    }
+
+    pub(super) fn render_workspace_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let lines = vec![
+            format!("workspace  {}", self.workspace.workspace_display),
+            match self.workspace.host_root.as_ref() {
+                Some(path) => format!("source     {}", path.display()),
+                None => "source     sandbox-only".to_string(),
+            },
+            format!(
+                "repo       {}",
+                self.workspace
+                    .repo_label
+                    .as_deref()
+                    .unwrap_or("no git repo")
+            ),
+            format!(
+                "branch     {}",
+                self.workspace.branch.as_deref().unwrap_or("detached")
+            ),
+        ];
+
+        self.render_selectable_panel(frame, area, PanelId::Workspace, "WORKSPACE", lines);
+    }
+
+    pub(super) fn render_help_overlay(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let overlay_width = area.width.saturating_sub(12).min(68).max(44);
+        let overlay_height = area.height.saturating_sub(8).min(16).max(12);
+        let overlay = centered_rect(overlay_width, overlay_height, area);
+        let block = panel_block("HELP");
+        let inner = block.inner(overlay);
+        frame.render_widget(Clear, overlay);
+        frame.render_widget(block, overlay);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" run prompt", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Shift+Enter",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" newline", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Ctrl-T / Ctrl-E / Ctrl-R / Ctrl-P",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " focus threads / events / response / previous",
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "PageUp / PageDown",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" scroll focused pane", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Mouse wheel",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" scroll hovered pane", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "/sessions",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" open session picker", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "/plan /run",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" plan or run a workset", Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "? or Esc closes this overlay.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false }),
+            inner,
+        );
+    }
+
+    pub(super) fn render_threads_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let state_width = 8usize;
+        let thread_width = width.min(18).max(10);
+        let updated_width = 8usize;
+        let action_width = width
+            .saturating_sub(state_width + thread_width + updated_width + 3)
+            .max(8);
+
+        let mut lines = vec![header_line(
+            &[
+                ("STATE", state_width),
+                ("THREAD", thread_width),
+                ("ACTION", action_width),
+                ("UPDATED", updated_width),
+            ],
+            width,
+        )];
+
+        let mut threads: Vec<&ThreadView> = self.threads.values().collect();
+        threads.sort_by(|left, right| {
+            matches!(right.state, ThreadState::Active)
+                .cmp(&matches!(left.state, ThreadState::Active))
+                .then_with(|| right.updated_at_ts.cmp(&left.updated_at_ts))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+
+        if threads.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No threads in this session yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for thread in threads {
+                let name = fit_text(&thread.name, thread_width);
+                let action = fit_text(&thread.action, action_width);
+                let updated = fit_text(&thread.updated_at, updated_width);
+                lines.push(Line::from(vec![
+                    status_span(thread.state.label(), thread.state.tone()),
+                    Span::raw(pad_to(
+                        "",
+                        state_width.saturating_sub(thread.state.label().len()),
+                    )),
+                    Span::raw(" "),
+                    Span::raw(pad_cell(&name, thread_width)),
+                    Span::raw(" "),
+                    Span::raw(pad_cell(&action, action_width)),
+                    Span::raw(" "),
+                    Span::styled(updated, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        }
+
+        self.render_scrollable_lines_panel(frame, area, PanelId::Threads, "THREADS", lines);
+    }
+
+    pub(super) fn render_events_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let height = area.height.saturating_sub(2) as usize;
+        let lines: Vec<Line<'static>> = self
+            .timeline
+            .iter()
+            .rev()
+            .take(height.max(1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|entry| render_event_line(entry, inner_width(area)))
+            .collect();
+
+        let lines = if lines.is_empty() {
+            vec![Line::from(Span::styled(
+                "Waiting for activity.",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            lines
+        };
+
+        let title = self.events_panel_title();
+
+        render_lines_panel_with_title(frame, area, title, lines);
+    }
+
+    pub(super) fn render_response_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
+        let lines = match self.last_response.as_deref() {
+            Some(response) => match &self.response_markdown_cache {
+                Some((cached_text, cached_width, cached_lines))
+                    if cached_text == response && *cached_width == available_width =>
+                {
+                    cached_lines.clone()
+                }
+                _ => {
+                    let lines = render_markdown_lines(response, Some(available_width));
+                    self.response_markdown_cache =
+                        Some((response.to_string(), available_width, lines.clone()));
+                    lines
+                }
+            },
+            None => vec![Line::from(Span::styled(
+                "Waiting for the first orchestrator reply.",
+                Style::default().fg(Color::DarkGray),
+            ))],
+        };
+        let runtime = format_runtime(self.displayed_run_duration());
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "RESPONSE".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                runtime,
+                Style::default().fg(if self.result_rx.is_some() {
+                    Color::Green
+                } else {
+                    Color::Yellow
+                }),
+            ),
+        ]);
+        self.render_selectable_rich_panel_with_title(frame, area, PanelId::Response, title, lines);
+    }
+
+    pub(super) fn render_previous_response_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+    ) {
+        let available_width = area.width.saturating_sub(2) as usize;
+        let lines = match self.previous_response.as_deref() {
+            Some(response) => render_markdown_lines(response, Some(available_width)),
+            None => vec![Line::from(Span::styled(
+                "No previous orchestrator reply yet.",
+                Style::default().fg(Color::DarkGray),
+            ))],
+        };
+        self.render_selectable_rich_panel(
+            frame,
+            area,
+            PanelId::PreviousResponse,
+            "PREVIOUS RESPONSE",
+            lines,
+        );
+    }
+
+    pub(super) fn render_focused_threads(&mut self, frame: &mut ratatui::Frame, body: Rect) {
+        let left_width = (body.width as f64 * 0.33) as u16;
+        let left_width = left_width.max(20);
+        let right_width = body.width.saturating_sub(left_width + 1);
+
+        let left_area = Rect::new(body.x, body.y, left_width, body.height);
+        let right_area = Rect::new(body.x + left_width + 1, body.y, right_width, body.height);
+
+        self.render_thread_list_pane(frame, left_area);
+        self.render_episode_detail_pane(frame, right_area);
+    }
+
+    pub(super) fn render_thread_list_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let thread_names = self.sorted_thread_names();
+
+        // Auto-select first thread if nothing selected
+        if self.selected_thread.is_none() && !thread_names.is_empty() {
+            self.selected_thread = Some(thread_names[0].clone());
+        }
+
+        // Auto-scroll to keep selected thread visible
+        if let Some(ref selected) = self.selected_thread {
+            if let Some(pos) = thread_names.iter().position(|n| n == selected) {
+                let scroll = self.panel_scrolls.entry(PanelId::ThreadList).or_insert(0);
+                let visible_height = area.height.saturating_sub(2) as usize;
+                if pos < *scroll {
+                    *scroll = pos;
+                } else if pos >= *scroll + visible_height {
+                    *scroll = pos.saturating_sub(visible_height - 1);
+                }
+            }
+        }
+
+        // Build styled lines for each thread
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let max_name_width = 18usize;
+        let width = inner_width(area);
+
+        for name in &thread_names {
+            let thread = &self.threads[name];
+            let is_selected = self.selected_thread.as_deref() == Some(name.as_str());
+
+            let state_icon = match thread.state {
+                ThreadState::Active => "●",
+                ThreadState::Idle => "○",
+            };
+
+            let state_color = match thread.state {
+                ThreadState::Active => Color::Green,
+                ThreadState::Idle => Color::Gray,
+            };
+
+            let display_name = fit_text(name, max_name_width);
+            let ep_count = format!("{:>3}e", thread.episodes);
+            let action_width = width.saturating_sub(max_name_width + 8);
+            let display_action = fit_text(&thread.action, action_width);
+
+            let line_str = format!(
+                "{} {:<max_name_width$} {}  {}",
+                state_icon,
+                display_name,
+                ep_count,
+                display_action,
+                max_name_width = max_name_width,
+            );
+
+            if is_selected {
+                lines.push(Line::styled(
+                    line_str,
+                    Style::default().fg(Color::White).bg(Color::DarkGray),
+                ));
+            } else {
+                // Style state icon with state color, rest default
+                let mut spans = vec![Span::styled(
+                    state_icon.to_string(),
+                    Style::default().fg(state_color),
+                )];
+                let rest = &line_str[state_icon.len()..];
+                spans.push(Span::raw(rest.to_string()));
+                lines.push(Line::from(spans));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No threads yet",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadList,
+            panel_title("THREADS"),
+            lines,
+        );
+    }
+
+    pub(super) fn render_episode_detail_pane(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let available_width = area.width.saturating_sub(2) as usize;
+        let episodes = self
+            .selected_thread
+            .as_ref()
+            .and_then(|name| self.all_episodes.get(name));
+
+        let thread_name = self.selected_thread.as_deref().unwrap_or("none");
+
+        // Build lines, bypassing the markdown pipeline and cache for empty states
+        // so that placeholder messages use the muted DarkGray style.
+        let lines: Vec<Line<'static>> = if let Some(eps) = episodes {
+            if eps.is_empty() {
+                let mut lines = Vec::new();
+                if let Some(thread) = self
+                    .selected_thread
+                    .as_ref()
+                    .and_then(|name| self.threads.get(name))
+                {
+                    let mut header = String::new();
+                    header.push_str(&format!("# Thread: {}\n", thread.name));
+                    header.push_str(&format!(
+                        "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                        thread.action, thread.episodes, thread.state, thread.updated_at
+                    ));
+                    header.push_str("\n---\n\n");
+                    lines.extend(render_markdown_lines(&header, Some(available_width)));
+                }
+                lines.push(Line::from(Span::styled(
+                    "No episodes yet.",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines
+            } else {
+                let mut combined = String::new();
+                if let Some(thread) = self
+                    .selected_thread
+                    .as_ref()
+                    .and_then(|name| self.threads.get(name))
+                {
+                    combined.push_str(&format!("# Thread: {}\n", thread.name));
+                    combined.push_str(&format!(
+                        "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                        thread.action, thread.episodes, thread.state, thread.updated_at
+                    ));
+                    combined.push_str("\n---\n\n");
+                }
+                for (i, ep) in eps.iter().enumerate() {
+                    combined.push_str(&format!(
+                        "### Episode {} | {} | action: {}\n\n",
+                        i + 1,
+                        ep.created_at,
+                        ep.action
+                    ));
+                    combined.push_str(&ep.content);
+                    if i < eps.len() - 1 {
+                        combined.push_str("\n\n---\n\n");
+                    }
+                }
+                let cache_key = format!("{}:{}", thread_name, available_width);
+                match self.episode_markdown_cache.get(&cache_key) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        let rendered = render_markdown_lines(&combined, Some(available_width));
+                        self.episode_markdown_cache
+                            .insert(cache_key, rendered.clone());
+                        rendered
+                    }
+                }
+            }
+        } else if self.selected_thread.is_some() {
+            let mut lines = Vec::new();
+            if let Some(thread) = self
+                .selected_thread
+                .as_ref()
+                .and_then(|name| self.threads.get(name))
+            {
+                let mut header = String::new();
+                header.push_str(&format!("# Thread: {}\n", thread.name));
+                header.push_str(&format!(
+                    "Action: {}  |  Episodes: {}  |  State: {:?}  |  Updated: {}\n",
+                    thread.action, thread.episodes, thread.state, thread.updated_at
+                ));
+                header.push_str("\n---\n\n");
+                lines.extend(render_markdown_lines(&header, Some(available_width)));
+            }
+            lines.push(Line::from(Span::styled(
+                "Thread is running... no episodes yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
+            lines
+        } else {
+            vec![Line::from(Span::styled(
+                "Select a thread to view episodes.",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        };
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "EPISODES — ".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(thread_name.to_string()),
+        ]);
+        self.render_selectable_rich_panel_with_title(
+            frame,
+            area,
+            PanelId::ThreadEpisodes,
+            title,
+            lines,
+        );
+    }
+
+    pub(super) fn events_panel_title(&self) -> Line<'static> {
+        let dot_color = if self.result_rx.is_some() {
+            Color::Green
+        } else {
+            Color::Yellow
+        };
+        panel_title_segments(vec![
+            Span::styled(
+                "EVENTS".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled("●".to_string(), Style::default().fg(dot_color)),
+        ])
+    }
+
+    pub(super) fn render_tools_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let tool_width = width.min(14).max(9);
+        let stat_width = 5usize;
+        let duration_width = 8usize;
+        let target_width = width
+            .saturating_sub(tool_width + stat_width + duration_width + 3) // 3 = three 1-space gaps
+            .max(8);
+        let mut lines = vec![header_line(
+            &[
+                ("STAT", 5),
+                ("TOOL", tool_width),
+                ("TARGET", target_width),
+                ("TIME", duration_width),
+            ],
+            width,
+        )];
+
+        let mut active: Vec<&ActiveTool> = self.active_tools.values().collect();
+        active.sort_by(|left, right| left.name.cmp(&right.name));
+        for tool in active {
+            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = ToolStatus::Running.label();
+            lines.push(Line::from(vec![
+                status_span(stat_label, ToolStatus::Running.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
+                Span::raw(" "),
+                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&fit_text(&tool.target, target_width), target_width),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&format_duration(tool.started_at.elapsed()), duration_width),
+                    Style::default().fg(Color::Gray),
+                ),
+            ]));
+        }
+
+        for tool in self
+            .recent_tools
+            .iter()
+            .take(area.height.saturating_sub(2) as usize)
+        {
+            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
+            let stat_label = tool.status.label();
+            lines.push(Line::from(vec![
+                status_span(stat_label, tool.status.tone()),
+                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
+                Span::raw(" "),
+                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&fit_text(&tool.target, target_width), target_width),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    pad_cell(&format_duration(tool.duration), duration_width),
+                    Style::default().fg(Color::Gray),
+                ),
+            ]));
+        }
+
+        if lines.len() == 1 {
+            lines.push(Line::from(Span::styled(
+                "No tool activity yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        render_lines_panel(frame, area, "TOOLS", lines);
+    }
+
+    pub(super) fn render_worksets_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = inner_width(area);
+        let mut lines = Vec::new();
+
+        if let Some(error) = self.worksets.error.as_deref() {
+            push_wrapped_prefixed_lines(
+                &mut lines,
+                "",
+                error,
+                width,
+                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::DarkGray),
+            );
+        } else if self.worksets.items.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No worksets yet.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for (index, workset) in self.worksets.items.iter().enumerate() {
+                if index > 0 {
+                    lines.push(workset_separator_line(width));
+                }
+                lines.push(render_workset_header_line(workset, width));
+                if !workset.summary.is_empty() {
+                    push_workset_labeled_lines(
+                        &mut lines,
+                        "  ",
+                        "GOAL",
+                        &workset.summary,
+                        width,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::DarkGray),
+                    );
+                }
+                if let Some(recipe) = workset.verification_recipe.as_deref() {
+                    push_workset_labeled_lines(
+                        &mut lines,
+                        "  ",
+                        "CHECK",
+                        &one_line(recipe),
+                        width,
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::DarkGray),
+                    );
+                }
+                for item in &workset.items {
+                    lines.extend(render_workset_item_lines(item, width));
+                }
+            }
+        }
+
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "WORKSETS".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                self.worksets.items.len().to_string(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        self.render_scrollable_lines_panel_with_title(frame, area, PanelId::Worksets, title, lines);
+    }
+
+    pub(super) fn render_file_changes_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let height = area.height.saturating_sub(2) as usize;
+        let width = inner_width(area);
+        let mut lines = Vec::new();
+
+        if let Some(error) = self.workspace.error.as_deref() {
+            lines.push(Line::from(Span::styled(
+                fit_text(error, width),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if self.workspace.changed_files.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Working tree clean.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            let reserve_total = usize::from(height > 2);
+            let visible_files = height.saturating_sub(reserve_total).min(FILE_CHANGE_LIMIT);
+            for file in self.workspace.changed_files.iter().take(visible_files) {
+                lines.push(render_file_change_line(file, width));
+            }
+            if reserve_total == 1 {
+                lines.push(Line::from(vec![
+                    Span::styled(pad_cell("T", 1), Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!(
+                            "{:>width$}",
+                            format!("+{}", self.workspace.total_additions),
+                            width = 5
+                        ),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!(
+                            "{:>width$}",
+                            format!("-{}", self.workspace.total_deletions),
+                            width = 5
+                        ),
+                        Style::default().fg(Color::Red),
+                    ),
+                ]));
+            }
+        }
+
+        render_lines_panel(frame, area, "FILE CHANGES", lines);
+    }
+
+    pub(super) fn render_composer(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block("ASK");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        if self.result_rx.is_some() {
+            self.life_field
+                .ensure_size(inner.width as usize * 2, inner.height as usize * 4);
+            let lines = self
+                .life_field
+                .render_lines(inner.width as usize, inner.height as usize);
+            frame.render_widget(
+                Paragraph::new(Text::from(lines)).style(Style::default().fg(Color::Green)),
+                inner,
+            );
+            return;
+        }
+
+        self.maybe_expire_composer_notice();
+        let show_notice = self.composer_notice.is_some() && inner.height > 1;
+        let composer_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: inner.height.saturating_sub(u16::from(show_notice)).max(1),
+        };
+        let view = wrapped_composer_view(
+            self.composer.lines(),
+            self.composer.cursor(),
+            composer_area.width,
+            composer_area.height,
+        );
+
+        frame.render_widget(
+            Paragraph::new(Text::from(view.lines.clone())).style(Style::default().fg(Color::White)),
+            composer_area,
+        );
+        frame.set_cursor_position((
+            composer_area.x + view.cursor_col.min(composer_area.width.saturating_sub(1)),
+            composer_area.y + view.cursor_row.min(composer_area.height.saturating_sub(1)),
+        ));
+
+        if let Some(notice) = self.composer_notice.as_ref().filter(|_| show_notice) {
+            let notice_area = Rect {
+                x: inner.x,
+                y: inner.bottom().saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            };
+            let notice_line = Line::from(Span::styled(
+                fit_text(&notice.text, notice_area.width as usize),
+                Style::default()
+                    .fg(notice.tone.color())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(notice_line), notice_area);
+        }
+    }
+
+    pub(super) fn render_selectable_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: &'static str,
+        logical_lines: Vec<String>,
+    ) {
+        self.render_selectable_panel_with_title(
+            frame,
+            area,
+            panel_id,
+            panel_title(title),
+            logical_lines,
+        );
+    }
+
+    pub(super) fn render_selectable_rich_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: &'static str,
+        lines: Vec<Line<'static>>,
+    ) {
+        self.render_selectable_rich_panel_with_title(
+            frame,
+            area,
+            panel_id,
+            panel_title(title),
+            lines,
+        );
+    }
+
+    pub(super) fn render_selectable_panel_with_title(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: Line<'static>,
+        logical_lines: Vec<String>,
+    ) {
+        let block = panel_block_with_title(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let rows = wrap_logical_lines(&logical_lines, inner.width as usize);
+        let total_rows = rows.len().max(1);
+        let visible_rows = inner.height as usize;
+        let max_scroll = total_rows.saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let end = (start + visible_rows).min(rows.len());
+        let visible = rows[start..end].to_vec();
+
+        let selected = selection_bounds_for_panel(self.selection.as_ref(), panel_id);
+        let mut rendered = Vec::new();
+        for row in &visible {
+            rendered.push(render_wrapped_row(row, selected.clone()));
+        }
+        while rendered.len() < visible_rows {
+            rendered.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner,
+                logical_lines: logical_lines.clone(),
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(rendered)), inner);
+    }
+
+    pub(super) fn render_selectable_rich_panel_with_title(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: Line<'static>,
+        lines: Vec<Line<'static>>,
+    ) {
+        let block = panel_block_with_title(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let logical_lines: Vec<String> = lines.iter().map(line_to_plain_text).collect();
+        let rows = wrap_styled_lines(&lines, inner.width as usize);
+        let total_rows = rows.len().max(1);
+        let visible_rows = inner.height as usize;
+        let max_scroll = total_rows.saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let end = (start + visible_rows).min(rows.len());
+        let visible = rows[start..end].to_vec();
+
+        let selected = selection_bounds_for_panel(self.selection.as_ref(), panel_id);
+        let mut rendered = Vec::new();
+        for row in &visible {
+            rendered.push(render_wrapped_row(row, selected.clone()));
+        }
+        while rendered.len() < visible_rows {
+            rendered.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner,
+                logical_lines,
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(rendered)), inner);
+    }
+
+    pub(super) fn render_scrollable_lines_panel(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: &'static str,
+        lines: Vec<Line<'static>>,
+    ) {
+        self.render_scrollable_lines_panel_with_title(
+            frame,
+            area,
+            panel_id,
+            panel_title(title),
+            lines,
+        );
+    }
+
+    pub(super) fn render_scrollable_lines_panel_with_title(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        title: Line<'static>,
+        lines: Vec<Line<'static>>,
+    ) {
+        let block = panel_block_with_title(title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let logical_lines: Vec<String> = lines.iter().map(line_to_plain_text).collect();
+        let mut rows: Vec<WrappedRow> = logical_lines
+            .iter()
+            .enumerate()
+            .map(|(index, text)| WrappedRow {
+                logical_line: index,
+                start_char: 0,
+                end_char: text.chars().count(),
+                text: text.clone(),
+                spans: vec![StyledSegment {
+                    text: text.clone(),
+                    style: Style::default().fg(Color::Gray),
+                }],
+            })
+            .collect();
+        if rows.is_empty() {
+            rows.push(WrappedRow {
+                logical_line: 0,
+                start_char: 0,
+                end_char: 0,
+                text: String::new(),
+                spans: Vec::new(),
+            });
+        }
+
+        let visible_rows = inner.height as usize;
+        let max_scroll = rows.len().saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let mut visible: Vec<Line<'static>> =
+            lines.into_iter().skip(start).take(visible_rows).collect();
+        while visible.len() < visible_rows {
+            visible.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner,
+                logical_lines,
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(visible)), inner);
+    }
+
+    pub(super) fn selection_point_at(&self, column: u16, row: u16) -> Option<SelectionPoint> {
+        let panel = self.panel_at(column, row)?;
+        if !panel_is_selectable(panel) {
+            return None;
+        }
+        self.selection_point_for_panel(panel, column, row)
+    }
+
+    pub(super) fn panel_at(&self, column: u16, row: u16) -> Option<PanelId> {
+        self.panel_views.iter().find_map(|(panel_id, view)| {
+            contains_point(view.inner, column, row).then_some(*panel_id)
+        })
+    }
+
+    pub(super) fn selection_point_for_panel(
+        &self,
+        panel: PanelId,
+        column: u16,
+        row: u16,
+    ) -> Option<SelectionPoint> {
+        let view = self.panel_views.get(&panel)?;
+        let clamped_x = column.clamp(view.inner.x, view.inner.right().saturating_sub(1));
+        let clamped_y = row.clamp(view.inner.y, view.inner.bottom().saturating_sub(1));
+        let row_offset = clamped_y.saturating_sub(view.inner.y) as usize;
+        let scroll_offset = self
+            .panel_scrolls
+            .get(&panel)
+            .copied()
+            .unwrap_or(view.scroll_offset);
+        let row_index = (scroll_offset + row_offset).min(view.rows.len().saturating_sub(1));
+        let wrapped = view.rows.get(row_index)?;
+        let width = wrapped.text.chars().count();
+        let col_offset = clamped_x.saturating_sub(view.inner.x) as usize;
+        let char_in_row = col_offset.min(width);
+        Some(SelectionPoint {
+            panel,
+            logical_line: wrapped.logical_line,
+            char_index: wrapped.start_char + char_in_row,
+        })
+    }
+
+    pub(super) fn autoscroll_drag_selection(&mut self, panel: PanelId, _column: u16, row: u16) {
+        let Some((top, bottom)) = self
+            .panel_views
+            .get(&panel)
+            .map(|view| (view.inner.y, view.inner.bottom().saturating_sub(1)))
+        else {
+            return;
+        };
+
+        if row <= top {
+            self.scroll_panel(panel, -1);
+        } else if row >= bottom {
+            self.scroll_panel(panel, 1);
+        }
+    }
+
+    pub(super) fn scroll_panel(&mut self, panel: PanelId, delta_lines: isize) {
+        let Some(view) = self.panel_views.get(&panel) else {
+            return;
+        };
+        let max_scroll = view.rows.len().saturating_sub(view.visible_rows);
+        let entry = self.panel_scrolls.entry(panel).or_insert(0);
+        if delta_lines.is_negative() {
+            *entry = entry.saturating_sub(delta_lines.unsigned_abs());
+        } else {
+            *entry = (*entry)
+                .saturating_add(delta_lines as usize)
+                .min(max_scroll);
+        }
+    }
+
+    pub(super) fn copy_selection_to_clipboard(&mut self) {
+        let Some(selection) = self.selection.as_ref() else {
+            return;
+        };
+        if selection.anchor.panel != selection.focus.panel {
+            return;
+        }
+        let Some(view) = self.panel_views.get(&selection.anchor.panel) else {
+            return;
+        };
+        let text = extract_selection_text(view, selection);
+        if text.is_empty() {
+            return;
+        }
+        if let Some(ref mut clipboard) = self.clipboard {
+            let _ = copy_text_to_clipboard(clipboard, &text);
+        }
+    }
+}

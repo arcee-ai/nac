@@ -156,7 +156,7 @@ pub async fn execute_tool(
     name: &str,
     args: Value,
     runtime: &ToolRuntime,
-    client: &crate::api::ModelClient,
+    client: &crate::model::ModelClient,
 ) -> ToolResult {
     if name.starts_with("mcp__") {
         let Some(registry) = &runtime.mcp else {
