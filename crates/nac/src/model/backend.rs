@@ -3,8 +3,8 @@ use super::*;
 pub(super) fn default_model_for_backend(backend: BackendKind) -> String {
     match backend {
         BackendKind::DeepSeekChat => "deepseek-v4-pro".to_string(),
-        BackendKind::OpenAiResponses => "gpt-5.4".to_string(),
-        BackendKind::FireworksChat => "gpt-5.4".to_string(),
+        BackendKind::OpenAiResponses => "gpt-5.5".to_string(),
+        BackendKind::FireworksChat => "gpt-5.5".to_string(),
         BackendKind::Auto => unreachable!("auto backend does not have a default model"),
     }
 }
