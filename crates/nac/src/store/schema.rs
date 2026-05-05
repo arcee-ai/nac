@@ -75,6 +75,8 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
              reasoning_effort TEXT,
              sandbox_json TEXT,
              messages_json TEXT NOT NULL,
+             last_response_duration_ms INTEGER,
+             previous_response_duration_ms INTEGER,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
@@ -90,6 +92,13 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     ensure_workset_items_acceptance_column(&conn)?;
     ensure_column(&conn, "sessions", "backend", "TEXT")?;
     ensure_column(&conn, "sessions", "reasoning_effort", "TEXT")?;
+    ensure_column(&conn, "sessions", "last_response_duration_ms", "INTEGER")?;
+    ensure_column(
+        &conn,
+        "sessions",
+        "previous_response_duration_ms",
+        "INTEGER",
+    )?;
     Ok(conn)
 }
 

@@ -175,12 +175,26 @@ pub async fn run(
     let running = Arc::new(AtomicBool::new(true));
     let input_thread = spawn_input_thread(running.clone(), input_tx);
 
+    let (last_response_duration, previous_response_duration) = session_snapshot
+        .as_ref()
+        .map(|snapshot| {
+            (
+                snapshot
+                    .last_response_duration_ms
+                    .map(Duration::from_millis),
+                snapshot
+                    .previous_response_duration_ms
+                    .map(Duration::from_millis),
+            )
+        })
+        .unwrap_or_default();
     let mut app = App::new_with_mode(
         metadata,
         &restored_messages,
         start_in_session_picker,
         ui_mode,
     );
+    app.restore_response_durations(last_response_duration, previous_response_duration);
     let (ws_tx, ws_rx) = mpsc::channel::<WorkspaceSnapshot>(1);
     app.workspace_tx = Some(ws_tx);
     app.workspace_rx = Some(ws_rx);
@@ -268,17 +282,25 @@ pub async fn run(
                         app.working_frame = 0;
                         app.working_started_at = None;
                         app.reset_life();
-                        if let Some(snapshot) = session_snapshot.as_mut() {
-                            let agent = agent.lock().await;
-                            persist_session_snapshot(snapshot, &agent).await?;
-                        }
                         match result {
-                            Ok(_) => {
-                                app.last_response_duration = completed_duration;
+                            Ok(response) => {
+                                app.complete_top_level_response(response, completed_duration);
                             }
                             Err(error) => {
                                 app.note_send_error(error);
                             }
+                        }
+                        if let Some(snapshot) = session_snapshot.as_mut() {
+                            let agent = agent.lock().await;
+                            let (last_response_duration_ms, previous_response_duration_ms) =
+                                app.response_duration_snapshot_ms();
+                            persist_session_snapshot(
+                                snapshot,
+                                &agent,
+                                last_response_duration_ms,
+                                previous_response_duration_ms,
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -834,10 +856,7 @@ mod tests {
             action: "build compact ui".to_string(),
             source_threads: Vec::new(),
         });
-        app.apply_agent_event(AgentEvent::AssistantMessage {
-            thread_name: None,
-            content: "Compact mode ready.".to_string(),
-        });
+        app.complete_top_level_response("Compact mode ready.".to_string(), Duration::from_secs(2));
 
         let rendered = app
             .compact_stream_lines(80)
@@ -867,10 +886,10 @@ mod tests {
                 Tone::Info,
             );
         }
-        app.apply_agent_event(AgentEvent::AssistantMessage {
-            thread_name: None,
-            content: "Compact mode ready.\n\nIt still keeps the full response available for scrolling.\n\n- one\n- two\n- three".to_string(),
-        });
+        app.complete_top_level_response(
+            "Compact mode ready.\n\nIt still keeps the full response available for scrolling.\n\n- one\n- two\n- three".to_string(),
+            Duration::from_secs(2),
+        );
 
         let lines = app.compact_stream_lines(48);
 
@@ -1120,23 +1139,72 @@ mod tests {
     }
 
     #[test]
-    fn top_level_responses_shift_into_previous_response() {
-        let dir = temp_dir("responses");
+    fn response_runtime_tracks_placeholder_current_previous_and_ignored_event() {
+        let dir = temp_dir("response-runtime");
         let mut app = App::new(metadata_for(&dir), &[], false);
 
-        app.apply_agent_event(AgentEvent::AssistantMessage {
-            thread_name: None,
-            content: "first reply".to_string(),
-        });
-        assert_eq!(app.last_response.as_deref(), Some("first reply"));
-        assert_eq!(app.previous_response, None);
+        assert_eq!(
+            format_optional_runtime(app.displayed_run_duration()),
+            "--h--m--s"
+        );
+        assert_eq!(
+            format_optional_runtime(app.previous_response_duration),
+            "--h--m--s"
+        );
 
         app.apply_agent_event(AgentEvent::AssistantMessage {
             thread_name: None,
-            content: "second reply".to_string(),
+            content: "ignored".to_string(),
         });
-        assert_eq!(app.last_response.as_deref(), Some("second reply"));
+        assert_eq!(app.last_response, None);
+
+        app.complete_top_level_response("first reply".to_string(), Duration::from_secs(1));
+        assert_eq!(app.last_response.as_deref(), Some("first reply"));
+        assert_eq!(app.last_response_duration, Some(Duration::from_secs(1)));
+        assert_eq!(app.previous_response, None);
+
+        app.note_prompt_submitted("second prompt");
+        assert_eq!(app.last_response, None);
+        assert_eq!(app.last_response_duration, None);
         assert_eq!(app.previous_response.as_deref(), Some("first reply"));
+        assert_eq!(app.previous_response_duration, Some(Duration::from_secs(1)));
+
+        app.complete_top_level_response("second reply".to_string(), Duration::from_secs(2));
+        assert_eq!(app.last_response.as_deref(), Some("second reply"));
+        assert_eq!(app.last_response_duration, Some(Duration::from_secs(2)));
+        assert_eq!(app.previous_response.as_deref(), Some("first reply"));
+        assert_eq!(app.previous_response_duration, Some(Duration::from_secs(1)));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn response_durations_restore_with_hydrated_responses() {
+        let dir = temp_dir("response-runtime-hydrate");
+        let metadata = metadata_for(&dir);
+        let messages = vec![
+            Message::Assistant {
+                content: Some("first reply".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::Assistant {
+                content: Some("second reply".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ];
+
+        let mut app = App::new_with_mode(metadata, &messages, false, UiMode::Full);
+        app.restore_response_durations(Some(Duration::from_secs(9)), Some(Duration::from_secs(4)));
+
+        assert_eq!(app.last_response.as_deref(), Some("second reply"));
+        assert_eq!(app.last_response_duration, Some(Duration::from_secs(9)));
+        assert_eq!(app.previous_response.as_deref(), Some("first reply"));
+        assert_eq!(app.previous_response_duration, Some(Duration::from_secs(4)));
+
         let _ = std::fs::remove_dir_all(dir);
     }
 
