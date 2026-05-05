@@ -51,9 +51,7 @@ pub(super) async fn run_non_tui(run_config: RunConfig) -> Result<()> {
     let mut session_snapshot = run_config.session_snapshot.clone();
     let mut agent = run_config.agent;
     let Some(prompt) = run_config.initial_prompt else {
-        anyhow::bail!(
-            "interactive mode requires the TUI; run nac from a terminal or provide a prompt for a single-shot non-TUI run"
-        );
+        anyhow::bail!("interactive mode requires the TUI; run nac from a terminal");
     };
 
     let send_result = agent.send(&prompt).await;
@@ -91,6 +89,9 @@ mod tests {
         };
 
         let error = run_non_tui(run_config).await.unwrap_err().to_string();
-        assert!(error.contains("interactive mode requires the TUI"));
+        assert_eq!(
+            error,
+            "interactive mode requires the TUI; run nac from a terminal"
+        );
     }
 }

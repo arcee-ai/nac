@@ -7,8 +7,6 @@ use super::*;
     after_help = "Use `nac resume [SESSION_ID]` to continue a saved session."
 )]
 pub(super) struct RunCli {
-    pub(super) prompt: Option<String>,
-
     /// Open the interactive session picker instead of starting a fresh session
     #[arg(long)]
     pub(super) resume: bool,
@@ -17,28 +15,24 @@ pub(super) struct RunCli {
     #[arg(short = 'C', long)]
     pub(super) directory: Option<PathBuf>,
 
-    /// Run orchestrator prompt and exit without launching the TUI
-    #[arg(long)]
-    pub(super) single: bool,
-
-    /// Run as a worker instead of an orchestrator
-    #[arg(long)]
+    /// Internal: run as a managed worker subprocess
+    #[arg(long, hide = true)]
     pub(super) worker: bool,
 
-    /// Session id for an orchestrator session or managed worker dispatch
-    #[arg(long)]
+    /// Internal: session id for an orchestrator session or managed worker dispatch
+    #[arg(long, hide = true)]
     pub(super) session_id: Option<String>,
 
-    /// Thread name for a managed worker dispatch
-    #[arg(long)]
+    /// Internal: thread name for a managed worker dispatch
+    #[arg(long, hide = true)]
     pub(super) thread_name: Option<String>,
 
-    /// Action for a managed worker dispatch
-    #[arg(long)]
+    /// Internal: action for a managed worker dispatch
+    #[arg(long, hide = true)]
     pub(super) action: Option<String>,
 
-    /// Source threads whose latest retained episodes should be loaded
-    #[arg(long = "source-thread")]
+    /// Internal: source threads whose latest retained episodes should be loaded
+    #[arg(long = "source-thread", hide = true)]
     pub(super) source_threads: Vec<String>,
 
     /// Override the SQLite store path (default: .nac/store.db)

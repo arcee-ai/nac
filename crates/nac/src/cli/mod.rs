@@ -115,8 +115,8 @@ pub async fn run() -> Result<()> {
 async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
     match cli {
         ParsedCli::Run(cli) if cli.resume => {
-            if cli.prompt.is_some() || cli.single || cli.worker || cli.session_id.is_some() {
-                anyhow::bail!("--resume cannot be combined with prompts, workers, or session ids");
+            if cli.worker || cli.session_id.is_some() {
+                anyhow::bail!("--resume cannot be combined with workers or session ids");
             }
             Ok(RunState {
                 run_config: build_resume_picker_config(cli).await?,
@@ -135,6 +135,22 @@ async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
 }
 
 async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
+    let managed_worker =
+        cli.worker && cli.session_id.is_some() && cli.thread_name.is_some() && cli.action.is_some();
+
+    if cli.worker && !managed_worker {
+        anyhow::bail!("--worker is internal and only supports managed thread dispatches");
+    }
+
+    if !cli.worker
+        && (cli.session_id.is_some()
+            || cli.thread_name.is_some()
+            || cli.action.is_some()
+            || !cli.source_threads.is_empty())
+    {
+        anyhow::bail!("worker dispatch flags are only valid with --worker");
+    }
+
     let client = ModelClient::from_env_with_overrides(ClientOverrides {
         base_url: cli.api_base_url.clone(),
         model: cli.api_model.clone(),
@@ -163,107 +179,42 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
     let agents_md_status = agents_md.status_text();
 
     if cli.worker {
-        if cli.single {
-            anyhow::bail!("--single is not valid with --worker");
-        }
-
-        let managed = cli.session_id.is_some()
-            || cli.thread_name.is_some()
-            || cli.action.is_some()
-            || !cli.source_threads.is_empty();
-
-        if managed {
-            if cli.prompt.is_some() {
-                anyhow::bail!(
-                    "managed worker dispatches use --action instead of the positional prompt"
-                );
-            }
-
-            let session_id = cli
-                .session_id
-                .ok_or_else(|| anyhow::anyhow!("managed worker dispatches require --session-id"))?;
-            let thread_name = cli.thread_name.ok_or_else(|| {
-                anyhow::anyhow!("managed worker dispatches require --thread-name")
-            })?;
-            let action = cli
-                .action
-                .ok_or_else(|| anyhow::anyhow!("managed worker dispatches require --action"))?;
-            let store_path = absolute_store_path(
-                &current_dir,
-                cli.store_path.unwrap_or_else(store::default_store_path),
-            );
-            let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
-            let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
-            let extra_tool_defs = mcp
-                .as_ref()
-                .map(|registry| registry.tool_definitions())
-                .unwrap_or_default();
-
-            store::initialize(&store_path)?;
-            let worker_context = store::load_worker_context(
-                &store_path,
-                &session_id,
-                &thread_name,
-                &cli.source_threads,
-            )?;
-            let agent = Agent::with_config(
-                client.clone(),
-                AgentConfig {
-                    mode: AgentMode::Worker,
-                    store_path: store_path.clone(),
-                    session_id: Some(session_id.clone()),
-                    initial_messages: build_worker_context_messages(&thread_name, &worker_context),
-                    thread_name: Some(thread_name.clone()),
-                    event_sink: EventSink::stderr_prefixed(),
-                    working_directory: working_directory.clone(),
-                    sandbox: sandbox.clone(),
-                    mcp,
-                    skills,
-                    extra_tool_defs,
-                    agents_md_message: agents_md_message.clone(),
-                },
-            );
-
-            return Ok(RunConfig {
-                mode: AgentMode::Worker,
-                agent,
-                initial_prompt: Some(action.clone()),
-                continue_interactive: false,
-                managed_worker: Some(ManagedWorkerConfig {
-                    store_path,
-                    session_id,
-                    thread_name,
-                    action,
-                }),
-                client,
-                session_id: None,
-                session_snapshot: None,
-                sandbox_status,
-                agents_md_status,
-                workspace_display: working_directory.clone(),
-                workspace_host_path: workspace_host_path.clone(),
-            });
-        }
-
-        let standalone_prompt = cli.prompt.clone();
+        let session_id = cli
+            .session_id
+            .expect("managed worker validation requires session_id");
+        let thread_name = cli
+            .thread_name
+            .expect("managed worker validation requires thread_name");
+        let action = cli
+            .action
+            .expect("managed worker validation requires action");
+        let store_path = absolute_store_path(
+            &current_dir,
+            cli.store_path.unwrap_or_else(store::default_store_path),
+        );
         let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
         let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
         let extra_tool_defs = mcp
             .as_ref()
             .map(|registry| registry.tool_definitions())
             .unwrap_or_default();
+
+        store::initialize(&store_path)?;
+        let worker_context = store::load_worker_context(
+            &store_path,
+            &session_id,
+            &thread_name,
+            &cli.source_threads,
+        )?;
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
                 mode: AgentMode::Worker,
-                store_path: absolute_store_path(
-                    &current_dir,
-                    cli.store_path.unwrap_or_else(store::default_store_path),
-                ),
-                session_id: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                event_sink: EventSink::none(),
+                store_path: store_path.clone(),
+                session_id: Some(session_id.clone()),
+                initial_messages: build_worker_context_messages(&thread_name, &worker_context),
+                thread_name: Some(thread_name.clone()),
+                event_sink: EventSink::stderr_prefixed(),
                 working_directory: working_directory.clone(),
                 sandbox: sandbox.clone(),
                 mcp,
@@ -276,9 +227,14 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         return Ok(RunConfig {
             mode: AgentMode::Worker,
             agent,
-            initial_prompt: standalone_prompt.clone(),
-            continue_interactive: standalone_prompt.is_none(),
-            managed_worker: None,
+            initial_prompt: Some(action.clone()),
+            continue_interactive: false,
+            managed_worker: Some(ManagedWorkerConfig {
+                store_path,
+                session_id,
+                thread_name,
+                action,
+            }),
             client,
             session_id: None,
             session_snapshot: None,
@@ -289,20 +245,12 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
         });
     }
 
-    if cli.thread_name.is_some() || cli.action.is_some() || !cli.source_threads.is_empty() {
-        anyhow::bail!("worker dispatch flags are only valid with --worker");
-    }
-
-    if cli.single && cli.prompt.is_none() {
-        anyhow::bail!("--single requires a prompt");
-    }
-
     let store_path = absolute_store_path(
         &current_dir,
         cli.store_path.unwrap_or_else(store::default_store_path),
     );
     store::initialize(&store_path)?;
-    let session_id = cli.session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let session_id = Uuid::new_v4().to_string();
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
@@ -336,8 +284,8 @@ async fn build_run_cli_config(cli: RunCli) -> Result<RunConfig> {
     Ok(RunConfig {
         mode: AgentMode::Orchestrator,
         agent,
-        initial_prompt: cli.prompt,
-        continue_interactive: !cli.single,
+        initial_prompt: None,
+        continue_interactive: true,
         managed_worker: None,
         client,
         session_id: Some(session_id),
@@ -484,10 +432,8 @@ mod tests {
         .unwrap();
 
         let cli = RunCli {
-            prompt: None,
             resume: false,
             directory: None,
-            single: false,
             worker: true,
             session_id: Some(session_id.to_string()),
             thread_name: Some("impl".to_string()),
@@ -563,38 +509,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn orchestrator_allows_explicit_session_id() {
+    async fn standalone_worker_is_rejected_before_client_setup() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 
         let original_api_key = std::env::var("OPENAI_API_KEY").ok();
-        let original_nac_home = std::env::var_os("NAC_HOME");
         unsafe {
-            std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
+            std::env::remove_var("OPENAI_API_KEY");
         }
-        let nac_home = std::env::temp_dir().join(format!(
-            "nac_resume_home_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time went backwards")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&nac_home).unwrap();
-        unsafe {
-            std::env::set_var("NAC_HOME", &nac_home);
-        }
-
-        let store_path = temp_store_path("orchestrator_session_id");
         let cli = RunCli {
-            prompt: None,
             resume: false,
             directory: None,
-            single: false,
-            worker: false,
-            session_id: Some("server-owned-session".to_string()),
+            worker: true,
+            session_id: None,
             thread_name: None,
             action: None,
             source_threads: Vec::new(),
-            store_path: Some(store_path.clone()),
+            store_path: None,
             sandbox: false,
             backend: BackendKind::Auto,
             reasoning_effort: None,
@@ -610,18 +540,14 @@ mod tests {
             api_model: None,
         };
 
-        let run_config = build_run_cli_config(cli).await.unwrap();
+        let error = match build_run_cli_config(cli).await {
+            Ok(_) => panic!("standalone worker should be rejected"),
+            Err(error) => error.to_string(),
+        };
         assert_eq!(
-            run_config.session_id.as_deref(),
-            Some("server-owned-session")
+            error,
+            "--worker is internal and only supports managed thread dispatches"
         );
-        assert!(run_config.session_snapshot.is_some());
-
-        let loaded = sessions::load_session("server-owned-session").unwrap();
-        assert_eq!(loaded.session_id, "server-owned-session");
-
-        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-        let _ = std::fs::remove_dir_all(nac_home);
 
         if let Some(key) = original_api_key {
             unsafe {
@@ -631,10 +557,6 @@ mod tests {
             unsafe {
                 std::env::remove_var("OPENAI_API_KEY");
             }
-        }
-        match original_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
         }
     }
 
