@@ -1145,11 +1145,11 @@ mod tests {
 
         assert_eq!(
             format_optional_runtime(app.displayed_run_duration()),
-            "--h--m--s"
+            "T+--:--:--"
         );
         assert_eq!(
             format_optional_runtime(app.previous_response_duration),
-            "--h--m--s"
+            "T+--:--:--"
         );
 
         app.apply_agent_event(AgentEvent::AssistantMessage {

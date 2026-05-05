@@ -1653,7 +1653,8 @@ impl App {
             .as_deref()
             .map(short_session)
             .unwrap_or_else(|| "-".to_string());
-        let runtime = format_optional_runtime(self.displayed_run_duration());
+        let runtime_duration = self.displayed_run_duration();
+        let runtime = format_optional_runtime(runtime_duration);
         let run_state = if self.result_rx.is_some() {
             ("RUNNING", Tone::Success)
         } else {
@@ -1701,7 +1702,9 @@ impl App {
             Span::styled("  |  runtime ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 runtime,
-                Style::default().fg(if self.result_rx.is_some() {
+                Style::default().fg(if runtime_duration.is_none() {
+                    Color::DarkGray
+                } else if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::White
@@ -2198,7 +2201,8 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ))],
         };
-        let runtime = format_optional_runtime(self.displayed_run_duration());
+        let runtime_duration = self.displayed_run_duration();
+        let runtime = format_optional_runtime(runtime_duration);
         let title = panel_title_segments(vec![
             Span::styled(
                 "RESPONSE".to_string(),
@@ -2209,7 +2213,9 @@ impl App {
             Span::raw(" "),
             Span::styled(
                 runtime,
-                Style::default().fg(if self.result_rx.is_some() {
+                Style::default().fg(if runtime_duration.is_none() {
+                    Color::DarkGray
+                } else if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::Yellow
@@ -2241,7 +2247,14 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(runtime, Style::default().fg(Color::Yellow)),
+            Span::styled(
+                runtime,
+                Style::default().fg(if self.previous_response_duration.is_some() {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
+            ),
         ]);
         self.render_selectable_rich_panel_with_title(
             frame,
