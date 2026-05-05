@@ -15,7 +15,7 @@ pub use schema::{default_store_path, initialize};
 pub use threads::*;
 pub use worksets::*;
 
-use schema::open_connection;
+pub(crate) use schema::open_connection;
 use time::now_utc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

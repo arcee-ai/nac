@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) struct App {
     pub(super) metadata: TuiMetadata,
+    pub(super) ui_mode: UiMode,
     pub(super) inspect_root: Option<PathBuf>,
     pub(super) composer: TextArea<'static>,
     pub(super) composer_notice: Option<ComposerNotice>,
@@ -42,10 +43,25 @@ pub(super) struct App {
 }
 
 impl App {
+    #[cfg(test)]
     pub(super) fn new(
         metadata: TuiMetadata,
         restored_messages: &[Message],
         start_in_session_picker: bool,
+    ) -> Self {
+        Self::new_with_mode(
+            metadata,
+            restored_messages,
+            start_in_session_picker,
+            UiMode::Full,
+        )
+    }
+
+    pub(super) fn new_with_mode(
+        metadata: TuiMetadata,
+        restored_messages: &[Message],
+        start_in_session_picker: bool,
+        ui_mode: UiMode,
     ) -> Self {
         let inspect_root = metadata.workspace_host_path.clone();
         let workspace = WorkspaceSnapshot::load(&metadata.cwd, inspect_root.as_deref());
@@ -62,9 +78,11 @@ impl App {
         panel_scrolls.insert(PanelId::Worksets, 0);
         panel_scrolls.insert(PanelId::ThreadList, 0);
         panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
+        panel_scrolls.insert(PanelId::CompactStream, usize::MAX);
 
         let mut app = Self {
             metadata,
+            ui_mode,
             inspect_root,
             composer: build_composer(),
             composer_notice: None,
@@ -265,6 +283,30 @@ impl App {
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_focus_panel(FocusPanel::Threads);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('o'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Tools);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('w'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Workspace);
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Worksets);
                 AppAction::None
             }
             KeyEvent {
@@ -586,6 +628,12 @@ impl App {
             ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
             ScreenMode::Focused(FocusPanel::PreviousResponse) => PanelId::PreviousResponse,
             ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
+            ScreenMode::Focused(FocusPanel::Tools) => PanelId::Tools,
+            ScreenMode::Focused(FocusPanel::Workspace) => PanelId::Workspace,
+            ScreenMode::Focused(FocusPanel::Worksets) => PanelId::Worksets,
+            ScreenMode::Dashboard if matches!(self.ui_mode, UiMode::Compact) => {
+                PanelId::CompactStream
+            }
             _ => PanelId::Response,
         }
     }
@@ -608,7 +656,8 @@ impl App {
     }
 
     pub(super) fn refresh_session_picker(&mut self) {
-        match tokio::task::block_in_place(|| sessions::list_sessions()) {
+        let store_path = self.metadata.store_path.clone();
+        match tokio::task::block_in_place(move || sessions::list_sessions(&store_path)) {
             Ok(sessions) => {
                 let current_session = self.metadata.session_id.as_deref();
                 let selected = current_session
@@ -747,6 +796,8 @@ impl App {
     pub(super) fn note_prompt_submitted(&mut self, prompt: &str) {
         self.last_prompt = Some(prompt.to_string());
         self.panel_scrolls.insert(PanelId::Prompt, 0);
+        self.panel_scrolls
+            .insert(PanelId::CompactStream, usize::MAX);
         self.push_timeline(
             "user",
             format!("prompt • {}", fit_text(prompt, 110)),
@@ -1017,6 +1068,10 @@ impl App {
         while self.timeline.len() > TIMELINE_LIMIT {
             self.timeline.pop_front();
         }
+        if matches!(self.ui_mode, UiMode::Compact) {
+            self.panel_scrolls
+                .insert(PanelId::CompactStream, usize::MAX);
+        }
     }
 
     pub(super) fn active_thread_count(&self) -> usize {
@@ -1098,8 +1153,14 @@ impl App {
         self.panel_views.clear();
 
         let area = frame.area();
-        if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
+        let (min_width, min_height) = self.minimum_terminal_size();
+        if area.width < min_width || area.height < min_height {
             self.render_too_small(frame, area);
+            return;
+        }
+
+        if matches!(self.ui_mode, UiMode::Compact) {
+            self.render_compact(frame, area);
             return;
         }
 
@@ -1128,6 +1189,9 @@ impl App {
                     self.render_focused_previous_response(frame, sections[1])
                 }
                 FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
+                FocusPanel::Tools => self.render_focused_tools(frame, sections[1]),
+                FocusPanel::Workspace => self.render_focused_workspace(frame, sections[1]),
+                FocusPanel::Worksets => self.render_focused_worksets(frame, sections[1]),
             }
             self.render_composer(frame, sections[2]);
             if self.help_visible {
@@ -1152,6 +1216,58 @@ impl App {
 
         if self.help_visible {
             self.render_help_overlay(frame, sections[1]);
+        }
+    }
+
+    pub(super) fn render_compact(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let composer_height = compact_composer_height(area.height);
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+                Constraint::Length(composer_height),
+            ])
+            .split(area);
+
+        self.render_compact_header(frame, sections[0]);
+
+        if matches!(self.screen, ScreenMode::SessionPicker { .. }) {
+            self.render_session_picker(frame, sections[1]);
+            self.render_compact_session_footer(frame, sections[2]);
+            self.render_compact_composer(frame, sections[3]);
+            return;
+        }
+
+        if let ScreenMode::Focused(panel) = self.screen {
+            match panel {
+                FocusPanel::Events => self.render_focused_events(frame, sections[1]),
+                FocusPanel::Response => self.render_focused_response(frame, sections[1]),
+                FocusPanel::PreviousResponse => {
+                    self.render_focused_previous_response(frame, sections[1])
+                }
+                FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
+                FocusPanel::Tools => self.render_focused_tools(frame, sections[1]),
+                FocusPanel::Workspace => self.render_focused_workspace(frame, sections[1]),
+                FocusPanel::Worksets => self.render_focused_worksets(frame, sections[1]),
+            }
+        } else {
+            self.render_compact_stream(frame, sections[1]);
+        }
+
+        self.render_compact_status(frame, sections[2]);
+        self.render_compact_composer(frame, sections[3]);
+
+        if self.help_visible {
+            self.render_help_overlay(frame, sections[1]);
+        }
+    }
+
+    pub(super) fn minimum_terminal_size(&self) -> (u16, u16) {
+        match self.ui_mode {
+            UiMode::Full => (MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT),
+            UiMode::Compact => (COMPACT_MIN_TERMINAL_WIDTH, COMPACT_MIN_TERMINAL_HEIGHT),
         }
     }
 
@@ -1190,6 +1306,273 @@ impl App {
         self.render_previous_response_panel(frame, area);
     }
 
+    pub(super) fn render_focused_tools(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_tools_panel(frame, area);
+    }
+
+    pub(super) fn render_focused_workspace(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(6), Constraint::Min(6)])
+            .split(area);
+
+        self.render_workspace_panel(frame, sections[0]);
+        self.render_file_changes_panel(frame, sections[1]);
+    }
+
+    pub(super) fn render_focused_worksets(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_worksets_panel(frame, area);
+    }
+
+    pub(super) fn render_compact_stream(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let width = area.width as usize;
+        let lines = self.compact_stream_lines(width);
+        self.render_selectable_rich_area(frame, area, PanelId::CompactStream, lines);
+    }
+
+    pub(super) fn compact_stream_lines(&mut self, width: usize) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+
+        if let Some(prompt) = self.last_prompt.as_deref() {
+            lines.push(compact_inline_text_line(
+                "you",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+                &one_line(prompt),
+                width,
+            ));
+        }
+
+        let events: Vec<TimelineEntry> = self
+            .timeline
+            .iter()
+            .rev()
+            .take(COMPACT_TIMELINE_LIMIT)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        for entry in events {
+            lines.push(render_compact_event_line(&entry, width));
+        }
+
+        match self.last_response.as_deref() {
+            Some(response) => {
+                let rendered = match &self.response_markdown_cache {
+                    Some((cached_text, cached_width, cached_lines))
+                        if cached_text == response && *cached_width == width =>
+                    {
+                        cached_lines.clone()
+                    }
+                    _ => {
+                        let rendered = render_markdown_lines(response, Some(width));
+                        self.response_markdown_cache =
+                            Some((response.to_string(), width, rendered.clone()));
+                        rendered
+                    }
+                };
+                lines.extend(rendered);
+            }
+            None => {}
+        }
+
+        lines
+    }
+
+    pub(super) fn render_compact_header(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let repo = self
+            .workspace
+            .repo_label
+            .as_deref()
+            .unwrap_or("no git repo");
+        let branch = self.workspace.branch.as_deref().unwrap_or("detached");
+        let session = self
+            .metadata
+            .session_id
+            .as_deref()
+            .map(short_session)
+            .unwrap_or_else(|| "-".to_string());
+        let run_state = if self.result_rx.is_some() {
+            ("RUN", Tone::Success)
+        } else {
+            ("IDLE", Tone::Muted)
+        };
+        let width = area.width as usize;
+        let content_width = width.saturating_sub(28).max(8);
+        let line = Line::from(vec![
+            Span::styled(
+                "NAC",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            status_span(run_state.0, run_state.1),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                fit_text(repo, content_width / 3),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("@", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                fit_text(branch, content_width / 4),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session, Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                compact_path(&self.metadata.model, content_width / 3),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+    }
+
+    pub(super) fn render_compact_status(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let changed_files = self.workspace.changed_files.len();
+        let workset = self
+            .worksets
+            .items
+            .first()
+            .map(|workset| workset.id.as_str())
+            .unwrap_or("none");
+        let workspace_state = if let Some(error) = self.workspace.error.as_deref() {
+            fit_text(error, 28)
+        } else if changed_files == 0 {
+            "clean".to_string()
+        } else {
+            format!(
+                "{} files +{} -{}",
+                changed_files, self.workspace.total_additions, self.workspace.total_deletions
+            )
+        };
+
+        let line = Line::from(vec![
+            Span::styled("threads ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{}/{}", self.active_thread_count(), self.threads.len()),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  files ", Style::default().fg(Color::DarkGray)),
+            Span::styled(workspace_state, Style::default().fg(Color::White)),
+            Span::styled("  workset ", Style::default().fg(Color::DarkGray)),
+            Span::styled(compact_path(workset, 24), Style::default().fg(Color::White)),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+    }
+
+    pub(super) fn render_compact_session_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let escape_label = if matches!(self.screen, ScreenMode::SessionPicker { startup: true }) {
+            "Esc exit"
+        } else {
+            "Esc back"
+        };
+        let line = Line::from(vec![
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" resume  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "↑/↓",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" move  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "r",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" refresh  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(escape_label, Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+    }
+
+    pub(super) fn render_compact_composer(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        if self.result_rx.is_some() {
+            let line = Line::from(vec![
+                Span::styled(
+                    "› ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("running ", Style::default().fg(Color::Green)),
+                Span::styled(
+                    format_runtime(self.displayed_run_duration()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(line), area);
+            return;
+        }
+
+        self.maybe_expire_composer_notice();
+        let show_notice = self.composer_notice.is_some() && area.height > 1;
+        let composer_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height.saturating_sub(u16::from(show_notice)).max(1),
+        };
+        let view = wrapped_composer_view(
+            self.composer.lines(),
+            self.composer.cursor(),
+            composer_area.width,
+            composer_area.height,
+        );
+
+        frame.render_widget(
+            Paragraph::new(Text::from(view.lines.clone())).style(Style::default().fg(Color::White)),
+            composer_area,
+        );
+        frame.set_cursor_position((
+            composer_area.x + view.cursor_col.min(composer_area.width.saturating_sub(1)),
+            composer_area.y + view.cursor_row.min(composer_area.height.saturating_sub(1)),
+        ));
+
+        if let Some(notice) = self.composer_notice.as_ref().filter(|_| show_notice) {
+            let notice_area = Rect {
+                x: area.x,
+                y: area.bottom().saturating_sub(1),
+                width: area.width,
+                height: 1,
+            };
+            let notice_line = Line::from(Span::styled(
+                fit_text(&notice.text, notice_area.width as usize),
+                Style::default()
+                    .fg(notice.tone.color())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(notice_line), notice_area);
+        }
+    }
+
     pub(super) fn render_too_small(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let block = panel_block("NAC");
         let inner = block.inner(area);
@@ -1197,14 +1580,15 @@ impl App {
 
         let mut lines = vec![
             Line::from(Span::styled(
-                "Terminal too small for the managed dashboard.",
+                "Terminal too small for this TUI.",
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(format!(
                 "Resize to at least {}x{}.",
-                MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT
+                self.minimum_terminal_size().0,
+                self.minimum_terminal_size().1
             )),
         ];
         if let Some(prompt) = self.last_prompt.as_deref() {
@@ -1613,6 +1997,18 @@ impl App {
                 ),
                 Span::styled(
                     " focus threads / events / response / previous",
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Ctrl-O / Ctrl-W / Ctrl-K",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " focus tools / workspace / worksets",
                     Style::default().fg(Color::White),
                 ),
             ]),
@@ -2117,7 +2513,7 @@ impl App {
             )));
         }
 
-        render_lines_panel(frame, area, "TOOLS", lines);
+        self.render_scrollable_lines_panel(frame, area, PanelId::Tools, "TOOLS", lines);
     }
 
     pub(super) fn render_worksets_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -2439,6 +2835,54 @@ impl App {
         frame.render_widget(Paragraph::new(Text::from(rendered)), inner);
     }
 
+    pub(super) fn render_selectable_rich_area(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: Rect,
+        panel_id: PanelId,
+        lines: Vec<Line<'static>>,
+    ) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        frame.render_widget(Clear, area);
+
+        let logical_lines: Vec<String> = lines.iter().map(line_to_plain_text).collect();
+        let rows = wrap_styled_lines(&lines, area.width as usize);
+        let total_rows = rows.len().max(1);
+        let visible_rows = area.height as usize;
+        let max_scroll = total_rows.saturating_sub(visible_rows);
+        let scroll = self.panel_scrolls.entry(panel_id).or_insert(0);
+        *scroll = (*scroll).min(max_scroll);
+        let start = *scroll;
+        let end = (start + visible_rows).min(rows.len());
+        let visible = rows[start..end].to_vec();
+
+        let selected = selection_bounds_for_panel(self.selection.as_ref(), panel_id);
+        let mut rendered = Vec::new();
+        for row in &visible {
+            rendered.push(render_wrapped_row(row, selected.clone()));
+        }
+        while rendered.len() < visible_rows {
+            rendered.push(Line::from(""));
+        }
+
+        self.panel_views.insert(
+            panel_id,
+            PanelView {
+                id: panel_id,
+                inner: area,
+                logical_lines,
+                rows,
+                scroll_offset: *scroll,
+                visible_rows,
+            },
+        );
+
+        frame.render_widget(Paragraph::new(Text::from(rendered)), area);
+    }
+
     pub(super) fn render_scrollable_lines_panel(
         &mut self,
         frame: &mut ratatui::Frame,
@@ -2613,4 +3057,8 @@ impl App {
             let _ = copy_text_to_clipboard(clipboard, &text);
         }
     }
+}
+
+fn compact_composer_height(_total_height: u16) -> u16 {
+    1
 }

@@ -239,7 +239,7 @@ impl ModelClient {
             client: reqwest::Client::new(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test_dummy_key".to_string(),
-            model: "gpt-5.4".to_string(),
+            model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),
         }

@@ -80,6 +80,72 @@ pub(super) fn render_event_line(entry: &TimelineEntry, width: usize) -> Line<'st
     Line::from(spans)
 }
 
+pub(super) fn render_compact_event_line(entry: &TimelineEntry, width: usize) -> Line<'static> {
+    let (action, detail) = entry
+        .detail
+        .split_once(" • ")
+        .map(|(action, detail)| (action.to_string(), detail.to_string()))
+        .unwrap_or_else(|| (entry.detail.clone(), String::new()));
+
+    let glyph = tone_glyph(entry.tone);
+    let actor_width = (width / 4).clamp(5, 12);
+    let action_width = (width / 3).clamp(7, 18);
+    let prefix_width = glyph.chars().count() + actor_width + action_width + 3;
+    let detail_width = width.saturating_sub(prefix_width);
+
+    let mut spans = vec![
+        Span::styled(glyph.to_string(), Style::default().fg(entry.tone.color())),
+        Span::raw(" "),
+        Span::styled(
+            pad_cell(&fit_text(&entry.actor, actor_width), actor_width),
+            Style::default()
+                .fg(actor_color(&entry.actor, entry.tone))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            pad_cell(&fit_text(&action, action_width), action_width),
+            Style::default().fg(entry.tone.color()),
+        ),
+    ];
+
+    if detail_width > 0 && !detail.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            fit_text(&detail, detail_width),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+pub(super) fn compact_inline_text_line(
+    label: &str,
+    label_style: Style,
+    content: &str,
+    width: usize,
+) -> Line<'static> {
+    if width == 0 {
+        return Line::from("");
+    }
+
+    let label_width = label.chars().count().min(COMPACT_LABEL_WIDTH).min(width);
+    let content_width = width.saturating_sub(label_width + 1);
+    if content_width == 0 {
+        return Line::from(Span::styled(fit_text(label, width), label_style));
+    }
+
+    Line::from(vec![
+        Span::styled(fit_text(label, label_width), label_style),
+        Span::styled(" ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            fit_text(&one_line(content), content_width),
+            Style::default().fg(Color::White),
+        ),
+    ])
+}
+
 pub(super) fn render_file_change_line(file: &ChangedFileStat, width: usize) -> Line<'static> {
     let status_width = 1usize;
     let delta_width = 5usize;

@@ -16,7 +16,11 @@ pub(super) fn classify_tool_status(is_error: bool, preview: &str) -> ToolStatus 
 pub(super) fn panel_is_selectable(panel: PanelId) -> bool {
     matches!(
         panel,
-        PanelId::Prompt | PanelId::Response | PanelId::PreviousResponse | PanelId::Workspace
+        PanelId::Prompt
+            | PanelId::Response
+            | PanelId::PreviousResponse
+            | PanelId::Workspace
+            | PanelId::CompactStream
     )
 }
 

@@ -1,11 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{detect_backend, BackendKind, ReasoningEffort};
-use crate::paths::nac_sessions_path;
 use crate::sandbox::SandboxSpec;
 use crate::types::Message;
 
@@ -54,29 +53,25 @@ mod tests {
     use crate::types::Message;
     use crate::TEST_ENV_LOCK;
 
-    fn temp_home(label: &str) -> PathBuf {
+    fn temp_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("nac_sessions_test_{}_{}", label, unique));
-        std::fs::create_dir_all(&path).unwrap();
-        path
+        std::env::temp_dir()
+            .join(format!("nac_sessions_test_{}_{}", label, unique))
+            .join("store.db")
     }
 
     #[test]
     fn create_and_load_session_round_trip() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let home = temp_home("round_trip");
-        let previous_nac_home = std::env::var_os("NAC_HOME");
-        unsafe {
-            std::env::set_var("NAC_HOME", &home);
-        }
+        let store_path = temp_store_path("round_trip");
 
         let snapshot = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo"),
-            PathBuf::from("/repo/.nac/store.db"),
+            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
@@ -87,31 +82,23 @@ mod tests {
             }],
         );
         create_session(&snapshot).unwrap();
-        let loaded = load_session("session-1").unwrap();
+        let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
         assert_eq!(loaded.cwd, PathBuf::from("/repo"));
         assert_eq!(loaded.messages.len(), 1);
 
-        match previous_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
-        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[test]
     fn load_last_session_returns_most_recent() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let home = temp_home("latest");
-        let previous_nac_home = std::env::var_os("NAC_HOME");
-        unsafe {
-            std::env::set_var("NAC_HOME", &home);
-        }
+        let store_path = temp_store_path("latest");
 
         let first = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo-one"),
-            PathBuf::from("/repo-one/.nac/store.db"),
+            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
@@ -124,7 +111,7 @@ mod tests {
         let second = new_snapshot(
             "session-2".to_string(),
             PathBuf::from("/repo-two"),
-            PathBuf::from("/repo-two/.nac/store.db"),
+            store_path.clone(),
             "model-b".to_string(),
             "https://api.fireworks.ai/inference/v1".to_string(),
             BackendKind::FireworksChat,
@@ -136,29 +123,21 @@ mod tests {
         );
         save_session(&second).unwrap();
 
-        let loaded = load_last_session().unwrap();
+        let loaded = load_last_session(&store_path).unwrap();
         assert_eq!(loaded.session_id, "session-2");
 
-        match previous_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
-        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[test]
     fn list_sessions_returns_summaries_in_updated_order() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let home = temp_home("list");
-        let previous_nac_home = std::env::var_os("NAC_HOME");
-        unsafe {
-            std::env::set_var("NAC_HOME", &home);
-        }
+        let store_path = temp_store_path("list");
 
         let first = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo-one"),
-            PathBuf::from("/repo-one/.nac/store.db"),
+            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
@@ -178,7 +157,7 @@ mod tests {
         let second = new_snapshot(
             "session-2".to_string(),
             PathBuf::from("/repo-two"),
-            PathBuf::from("/repo-two/.nac/store.db"),
+            store_path.clone(),
             "model-b".to_string(),
             "https://api.fireworks.ai/inference/v1".to_string(),
             BackendKind::FireworksChat,
@@ -207,7 +186,7 @@ mod tests {
         );
         save_session(&second).unwrap();
 
-        let sessions = list_sessions().unwrap();
+        let sessions = list_sessions(&store_path).unwrap();
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].session_id, "session-2");
         assert_eq!(sessions[0].visible_message_count, 2);
@@ -217,10 +196,6 @@ mod tests {
         );
         assert!(sessions[0].sandboxed);
 
-        match previous_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
-        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }

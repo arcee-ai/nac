@@ -9,7 +9,7 @@ pub fn initialize(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn open_connection(path: &Path) -> Result<Connection> {
+pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create store dir {}", parent.display()))?;
@@ -65,14 +65,31 @@ pub(super) fn open_connection(path: &Path) -> Result<Connection> {
              PRIMARY KEY (workset_id, session_id, position),
              FOREIGN KEY (workset_id, session_id) REFERENCES worksets(id, session_id)
          );
+         CREATE TABLE IF NOT EXISTS sessions (
+             session_id TEXT PRIMARY KEY,
+             cwd TEXT NOT NULL,
+             store_path TEXT NOT NULL,
+             model TEXT NOT NULL,
+             base_url TEXT NOT NULL,
+             backend TEXT,
+             reasoning_effort TEXT,
+             sandbox_json TEXT,
+             messages_json TEXT NOT NULL,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
          CREATE INDEX IF NOT EXISTS idx_episodes_thread_session_created
              ON episodes(thread_name, session_id, id);
          CREATE INDEX IF NOT EXISTS idx_worksets_session_updated
              ON worksets(session_id, updated_at DESC);
          CREATE INDEX IF NOT EXISTS idx_workset_items_workset_position
-             ON workset_items(workset_id, session_id, position);",
+             ON workset_items(workset_id, session_id, position);
+         CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
+             ON sessions(updated_at DESC);",
     )?;
     ensure_workset_items_acceptance_column(&conn)?;
+    ensure_column(&conn, "sessions", "backend", "TEXT")?;
+    ensure_column(&conn, "sessions", "reasoning_effort", "TEXT")?;
     Ok(conn)
 }
 
@@ -90,5 +107,20 @@ fn ensure_workset_items_acceptance_column(conn: &Connection) -> Result<()> {
         "ALTER TABLE workset_items ADD COLUMN acceptance TEXT NOT NULL DEFAULT ''",
         [],
     )?;
+    Ok(())
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    let pragma = format!("PRAGMA table_info({})", table);
+    let mut stmt = conn.prepare(&pragma)?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+
+    let alter = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition);
+    conn.execute(&alter, [])?;
     Ok(())
 }

@@ -519,7 +519,7 @@ async fn run_worker(
     let executable = std::env::current_exe()?;
     let mut command = Command::new(executable);
     command
-        .arg("--worker")
+        .arg("__worker")
         .arg("--session-id")
         .arg(session_id)
         .arg("--thread-name")

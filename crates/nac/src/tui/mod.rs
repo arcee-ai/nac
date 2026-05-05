@@ -67,14 +67,18 @@ use wrap::*;
 const COMPOSER_HEIGHT: u16 = 6;
 const MIN_TERMINAL_WIDTH: u16 = 72;
 const MIN_TERMINAL_HEIGHT: u16 = 22;
+const COMPACT_MIN_TERMINAL_WIDTH: u16 = 40;
+const COMPACT_MIN_TERMINAL_HEIGHT: u16 = 8;
 const TIMELINE_LIMIT: usize = 220;
 const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
+const COMPACT_TIMELINE_LIMIT: usize = 24;
 const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const VIEW_CHANGE_SCROLL_SUPPRESS: Duration = Duration::from_millis(750);
 const PROMPT_SEPARATOR: &str = " › ";
 const COMMAND_SEPARATOR: &str = " / ";
 const CONTINUATION_PREFIX: &str = "   ";
+const COMPACT_LABEL_WIDTH: usize = 10;
 
 type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -90,6 +94,12 @@ pub struct TuiMetadata {
     pub session_id: Option<String>,
     pub sandbox_status: String,
     pub agents_md_status: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiMode {
+    Full,
+    Compact,
 }
 
 #[derive(Debug)]
@@ -139,11 +149,11 @@ pub enum TuiOutcome {
 
 pub async fn run(
     mut agent: Agent,
-    initial_prompt: Option<String>,
     metadata: TuiMetadata,
     restored_messages: Vec<Message>,
     mut session_snapshot: Option<SessionSnapshot>,
     start_in_session_picker: bool,
+    ui_mode: UiMode,
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
@@ -165,17 +175,18 @@ pub async fn run(
     let running = Arc::new(AtomicBool::new(true));
     let input_thread = spawn_input_thread(running.clone(), input_tx);
 
-    let mut app = App::new(metadata, &restored_messages, start_in_session_picker);
+    let mut app = App::new_with_mode(
+        metadata,
+        &restored_messages,
+        start_in_session_picker,
+        ui_mode,
+    );
     let (ws_tx, ws_rx) = mpsc::channel::<WorkspaceSnapshot>(1);
     app.workspace_tx = Some(ws_tx);
     app.workspace_rx = Some(ws_rx);
     let mut animation_tick = time::interval(Duration::from_millis(75));
     animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     terminal.draw(|frame| app.render(frame))?;
-
-    if let Some(prompt) = initial_prompt {
-        submit_prompt(prompt, agent.clone(), &mut app, &mut terminal)?;
-    }
 
     let mut outcome = TuiOutcome::Exit;
 
@@ -809,6 +820,82 @@ mod tests {
         });
 
         assert_eq!(app.last_prompt.as_deref(), Some("/plan refresh auth flow"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn compact_stream_uses_event_glyphs_and_latest_response() {
+        let dir = temp_dir("compact-stream");
+        let mut app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
+        app.note_prompt_submitted("implement compact mode");
+
+        app.apply_agent_event(AgentEvent::ThreadStarted {
+            name: "impl".to_string(),
+            action: "build compact ui".to_string(),
+            source_threads: Vec::new(),
+        });
+        app.apply_agent_event(AgentEvent::AssistantMessage {
+            thread_name: None,
+            content: "Compact mode ready.".to_string(),
+        });
+
+        let rendered = app
+            .compact_stream_lines(80)
+            .iter()
+            .map(line_to_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("implement compact mode"));
+        assert!(rendered.contains("+ impl"));
+        assert!(rendered.contains("Compact mode ready."));
+        assert!(!rendered.contains("assistant Compact mode ready."));
+        assert!(!rendered.contains("waiting for first reply"));
+        assert_eq!(app.primary_scroll_panel(), PanelId::CompactStream);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn compact_stream_keeps_full_response_scrollback() {
+        let dir = temp_dir("compact-stream-height");
+        let mut app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
+        app.note_prompt_submitted("implement compact mode with no required vertical scroll");
+        for index in 0..8 {
+            app.push_timeline(
+                format!("thread-{index}"),
+                format!("tool call • detail {index}"),
+                Tone::Info,
+            );
+        }
+        app.apply_agent_event(AgentEvent::AssistantMessage {
+            thread_name: None,
+            content: "Compact mode ready.\n\nIt still keeps the full response available for scrolling.\n\n- one\n- two\n- three".to_string(),
+        });
+
+        let lines = app.compact_stream_lines(48);
+
+        assert!(lines.len() > 4);
+        let rendered = lines
+            .iter()
+            .map(line_to_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("you"));
+        assert!(rendered.contains("full response available"));
+        assert!(rendered.contains("three"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn compact_mode_allows_phone_height_terminals() {
+        let dir = temp_dir("compact-min-size");
+        let app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
+
+        assert_eq!(
+            app.minimum_terminal_size(),
+            (COMPACT_MIN_TERMINAL_WIDTH, COMPACT_MIN_TERMINAL_HEIGHT)
+        );
+        assert!(COMPACT_MIN_TERMINAL_HEIGHT < MIN_TERMINAL_HEIGHT);
         let _ = std::fs::remove_dir_all(dir);
     }
 

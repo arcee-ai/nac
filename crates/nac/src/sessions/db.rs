@@ -1,8 +1,11 @@
 use super::*;
 
 pub fn create_session(snapshot: &SessionSnapshot) -> Result<()> {
-    let path = sessions_path()?;
-    let mut conn = open_connection(&path)?;
+    create_session_at(&snapshot.store_path, snapshot)
+}
+
+pub fn create_session_at(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+    let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
 
     let existing: Option<String> = tx
@@ -26,17 +29,19 @@ pub fn create_session(snapshot: &SessionSnapshot) -> Result<()> {
 }
 
 pub fn save_session(snapshot: &SessionSnapshot) -> Result<()> {
-    let path = sessions_path()?;
-    let mut conn = open_connection(&path)?;
+    save_session_at(&snapshot.store_path, snapshot)
+}
+
+pub fn save_session_at(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+    let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
     insert_or_replace_session(&tx, snapshot)?;
     tx.commit()?;
     Ok(())
 }
 
-pub fn load_session(session_id: &str) -> Result<SessionSnapshot> {
-    let path = sessions_path()?;
-    let conn = open_connection(&path)?;
+pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
+    let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
             "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, created_at, updated_at
@@ -68,9 +73,8 @@ pub fn load_session(session_id: &str) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
-pub fn load_last_session() -> Result<SessionSnapshot> {
-    let path = sessions_path()?;
-    let conn = open_connection(&path)?;
+pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
+    let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
             "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, created_at, updated_at
@@ -103,9 +107,8 @@ pub fn load_last_session() -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
-pub fn list_sessions() -> Result<Vec<SessionSummary>> {
-    let path = sessions_path()?;
-    let conn = open_connection(&path)?;
+pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
+    let conn = crate::store::open_connection(path)?;
     let mut stmt = conn.prepare(
         "SELECT session_id, cwd, model, base_url, backend, sandbox_json, messages_json, created_at, updated_at
          FROM sessions
@@ -155,41 +158,6 @@ pub fn list_sessions() -> Result<Vec<SessionSummary>> {
     }
 
     Ok(sessions)
-}
-
-fn sessions_path() -> Result<PathBuf> {
-    nac_sessions_path().ok_or_else(|| anyhow!("could not determine NAC_HOME for session storage"))
-}
-
-fn open_connection(path: &Path) -> Result<Connection> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create sessions dir {}", parent.display()))?;
-    }
-
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to open sessions database {}", path.display()))?;
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         CREATE TABLE IF NOT EXISTS sessions (
-             session_id TEXT PRIMARY KEY,
-             cwd TEXT NOT NULL,
-             store_path TEXT NOT NULL,
-             model TEXT NOT NULL,
-             base_url TEXT NOT NULL,
-             backend TEXT,
-             reasoning_effort TEXT,
-             sandbox_json TEXT,
-             messages_json TEXT NOT NULL,
-             created_at TEXT NOT NULL,
-             updated_at TEXT NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
-             ON sessions(updated_at DESC);",
-    )?;
-    ensure_column(&conn, "sessions", "backend", "TEXT")?;
-    ensure_column(&conn, "sessions", "reasoning_effort", "TEXT")?;
-    Ok(conn)
 }
 
 fn insert_or_replace_session(
@@ -292,19 +260,4 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some(other) => Err(anyhow!("unsupported stored reasoning effort '{}'", other)),
         None => Ok(None),
     }
-}
-
-fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
-    let pragma = format!("PRAGMA table_info({})", table);
-    let mut stmt = conn.prepare(&pragma)?;
-    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for existing in columns {
-        if existing? == column {
-            return Ok(());
-        }
-    }
-
-    let alter = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition);
-    conn.execute(&alter, [])?;
-    Ok(())
 }
