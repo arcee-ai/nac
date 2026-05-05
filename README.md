@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/instal
 
 Pinned version installs are not supported yet.
 
-Set `OPENAI_API_KEY`, then run `nac`.
+Set `OPENAI_API_KEY`, then run `nac`. Use `nac --compact` for the compact single-column TUI.
 
 Optional:
 - `OPENAI_BASE_URL`

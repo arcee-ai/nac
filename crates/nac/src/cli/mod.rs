@@ -18,7 +18,7 @@ use crate::sandbox::{
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillRegistry};
 use crate::store::{self, WorkerContext};
-use crate::tui::{self, TuiMetadata, TuiOutcome};
+use crate::tui::{self, TuiMetadata, TuiOutcome, UiMode};
 use crate::types::Message;
 
 mod args;
@@ -71,6 +71,7 @@ pub async fn run() -> Result<()> {
             RunState::Orchestrator {
                 run_config,
                 start_in_session_picker,
+                ui_mode,
             } => {
                 let store_path = run_config.session.store_path();
                 let session_id = run_config.session.session_id().map(str::to_string);
@@ -103,6 +104,7 @@ pub async fn run() -> Result<()> {
                     restored_messages,
                     session_snapshot,
                     start_in_session_picker,
+                    ui_mode,
                 )
                 .await?
                 {
@@ -112,6 +114,7 @@ pub async fn run() -> Result<()> {
                             run_config: build_resume_config_for_session(store_path, &session_id)
                                 .await?,
                             start_in_session_picker: false,
+                            ui_mode,
                         };
                         continue;
                     }
@@ -123,23 +126,41 @@ pub async fn run() -> Result<()> {
 
 async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
     match cli {
-        ParsedCli::Run(cli) => Ok(RunState::Orchestrator {
-            run_config: build_run_cli_config(cli).await?,
-            start_in_session_picker: false,
-        }),
+        ParsedCli::Run(cli) => {
+            let ui_mode = ui_mode_from_args(&cli.ui);
+            Ok(RunState::Orchestrator {
+                run_config: build_run_cli_config(cli).await?,
+                start_in_session_picker: false,
+                ui_mode,
+            })
+        }
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
             build_managed_worker_config(cli).await?,
         )),
         ParsedCli::Resume(cli) if cli.session_id.is_none() && !cli.last => {
+            let ui_mode = ui_mode_from_args(&cli.ui);
             Ok(RunState::Orchestrator {
                 run_config: build_resume_picker_config(cli).await?,
                 start_in_session_picker: true,
+                ui_mode,
             })
         }
-        ParsedCli::Resume(cli) => Ok(RunState::Orchestrator {
-            run_config: build_resume_config(cli).await?,
-            start_in_session_picker: false,
-        }),
+        ParsedCli::Resume(cli) => {
+            let ui_mode = ui_mode_from_args(&cli.ui);
+            Ok(RunState::Orchestrator {
+                run_config: build_resume_config(cli).await?,
+                start_in_session_picker: false,
+                ui_mode,
+            })
+        }
+    }
+}
+
+fn ui_mode_from_args(ui: &UiArgs) -> UiMode {
+    if ui.compact {
+        UiMode::Compact
+    } else {
+        UiMode::Full
     }
 }
 
@@ -361,6 +382,10 @@ mod tests {
         }
     }
 
+    fn default_ui_args() -> UiArgs {
+        UiArgs { compact: false }
+    }
+
     #[test]
     fn workspace_dir_from_explicit_mount_uses_workspace_guest_mapping() {
         let root = std::env::temp_dir().join(format!(
@@ -410,6 +435,32 @@ mod tests {
             }
             ParsedCli::Run(_) => panic!("expected resume cli"),
             ParsedCli::ManagedWorker(_) => panic!("expected resume cli"),
+        }
+    }
+
+    #[test]
+    fn parse_compact_flag_uses_run_ui_args() {
+        let parsed = parse_cli_from(vec![OsString::from("nac"), OsString::from("--compact")]);
+        match parsed {
+            ParsedCli::Run(run) => assert!(run.ui.compact),
+            ParsedCli::Resume(_) | ParsedCli::ManagedWorker(_) => panic!("expected run cli"),
+        }
+    }
+
+    #[test]
+    fn parse_resume_compact_flag_uses_resume_ui_args() {
+        let parsed = parse_cli_from(vec![
+            OsString::from("nac"),
+            OsString::from("resume"),
+            OsString::from("--compact"),
+            OsString::from("--last"),
+        ]);
+        match parsed {
+            ParsedCli::Resume(resume) => {
+                assert!(resume.ui.compact);
+                assert!(resume.last);
+            }
+            ParsedCli::Run(_) | ParsedCli::ManagedWorker(_) => panic!("expected resume cli"),
         }
     }
 
@@ -591,6 +642,7 @@ mod tests {
             last: false,
             directory: Some(session_cwd.clone()),
             store: StoreArgs { store_path: None },
+            ui: default_ui_args(),
         })
         .await
         .unwrap();

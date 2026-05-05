@@ -15,6 +15,9 @@ pub(super) struct RunCli {
     pub(super) store: StoreArgs,
 
     #[command(flatten)]
+    pub(super) ui: UiArgs,
+
+    #[command(flatten)]
     pub(super) model: ModelArgs,
 
     #[command(flatten)]
@@ -46,6 +49,13 @@ pub(super) struct StoreArgs {
     /// Override the SQLite store path (default: .nac/store.db)
     #[arg(long)]
     pub(super) store_path: Option<PathBuf>,
+}
+
+#[derive(clap::Args)]
+pub(super) struct UiArgs {
+    /// Use the compact single-column TUI layout
+    #[arg(long)]
+    pub(super) compact: bool,
 }
 
 #[derive(clap::Args)]
@@ -141,6 +151,9 @@ pub(super) struct ResumeCli {
 
     #[command(flatten)]
     pub(super) store: StoreArgs,
+
+    #[command(flatten)]
+    pub(super) ui: UiArgs,
 }
 
 pub(super) enum ParsedCli {

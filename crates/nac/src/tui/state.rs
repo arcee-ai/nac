@@ -86,6 +86,7 @@ pub(super) enum PanelId {
     Worksets,
     ThreadList,
     ThreadEpisodes,
+    CompactStream,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +344,9 @@ pub(super) enum FocusPanel {
     Response,
     PreviousResponse,
     Threads,
+    Tools,
+    Workspace,
+    Worksets,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

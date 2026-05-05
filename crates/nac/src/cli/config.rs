@@ -55,6 +55,7 @@ pub(super) enum RunState {
     Orchestrator {
         run_config: OrchestratorRunConfig,
         start_in_session_picker: bool,
+        ui_mode: tui::UiMode,
     },
     ManagedWorker(ManagedWorkerRunConfig),
 }
