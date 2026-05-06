@@ -10,11 +10,12 @@ pub(super) struct App {
     pub(super) quit: bool,
     pub(super) working_started_at: Option<Instant>,
     pub(super) working_frame: usize,
-    pub(super) last_response_duration: Duration,
+    pub(super) last_response_duration: Option<Duration>,
     pub(super) restored_message_count: usize,
     pub(super) last_prompt: Option<String>,
     pub(super) last_response: Option<String>,
     pub(super) previous_response: Option<String>,
+    pub(super) previous_response_duration: Option<Duration>,
     pub(super) timeline: VecDeque<TimelineEntry>,
     pub(super) threads: HashMap<String, ThreadView>,
     pub(super) all_episodes: HashMap<String, Vec<store::EpisodeRecord>>,
@@ -90,11 +91,12 @@ impl App {
             quit: false,
             working_started_at: None,
             working_frame: 0,
-            last_response_duration: Duration::default(),
+            last_response_duration: None,
             restored_message_count: visible_restored_message_count(restored_messages),
             last_prompt: None,
             last_response: None,
             previous_response: None,
+            previous_response_duration: None,
             timeline: VecDeque::new(),
             threads: HashMap::new(),
             all_episodes: HashMap::new(),
@@ -524,6 +526,41 @@ impl App {
         }
     }
 
+    pub(super) fn restore_response_durations(
+        &mut self,
+        last_response_duration: Option<Duration>,
+        previous_response_duration: Option<Duration>,
+    ) {
+        self.last_response_duration = self.last_response.as_ref().and(last_response_duration);
+        self.previous_response_duration = self
+            .previous_response
+            .as_ref()
+            .and(previous_response_duration);
+    }
+
+    pub(super) fn archive_current_response(&mut self) {
+        if let Some(response) = self.last_response.take() {
+            self.previous_response = Some(response);
+            self.previous_response_duration = self.last_response_duration.take();
+            self.response_markdown_cache = None;
+            self.panel_scrolls.insert(PanelId::Response, 0);
+            self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
+        }
+    }
+
+    pub(super) fn complete_top_level_response(&mut self, content: String, duration: Duration) {
+        self.archive_current_response();
+        self.last_response = Some(content.clone());
+        self.last_response_duration = Some(duration);
+        self.response_markdown_cache = None;
+        self.panel_scrolls.insert(PanelId::Response, 0);
+        self.push_timeline(
+            "assistant",
+            format!("reply • {}", fit_text(&content, 110)),
+            Tone::Success,
+        );
+    }
+
     pub(super) fn handle_session_picker_key_event(&mut self, key: KeyEvent) -> AppAction {
         match key {
             KeyEvent {
@@ -794,6 +831,7 @@ impl App {
     }
 
     pub(super) fn note_prompt_submitted(&mut self, prompt: &str) {
+        self.archive_current_response();
         self.last_prompt = Some(prompt.to_string());
         self.panel_scrolls.insert(PanelId::Prompt, 0);
         self.panel_scrolls
@@ -1022,19 +1060,7 @@ impl App {
                         Tone::Muted,
                     );
                 }
-                None => {
-                    if let Some(previous) = self.last_response.replace(content.clone()) {
-                        self.previous_response = Some(previous);
-                    }
-                    self.response_markdown_cache = None;
-                    self.panel_scrolls.insert(PanelId::Response, 0);
-                    self.panel_scrolls.insert(PanelId::PreviousResponse, 0);
-                    self.push_timeline(
-                        "assistant",
-                        format!("reply • {}", fit_text(&content, 110)),
-                        Tone::Success,
-                    );
-                }
+                None => {}
             },
             AgentEvent::Error {
                 thread_name,
@@ -1124,10 +1150,17 @@ impl App {
         self.panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
     }
 
-    pub(super) fn displayed_run_duration(&self) -> Duration {
+    pub(super) fn displayed_run_duration(&self) -> Option<Duration> {
         self.working_started_at
             .map(|started| started.elapsed())
-            .unwrap_or(self.last_response_duration)
+            .or(self.last_response_duration)
+    }
+
+    pub(super) fn response_duration_snapshot_ms(&self) -> (Option<u64>, Option<u64>) {
+        (
+            self.last_response_duration.map(duration_to_millis_u64),
+            self.previous_response_duration.map(duration_to_millis_u64),
+        )
     }
 
     pub(super) fn reset_life(&mut self) {
@@ -1524,7 +1557,7 @@ impl App {
                 ),
                 Span::styled("running ", Style::default().fg(Color::Green)),
                 Span::styled(
-                    format_runtime(self.displayed_run_duration()),
+                    format_optional_runtime(self.displayed_run_duration()),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]);
@@ -1620,7 +1653,8 @@ impl App {
             .as_deref()
             .map(short_session)
             .unwrap_or_else(|| "-".to_string());
-        let runtime = format_runtime(self.displayed_run_duration());
+        let runtime_duration = self.displayed_run_duration();
+        let runtime = format_optional_runtime(runtime_duration);
         let run_state = if self.result_rx.is_some() {
             ("RUNNING", Tone::Success)
         } else {
@@ -1668,7 +1702,9 @@ impl App {
             Span::styled("  |  runtime ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 runtime,
-                Style::default().fg(if self.result_rx.is_some() {
+                Style::default().fg(if runtime_duration.is_none() {
+                    Color::DarkGray
+                } else if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::White
@@ -2161,11 +2197,12 @@ impl App {
                 }
             },
             None => vec![Line::from(Span::styled(
-                "Waiting for the first orchestrator reply.",
+                "Awaiting orchestrator reply.",
                 Style::default().fg(Color::DarkGray),
             ))],
         };
-        let runtime = format_runtime(self.displayed_run_duration());
+        let runtime_duration = self.displayed_run_duration();
+        let runtime = format_optional_runtime(runtime_duration);
         let title = panel_title_segments(vec![
             Span::styled(
                 "RESPONSE".to_string(),
@@ -2176,7 +2213,9 @@ impl App {
             Span::raw(" "),
             Span::styled(
                 runtime,
-                Style::default().fg(if self.result_rx.is_some() {
+                Style::default().fg(if runtime_duration.is_none() {
+                    Color::DarkGray
+                } else if self.result_rx.is_some() {
                     Color::Green
                 } else {
                     Color::Yellow
@@ -2199,11 +2238,29 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ))],
         };
-        self.render_selectable_rich_panel(
+        let runtime = format_optional_runtime(self.previous_response_duration);
+        let title = panel_title_segments(vec![
+            Span::styled(
+                "PREVIOUS RESPONSE".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                runtime,
+                Style::default().fg(if self.previous_response_duration.is_some() {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]);
+        self.render_selectable_rich_panel_with_title(
             frame,
             area,
             PanelId::PreviousResponse,
-            "PREVIOUS RESPONSE",
+            title,
             lines,
         );
     }
@@ -2714,23 +2771,6 @@ impl App {
             panel_id,
             panel_title(title),
             logical_lines,
-        );
-    }
-
-    pub(super) fn render_selectable_rich_panel(
-        &mut self,
-        frame: &mut ratatui::Frame,
-        area: Rect,
-        panel_id: PanelId,
-        title: &'static str,
-        lines: Vec<Line<'static>>,
-    ) {
-        self.render_selectable_rich_panel_with_title(
-            frame,
-            area,
-            panel_id,
-            panel_title(title),
-            lines,
         );
     }
 

@@ -30,6 +30,8 @@ pub struct SessionSnapshot {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub sandbox_spec: Option<SandboxSpec>,
     pub messages: Vec<Message>,
+    pub last_response_duration_ms: Option<u64>,
+    pub previous_response_duration_ms: Option<u64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -68,7 +70,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("round_trip");
 
-        let snapshot = new_snapshot(
+        let mut snapshot = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo"),
             store_path.clone(),
@@ -81,11 +83,15 @@ mod tests {
                 content: "hello".to_string(),
             }],
         );
+        snapshot.last_response_duration_ms = Some(12_345);
+        snapshot.previous_response_duration_ms = Some(6_789);
         create_session(&snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
         assert_eq!(loaded.cwd, PathBuf::from("/repo"));
         assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.last_response_duration_ms, Some(12_345));
+        assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

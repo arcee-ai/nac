@@ -44,7 +44,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, created_at, updated_at
+            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -59,8 +59,10 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     reasoning_effort: row.get(6)?,
                     sandbox_json: row.get(7)?,
                     messages_json: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    last_response_duration_ms: row.get(9)?,
+                    previous_response_duration_ms: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -77,7 +79,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, created_at, updated_at
+            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -93,8 +95,10 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     reasoning_effort: row.get(6)?,
                     sandbox_json: row.get(7)?,
                     messages_json: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    last_response_duration_ms: row.get(9)?,
+                    previous_response_duration_ms: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -174,8 +178,8 @@ fn insert_or_replace_session(
 
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
@@ -185,6 +189,8 @@ fn insert_or_replace_session(
              reasoning_effort = excluded.reasoning_effort,
              sandbox_json = excluded.sandbox_json,
              messages_json = excluded.messages_json,
+             last_response_duration_ms = excluded.last_response_duration_ms,
+             previous_response_duration_ms = excluded.previous_response_duration_ms,
              updated_at = excluded.updated_at",
         params![
             snapshot.session_id,
@@ -196,6 +202,8 @@ fn insert_or_replace_session(
             snapshot.reasoning_effort.map(|effort| effort.as_str().to_string()),
             sandbox_json,
             messages_json,
+            snapshot.last_response_duration_ms,
+            snapshot.previous_response_duration_ms,
             snapshot.created_at,
             snapshot.updated_at,
         ],
@@ -213,6 +221,8 @@ struct SessionRow {
     reasoning_effort: Option<String>,
     sandbox_json: Option<String>,
     messages_json: String,
+    last_response_duration_ms: Option<u64>,
+    previous_response_duration_ms: Option<u64>,
     created_at: String,
     updated_at: String,
 }
@@ -233,6 +243,8 @@ impl SessionRow {
             reasoning_effort: parse_reasoning_effort(self.reasoning_effort)?,
             sandbox_spec: deserialize_sandbox(self.sandbox_json)?,
             messages,
+            last_response_duration_ms: self.last_response_duration_ms,
+            previous_response_duration_ms: self.previous_response_duration_ms,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })

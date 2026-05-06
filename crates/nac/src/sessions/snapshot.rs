@@ -74,12 +74,19 @@ pub fn new_snapshot(
         reasoning_effort,
         sandbox_spec,
         messages,
+        last_response_duration_ms: None,
+        previous_response_duration_ms: None,
         created_at: now.clone(),
         updated_at: now,
     }
 }
 
-pub fn refresh_snapshot(snapshot: &SessionSnapshot, messages: Vec<Message>) -> SessionSnapshot {
+pub fn refresh_snapshot(
+    snapshot: &SessionSnapshot,
+    messages: Vec<Message>,
+    last_response_duration_ms: Option<u64>,
+    previous_response_duration_ms: Option<u64>,
+) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
         cwd: snapshot.cwd.clone(),
@@ -90,6 +97,8 @@ pub fn refresh_snapshot(snapshot: &SessionSnapshot, messages: Vec<Message>) -> S
         reasoning_effort: snapshot.reasoning_effort,
         sandbox_spec: snapshot.sandbox_spec.clone(),
         messages,
+        last_response_duration_ms,
+        previous_response_duration_ms,
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }

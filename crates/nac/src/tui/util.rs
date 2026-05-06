@@ -65,7 +65,17 @@ pub(super) fn format_runtime(duration: Duration) -> String {
     let hours = total_seconds / 3_600;
     let minutes = (total_seconds % 3_600) / 60;
     let seconds = total_seconds % 60;
-    format!("{hours:02}h{minutes:02}m{seconds:02}s")
+    format!("T+{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+pub(super) fn format_optional_runtime(duration: Option<Duration>) -> String {
+    duration
+        .map(format_runtime)
+        .unwrap_or_else(|| "T+--:--:--".to_string())
+}
+
+pub(super) fn duration_to_millis_u64(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 pub(super) fn compact_path(path: &str, max_width: usize) -> String {
