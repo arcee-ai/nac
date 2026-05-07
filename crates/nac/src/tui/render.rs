@@ -88,29 +88,39 @@ pub(super) fn render_compact_event_line(entry: &TimelineEntry, width: usize) -> 
         .unwrap_or_else(|| (entry.detail.clone(), String::new()));
 
     let glyph = tone_glyph(entry.tone);
-    let actor_width = (width / 4).clamp(5, 12);
-    let action_width = (width / 3).clamp(7, 18);
-    let prefix_width = glyph.chars().count() + actor_width + action_width + 3;
+    let actor = fit_text(&entry.actor, (width / 5).clamp(8, 16));
+    let action = fit_text(&action, (width / 4).clamp(10, 20));
+
+    let action_style = match entry.tone {
+        Tone::Muted => Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default()
+            .fg(entry.tone.color())
+            .add_modifier(Modifier::BOLD),
+    };
+
+    let prefix_width = glyph.chars().count()
+        + actor.chars().count()
+        + action.chars().count()
+        + 8;
     let detail_width = width.saturating_sub(prefix_width);
 
     let mut spans = vec![
         Span::styled(glyph.to_string(), Style::default().fg(entry.tone.color())),
         Span::raw(" "),
         Span::styled(
-            pad_cell(&fit_text(&entry.actor, actor_width), actor_width),
+            actor,
             Style::default()
                 .fg(actor_color(&entry.actor, entry.tone))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" "),
-        Span::styled(
-            pad_cell(&fit_text(&action, action_width), action_width),
-            Style::default().fg(entry.tone.color()),
-        ),
+        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+        Span::styled(action, action_style),
     ];
 
     if detail_width > 0 && !detail.is_empty() {
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(" • ", Style::default().fg(Color::DarkGray)));
         spans.push(Span::styled(
             fit_text(&detail, detail_width),
             Style::default().fg(Color::DarkGray),
