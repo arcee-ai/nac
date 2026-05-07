@@ -1,5 +1,74 @@
 use super::*;
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct NacConfig {
+    #[serde(default)]
+    pub(super) ui: UiConfig,
+    #[serde(default)]
+    pub(super) storage: StorageConfig,
+    #[serde(default)]
+    pub(super) model: ModelConfig,
+    #[serde(default)]
+    pub(super) sandbox: SandboxConfig,
+    #[serde(default)]
+    pub(super) worker: WorkerConfig,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct UiConfig {
+    pub(super) mode: Option<UiModeConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum UiModeConfig {
+    Full,
+    Compact,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct StorageConfig {
+    pub(super) store_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct ModelConfig {
+    pub(super) backend: Option<BackendKind>,
+    pub(super) model: Option<String>,
+    pub(super) base_url: Option<String>,
+    pub(super) reasoning_effort: Option<ReasoningEffort>,
+    pub(super) api_key_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct SandboxConfig {
+    pub(super) image: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(super) struct WorkerConfig {
+    pub(super) thread_timeout_secs: Option<u64>,
+}
+
+impl NacConfig {
+    pub(super) fn load() -> Result<Self> {
+        let Some(path) = crate::paths::nac_config_path() else {
+            return Ok(Self::default());
+        };
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read config {}", path.display()));
+            }
+        };
+        toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+}
+
 pub(super) enum OrchestratorSession {
     Active {
         session_id: String,

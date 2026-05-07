@@ -2,7 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use uuid::Uuid;
 
@@ -60,7 +60,8 @@ pub async fn run() -> Result<()> {
         anyhow::bail!("interactive mode requires the TUI; run nac from a terminal");
     }
 
-    let mut run_state = build_run_state(cli).await?;
+    let app_config = NacConfig::load()?;
+    let mut run_state = build_run_state(cli, &app_config).await?;
 
     loop {
         match run_state {
@@ -111,8 +112,12 @@ pub async fn run() -> Result<()> {
                     TuiOutcome::Exit => return Ok(()),
                     TuiOutcome::ResumeSession(session_id) => {
                         run_state = RunState::Orchestrator {
-                            run_config: build_resume_config_for_session(store_path, &session_id)
-                                .await?,
+                            run_config: build_resume_config_for_session(
+                                store_path,
+                                &session_id,
+                                &app_config,
+                            )
+                            .await?,
                             start_in_session_picker: false,
                             ui_mode,
                         };
@@ -124,31 +129,31 @@ pub async fn run() -> Result<()> {
     }
 }
 
-async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
+async fn build_run_state(cli: ParsedCli, config: &NacConfig) -> Result<RunState> {
     match cli {
         ParsedCli::Run(cli) => {
-            let ui_mode = ui_mode_from_args(&cli.ui);
+            let ui_mode = ui_mode_from_args(&cli.ui, config);
             Ok(RunState::Orchestrator {
-                run_config: build_run_cli_config(cli).await?,
+                run_config: build_run_cli_config(cli, config).await?,
                 start_in_session_picker: false,
                 ui_mode,
             })
         }
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
-            build_managed_worker_config(cli).await?,
+            build_managed_worker_config(cli, config).await?,
         )),
         ParsedCli::Resume(cli) if cli.session_id.is_none() && !cli.last => {
-            let ui_mode = ui_mode_from_args(&cli.ui);
+            let ui_mode = ui_mode_from_args(&cli.ui, config);
             Ok(RunState::Orchestrator {
-                run_config: build_resume_picker_config(cli).await?,
+                run_config: build_resume_picker_config(cli, config).await?,
                 start_in_session_picker: true,
                 ui_mode,
             })
         }
         ParsedCli::Resume(cli) => {
-            let ui_mode = ui_mode_from_args(&cli.ui);
+            let ui_mode = ui_mode_from_args(&cli.ui, config);
             Ok(RunState::Orchestrator {
-                run_config: build_resume_config(cli).await?,
+                run_config: build_resume_config(cli, config).await?,
                 start_in_session_picker: false,
                 ui_mode,
             })
@@ -156,23 +161,133 @@ async fn build_run_state(cli: ParsedCli) -> Result<RunState> {
     }
 }
 
-fn ui_mode_from_args(ui: &UiArgs) -> UiMode {
+fn ui_mode_from_args(ui: &UiArgs, config: &NacConfig) -> UiMode {
     if ui.compact {
+        UiMode::Compact
+    } else if ui.full {
+        UiMode::Full
+    } else if config.ui.mode == Some(UiModeConfig::Compact) {
         UiMode::Compact
     } else {
         UiMode::Full
     }
 }
 
-async fn build_run_cli_config(cli: RunCli) -> Result<OrchestratorRunConfig> {
-    let client = ModelClient::from_env_with_overrides(ClientOverrides {
-        base_url: cli.model.api_base_url.clone(),
-        model: cli.model.api_model.clone(),
-        backend: Some(cli.model.backend),
-        reasoning_effort: cli.model.reasoning_effort,
-    })?;
+struct EffectiveSandboxArgs {
+    sandbox: bool,
+    no_mount_cwd: bool,
+    mounts: Vec<String>,
+    mounts_ro: Vec<String>,
+    sandbox_image: Option<String>,
+    sandbox_gpus: Vec<String>,
+    sandbox_shm_size: Option<String>,
+    sandbox_session_key: Option<String>,
+    sandbox_workdir: Option<String>,
+    explicit_sandbox_config_flags_present: bool,
+}
+
+impl SandboxCliArgs for EffectiveSandboxArgs {
+    fn sandbox_enabled(&self) -> bool {
+        self.sandbox
+    }
+
+    fn no_mount_cwd(&self) -> bool {
+        self.no_mount_cwd
+    }
+
+    fn mounts(&self) -> &[String] {
+        &self.mounts
+    }
+
+    fn mounts_ro(&self) -> &[String] {
+        &self.mounts_ro
+    }
+
+    fn sandbox_image(&self) -> Option<&str> {
+        self.sandbox_image.as_deref()
+    }
+
+    fn sandbox_gpus(&self) -> &[String] {
+        &self.sandbox_gpus
+    }
+
+    fn sandbox_shm_size(&self) -> Option<&String> {
+        self.sandbox_shm_size.as_ref()
+    }
+
+    fn sandbox_session_key(&self) -> Option<&String> {
+        self.sandbox_session_key.as_ref()
+    }
+
+    fn sandbox_workdir(&self) -> Option<&String> {
+        self.sandbox_workdir.as_ref()
+    }
+
+    fn explicit_sandbox_config_flags_present(&self) -> bool {
+        self.explicit_sandbox_config_flags_present
+    }
+}
+
+fn effective_sandbox_args(cli: SandboxArgs, config: &NacConfig) -> EffectiveSandboxArgs {
+    let explicit_sandbox_config_flags_present = cli.explicit_sandbox_config_flags_present();
+    EffectiveSandboxArgs {
+        sandbox: cli.sandbox,
+        no_mount_cwd: cli.no_mount_cwd,
+        mounts: cli.mounts,
+        mounts_ro: cli.mounts_ro,
+        sandbox_image: cli.sandbox_image.or_else(|| config.sandbox.image.clone()),
+        sandbox_gpus: cli.sandbox_gpus,
+        sandbox_shm_size: cli.sandbox_shm_size,
+        sandbox_session_key: cli.sandbox_session_key,
+        sandbox_workdir: cli.sandbox_workdir,
+        explicit_sandbox_config_flags_present,
+    }
+}
+
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+fn configured_api_key_env(config: &NacConfig) -> Option<String> {
+    config
+        .model
+        .api_key_env
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn model_overrides(model: &ModelArgs, config: &NacConfig) -> Result<ClientOverrides> {
+    Ok(ClientOverrides {
+        base_url: model
+            .api_base_url
+            .clone()
+            .or_else(|| env_var("OPENAI_BASE_URL"))
+            .or_else(|| config.model.base_url.clone()),
+        model: model
+            .api_model
+            .clone()
+            .or_else(|| env_var("OPENAI_MODEL"))
+            .or_else(|| config.model.model.clone()),
+        backend: model.backend.or(config.model.backend),
+        reasoning_effort: model.reasoning_effort.or(config.model.reasoning_effort),
+        api_key_env: configured_api_key_env(config),
+    })
+}
+
+fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
+    config
+        .worker
+        .thread_timeout_secs
+        .unwrap_or(crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS)
+        .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
+}
+
+async fn build_run_cli_config(cli: RunCli, config: &NacConfig) -> Result<OrchestratorRunConfig> {
+    let client = ModelClient::from_env_with_overrides(model_overrides(&cli.model, config)?)?;
     let current_dir = std::env::current_dir()?;
-    let sandbox = build_sandbox_session(&cli.sandbox, &current_dir).await?;
+    let sandbox_args = effective_sandbox_args(cli.sandbox, config);
+    let sandbox = build_sandbox_session(&sandbox_args, &current_dir).await?;
     let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
     let working_directory = sandbox
@@ -195,6 +310,7 @@ async fn build_run_cli_config(cli: RunCli) -> Result<OrchestratorRunConfig> {
         &current_dir,
         cli.store
             .store_path
+            .or_else(|| config.storage.store_path.clone())
             .unwrap_or_else(store::default_store_path),
     );
     store::initialize(&store_path)?;
@@ -214,6 +330,7 @@ async fn build_run_cli_config(cli: RunCli) -> Result<OrchestratorRunConfig> {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message,
+            thread_timeout_secs: worker_thread_timeout_secs(config),
         },
     );
     let session_snapshot = sessions::new_snapshot(
@@ -243,15 +360,14 @@ async fn build_run_cli_config(cli: RunCli) -> Result<OrchestratorRunConfig> {
     })
 }
 
-async fn build_managed_worker_config(cli: ManagedWorkerCli) -> Result<ManagedWorkerRunConfig> {
-    let client = ModelClient::from_env_with_overrides(ClientOverrides {
-        base_url: cli.model.api_base_url.clone(),
-        model: cli.model.api_model.clone(),
-        backend: Some(cli.model.backend),
-        reasoning_effort: cli.model.reasoning_effort,
-    })?;
+async fn build_managed_worker_config(
+    cli: ManagedWorkerCli,
+    config: &NacConfig,
+) -> Result<ManagedWorkerRunConfig> {
+    let client = ModelClient::from_env_with_overrides(model_overrides(&cli.model, config)?)?;
     let current_dir = std::env::current_dir()?;
-    let sandbox = build_sandbox_session(&cli.sandbox, &current_dir).await?;
+    let sandbox_args = effective_sandbox_args(cli.sandbox, config);
+    let sandbox = build_sandbox_session(&sandbox_args, &current_dir).await?;
     let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
     let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
@@ -264,6 +380,7 @@ async fn build_managed_worker_config(cli: ManagedWorkerCli) -> Result<ManagedWor
         &current_dir,
         cli.store
             .store_path
+            .or_else(|| config.storage.store_path.clone())
             .unwrap_or_else(store::default_store_path),
     );
     let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
@@ -298,6 +415,7 @@ async fn build_managed_worker_config(cli: ManagedWorkerCli) -> Result<ManagedWor
             skills,
             extra_tool_defs,
             agents_md_message,
+            thread_timeout_secs: worker_thread_timeout_secs(config),
         },
     );
 
@@ -361,7 +479,7 @@ mod tests {
 
     fn default_model_args() -> ModelArgs {
         ModelArgs {
-            backend: BackendKind::Auto,
+            backend: None,
             reasoning_effort: None,
             api_base_url: None,
             api_model: None,
@@ -374,7 +492,7 @@ mod tests {
             no_mount_cwd: false,
             mounts: Vec::new(),
             mounts_ro: Vec::new(),
-            sandbox_image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            sandbox_image: None,
             sandbox_gpus: Vec::new(),
             sandbox_shm_size: None,
             sandbox_session_key: None,
@@ -383,7 +501,206 @@ mod tests {
     }
 
     fn default_ui_args() -> UiArgs {
-        UiArgs { compact: false }
+        UiArgs {
+            compact: false,
+            full: false,
+        }
+    }
+
+    fn restore_env(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
+    #[test]
+    fn ui_config_sets_default_and_cli_overrides() {
+        let mut config = NacConfig::default();
+        config.ui.mode = Some(UiModeConfig::Compact);
+
+        assert_eq!(
+            ui_mode_from_args(&default_ui_args(), &config),
+            UiMode::Compact
+        );
+        assert_eq!(
+            ui_mode_from_args(
+                &UiArgs {
+                    compact: false,
+                    full: true,
+                },
+                &config,
+            ),
+            UiMode::Full
+        );
+        assert_eq!(
+            ui_mode_from_args(
+                &UiArgs {
+                    compact: true,
+                    full: false,
+                },
+                &NacConfig::default(),
+            ),
+            UiMode::Compact
+        );
+    }
+
+    #[test]
+    fn model_overrides_prefer_cli_then_env_then_config() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_base_url = std::env::var_os("OPENAI_BASE_URL");
+        let original_model = std::env::var_os("OPENAI_MODEL");
+        unsafe {
+            std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1");
+            std::env::set_var("OPENAI_MODEL", "env-model");
+        }
+
+        let mut config = NacConfig::default();
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.model = Some("config-model".to_string());
+        config.model.backend = Some(BackendKind::OpenAiResponses);
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+        config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
+
+        let env_overrides = model_overrides(&default_model_args(), &config).unwrap();
+        assert_eq!(
+            env_overrides.base_url.as_deref(),
+            Some("https://env.example/v1")
+        );
+        assert_eq!(env_overrides.model.as_deref(), Some("env-model"));
+        assert_eq!(env_overrides.backend, Some(BackendKind::OpenAiResponses));
+        assert_eq!(env_overrides.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            env_overrides.api_key_env.as_deref(),
+            Some("NAC_TEST_API_KEY")
+        );
+
+        let cli_overrides = model_overrides(
+            &ModelArgs {
+                backend: Some(BackendKind::DeepSeekChat),
+                reasoning_effort: Some(ReasoningEffort::Low),
+                api_base_url: Some("https://cli.example/v1".to_string()),
+                api_model: Some("cli-model".to_string()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            cli_overrides.base_url.as_deref(),
+            Some("https://cli.example/v1")
+        );
+        assert_eq!(cli_overrides.model.as_deref(), Some("cli-model"));
+        assert_eq!(cli_overrides.backend, Some(BackendKind::DeepSeekChat));
+        assert_eq!(cli_overrides.reasoning_effort, Some(ReasoningEffort::Low));
+
+        restore_env("OPENAI_BASE_URL", original_base_url);
+        restore_env("OPENAI_MODEL", original_model);
+    }
+
+    #[test]
+    fn sandbox_image_config_is_default_not_enablement() {
+        let mut config = NacConfig::default();
+        config.sandbox.image = Some("custom-image".to_string());
+
+        let disabled = effective_sandbox_args(default_sandbox_args(), &config);
+        assert!(!disabled.sandbox_enabled());
+        assert!(!disabled.explicit_sandbox_config_flags_present());
+        assert_eq!(disabled.sandbox_image(), Some("custom-image"));
+
+        let mut cli = default_sandbox_args();
+        cli.sandbox = true;
+        let enabled = effective_sandbox_args(cli, &config);
+        assert!(enabled.sandbox_enabled());
+        assert_eq!(enabled.sandbox_image(), Some("custom-image"));
+
+        let mut cli = default_sandbox_args();
+        cli.sandbox = true;
+        cli.sandbox_image = Some("cli-image".to_string());
+        let overridden = effective_sandbox_args(cli, &config);
+        assert_eq!(overridden.sandbox_image(), Some("cli-image"));
+        assert!(overridden.explicit_sandbox_config_flags_present());
+    }
+
+    #[test]
+    fn worker_timeout_reads_config_default() {
+        let mut config = NacConfig::default();
+        config.worker.thread_timeout_secs = Some(7_200);
+        assert_eq!(worker_thread_timeout_secs(&config), 7_200);
+
+        config.worker.thread_timeout_secs = Some(10);
+        assert_eq!(
+            worker_thread_timeout_secs(&config),
+            crate::tools::thread::MIN_THREAD_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn nac_config_loads_new_sections_alongside_existing_mcp() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_config_load_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+[ui]
+mode = "compact"
+
+[storage]
+store_path = "custom/store.db"
+
+[model]
+backend = "openai-responses"
+model = "config-model"
+base_url = "https://config.example/v1"
+reasoning_effort = "high"
+api_key_env = "NAC_TEST_API_KEY"
+
+[sandbox]
+image = "config-image"
+
+[worker]
+thread_timeout_secs = 7200
+
+[mcp_servers.context7]
+enabled = true
+transport = "streamable_http"
+url = "https://mcp.context7.com/mcp"
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let config = NacConfig::load().unwrap();
+        assert_eq!(config.ui.mode, Some(UiModeConfig::Compact));
+        assert_eq!(
+            config.storage.store_path.as_deref(),
+            Some(Path::new("custom/store.db"))
+        );
+        assert_eq!(config.model.backend, Some(BackendKind::OpenAiResponses));
+        assert_eq!(config.model.model.as_deref(), Some("config-model"));
+        assert_eq!(
+            config.model.base_url.as_deref(),
+            Some("https://config.example/v1")
+        );
+        assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            config.model.api_key_env.as_deref(),
+            Some("NAC_TEST_API_KEY")
+        );
+        assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
+        assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+
+        restore_env("NAC_HOME", original_nac_home);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -541,7 +858,9 @@ mod tests {
             sandbox: default_sandbox_args(),
         };
 
-        let run_config = build_managed_worker_config(cli).await.unwrap();
+        let run_config = build_managed_worker_config(cli, &NacConfig::default())
+            .await
+            .unwrap();
 
         assert_eq!(run_config.action, "implement the next step");
         assert_eq!(run_config.agent.messages.len(), 4);
@@ -637,13 +956,16 @@ mod tests {
         sessions::create_session(&snapshot).unwrap();
 
         std::env::set_current_dir(std::env::temp_dir()).unwrap();
-        let run_config = build_resume_config(ResumeCli {
-            session_id: Some("resume-session".to_string()),
-            last: false,
-            directory: Some(session_cwd.clone()),
-            store: StoreArgs { store_path: None },
-            ui: default_ui_args(),
-        })
+        let run_config = build_resume_config(
+            ResumeCli {
+                session_id: Some("resume-session".to_string()),
+                last: false,
+                directory: Some(session_cwd.clone()),
+                store: StoreArgs { store_path: None },
+                ui: default_ui_args(),
+            },
+            &NacConfig::default(),
+        )
         .await
         .unwrap();
 

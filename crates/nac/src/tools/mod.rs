@@ -35,6 +35,7 @@ pub struct ToolRuntime {
     pub skills: Option<Arc<SkillRegistry>>,
     pub activated_skills: Arc<Mutex<HashSet<String>>>,
     pub terminal_manager: TerminalManager,
+    pub thread_timeout_secs: u64,
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::const_new(());

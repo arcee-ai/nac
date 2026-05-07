@@ -16,14 +16,14 @@ use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
 use crate::types::ToolDefinition;
 
-const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
-const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
+pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
+pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
 
 pub fn dispatch_definition() -> ToolDefinition {
     use serde_json::json;
     def(
         "thread",
-        "Dispatch a named worker thread. The worker reuses its own retained history and can pull the latest retained episode from other named threads. Default timeout is 3600 seconds; minimum timeout is 1800 seconds.",
+        "Dispatch a named worker thread. The worker reuses its own retained history and can pull the latest retained episode from other named threads. Default timeout is configured by nac; built-in default is 3600 seconds and minimum timeout is 1800 seconds.",
         json!({
             "type": "object",
             "properties": {
@@ -115,7 +115,7 @@ pub async fn execute_dispatch(
         };
     }
 
-    let timeout_secs = resolve_thread_timeout_secs(&args);
+    let timeout_secs = resolve_thread_timeout_secs(&args, runtime.thread_timeout_secs);
 
     runtime.event_sink.emit(AgentEvent::ThreadStarted {
         name: thread_name.clone(),
@@ -353,15 +353,10 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     })
 }
 
-fn resolve_thread_timeout_secs(args: &Value) -> u64 {
+fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
     args.get("timeout")
         .and_then(|v| v.as_u64())
-        .or_else(|| {
-            std::env::var("AGENT_THREAD_TIMEOUT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(DEFAULT_THREAD_TIMEOUT_SECS)
+        .unwrap_or(default_timeout_secs)
         .max(MIN_THREAD_TIMEOUT_SECS)
 }
 
@@ -623,47 +618,26 @@ async fn run_worker(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::ffi::OsString;
-
-    fn restore_env(name: &str, value: Option<OsString>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
 
     #[test]
     fn thread_timeout_defaults_to_one_hour() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
-        let original = std::env::var_os("AGENT_THREAD_TIMEOUT");
-        unsafe {
-            std::env::remove_var("AGENT_THREAD_TIMEOUT");
-        }
-
-        assert_eq!(resolve_thread_timeout_secs(&json!({})), 60 * 60);
-
-        restore_env("AGENT_THREAD_TIMEOUT", original);
+        assert_eq!(
+            resolve_thread_timeout_secs(&json!({}), DEFAULT_THREAD_TIMEOUT_SECS),
+            60 * 60
+        );
     }
 
     #[test]
     fn thread_timeout_is_clamped_to_thirty_minutes() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
-        let original = std::env::var_os("AGENT_THREAD_TIMEOUT");
-        unsafe {
-            std::env::set_var("AGENT_THREAD_TIMEOUT", "10");
-        }
-
-        assert_eq!(resolve_thread_timeout_secs(&json!({})), 30 * 60);
+        assert_eq!(resolve_thread_timeout_secs(&json!({}), 10), 30 * 60);
         assert_eq!(
-            resolve_thread_timeout_secs(&json!({ "timeout": 20 })),
+            resolve_thread_timeout_secs(&json!({ "timeout": 20 }), DEFAULT_THREAD_TIMEOUT_SECS),
             30 * 60
         );
         assert_eq!(
-            resolve_thread_timeout_secs(&json!({ "timeout": 7200 })),
+            resolve_thread_timeout_secs(&json!({ "timeout": 7200 }), DEFAULT_THREAD_TIMEOUT_SECS),
             7200
         );
-
-        restore_env("AGENT_THREAD_TIMEOUT", original);
     }
 
     #[test]

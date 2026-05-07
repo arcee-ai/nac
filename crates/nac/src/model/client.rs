@@ -26,7 +26,7 @@ impl ModelClient {
             BackendKind::Auto => detect_backend(&base_url)?,
             explicit => explicit,
         };
-        let api_key = api_key_for_backend(backend)?;
+        let api_key = api_key_for_backend(backend, overrides.api_key_env.as_deref())?;
         let model = overrides.model.unwrap_or_else(|| {
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
         });

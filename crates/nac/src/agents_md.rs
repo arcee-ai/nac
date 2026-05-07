@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::paths::{nac_config_path, nac_home_dir};
 
-const AGENTS_MD_MAX_BYTES: usize = 32 * 1024;
+const AGENTS_MD_MAX_BYTES: usize = 4 * 1024 * 1024;
 const AGENTS_MD_NOTICE: &str =
     "Below are instructions from the user's AGENTS.md configuration files. More specific files override broader ones when they conflict.";
 
@@ -24,9 +24,15 @@ pub struct AgentsMdBundle {
 #[derive(Debug, Default, Deserialize)]
 struct AgentsMdConfigFile {
     #[serde(default)]
-    project_doc_fallback_filenames: Vec<String>,
-    #[serde(default = "default_max_bytes")]
-    project_doc_max_bytes: usize,
+    agents_md: AgentsMdConfigSection,
+    project_doc_fallback_filenames: Option<Vec<String>>,
+    project_doc_max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AgentsMdConfigSection {
+    fallback_filenames: Option<Vec<String>>,
+    max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -208,13 +214,18 @@ fn load_settings() -> AgentsMdSettings {
         return settings;
     };
 
-    settings.fallback_filenames = config.project_doc_fallback_filenames;
-    settings.max_bytes = config.project_doc_max_bytes.max(1);
+    settings.fallback_filenames = config
+        .agents_md
+        .fallback_filenames
+        .or(config.project_doc_fallback_filenames)
+        .unwrap_or_default();
+    settings.max_bytes = config
+        .agents_md
+        .max_bytes
+        .or(config.project_doc_max_bytes)
+        .unwrap_or(AGENTS_MD_MAX_BYTES)
+        .max(1);
     settings
-}
-
-fn default_max_bytes() -> usize {
-    AGENTS_MD_MAX_BYTES
 }
 
 #[cfg(test)]
@@ -343,7 +354,7 @@ mod tests {
         fs::create_dir_all(project.join(".git")).unwrap();
         fs::write(
             nac_home.join("config.toml"),
-            "project_doc_fallback_filenames = [\"TEAM_GUIDE.md\"]\n",
+            "[agents_md]\nfallback_filenames = [\"TEAM_GUIDE.md\"]\n",
         )
         .unwrap();
         fs::write(project.join("TEAM_GUIDE.md"), "team guide").unwrap();

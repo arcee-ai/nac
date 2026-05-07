@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/instal
 
 Pinned version installs are not supported yet.
 
-Set `OPENAI_API_KEY`, then run `nac`. Use `nac --compact` for the compact single-column TUI.
+Set `OPENAI_API_KEY`, then run `nac`. Use `nac --compact` for the compact single-column TUI, or `nac --full` to override a compact config default.
 
 Optional:
 - `OPENAI_BASE_URL`
@@ -48,16 +48,50 @@ podman machine init
 podman machine start
 ```
 
-Optional MCP config lives at `~/.config/nac/config.toml`.
-Supported transports right now are `stdio` and `streamable_http`.
+## Recommended config
+
+Optional config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit CLI args and environment variables override TOML defaults. Resumed sessions continue using the model and sandbox settings stored in their session snapshot.
+
+The `api_key_env` setting names the environment variable to read when `OPENAI_API_KEY` is not set. Store paths remain relative to the launch working directory.
 
 ```toml
-[mcp_servers.filesystem]
-transport = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+[agents_md]
+fallback_filenames = []
+max_bytes = 4194304
+
+[ui]
+mode = "full" # "full" or "compact"
+
+[storage]
+store_path = ".nac/store.db"
+
+[model]
+backend = "openai-responses" # "auto", "deepseek-chat", "fireworks-chat", or "openai-responses"
+model = "gpt-5.5"
+base_url = "https://api.openai.com/v1"
+reasoning_effort = "xhigh"
+api_key_env = "OPENAI_API_KEY"
+
+[sandbox]
+image = "python:3.13-bookworm"
+
+[worker]
+thread_timeout_secs = 3600
+
+[mcp_servers.exa_web_search]
+enabled = true
+transport = "streamable_http"
+url = "https://mcp.exa.ai/mcp"
 
 [mcp_servers.context7]
+enabled = true
 transport = "streamable_http"
 url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.grep_app]
+enabled = true
+transport = "streamable_http"
+url = "https://mcp.grep.app"
 ```
+
+Supported MCP transports right now are `stdio` and `streamable_http`. Stdio servers can provide `command`, `args`, and `env`; streamable HTTP servers provide `url` and optional `headers`. MCP string values support `${ENV_VAR}` expansion.

@@ -27,13 +27,28 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
     }
 }
 
-pub(super) fn api_key_for_backend(backend: BackendKind) -> Result<String> {
+pub(super) fn api_key_for_backend(
+    backend: BackendKind,
+    configured_env: Option<&str>,
+) -> Result<String> {
     match backend {
         BackendKind::Auto
         | BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
-        | BackendKind::OpenAiResponses => std::env::var("OPENAI_API_KEY")
-            .map_err(|_| anyhow!("OPENAI_API_KEY environment variable is not set")),
+        | BackendKind::OpenAiResponses => {
+            if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+                return Ok(api_key);
+            }
+            if let Some(env_name) = configured_env.filter(|name| *name != "OPENAI_API_KEY") {
+                return std::env::var(env_name).map_err(|_| {
+                    anyhow!(
+                        "OPENAI_API_KEY environment variable is not set and configured api_key_env '{}' is not set",
+                        env_name
+                    )
+                });
+            }
+            Err(anyhow!("OPENAI_API_KEY environment variable is not set"))
+        }
     }
 }
 

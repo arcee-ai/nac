@@ -41,6 +41,7 @@ pub struct AgentConfig {
     pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
+    pub thread_timeout_secs: u64,
 }
 
 pub struct Agent {
@@ -59,6 +60,7 @@ impl Agent {
 
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Self {
         let cwd = config.working_directory.clone();
+        let thread_timeout_secs = config.thread_timeout_secs;
 
         let (system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
@@ -137,7 +139,7 @@ impl Agent {
                      thread(name, action, threads?, timeout?), the worker for name receives that thread's own retained \
                      history, and if you provide threads, it also receives the latest retained episode from \
                      each named source thread as input for that dispatch. The worker's final response becomes \
-                     the next retained episode for name. The default thread timeout is 3600 seconds, with \
+                     the next retained episode for name. The default thread timeout is {} seconds, with \
                      a minimum of 1800 seconds; pass timeout only when a dispatch genuinely needs a different limit.\n\
                      Use this mechanism deliberately. Dispatch work so that important setup, implementation, \
                      and verification threads end by producing a high-signal retained episode that another \
@@ -173,7 +175,7 @@ impl Agent {
                      - workset_read(id)\n\
                      - workset_list()\n\n\
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",
-                    cwd
+                    cwd, thread_timeout_secs
                 ),
                 tools::orchestrator_tool_definitions(),
             ),
@@ -222,6 +224,7 @@ impl Agent {
                 skills: config.skills,
                 activated_skills: Arc::new(Mutex::new(HashSet::new())),
                 terminal_manager: crate::terminal::TerminalManager::new(),
+                thread_timeout_secs: config.thread_timeout_secs,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -246,6 +249,7 @@ impl Agent {
                 skills: None,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             },
         )
     }
@@ -436,6 +440,7 @@ mod tests {
                 skills: Some(registry.clone()),
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             },
         );
         assert!(worker
@@ -462,6 +467,7 @@ mod tests {
                 skills: Some(registry),
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             },
         );
         assert!(!orchestrator

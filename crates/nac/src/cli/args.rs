@@ -54,15 +54,19 @@ pub(super) struct StoreArgs {
 #[derive(clap::Args)]
 pub(super) struct UiArgs {
     /// Use the compact single-column TUI layout
-    #[arg(long)]
+    #[arg(long, conflicts_with = "full")]
     pub(super) compact: bool,
+
+    /// Use the full dashboard TUI layout
+    #[arg(long, conflicts_with = "compact")]
+    pub(super) full: bool,
 }
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Default)]
 pub(super) struct ModelArgs {
     /// Backend wire shape to use for model requests
-    #[arg(long, value_enum, default_value_t = BackendKind::Auto)]
-    pub(super) backend: BackendKind,
+    #[arg(long, value_enum)]
+    pub(super) backend: Option<BackendKind>,
 
     /// Reasoning effort to request when supported by the selected backend
     #[arg(long = "effort", value_enum)]
@@ -115,8 +119,8 @@ pub(super) struct SandboxArgs {
     pub(super) mounts_ro: Vec<String>,
 
     /// Sandbox image to use when --sandbox is enabled
-    #[arg(long, default_value = DEFAULT_SANDBOX_IMAGE)]
-    pub(super) sandbox_image: String,
+    #[arg(long)]
+    pub(super) sandbox_image: Option<String>,
 
     /// GPU CDI device to expose to the sandbox (repeatable; use 'all' for all NVIDIA GPUs)
     #[arg(long = "sandbox-gpu")]

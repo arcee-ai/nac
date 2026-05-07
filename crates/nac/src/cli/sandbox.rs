@@ -5,11 +5,12 @@ pub(super) trait SandboxCliArgs {
     fn no_mount_cwd(&self) -> bool;
     fn mounts(&self) -> &[String];
     fn mounts_ro(&self) -> &[String];
-    fn sandbox_image(&self) -> &str;
+    fn sandbox_image(&self) -> Option<&str>;
     fn sandbox_gpus(&self) -> &[String];
     fn sandbox_shm_size(&self) -> Option<&String>;
     fn sandbox_session_key(&self) -> Option<&String>;
     fn sandbox_workdir(&self) -> Option<&String>;
+    fn explicit_sandbox_config_flags_present(&self) -> bool;
 }
 
 impl SandboxCliArgs for SandboxArgs {
@@ -29,8 +30,8 @@ impl SandboxCliArgs for SandboxArgs {
         &self.mounts_ro
     }
 
-    fn sandbox_image(&self) -> &str {
-        &self.sandbox_image
+    fn sandbox_image(&self) -> Option<&str> {
+        self.sandbox_image.as_deref()
     }
 
     fn sandbox_gpus(&self) -> &[String] {
@@ -48,23 +49,25 @@ impl SandboxCliArgs for SandboxArgs {
     fn sandbox_workdir(&self) -> Option<&String> {
         self.sandbox_workdir.as_ref()
     }
+
+    fn explicit_sandbox_config_flags_present(&self) -> bool {
+        self.no_mount_cwd()
+            || !self.mounts().is_empty()
+            || !self.mounts_ro().is_empty()
+            || self.sandbox_session_key().is_some()
+            || self.sandbox_workdir().is_some()
+            || self.sandbox_image().is_some()
+            || !self.sandbox_gpus().is_empty()
+            || self.sandbox_shm_size().is_some()
+    }
 }
 
 pub(super) async fn build_sandbox_session<Cli: SandboxCliArgs>(
     cli: &Cli,
     cwd: &Path,
 ) -> Result<Option<SandboxSession>> {
-    let sandbox_flags_present = cli.no_mount_cwd()
-        || !cli.mounts().is_empty()
-        || !cli.mounts_ro().is_empty()
-        || cli.sandbox_session_key().is_some()
-        || cli.sandbox_workdir().is_some()
-        || cli.sandbox_image() != DEFAULT_SANDBOX_IMAGE
-        || !cli.sandbox_gpus().is_empty()
-        || cli.sandbox_shm_size().is_some();
-
     if !cli.sandbox_enabled() {
-        if sandbox_flags_present {
+        if cli.explicit_sandbox_config_flags_present() {
             anyhow::bail!("sandbox configuration flags require --sandbox");
         }
         return Ok(None);
@@ -94,7 +97,9 @@ pub(super) async fn build_sandbox_session<Cli: SandboxCliArgs>(
     mounts.extend(skills::auto_mounts(&skills_workspace_dir, &mounts)?);
 
     let spec = build_sandbox_spec(
-        cli.sandbox_image().to_string(),
+        cli.sandbox_image()
+            .unwrap_or(DEFAULT_SANDBOX_IMAGE)
+            .to_string(),
         workdir,
         mounts,
         cli.sandbox_gpus()
