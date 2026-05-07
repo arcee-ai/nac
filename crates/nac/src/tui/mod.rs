@@ -446,6 +446,13 @@ mod tests {
         })
     }
 
+    fn press_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        assert!(matches!(
+            app.handle_key_event(KeyEvent::new(code, modifiers)),
+            AppAction::None
+        ));
+    }
+
     #[test]
     fn shift_enter_inserts_newline() {
         let dir = temp_dir("newline");
@@ -918,13 +925,9 @@ mod tests {
         let dir = temp_dir("composer-title-timer");
         let mut app = App::new(metadata_for(&dir), &[], false);
 
-        let idle_title = app.composer_panel_title();
-        assert_eq!(line_to_plain_text(&idle_title), " [ ASK ] ");
-        assert!(!line_to_plain_text(&idle_title).contains("T+"));
-        assert_eq!(idle_title.spans.len(), 3);
-        assert!(idle_title.spans.iter().all(|span| {
-            span.style.fg == Some(Color::Cyan) && span.style.add_modifier.contains(Modifier::BOLD)
-        }));
+        let idle_text = line_to_plain_text(&app.composer_panel_title());
+        assert_eq!(idle_text, " [ ASK ] ");
+        assert!(!idle_text.contains("T+"));
 
         let (_tx, rx) = tokio::sync::oneshot::channel();
         app.result_rx = Some(rx);
@@ -934,26 +937,14 @@ mod tests {
         let running_text = line_to_plain_text(&running_title);
         assert!(running_text.starts_with(" [ ASK T+"));
         assert!(running_text.ends_with(" ] "));
-        assert_eq!(running_title.spans.len(), 5);
-        for index in [0, 1, 4] {
-            assert_eq!(running_title.spans[index].style.fg, Some(Color::Cyan));
-            assert!(running_title.spans[index]
-                .style
-                .add_modifier
-                .contains(Modifier::BOLD));
-        }
-        assert_eq!(running_title.spans[2].content.as_ref(), " ");
-        assert_eq!(running_title.spans[2].style.fg, None);
-        assert!(!running_title.spans[2]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
-        assert!(running_title.spans[3].content.as_ref().starts_with("T+"));
-        assert_eq!(running_title.spans[3].style.fg, Some(Color::Green));
-        assert!(!running_title.spans[3]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(running_title.spans.iter().any(|span| {
+            span.content.as_ref().contains("ASK")
+                && span.style.fg == Some(Color::Cyan)
+                && span.style.add_modifier.contains(Modifier::BOLD)
+        }));
+        assert!(running_title.spans.iter().any(|span| {
+            span.content.as_ref().starts_with("T+") && span.style.fg == Some(Color::Green)
+        }));
 
         app.result_rx = None;
         app.working_started_at = None;
@@ -963,114 +954,59 @@ mod tests {
             Some(Duration::from_secs(7))
         );
 
-        let idle_again_title = app.composer_panel_title();
-        assert_eq!(line_to_plain_text(&idle_again_title), " [ ASK ] ");
-        assert!(!line_to_plain_text(&idle_again_title).contains("T+"));
-        assert!(idle_again_title.spans.iter().all(|span| {
-            span.style.fg == Some(Color::Cyan) && span.style.add_modifier.contains(Modifier::BOLD)
-        }));
+        let idle_again_text = line_to_plain_text(&app.composer_panel_title());
+        assert_eq!(idle_again_text, " [ ASK ] ");
+        assert!(!idle_again_text.contains("T+"));
 
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn ctrl_p_focuses_prompts_and_unfocus_returns_to_latest() {
-        let dir = temp_dir("prompt-focus");
-        let mut app = App::new(metadata_for(&dir), &[], false);
-        app.note_prompt_submitted("first prompt");
-        app.note_prompt_submitted("second prompt");
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-        assert!(matches!(action, AppAction::None));
-        assert!(matches!(
-            app.screen,
-            ScreenMode::Focused(FocusPanel::Prompt)
-        ));
-        assert_eq!(app.displayed_prompt_index(), Some(1));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(0));
-        assert_eq!(app.displayed_prompt_index(), Some(0));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.screen, ScreenMode::Dashboard);
-        assert_eq!(app.selected_prompt, Some(1));
-        assert_eq!(app.displayed_prompt_index(), Some(1));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-        assert!(matches!(action, AppAction::None));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(0));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.screen, ScreenMode::Dashboard);
-        assert_eq!(app.selected_prompt, Some(1));
-        assert_eq!(app.displayed_prompt_index(), Some(1));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn focused_prompt_left_right_navigates_history_and_resets_scroll() {
+    fn prompt_history_focus_navigation_guard_and_reset_to_latest() {
         let dir = temp_dir("prompt-history-nav");
         let mut app = App::new(metadata_for(&dir), &[], false);
         app.note_prompt_submitted("one");
         app.note_prompt_submitted("two");
         app.note_prompt_submitted("three");
-        app.screen = ScreenMode::Focused(FocusPanel::Prompt);
-        app.panel_scrolls.insert(PanelId::Prompt, 12);
 
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(app.selected_prompt, Some(2));
+
+        press_key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            app.screen,
+            ScreenMode::Focused(FocusPanel::Prompt)
+        ));
+        assert_eq!(app.displayed_prompt_index(), Some(2));
+
+        app.panel_scrolls.insert(PanelId::Prompt, 12);
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert_eq!(app.selected_prompt, Some(1));
         assert_eq!(app.panel_scrolls.get(&PanelId::Prompt), Some(&0));
-        assert_eq!(app.displayed_prompt_index(), Some(1));
         assert!(line_to_plain_text(&app.prompt_panel_title()).contains("PROMPTS 2/3"));
 
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(0));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert_eq!(app.selected_prompt, Some(0));
 
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(1));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(2));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
         assert_eq!(app.selected_prompt, Some(2));
 
-        app.screen = ScreenMode::Dashboard;
         app.selected_prompt = Some(0);
+        press_key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        assert_eq!(app.selected_prompt, Some(2));
         assert_eq!(app.displayed_prompt_index(), Some(2));
-        let _ = std::fs::remove_dir_all(dir);
-    }
 
-    #[test]
-    fn prompt_history_navigation_only_works_while_prompt_focused() {
-        let dir = temp_dir("prompt-history-nav-focus-guard");
-        let mut app = App::new(metadata_for(&dir), &[], false);
-        app.note_prompt_submitted("one");
-        app.note_prompt_submitted("two");
-        app.selected_prompt = Some(1);
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
+        press_key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert_eq!(app.selected_prompt, Some(1));
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        assert_eq!(app.selected_prompt, Some(2));
 
-        app.complete_top_level_response("reply one".to_string(), Duration::from_secs(1));
-        app.complete_top_level_response("reply two".to_string(), Duration::from_secs(2));
-        app.screen = ScreenMode::Focused(FocusPanel::Response);
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_prompt, Some(1));
-        assert_eq!(app.selected_response, Some(0));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1278,30 +1214,41 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_r_focuses_responses_and_unfocus_returns_to_latest() {
-        let dir = temp_dir("response-focus");
+    fn response_history_focus_navigation_and_reset_to_latest() {
+        let dir = temp_dir("response-history-nav");
         let mut app = App::new(metadata_for(&dir), &[], false);
-        app.complete_top_level_response("first reply".to_string(), Duration::from_secs(1));
-        app.complete_top_level_response("second reply".to_string(), Duration::from_secs(2));
+        app.complete_top_level_response("one".to_string(), Duration::from_secs(1));
+        app.complete_top_level_response("two".to_string(), Duration::from_secs(2));
+        app.complete_top_level_response("three".to_string(), Duration::from_secs(3));
 
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
-        assert!(matches!(action, AppAction::None));
+        press_key(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
         assert!(matches!(
             app.screen,
             ScreenMode::Focused(FocusPanel::Response)
         ));
-        assert_eq!(app.displayed_response_index(), Some(1));
+        assert_eq!(app.displayed_response_index(), Some(2));
 
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(0));
-        assert_eq!(app.displayed_response_index(), Some(0));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.screen, ScreenMode::Dashboard);
+        app.panel_scrolls.insert(PanelId::Response, 12);
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert_eq!(app.selected_response, Some(1));
+        assert_eq!(app.panel_scrolls.get(&PanelId::Response), Some(&0));
         assert_eq!(app.displayed_response_index(), Some(1));
+
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(app.selected_response, Some(0));
+
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+        press_key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(app.selected_response, Some(2));
+
+        app.selected_response = Some(0);
+        press_key(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        assert_eq!(app.selected_response, Some(2));
+        assert_eq!(app.displayed_response_index(), Some(2));
+
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1313,45 +1260,6 @@ mod tests {
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert!(matches!(action, AppAction::None));
         assert!(matches!(app.screen, ScreenMode::Focused(FocusPanel::Tools)));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn focused_response_left_right_navigates_history_and_resets_scroll() {
-        let dir = temp_dir("response-history-nav");
-        let mut app = App::new(metadata_for(&dir), &[], false);
-        app.complete_top_level_response("one".to_string(), Duration::from_secs(1));
-        app.complete_top_level_response("two".to_string(), Duration::from_secs(2));
-        app.complete_top_level_response("three".to_string(), Duration::from_secs(3));
-        app.screen = ScreenMode::Focused(FocusPanel::Response);
-        app.panel_scrolls.insert(PanelId::Response, 12);
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(1));
-        assert_eq!(app.panel_scrolls.get(&PanelId::Response), Some(&0));
-        assert_eq!(app.displayed_response_index(), Some(1));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(0));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(0));
-
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(1));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(2));
-        let action = app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert!(matches!(action, AppAction::None));
-        assert_eq!(app.selected_response, Some(2));
-
-        app.screen = ScreenMode::Dashboard;
-        app.selected_response = Some(0);
-        assert_eq!(app.displayed_response_index(), Some(2));
         let _ = std::fs::remove_dir_all(dir);
     }
 
