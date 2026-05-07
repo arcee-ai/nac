@@ -11,7 +11,8 @@ pub(super) struct App {
     pub(super) working_started_at: Option<Instant>,
     pub(super) working_frame: usize,
     pub(super) restored_message_count: usize,
-    pub(super) last_prompt: Option<String>,
+    pub(super) prompts: Vec<String>,
+    pub(super) selected_prompt: Option<usize>,
     pub(super) responses: Vec<ResponseEntry>,
     pub(super) selected_response: Option<usize>,
     pub(super) timeline: VecDeque<TimelineEntry>,
@@ -89,7 +90,8 @@ impl App {
             working_started_at: None,
             working_frame: 0,
             restored_message_count: visible_restored_message_count(restored_messages),
-            last_prompt: None,
+            prompts: Vec::new(),
+            selected_prompt: None,
             responses: Vec::new(),
             selected_response: None,
             timeline: VecDeque::new(),
@@ -184,12 +186,20 @@ impl App {
 
     pub(super) fn scroll_reset_state(
         &self,
-    ) -> (ScreenMode, bool, Option<String>, usize, Option<usize>) {
+    ) -> (
+        ScreenMode,
+        bool,
+        Option<String>,
+        usize,
+        Option<usize>,
+        Option<usize>,
+    ) {
         (
             self.screen,
             self.help_visible,
             self.selected_thread.clone(),
             self.session_picker.selected,
+            self.selected_prompt,
             self.selected_response,
         )
     }
@@ -270,6 +280,14 @@ impl App {
                 AppAction::None
             }
             KeyEvent {
+                code: KeyCode::Char('p'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_focus_panel(FocusPanel::Prompt);
+                AppAction::None
+            }
+            KeyEvent {
                 code: KeyCode::Char('t'),
                 modifiers,
                 ..
@@ -306,6 +324,8 @@ impl App {
             } if matches!(self.screen, ScreenMode::Focused(_)) => {
                 if matches!(self.screen, ScreenMode::Focused(FocusPanel::Response)) {
                     self.select_latest_response();
+                } else if matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt)) {
+                    self.select_latest_prompt();
                 } else {
                     self.selection = None;
                 }
@@ -346,6 +366,20 @@ impl App {
                 ..
             } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Response)) => {
                 self.select_newer_response();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt)) => {
+                self.select_older_prompt();
+                AppAction::None
+            }
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } if matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt)) => {
+                self.select_newer_prompt();
                 AppAction::None
             }
             KeyEvent {
@@ -517,15 +551,18 @@ impl App {
         for message in messages {
             match message {
                 Message::User { content } => {
-                    self.last_prompt = Some(display_prompt_from_message(content));
+                    self.prompts.push(display_prompt_from_message(content));
+                    self.selected_prompt = self.latest_prompt_index();
                 }
                 Message::Assistant {
-                    content: Some(content),
+                    content,
                     tool_calls,
                     ..
                 } if tool_calls.as_ref().map_or(true, |tc| tc.is_empty()) => {
                     self.responses.push(ResponseEntry {
-                        content: content.clone(),
+                        content: content
+                            .clone()
+                            .unwrap_or_else(|| "[No response]".to_string()),
                         duration: None,
                     });
                     self.selected_response = self.latest_response_index();
@@ -533,6 +570,28 @@ impl App {
                 }
                 _ => {}
             }
+        }
+    }
+
+    pub(super) fn restore_response_duration_history(
+        &mut self,
+        response_durations: Option<&[Option<Duration>]>,
+        last_response_duration: Option<Duration>,
+        previous_response_duration: Option<Duration>,
+    ) {
+        if let Some(response_durations) = response_durations {
+            for response in &mut self.responses {
+                response.duration = None;
+            }
+            for (response, duration) in self
+                .responses
+                .iter_mut()
+                .zip(response_durations.iter().copied())
+            {
+                response.duration = duration;
+            }
+        } else {
+            self.restore_response_durations(last_response_duration, previous_response_duration);
         }
     }
 
@@ -647,6 +706,7 @@ impl App {
     }
 
     pub(super) fn toggle_focus_panel(&mut self, panel: FocusPanel) {
+        let was_prompt_focused = matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt));
         let was_response_focused = matches!(self.screen, ScreenMode::Focused(FocusPanel::Response));
         self.selection = None;
         self.screen = match self.screen {
@@ -654,6 +714,9 @@ impl App {
             _ => {
                 if matches!(panel, FocusPanel::Events) {
                     self.panel_scrolls.insert(PanelId::Events, usize::MAX);
+                }
+                if matches!(panel, FocusPanel::Prompt) {
+                    self.ensure_selected_prompt();
                 }
                 if matches!(panel, FocusPanel::Response) {
                     self.ensure_selected_response();
@@ -669,6 +732,9 @@ impl App {
                 ScreenMode::Focused(panel)
             }
         };
+        if was_prompt_focused && !matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt)) {
+            self.select_latest_prompt();
+        }
         if was_response_focused && !matches!(self.screen, ScreenMode::Focused(FocusPanel::Response))
         {
             self.select_latest_response();
@@ -677,6 +743,7 @@ impl App {
 
     pub(super) fn primary_scroll_panel(&self) -> PanelId {
         match self.screen {
+            ScreenMode::Focused(FocusPanel::Prompt) => PanelId::Prompt,
             ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
             ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
             ScreenMode::Focused(FocusPanel::Tools) => PanelId::Tools,
@@ -845,8 +912,8 @@ impl App {
     }
 
     pub(super) fn note_prompt_submitted(&mut self, prompt: &str) {
-        self.last_prompt = Some(prompt.to_string());
-        self.panel_scrolls.insert(PanelId::Prompt, 0);
+        self.prompts.push(prompt.to_string());
+        self.select_latest_prompt();
         self.panel_scrolls
             .insert(PanelId::CompactStream, usize::MAX);
         self.push_timeline(
@@ -866,8 +933,9 @@ impl App {
                 thread_name,
                 prompt_preview,
             } => {
-                if thread_name.is_none() && self.last_prompt.is_none() {
-                    self.last_prompt = Some(prompt_preview.clone());
+                if thread_name.is_none() && self.prompts.is_empty() {
+                    self.prompts.push(prompt_preview.clone());
+                    self.selected_prompt = self.latest_prompt_index();
                 }
                 let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
                 self.push_timeline(
@@ -1131,6 +1199,66 @@ impl App {
         threads.into_iter().map(|t| t.name.clone()).collect()
     }
 
+    pub(super) fn latest_prompt_index(&self) -> Option<usize> {
+        self.prompts.len().checked_sub(1)
+    }
+
+    pub(super) fn latest_prompt(&self) -> Option<&str> {
+        self.prompts.last().map(String::as_str)
+    }
+
+    pub(super) fn ensure_selected_prompt(&mut self) {
+        match (self.selected_prompt, self.latest_prompt_index()) {
+            (_, None) => self.selected_prompt = None,
+            (Some(selected), Some(latest)) if selected <= latest => {}
+            (_, Some(latest)) => self.selected_prompt = Some(latest),
+        }
+    }
+
+    pub(super) fn select_latest_prompt(&mut self) {
+        self.selected_prompt = self.latest_prompt_index();
+        self.selection = None;
+        self.panel_scrolls.insert(PanelId::Prompt, 0);
+    }
+
+    pub(super) fn displayed_prompt_index(&self) -> Option<usize> {
+        let latest = self.latest_prompt_index()?;
+        if matches!(self.screen, ScreenMode::Focused(FocusPanel::Prompt)) {
+            self.selected_prompt
+                .filter(|selected| *selected <= latest)
+                .or(Some(latest))
+        } else {
+            Some(latest)
+        }
+    }
+
+    pub(super) fn select_older_prompt(&mut self) {
+        self.ensure_selected_prompt();
+        let Some(selected) = self.selected_prompt else {
+            return;
+        };
+        let new_selected = selected.saturating_sub(1);
+        if new_selected != selected {
+            self.selected_prompt = Some(new_selected);
+            self.selection = None;
+            self.panel_scrolls.insert(PanelId::Prompt, 0);
+        }
+    }
+
+    pub(super) fn select_newer_prompt(&mut self) {
+        self.ensure_selected_prompt();
+        let (Some(selected), Some(latest)) = (self.selected_prompt, self.latest_prompt_index())
+        else {
+            return;
+        };
+        let new_selected = (selected + 1).min(latest);
+        if new_selected != selected {
+            self.selected_prompt = Some(new_selected);
+            self.selection = None;
+            self.panel_scrolls.insert(PanelId::Prompt, 0);
+        }
+    }
+
     pub(super) fn latest_response_index(&self) -> Option<usize> {
         self.responses.len().checked_sub(1)
     }
@@ -1244,6 +1372,13 @@ impl App {
         (last_response_duration, previous_response_duration)
     }
 
+    pub(super) fn response_duration_history_snapshot_ms(&self) -> Vec<Option<u64>> {
+        self.responses
+            .iter()
+            .map(|response| response.duration.map(duration_to_millis_u64))
+            .collect()
+    }
+
     pub(super) fn reset_life(&mut self) {
         // Get the panel size from the last render or use defaults
         let width = self
@@ -1297,6 +1432,7 @@ impl App {
 
         if let ScreenMode::Focused(panel) = self.screen {
             match panel {
+                FocusPanel::Prompt => self.render_focused_prompt(frame, sections[1]),
                 FocusPanel::Events => self.render_focused_events(frame, sections[1]),
                 FocusPanel::Response => self.render_focused_response(frame, sections[1]),
                 FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
@@ -1353,6 +1489,7 @@ impl App {
 
         if let ScreenMode::Focused(panel) = self.screen {
             match panel {
+                FocusPanel::Prompt => self.render_focused_prompt(frame, sections[1]),
                 FocusPanel::Events => self.render_focused_events(frame, sections[1]),
                 FocusPanel::Response => self.render_focused_response(frame, sections[1]),
                 FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
@@ -1377,6 +1514,10 @@ impl App {
             UiMode::Full => (MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT),
             UiMode::Compact => (COMPACT_MIN_TERMINAL_WIDTH, COMPACT_MIN_TERMINAL_HEIGHT),
         }
+    }
+
+    pub(super) fn render_focused_prompt(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.render_prompt_panel(frame, area);
     }
 
     pub(super) fn render_focused_events(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1433,7 +1574,7 @@ impl App {
     pub(super) fn compact_stream_lines(&mut self, width: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
-        if let Some(prompt) = self.last_prompt.as_deref() {
+        if let Some(prompt) = self.latest_prompt() {
             lines.push(compact_inline_text_line(
                 "you",
                 Style::default()
@@ -1691,7 +1832,7 @@ impl App {
                 self.minimum_terminal_size().1
             )),
         ];
-        if let Some(prompt) = self.last_prompt.as_deref() {
+        if let Some(prompt) = self.latest_prompt() {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("last prompt ", Style::default().fg(Color::DarkGray)),
@@ -2027,12 +2168,32 @@ impl App {
         self.render_file_changes_panel(frame, sections[2]);
     }
 
+    pub(super) fn prompt_panel_title(&self) -> Line<'static> {
+        let position = match self.displayed_prompt_index() {
+            Some(index) => format!(" {}/{}", index + 1, self.prompts.len()),
+            None => " 0/0".to_string(),
+        };
+        panel_title_segments(vec![
+            Span::styled(
+                "PROMPTS".to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(position, Style::default().fg(Color::DarkGray)),
+        ])
+    }
+
     pub(super) fn render_prompt_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let lines = match self.last_prompt.as_deref() {
+        let lines = match self
+            .displayed_prompt_index()
+            .and_then(|index| self.prompts.get(index))
+        {
             Some(prompt) => split_preserving_empty(prompt),
             None => vec!["Waiting for the first orchestrator prompt.".to_string()],
         };
-        self.render_selectable_panel(frame, area, PanelId::Prompt, "PROMPT", lines);
+        let title = self.prompt_panel_title();
+        self.render_selectable_panel_with_title(frame, area, PanelId::Prompt, title, lines);
     }
 
     pub(super) fn render_workspace_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -2091,13 +2252,13 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "Ctrl-T / Ctrl-E / Ctrl-R",
+                    "Ctrl-T / Ctrl-E / Ctrl-P / Ctrl-R",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    " focus threads / events / responses",
+                    " focus threads / events / prompts / responses",
                     Style::default().fg(Color::White),
                 ),
             ]),
@@ -2109,7 +2270,7 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    " older / newer response while focused",
+                    " older / newer prompt or response while focused",
                     Style::default().fg(Color::White),
                 ),
             ]),

@@ -53,12 +53,14 @@ pub(super) async fn persist_session_snapshot(
     agent: &Agent,
     last_response_duration_ms: Option<u64>,
     previous_response_duration_ms: Option<u64>,
+    response_durations_ms: Vec<Option<u64>>,
 ) -> Result<()> {
     let refreshed = sessions::refresh_snapshot(
         snapshot,
         agent.messages.clone(),
         last_response_duration_ms,
         previous_response_duration_ms,
+        Some(response_durations_ms),
     );
     let snapshot_for_blocking = refreshed.clone();
     tokio::task::spawn_blocking(move || sessions::save_session(&snapshot_for_blocking)).await??;

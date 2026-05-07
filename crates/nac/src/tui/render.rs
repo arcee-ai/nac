@@ -100,10 +100,7 @@ pub(super) fn render_compact_event_line(entry: &TimelineEntry, width: usize) -> 
             .add_modifier(Modifier::BOLD),
     };
 
-    let prefix_width = glyph.chars().count()
-        + actor.chars().count()
-        + action.chars().count()
-        + 8;
+    let prefix_width = glyph.chars().count() + actor.chars().count() + action.chars().count() + 8;
     let detail_width = width.saturating_sub(prefix_width);
 
     let mut spans = vec![

@@ -32,6 +32,7 @@ pub struct SessionSnapshot {
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
+    pub response_durations_ms: Option<Vec<Option<u64>>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -85,6 +86,7 @@ mod tests {
         );
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
+        snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
         create_session(&snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
@@ -92,6 +94,74 @@ mod tests {
         assert_eq!(loaded.messages.len(), 1);
         assert_eq!(loaded.last_response_duration_ms, Some(12_345));
         assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
+        assert_eq!(
+            loaded.response_durations_ms,
+            Some(vec![Some(1_000), None, Some(12_345)])
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn load_session_migrates_legacy_schema_without_duration_history() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("legacy_duration_schema");
+        std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
+        let messages_json = serde_json::to_string(&vec![Message::User {
+            content: "hello".to_string(),
+        }])
+        .unwrap();
+
+        {
+            let conn = rusqlite::Connection::open(&store_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                    session_id TEXT PRIMARY KEY,
+                    cwd TEXT NOT NULL,
+                    store_path TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    backend TEXT,
+                    reasoning_effort TEXT,
+                    sandbox_json TEXT,
+                    messages_json TEXT NOT NULL,
+                    last_response_duration_ms INTEGER,
+                    previous_response_duration_ms INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (
+                    session_id, cwd, store_path, model, base_url, backend, reasoning_effort,
+                    sandbox_json, messages_json, last_response_duration_ms,
+                    previous_response_duration_ms, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                rusqlite::params![
+                    "legacy-session",
+                    "/repo",
+                    store_path.display().to_string(),
+                    "model-a",
+                    "https://api.openai.com/v1",
+                    "openai-responses",
+                    "xhigh",
+                    Option::<String>::None,
+                    messages_json,
+                    12_345_u64,
+                    6_789_u64,
+                    "2026-01-01 00:00:00.000000000",
+                    "2026-01-01 00:00:01.000000000",
+                ],
+            )
+            .unwrap();
+        }
+
+        let loaded = load_session(&store_path, "legacy-session").unwrap();
+        assert_eq!(loaded.session_id, "legacy-session");
+        assert_eq!(loaded.last_response_duration_ms, Some(12_345));
+        assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
+        assert_eq!(loaded.response_durations_ms, None);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

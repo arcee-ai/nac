@@ -44,7 +44,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
+            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -61,8 +61,9 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     messages_json: row.get(8)?,
                     last_response_duration_ms: row.get(9)?,
                     previous_response_duration_ms: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    response_durations_ms_json: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             },
         )
@@ -79,7 +80,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
+            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -97,8 +98,9 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     messages_json: row.get(8)?,
                     last_response_duration_ms: row.get(9)?,
                     previous_response_duration_ms: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    response_durations_ms_json: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             },
         )
@@ -175,11 +177,17 @@ fn insert_or_replace_session(
         .transpose()?;
     let messages_json = serde_json::to_string(&snapshot.messages)
         .context("failed to serialize session messages")?;
+    let response_durations_ms_json = snapshot
+        .response_durations_ms
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .context("failed to serialize session response durations")?;
 
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
@@ -191,6 +199,7 @@ fn insert_or_replace_session(
              messages_json = excluded.messages_json,
              last_response_duration_ms = excluded.last_response_duration_ms,
              previous_response_duration_ms = excluded.previous_response_duration_ms,
+             response_durations_ms_json = excluded.response_durations_ms_json,
              updated_at = excluded.updated_at",
         params![
             snapshot.session_id,
@@ -204,6 +213,7 @@ fn insert_or_replace_session(
             messages_json,
             snapshot.last_response_duration_ms,
             snapshot.previous_response_duration_ms,
+            response_durations_ms_json,
             snapshot.created_at,
             snapshot.updated_at,
         ],
@@ -223,6 +233,7 @@ struct SessionRow {
     messages_json: String,
     last_response_duration_ms: Option<u64>,
     previous_response_duration_ms: Option<u64>,
+    response_durations_ms_json: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -231,6 +242,13 @@ impl SessionRow {
     fn into_snapshot(self) -> Result<SessionSnapshot> {
         let messages = serde_json::from_str(&self.messages_json)
             .context("failed to parse stored session messages")?;
+        let response_durations_ms = self
+            .response_durations_ms_json
+            .map(|json| {
+                serde_json::from_str::<Vec<Option<u64>>>(&json)
+                    .context("failed to parse stored session response durations")
+            })
+            .transpose()?;
         let base_url = self.base_url;
         let backend = parse_backend(self.backend, &base_url)?;
         Ok(SessionSnapshot {
@@ -245,6 +263,7 @@ impl SessionRow {
             messages,
             last_response_duration_ms: self.last_response_duration_ms,
             previous_response_duration_ms: self.previous_response_duration_ms,
+            response_durations_ms,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })

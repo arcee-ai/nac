@@ -345,6 +345,7 @@ pub(super) struct SelectionState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FocusPanel {
+    Prompt,
     Events,
     Response,
     Threads,

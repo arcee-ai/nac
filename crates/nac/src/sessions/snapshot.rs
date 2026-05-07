@@ -76,6 +76,7 @@ pub fn new_snapshot(
         messages,
         last_response_duration_ms: None,
         previous_response_duration_ms: None,
+        response_durations_ms: None,
         created_at: now.clone(),
         updated_at: now,
     }
@@ -86,6 +87,7 @@ pub fn refresh_snapshot(
     messages: Vec<Message>,
     last_response_duration_ms: Option<u64>,
     previous_response_duration_ms: Option<u64>,
+    response_durations_ms: Option<Vec<Option<u64>>>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
@@ -99,6 +101,7 @@ pub fn refresh_snapshot(
         messages,
         last_response_duration_ms,
         previous_response_duration_ms,
+        response_durations_ms,
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }

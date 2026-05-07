@@ -77,6 +77,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
              messages_json TEXT NOT NULL,
              last_response_duration_ms INTEGER,
              previous_response_duration_ms INTEGER,
+             response_durations_ms_json TEXT,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
@@ -99,6 +100,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "previous_response_duration_ms",
         "INTEGER",
     )?;
+    ensure_column(&conn, "sessions", "response_durations_ms_json", "TEXT")?;
     Ok(conn)
 }
 
