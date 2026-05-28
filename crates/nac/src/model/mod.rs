@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition, Usage};
 
+mod anthropic;
 mod backend;
 mod chat;
 mod chatgpt_codex;
@@ -23,6 +24,7 @@ pub use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::ModelClient;
 pub use types::*;
 
+use anthropic::*;
 use backend::*;
 use chat::*;
 use requests::*;
@@ -118,7 +120,147 @@ mod tests {
             detect_backend("https://api.deepseek.com").unwrap(),
             BackendKind::DeepSeekChat
         );
+        assert_eq!(
+            detect_backend("https://api.anthropic.com").unwrap(),
+            BackendKind::AnthropicMessages
+        );
         assert!(detect_backend("https://example.com/v1").is_err());
+    }
+
+    #[test]
+    fn anthropic_messages_request_includes_adaptive_max_thinking_and_128000() {
+        let request = anthropic_messages_request(
+            "claude-opus-4-6",
+            &[
+                Message::System {
+                    content: "system instructions".to_string(),
+                },
+                Message::User {
+                    content: "read a file".to_string(),
+                },
+            ],
+            &[ToolDefinition {
+                def_type: "function".to_string(),
+                function: crate::types::FunctionDef {
+                    name: "read".to_string(),
+                    description: "Read a file".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(request["model"], "claude-opus-4-6");
+        assert_eq!(request["max_tokens"], 128000);
+        assert_eq!(request["thinking"]["type"], "adaptive");
+        assert_eq!(request["thinking"]["display"], "omitted");
+        assert_eq!(request["output_config"]["effort"], "max");
+        assert_eq!(request["system"], "system instructions");
+        assert_eq!(request["messages"][0]["role"], "user");
+        assert_eq!(request["messages"][0]["content"], "read a file");
+        assert_eq!(request["tools"][0]["name"], "read");
+        assert_eq!(request["tools"][0]["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn anthropic_response_tool_thinking_round_trips() {
+        let thinking = json!({
+            "type": "thinking",
+            "thinking": "",
+            "signature": "sig_1"
+        });
+        let redacted = json!({
+            "type": "redacted_thinking",
+            "data": "opaque"
+        });
+        let parsed = parse_anthropic_messages_response(
+            &json!({
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    thinking.clone(),
+                    redacted.clone(),
+                    {"type": "text", "text": "Need to inspect the file."},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "read",
+                        "input": {"path": "src/main.rs"}
+                    }
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 10, "output_tokens": 20}
+            }),
+            "https://api.anthropic.com/v1/messages",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.assistant.content.as_deref(),
+            Some("Need to inspect the file.")
+        );
+        assert_eq!(
+            parsed.assistant.reasoning_details,
+            Some(json!([thinking.clone(), redacted.clone()]))
+        );
+        assert_eq!(parsed.finish_reason.as_deref(), Some("tool_use"));
+        assert_eq!(parsed.usage.prompt_tokens, Some(10));
+        assert_eq!(parsed.usage.completion_tokens, Some(20));
+        assert_eq!(parsed.usage.total_tokens, Some(30));
+
+        let tool_call = &parsed
+            .assistant
+            .tool_calls
+            .as_ref()
+            .expect("tool_use should become a tool call")[0];
+        assert_eq!(tool_call.id, "toolu_1");
+        assert_eq!(tool_call.function.name, "read");
+        assert_eq!(
+            serde_json::from_str::<Value>(&tool_call.function.arguments).unwrap(),
+            json!({"path": "src/main.rs"})
+        );
+
+        let request = anthropic_messages_request(
+            "claude-opus-4-6",
+            &[
+                Message::User {
+                    content: "please inspect".to_string(),
+                },
+                Message::Assistant {
+                    content: parsed.assistant.content.clone(),
+                    reasoning_text: None,
+                    reasoning_details: parsed.assistant.reasoning_details.clone(),
+                    tool_calls: parsed.assistant.tool_calls.clone(),
+                },
+                Message::Tool {
+                    tool_call_id: "toolu_1".to_string(),
+                    content: "file contents".to_string(),
+                },
+            ],
+            &[],
+        )
+        .unwrap();
+
+        let assistant_blocks = request["messages"][1]["content"]
+            .as_array()
+            .expect("assistant content should be blocks");
+        assert_eq!(assistant_blocks[0], thinking);
+        assert_eq!(assistant_blocks[1], redacted);
+        assert_eq!(assistant_blocks[3]["type"], "tool_use");
+        assert_eq!(assistant_blocks[3]["input"], json!({"path": "src/main.rs"}));
+        assert_eq!(request["messages"][2]["role"], "user");
+        assert_eq!(request["messages"][2]["content"][0]["type"], "tool_result");
+        assert_eq!(
+            request["messages"][2]["content"][0]["tool_use_id"],
+            "toolu_1"
+        );
     }
 
     #[test]

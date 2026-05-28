@@ -15,6 +15,9 @@ pub enum BackendKind {
     #[serde(rename = "chatgpt-codex-responses")]
     #[value(name = "chatgpt-codex-responses")]
     ChatGptCodexResponses,
+    #[serde(rename = "anthropic-messages")]
+    #[value(name = "anthropic-messages")]
+    AnthropicMessages,
 }
 
 impl BackendKind {
@@ -25,6 +28,7 @@ impl BackendKind {
             Self::FireworksChat => "fireworks-chat",
             Self::OpenAiResponses => "openai-responses",
             Self::ChatGptCodexResponses => "chatgpt-codex-responses",
+            Self::AnthropicMessages => "anthropic-messages",
         }
     }
 }

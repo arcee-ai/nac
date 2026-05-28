@@ -6,6 +6,7 @@ pub(super) fn default_model_for_backend(backend: BackendKind) -> String {
         BackendKind::OpenAiResponses => "gpt-5.5".to_string(),
         BackendKind::ChatGptCodexResponses => "gpt-5.5".to_string(),
         BackendKind::FireworksChat => "gpt-5.5".to_string(),
+        BackendKind::AnthropicMessages => "claude-opus-4-6".to_string(),
         BackendKind::Auto => unreachable!("auto backend does not have a default model"),
     }
 }
@@ -17,6 +18,7 @@ pub(super) fn default_reasoning_effort(backend: BackendKind) -> Option<Reasoning
         }
         BackendKind::DeepSeekChat => None,
         BackendKind::FireworksChat => None,
+        BackendKind::AnthropicMessages => None,
         BackendKind::Auto => None,
     }
 }
@@ -25,6 +27,7 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
     match backend {
         BackendKind::DeepSeekChat => "https://api.deepseek.com",
         BackendKind::ChatGptCodexResponses => "https://chatgpt.com/backend-api",
+        BackendKind::AnthropicMessages => "https://api.anthropic.com",
         BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
             "https://api.openai.com/v1"
         }
@@ -37,6 +40,20 @@ pub(super) fn api_key_for_backend(
 ) -> Result<String> {
     match backend {
         BackendKind::ChatGptCodexResponses => Ok(String::new()),
+        BackendKind::AnthropicMessages => {
+            if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+                return Ok(api_key);
+            }
+            if let Some(env_name) = configured_env.filter(|name| *name != "ANTHROPIC_API_KEY") {
+                return std::env::var(env_name).map_err(|_| {
+                    anyhow!(
+                        "ANTHROPIC_API_KEY environment variable is not set and configured api_key_env '{}' is not set",
+                        env_name
+                    )
+                });
+            }
+            Err(anyhow!("ANTHROPIC_API_KEY environment variable is not set"))
+        }
         BackendKind::Auto
         | BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
@@ -73,12 +90,15 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
     if host == "api.openai.com" {
         return Ok(BackendKind::OpenAiResponses);
     }
+    if host == "api.anthropic.com" {
+        return Ok(BackendKind::AnthropicMessages);
+    }
     if host == "chatgpt.com" && parsed.path().contains("/backend-api") {
         return Ok(BackendKind::ChatGptCodexResponses);
     }
 
     Err(anyhow!(
-        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend openai-responses, or --backend chatgpt-codex-responses",
+        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend openai-responses, --backend chatgpt-codex-responses, or --backend anthropic-messages",
         base_url
     ))
 }

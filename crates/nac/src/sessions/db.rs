@@ -276,6 +276,7 @@ fn parse_backend(raw: Option<String>, base_url: &str) -> Result<BackendKind> {
         Some("fireworks-chat") => Ok(BackendKind::FireworksChat),
         Some("openai-responses") => Ok(BackendKind::OpenAiResponses),
         Some("chatgpt-codex-responses") => Ok(BackendKind::ChatGptCodexResponses),
+        Some("anthropic-messages") => Ok(BackendKind::AnthropicMessages),
         Some(other) => Err(anyhow!("unsupported stored backend '{}'", other)),
         None => detect_backend(base_url),
     }
