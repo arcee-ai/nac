@@ -31,7 +31,7 @@ impl ModelClient {
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
         });
         let reasoning_effort = match backend {
-            BackendKind::DeepSeekChat => None,
+            BackendKind::DeepSeekChat | BackendKind::AnthropicMessages => None,
             _ => overrides
                 .reasoning_effort
                 .or_else(|| default_reasoning_effort(backend)),
@@ -57,6 +57,7 @@ impl ModelClient {
             BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
             BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
             BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
+            BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
             BackendKind::ChatGptCodexResponses => {
                 chatgpt_codex::send_responses(
                     &self.client,
@@ -185,7 +186,45 @@ impl ModelClient {
         parse_openai_responses_response(&value, &url)
     }
 
+    async fn send_anthropic_messages(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let request = anthropic_messages_request(&self.model, &messages, &tools)?;
+
+        let value = self.post_anthropic_json_with_retry(&url, &request).await?;
+        parse_anthropic_messages_response(&value, &url)
+    }
+
     async fn post_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+        let api_key = self.api_key.as_str();
+        self.post_json_with_retry_headers(url, body, |request| {
+            request.header("Authorization", format!("Bearer {}", api_key))
+        })
+        .await
+    }
+
+    async fn post_anthropic_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+        let api_key = self.api_key.as_str();
+        self.post_json_with_retry_headers(url, body, |request| {
+            request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+        })
+        .await
+    }
+
+    async fn post_json_with_retry_headers<F>(
+        &self,
+        url: &str,
+        body: &Value,
+        apply_headers: F,
+    ) -> Result<Value>
+    where
+        F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+    {
         let mut last_error = anyhow!("No attempts made");
 
         for attempt in 0..3 {
@@ -194,15 +233,15 @@ impl ModelClient {
                 sleep(Duration::from_secs(delay_secs)).await;
             }
 
-            let response = self
-                .client
-                .post(url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
+            let response = apply_headers(
+                self.client
+                    .post(url)
+                    .header("Content-Type", "application/json"),
+            )
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
 
             let status = response.status();
             let body = response
