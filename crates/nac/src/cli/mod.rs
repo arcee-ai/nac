@@ -328,10 +328,9 @@ async fn build_run_cli_config(cli: RunCli, config: &NacConfig) -> Result<Orchest
     let current_dir = std::env::current_dir()?;
     let sandbox_args = effective_sandbox_args(cli.sandbox, config);
     let sandbox = build_sandbox_session(&sandbox_args, &current_dir).await?;
-    let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
-    let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
-    let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
-    let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
+    let workspace_dir = effective_workspace_dir(&current_dir, sandbox.as_ref());
+    let agents_md = AgentsMdBundle::load(workspace_dir.as_deref())?;
+    let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -410,9 +409,8 @@ async fn build_managed_worker_config(
     let current_dir = std::env::current_dir()?;
     let sandbox_args = effective_sandbox_args(cli.sandbox, config);
     let sandbox = build_sandbox_session(&sandbox_args, &current_dir).await?;
-    let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
-    let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
-    let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
+    let workspace_dir = effective_workspace_dir(&current_dir, sandbox.as_ref());
+    let agents_md = AgentsMdBundle::load(workspace_dir.as_deref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -426,7 +424,7 @@ async fn build_managed_worker_config(
             .unwrap_or_else(store::default_store_path),
     );
     let mcp = McpRegistry::load(&current_dir, sandbox.as_ref()).await?;
-    let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
+    let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref())?;
     let extra_tool_defs = mcp
         .as_ref()
         .map(|registry| registry.tool_definitions())
@@ -440,7 +438,7 @@ async fn build_managed_worker_config(
         &cli.dispatch.source_threads,
     )?;
     let mut initial_messages =
-        build_preactivated_skill_messages(skills.as_deref(), &cli.dispatch.skills)?;
+        build_preloaded_skill_messages(skills.as_deref(), &cli.dispatch.skills)?;
     initial_messages.extend(build_worker_context_messages(
         &cli.dispatch.thread_name,
         &worker_context,
@@ -473,17 +471,7 @@ async fn build_managed_worker_config(
     })
 }
 
-fn effective_agents_md_workspace_dir(
-    current_dir: &Path,
-    sandbox: Option<&SandboxSession>,
-) -> Option<PathBuf> {
-    if let Some(sandbox) = sandbox {
-        return sandbox.host_workdir();
-    }
-    Some(current_dir.to_path_buf())
-}
-
-fn effective_skills_workspace_dir(
+fn effective_workspace_dir(
     current_dir: &Path,
     sandbox: Option<&SandboxSession>,
 ) -> Option<PathBuf> {

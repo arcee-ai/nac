@@ -22,7 +22,7 @@ pub(super) fn build_worker_context_messages(
     messages
 }
 
-pub(super) fn build_preactivated_skill_messages(
+pub(super) fn build_preloaded_skill_messages(
     registry: Option<&SkillRegistry>,
     names: &[String],
 ) -> Result<Vec<Message>> {
@@ -37,7 +37,7 @@ pub(super) fn build_preactivated_skill_messages(
     let mut seen = HashSet::new();
     let mut messages = Vec::new();
     for name in names {
-        if !seen.insert(name.clone()) {
+        if !seen.insert(name.as_str()) {
             continue;
         }
         if !registry.has_skill(name) {
@@ -45,9 +45,6 @@ pub(super) fn build_preactivated_skill_messages(
         }
 
         let activated = registry.activate(name);
-        if activated.is_error {
-            anyhow::bail!(activated.content);
-        }
         messages.push(Message::System {
             content: format!(
                 "The orchestrator preloaded this skill for this worker dispatch.\n\n{}",
@@ -108,10 +105,10 @@ mod tests {
     }
 
     #[test]
-    fn preactivated_skill_messages_dedupe_validate_and_precede_context() {
+    fn preloaded_skill_messages_dedupe_validate_and_precede_context() {
         let registry = test_registry();
         let names = vec!["code-review".to_string(), "code-review".to_string()];
-        let mut messages = build_preactivated_skill_messages(Some(&registry), &names).unwrap();
+        let mut messages = build_preloaded_skill_messages(Some(&registry), &names).unwrap();
         messages.extend(build_worker_context_messages(
             "impl",
             &WorkerContext {
@@ -180,11 +177,11 @@ mod tests {
         }
 
         let missing = vec!["missing".to_string()];
-        assert!(build_preactivated_skill_messages(Some(&registry), &missing)
+        assert!(build_preloaded_skill_messages(Some(&registry), &missing)
             .unwrap_err()
             .to_string()
             .contains("unknown skill 'missing'"));
-        assert!(build_preactivated_skill_messages(None, &missing)
+        assert!(build_preloaded_skill_messages(None, &missing)
             .unwrap_err()
             .to_string()
             .contains("no skills are available"));

@@ -68,6 +68,40 @@ mod tests {
         path
     }
 
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(name: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(name);
+            unsafe {
+                std::env::set_var(name, value);
+            }
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var(self.name, value) },
+                None => unsafe { std::env::remove_var(self.name) },
+            }
+        }
+    }
+
+    fn isolate_user_skill_env(root: &Path) -> Vec<EnvVarGuard> {
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        vec![
+            EnvVarGuard::set_path("HOME", &home),
+            EnvVarGuard::set_path("NAC_HOME", &home.join(".config/nac")),
+            EnvVarGuard::set_path("XDG_CONFIG_HOME", &home.join(".config")),
+        ]
+    }
+
     fn write_skill(root: &Path, name: &str, description: &str, body: &str) -> PathBuf {
         let dir = root.join(name);
         fs::create_dir_all(&dir).unwrap();
@@ -83,6 +117,7 @@ mod tests {
     fn project_sources_override_user_sources() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let root = temp_dir("precedence");
+        let _env = isolate_user_skill_env(&root);
         let repo = root.join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
         let project_skills = repo.join(".nac/skills");
@@ -101,16 +136,7 @@ mod tests {
         );
         write_skill(&project_skills, "build", "project nac", "project nac body");
 
-        let previous_nac_home = std::env::var_os("NAC_HOME");
-        unsafe {
-            std::env::set_var("NAC_HOME", root.join("home/.config/nac"));
-        }
-
         let registry = SkillRegistry::load(Some(&repo), None).unwrap().unwrap();
-        match previous_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
         let entry = registry
             .catalog_entries()
             .into_iter()
@@ -123,7 +149,9 @@ mod tests {
 
     #[test]
     fn missing_description_skips_skill() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         let root = temp_dir("missing_desc");
+        let _env = isolate_user_skill_env(&root);
         let skill_root = root.join("repo/.agents/skills/foo");
         fs::create_dir_all(&skill_root).unwrap();
         fs::create_dir_all(root.join("repo/.git")).unwrap();
@@ -181,7 +209,9 @@ mod tests {
 
     #[test]
     fn auto_mounts_skip_paths_already_covered_by_workspace_mount() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         let root = temp_dir("auto_mounts_covered");
+        let _env = isolate_user_skill_env(&root);
         let repo = root.join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
         fs::create_dir_all(repo.join(".agents/skills")).unwrap();

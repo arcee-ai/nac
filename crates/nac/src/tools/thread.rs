@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,12 +157,14 @@ pub async fn execute_dispatch(
     let result = run_worker(
         runtime,
         client,
-        &session_id,
-        &thread_name,
-        &action,
-        &source_threads,
-        &scheduled_skills,
-        timeout_secs,
+        WorkerInvocation {
+            session_id: &session_id,
+            thread_name: &thread_name,
+            action: &action,
+            source_threads: &source_threads,
+            scheduled_skills: &scheduled_skills,
+            timeout_secs,
+        },
     )
     .await;
     unmark_thread_active(runtime, &thread_name).await;
@@ -389,10 +391,9 @@ fn resolve_scheduled_skills(
     args: &Value,
     registry: Option<&SkillRegistry>,
 ) -> Result<Vec<String>, ToolResult> {
-    let mut seen = HashSet::new();
     let mut skills = Vec::new();
     for skill in require_string_array(args, "skills")? {
-        if seen.insert(skill.clone()) {
+        if !skills.contains(&skill) {
             skills.push(skill);
         }
     }
@@ -458,19 +459,16 @@ struct ActiveToolCallTrace {
     args_detail: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 enum TimeoutLocation {
+    #[default]
     Startup,
-    ModelApi { iteration: usize },
+    ModelApi {
+        iteration: usize,
+    },
     ToolCall,
     BetweenToolAndModel,
     Finalizing,
-}
-
-impl Default for TimeoutLocation {
-    fn default() -> Self {
-        Self::Startup
-    }
 }
 
 #[derive(Default)]
@@ -568,26 +566,30 @@ impl WorkerTimeoutTrace {
     }
 }
 
+struct WorkerInvocation<'a> {
+    session_id: &'a str,
+    thread_name: &'a str,
+    action: &'a str,
+    source_threads: &'a [String],
+    scheduled_skills: &'a [String],
+    timeout_secs: u64,
+}
+
 async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
-    session_id: &str,
-    thread_name: &str,
-    action: &str,
-    source_threads: &[String],
-    scheduled_skills: &[String],
-    timeout_secs: u64,
+    invocation: WorkerInvocation<'_>,
 ) -> std::io::Result<WorkerRun> {
     let executable = std::env::current_exe()?;
     let mut command = Command::new(executable);
     command
         .arg("__worker")
         .arg("--session-id")
-        .arg(session_id)
+        .arg(invocation.session_id)
         .arg("--thread-name")
-        .arg(thread_name)
+        .arg(invocation.thread_name)
         .arg("--action")
-        .arg(action)
+        .arg(invocation.action)
         .arg("--api-model")
         .arg(client.model.as_str())
         .arg("--api-base-url")
@@ -603,10 +605,10 @@ async fn run_worker(
         command.arg("--effort").arg(reasoning_effort.as_str());
     }
 
-    for source_thread in source_threads {
+    for source_thread in invocation.source_threads {
         command.arg("--source-thread").arg(source_thread);
     }
-    for skill in scheduled_skills {
+    for skill in invocation.scheduled_skills {
         command.arg("--skill").arg(skill);
     }
     if let Some(sandbox) = &runtime.sandbox {
@@ -619,7 +621,7 @@ async fn run_worker(
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
-    let thread_name_for_logs = thread_name.to_string();
+    let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
@@ -657,7 +659,7 @@ async fn run_worker(
         output
     });
 
-    let status = timeout(Duration::from_secs(timeout_secs), child.wait()).await;
+    let status = timeout(Duration::from_secs(invocation.timeout_secs), child.wait()).await;
     let timed_out = status.is_err();
     if timed_out {
         terminate_child_tree(&mut child).await;

@@ -109,10 +109,9 @@ async fn build_resume_config_from_snapshot(
         Some(spec) => Some(SandboxSession::create(spec, Uuid::new_v4().to_string(), true).await?),
         None => None,
     };
-    let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
-    let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
-    let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
-    let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
+    let workspace_dir = effective_workspace_dir(&current_dir, sandbox.as_ref());
+    let agents_md = AgentsMdBundle::load(workspace_dir.as_deref())?;
+    let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
