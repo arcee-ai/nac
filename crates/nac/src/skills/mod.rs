@@ -5,12 +5,10 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use serde_json::{json, Value};
 
 use crate::paths::nac_home_dir;
 use crate::sandbox::{MountSpec, SandboxSession};
-use crate::tools::{require_str, ToolResult, ToolRuntime};
-use crate::types::{FunctionDef, ToolDefinition};
+use crate::tools::ToolResult;
 
 const SKILL_FILENAME: &str = "SKILL.md";
 const MAX_SCAN_DEPTH: usize = 6;
@@ -28,7 +26,7 @@ mod resources;
 mod tool;
 
 pub use registry::SkillRegistry;
-pub use tool::{auto_mounts, execute_activate_skill};
+pub use tool::auto_mounts;
 
 use discovery::*;
 use frontmatter::*;
@@ -119,7 +117,7 @@ mod tests {
             .find(|entry| entry.name == "build")
             .unwrap();
         assert_eq!(entry.description, "project nac");
-        let activated = registry.activate("build", false);
+        let activated = registry.activate("build");
         assert!(activated.content.contains("project nac body"));
     }
 
@@ -170,7 +168,7 @@ mod tests {
         let registry = SkillRegistry::load(Some(&repo), Some(&sandbox))
             .unwrap()
             .unwrap();
-        let activated = registry.activate("lint", false);
+        let activated = registry.activate("lint");
         assert!(
             activated.content.contains("/workspace/.agents/skills/lint")
                 || activated
@@ -201,30 +199,12 @@ mod tests {
     }
 
     #[test]
-    fn repair_frontmatter_handles_unquoted_colons() {
-        let frontmatter = "name: lint\ndescription: Use when handling foo:bar tasks\n";
+    fn frontmatter_repairs_colons_and_ignores_disable_model_invocation() {
+        let frontmatter = "name: lint\ndescription: Use when handling foo:bar tasks\ndisable-model-invocation: true\n";
         let parsed = parse_frontmatter(frontmatter).unwrap();
         assert_eq!(
             parsed.description.as_deref(),
             Some("Use when handling foo:bar tasks")
         );
-    }
-
-    #[test]
-    fn repeated_activation_returns_short_notice() {
-        let root = temp_dir("activation_dedupe");
-        let repo = root.join("repo");
-        fs::create_dir_all(repo.join(".git")).unwrap();
-        let project_skills = repo.join(".agents/skills");
-        fs::create_dir_all(&project_skills).unwrap();
-        write_skill(&project_skills, "lint", "lint code", "full body");
-
-        let registry = SkillRegistry::load(Some(&repo), None).unwrap().unwrap();
-        let first = registry.activate("lint", false);
-        let second = registry.activate("lint", true);
-
-        assert!(first.content.contains("full body"));
-        assert!(second.content.contains("already active"));
-        assert!(!second.content.contains("full body"));
     }
 }

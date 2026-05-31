@@ -330,6 +330,8 @@ async fn build_run_cli_config(cli: RunCli, config: &NacConfig) -> Result<Orchest
     let sandbox = build_sandbox_session(&sandbox_args, &current_dir).await?;
     let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
+    let skills_workspace_dir = effective_skills_workspace_dir(&current_dir, sandbox.as_ref());
+    let skills = SkillRegistry::load(skills_workspace_dir.as_deref(), sandbox.as_ref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -367,7 +369,7 @@ async fn build_run_cli_config(cli: RunCli, config: &NacConfig) -> Result<Orchest
             working_directory: working_directory.clone(),
             sandbox: sandbox.clone(),
             mcp: None,
-            skills: None,
+            skills,
             extra_tool_defs: Vec::new(),
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
@@ -437,22 +439,25 @@ async fn build_managed_worker_config(
         &cli.dispatch.thread_name,
         &cli.dispatch.source_threads,
     )?;
+    let mut initial_messages =
+        build_preactivated_skill_messages(skills.as_deref(), &cli.dispatch.skills)?;
+    initial_messages.extend(build_worker_context_messages(
+        &cli.dispatch.thread_name,
+        &worker_context,
+    ));
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some(cli.dispatch.session_id.clone()),
-            initial_messages: build_worker_context_messages(
-                &cli.dispatch.thread_name,
-                &worker_context,
-            ),
+            initial_messages,
             thread_name: Some(cli.dispatch.thread_name.clone()),
             event_sink: EventSink::stderr_prefixed(),
             working_directory,
             sandbox,
             mcp,
-            skills,
+            skills: None,
             extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
@@ -852,6 +857,10 @@ url = "https://mcp.context7.com/mcp"
             OsString::from("do work"),
             OsString::from("--source-thread"),
             OsString::from("research"),
+            OsString::from("--skill"),
+            OsString::from("lint"),
+            OsString::from("--skill"),
+            OsString::from("review"),
         ]);
         match parsed {
             ParsedCli::ManagedWorker(worker) => {
@@ -859,6 +868,7 @@ url = "https://mcp.context7.com/mcp"
                 assert_eq!(worker.dispatch.thread_name, "impl");
                 assert_eq!(worker.dispatch.action, "do work");
                 assert_eq!(worker.dispatch.source_threads, vec!["research"]);
+                assert_eq!(worker.dispatch.skills, vec!["lint", "review"]);
             }
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
@@ -972,6 +982,7 @@ url = "https://mcp.context7.com/mcp"
                 thread_name: "impl".to_string(),
                 action: "implement the next step".to_string(),
                 source_threads: vec!["auth".to_string(), "tests".to_string()],
+                skills: Vec::new(),
             },
             store: StoreArgs {
                 store_path: Some(store_path.clone()),

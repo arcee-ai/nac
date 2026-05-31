@@ -98,6 +98,10 @@ pub(super) struct WorkerDispatchArgs {
     /// Source threads whose latest retained episodes should be loaded
     #[arg(long = "source-thread")]
     pub(super) source_threads: Vec<String>,
+
+    /// Skill names to preload for this managed worker dispatch
+    #[arg(long = "skill")]
+    pub(super) skills: Vec<String>,
 }
 
 #[derive(clap::Args)]
