@@ -12,6 +12,7 @@ use tokio::time::timeout;
 use crate::events::{decode_stderr_event, AgentEvent};
 use crate::model::ModelClient;
 use crate::process::{isolate_process_group, terminate_child_tree};
+use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
 use crate::types::ToolDefinition;
@@ -19,25 +20,51 @@ use crate::types::ToolDefinition;
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
 
-pub fn dispatch_definition() -> ToolDefinition {
+pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
     use serde_json::json;
+
+    let mut parameters = json!({
+        "type": "object",
+        "properties": {
+            "name": { "type": "string", "description": "Thread name. Creates if new, reuses if existing." },
+            "action": { "type": "string", "description": "Task for the worker." },
+            "threads": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Other thread names whose latest retained episodes should be loaded."
+            },
+            "timeout": { "type": "integer", "description": "Timeout in seconds for this dispatch (default 3600, minimum 1800)." }
+        },
+        "required": ["name", "action"]
+    });
+
+    if let Some(registry) = skills {
+        let catalog = registry.catalog_entries();
+        if !catalog.is_empty() {
+            let names: Vec<String> = catalog.iter().map(|entry| entry.name.clone()).collect();
+            let mut description = String::from(
+                "Worker skill names to preload before this dispatch. Pass skills when the task clearly matches them; workers cannot activate skills themselves. Compact catalog:",
+            );
+            for entry in &catalog {
+                description.push_str(&format!("\n- {}: {}", entry.name, entry.description));
+                if let Some(compatibility) = &entry.compatibility {
+                    description.push_str(&format!(" (compatibility: {})", compatibility));
+                }
+            }
+
+            parameters["properties"]["skills"] = json!({
+                "type": "array",
+                "items": { "type": "string", "enum": names },
+                "uniqueItems": true,
+                "description": description
+            });
+        }
+    }
+
     def(
         "thread",
         "Dispatch a named worker thread. The worker reuses its own retained history and can pull the latest retained episode from other named threads. Default timeout is configured by nac; built-in default is 3600 seconds and minimum timeout is 1800 seconds.",
-        json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string", "description": "Thread name. Creates if new, reuses if existing." },
-                "action": { "type": "string", "description": "Task for the worker." },
-                "threads": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Other thread names whose latest retained episodes should be loaded."
-                },
-                "timeout": { "type": "integer", "description": "Timeout in seconds for this dispatch (default 3600, minimum 1800)." }
-            },
-            "required": ["name", "action"]
-        }),
+        parameters,
     )
 }
 
@@ -100,6 +127,10 @@ pub async fn execute_dispatch(
         Ok(v) => v,
         Err(e) => return e,
     };
+    let scheduled_skills = match resolve_scheduled_skills(&args, runtime.skills.as_deref()) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
     let session_id = match require_session(runtime) {
         Ok(s) => s.to_string(),
         Err(e) => return e,
@@ -126,11 +157,14 @@ pub async fn execute_dispatch(
     let result = run_worker(
         runtime,
         client,
-        &session_id,
-        &thread_name,
-        &action,
-        &source_threads,
-        timeout_secs,
+        WorkerInvocation {
+            session_id: &session_id,
+            thread_name: &thread_name,
+            action: &action,
+            source_threads: &source_threads,
+            scheduled_skills: &scheduled_skills,
+            timeout_secs,
+        },
     )
     .await;
     unmark_thread_active(runtime, &thread_name).await;
@@ -353,6 +387,39 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     })
 }
 
+fn resolve_scheduled_skills(
+    args: &Value,
+    registry: Option<&SkillRegistry>,
+) -> Result<Vec<String>, ToolResult> {
+    let mut skills = Vec::new();
+    for skill in require_string_array(args, "skills")? {
+        if !skills.contains(&skill) {
+            skills.push(skill);
+        }
+    }
+    if skills.is_empty() {
+        return Ok(skills);
+    }
+
+    let Some(registry) = registry else {
+        return Err(ToolResult {
+            content: "Error: no skills are available for thread dispatch".to_string(),
+            is_error: true,
+        });
+    };
+
+    for skill in &skills {
+        if !registry.has_skill(skill) {
+            return Err(ToolResult {
+                content: format!("Error: unknown skill '{}'", skill),
+                is_error: true,
+            });
+        }
+    }
+
+    Ok(skills)
+}
+
 fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
     args.get("timeout")
         .and_then(|v| v.as_u64())
@@ -392,19 +459,16 @@ struct ActiveToolCallTrace {
     args_detail: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 enum TimeoutLocation {
+    #[default]
     Startup,
-    ModelApi { iteration: usize },
+    ModelApi {
+        iteration: usize,
+    },
     ToolCall,
     BetweenToolAndModel,
     Finalizing,
-}
-
-impl Default for TimeoutLocation {
-    fn default() -> Self {
-        Self::Startup
-    }
 }
 
 #[derive(Default)]
@@ -502,25 +566,30 @@ impl WorkerTimeoutTrace {
     }
 }
 
+struct WorkerInvocation<'a> {
+    session_id: &'a str,
+    thread_name: &'a str,
+    action: &'a str,
+    source_threads: &'a [String],
+    scheduled_skills: &'a [String],
+    timeout_secs: u64,
+}
+
 async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
-    session_id: &str,
-    thread_name: &str,
-    action: &str,
-    source_threads: &[String],
-    timeout_secs: u64,
+    invocation: WorkerInvocation<'_>,
 ) -> std::io::Result<WorkerRun> {
     let executable = std::env::current_exe()?;
     let mut command = Command::new(executable);
     command
         .arg("__worker")
         .arg("--session-id")
-        .arg(session_id)
+        .arg(invocation.session_id)
         .arg("--thread-name")
-        .arg(thread_name)
+        .arg(invocation.thread_name)
         .arg("--action")
-        .arg(action)
+        .arg(invocation.action)
         .arg("--api-model")
         .arg(client.model.as_str())
         .arg("--api-base-url")
@@ -536,8 +605,11 @@ async fn run_worker(
         command.arg("--effort").arg(reasoning_effort.as_str());
     }
 
-    for source_thread in source_threads {
+    for source_thread in invocation.source_threads {
         command.arg("--source-thread").arg(source_thread);
+    }
+    for skill in invocation.scheduled_skills {
+        command.arg("--skill").arg(skill);
     }
     if let Some(sandbox) = &runtime.sandbox {
         command.args(sandbox.worker_cli_args());
@@ -549,7 +621,7 @@ async fn run_worker(
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
-    let thread_name_for_logs = thread_name.to_string();
+    let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
@@ -587,7 +659,7 @@ async fn run_worker(
         output
     });
 
-    let status = timeout(Duration::from_secs(timeout_secs), child.wait()).await;
+    let status = timeout(Duration::from_secs(invocation.timeout_secs), child.wait()).await;
     let timed_out = status.is_err();
     if timed_out {
         terminate_child_tree(&mut child).await;
@@ -618,6 +690,74 @@ async fn run_worker(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn skill_record(
+        name: &str,
+        description: &str,
+        compatibility: Option<&str>,
+    ) -> crate::skills::SkillRecord {
+        crate::skills::SkillRecord {
+            name: name.to_string(),
+            description: description.to_string(),
+            compatibility: compatibility.map(str::to_string),
+            skill_md_path: std::path::PathBuf::from(format!("/tmp/{name}/SKILL.md")),
+            skill_root_host: std::path::PathBuf::from(format!("/tmp/{name}")),
+            skill_root_visible: std::path::PathBuf::from(format!("/tmp/{name}")),
+            body: format!("{name} body"),
+            resources: Vec::new(),
+        }
+    }
+
+    fn test_registry() -> SkillRegistry {
+        SkillRegistry::load_for_test(vec![
+            skill_record("lint", "Run linting workflows.", None),
+            skill_record("review", "Review code quality.", Some("Rust")),
+        ])
+    }
+
+    #[test]
+    fn dispatch_definition_skills_schema_depends_on_registry() {
+        assert!(dispatch_definition(None).function.parameters["properties"]
+            .get("skills")
+            .is_none());
+
+        let registry = test_registry();
+        let definition = dispatch_definition(Some(&registry));
+        let skills = &definition.function.parameters["properties"]["skills"];
+        assert_eq!(skills["items"]["enum"], json!(["lint", "review"]));
+        assert_eq!(skills["uniqueItems"], true);
+        let description = skills["description"].as_str().unwrap();
+        assert!(description.contains("Compact catalog"));
+        assert!(description.contains("- lint: Run linting workflows."));
+        assert!(description.contains("- review: Review code quality. (compatibility: Rust)"));
+    }
+
+    #[test]
+    fn scheduled_skills_validation_dedupes_and_rejects_invalid_requests() {
+        let registry = test_registry();
+        assert!(resolve_scheduled_skills(&json!({}), None)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            resolve_scheduled_skills(
+                &json!({ "skills": ["review", "lint", "review"] }),
+                Some(&registry),
+            )
+            .unwrap(),
+            vec!["review", "lint"]
+        );
+
+        let unknown = resolve_scheduled_skills(&json!({ "skills": ["missing"] }), Some(&registry))
+            .unwrap_err();
+        assert_eq!(unknown.content, "Error: unknown skill 'missing'");
+
+        let unavailable =
+            resolve_scheduled_skills(&json!({ "skills": ["lint"] }), None).unwrap_err();
+        assert_eq!(
+            unavailable.content,
+            "Error: no skills are available for thread dispatch"
+        );
+    }
 
     #[test]
     fn thread_timeout_defaults_to_one_hour() {

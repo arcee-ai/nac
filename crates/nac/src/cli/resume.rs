@@ -11,6 +11,7 @@ pub(super) async fn build_resume_picker_config(
         ModelClient::from_env_with_overrides(model_overrides(&ModelArgs::default(), config)?)?;
     let current_dir = std::env::current_dir()?;
     let agents_md = AgentsMdBundle::load(Some(&current_dir))?;
+    let skills = SkillRegistry::load(Some(&current_dir), None)?;
     let working_directory = current_directory_display();
     let workspace_host_path = Some(current_dir.clone());
     let sandbox_status = "off".to_string();
@@ -35,7 +36,7 @@ pub(super) async fn build_resume_picker_config(
             working_directory: working_directory.clone(),
             sandbox: None,
             mcp: None,
-            skills: None,
+            skills,
             extra_tool_defs: Vec::new(),
             agents_md_message: agents_md.system_message(),
             thread_timeout_secs: worker_thread_timeout_secs(config),
@@ -108,8 +109,9 @@ async fn build_resume_config_from_snapshot(
         Some(spec) => Some(SandboxSession::create(spec, Uuid::new_v4().to_string(), true).await?),
         None => None,
     };
-    let agents_md_workspace_dir = effective_agents_md_workspace_dir(&current_dir, sandbox.as_ref());
-    let agents_md = AgentsMdBundle::load(agents_md_workspace_dir.as_deref())?;
+    let workspace_dir = effective_workspace_dir(&current_dir, sandbox.as_ref());
+    let agents_md = AgentsMdBundle::load(workspace_dir.as_deref())?;
+    let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref())?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -138,7 +140,7 @@ async fn build_resume_config_from_snapshot(
             working_directory: working_directory.clone(),
             sandbox,
             mcp: None,
-            skills: None,
+            skills,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: worker_thread_timeout_secs(config),

@@ -295,7 +295,7 @@ pub(super) fn parse_markdown_link(
     is_image: bool,
     base_style: Style,
 ) -> Option<(usize, Vec<Span<'static>>)> {
-    let bracket_start = if is_image { start } else { start };
+    let bracket_start = start;
     if chars.get(bracket_start)? != &'[' {
         return None;
     }

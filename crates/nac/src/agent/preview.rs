@@ -51,15 +51,6 @@ pub(super) fn preview_tool_args(name: &str, args_str: &str) -> String {
                 return preview(&format!("{thread_name}: {action}"), 120);
             }
         }
-        "activate_skill" => {
-            if let Some(skill) = parsed
-                .as_ref()
-                .and_then(|value| value.get("name"))
-                .and_then(|value| value.as_str())
-            {
-                return preview(skill, 120);
-            }
-        }
         _ => {}
     }
 

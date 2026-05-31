@@ -108,7 +108,6 @@ mod tests {
             sandbox: None,
             mcp: None,
             skills: None,
-            activated_skills: Arc::new(Mutex::new(HashSet::new())),
             terminal_manager: crate::terminal::TerminalManager::new(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
         }

@@ -19,6 +19,7 @@ pub mod thread;
 pub mod workset;
 pub mod write;
 
+#[derive(Debug)]
 pub struct ToolResult {
     pub content: String,
     pub is_error: bool,
@@ -33,7 +34,6 @@ pub struct ToolRuntime {
     pub sandbox: Option<SandboxSession>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
-    pub activated_skills: Arc<Mutex<HashSet<String>>>,
     pub terminal_manager: TerminalManager,
     pub thread_timeout_secs: u64,
 }
@@ -94,9 +94,9 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
     tools
 }
 
-pub fn orchestrator_tool_definitions() -> Vec<ToolDefinition> {
+pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
     vec![
-        thread::dispatch_definition(),
+        thread::dispatch_definition(skills),
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
@@ -170,7 +170,6 @@ pub async fn execute_tool(
     }
 
     match name {
-        "activate_skill" => crate::skills::execute_activate_skill(args, runtime).await,
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,

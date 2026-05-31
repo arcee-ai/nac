@@ -53,6 +53,16 @@ pub struct Agent {
     thread_name: Option<String>,
 }
 
+fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
+    if extra.is_empty() {
+        return;
+    }
+    if let Some(Message::System { content }) = messages.first_mut() {
+        content.push_str("\n\n");
+        content.push_str(extra);
+    }
+}
+
 impl Agent {
     pub fn new(client: ModelClient) -> Self {
         Self::default(client)
@@ -136,11 +146,12 @@ impl Agent {
                      baseline thread before implementation.\n\
                      Prefer stable thread roles when useful, such as setup, impl/<topic>, and verify/<topic>.\n\
                      Threads do not share full live context with each other. When you dispatch \
-                     thread(name, action, threads?, timeout?), the worker for name receives that thread's own retained \
+                     thread(name, action, threads?, skills?, timeout?), the worker for name receives that thread's own retained \
                      history, and if you provide threads, it also receives the latest retained episode from \
                      each named source thread as input for that dispatch. The worker's final response becomes \
                      the next retained episode for name. The default thread timeout is {} seconds, with \
                      a minimum of 1800 seconds; pass timeout only when a dispatch genuinely needs a different limit.\n\
+                     If available worker skills clearly match a dispatch, pass skills with the selected skill names; workers receive those instructions before starting and cannot activate skills themselves later.\n\
                      Use this mechanism deliberately. Dispatch work so that important setup, implementation, \
                      and verification threads end by producing a high-signal retained episode that another \
                      thread can act on directly. Avoid dispatches that leave behind weak episodes and force \
@@ -167,7 +178,7 @@ impl Agent {
                      asks for them.\n\
                      You may dispatch independent threads in parallel when useful.\n\n\
                      Your tools:\n\
-                     - thread(name, action, threads?, timeout?)\n\
+                     - thread(name, action, threads?, skills?, timeout?)\n\
                      - threads()\n\
                      - thread_read(name)\n\
                      - thread_delete(name)\n\
@@ -177,21 +188,10 @@ impl Agent {
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",
                     cwd, thread_timeout_secs
                 ),
-                tools::orchestrator_tool_definitions(),
+                tools::orchestrator_tool_definitions(config.skills.as_deref()),
             ),
         };
-        let skills_catalog_message = if config.mode == AgentMode::Worker {
-            config
-                .skills
-                .as_ref()
-                .and_then(|registry| registry.catalog_message())
-        } else {
-            None
-        };
         if config.mode == AgentMode::Worker {
-            if let Some(skills) = &config.skills {
-                tool_defs.push(skills.tool_definition());
-            }
             tool_defs.extend(config.extra_tool_defs);
         }
 
@@ -199,16 +199,26 @@ impl Agent {
             content: system_prompt,
         }];
         if let Some(agents_md_message) = config.agents_md_message {
-            messages.push(Message::System {
-                content: agents_md_message,
-            });
+            if config.mode == AgentMode::Worker {
+                append_to_initial_system_message(&mut messages, &agents_md_message);
+            } else {
+                messages.push(Message::System {
+                    content: agents_md_message,
+                });
+            }
         }
-        if let Some(skills_catalog_message) = skills_catalog_message {
-            messages.push(Message::System {
-                content: skills_catalog_message,
-            });
+        if config.mode == AgentMode::Worker {
+            for message in config.initial_messages {
+                match message {
+                    Message::System { content } => {
+                        append_to_initial_system_message(&mut messages, &content);
+                    }
+                    other => messages.push(other),
+                }
+            }
+        } else {
+            messages.extend(config.initial_messages);
         }
-        messages.extend(config.initial_messages);
 
         Self {
             client,
@@ -222,7 +232,6 @@ impl Agent {
                 sandbox: config.sandbox,
                 mcp: config.mcp,
                 skills: config.skills,
-                activated_skills: Arc::new(Mutex::new(HashSet::new())),
                 terminal_manager: crate::terminal::TerminalManager::new(),
                 thread_timeout_secs: config.thread_timeout_secs,
             },
@@ -410,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_surfaces_skills_but_orchestrator_does_not() {
+    fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
         let client = ModelClient::new_for_test();
         let registry = Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
             crate::skills::SkillRecord {
@@ -420,64 +429,57 @@ mod tests {
                 skill_md_path: PathBuf::from("/tmp/lint/SKILL.md"),
                 skill_root_host: PathBuf::from("/tmp/lint"),
                 skill_root_visible: PathBuf::from("/tmp/lint"),
-                body: "body".to_string(),
+                body: "lint body".to_string(),
                 resources: Vec::new(),
             },
         ]));
+        let build_agent = |mode, skills| {
+            Agent::with_config(
+                client.clone(),
+                AgentConfig {
+                    mode,
+                    store_path: crate::store::default_store_path(),
+                    session_id: None,
+                    initial_messages: Vec::new(),
+                    thread_name: None,
+                    event_sink: EventSink::none(),
+                    working_directory: ".".to_string(),
+                    sandbox: None,
+                    mcp: None,
+                    skills,
+                    extra_tool_defs: Vec::new(),
+                    agents_md_message: None,
+                    thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                },
+            )
+        };
 
-        let worker = Agent::with_config(
-            client.clone(),
-            AgentConfig {
-                mode: AgentMode::Worker,
-                store_path: crate::store::default_store_path(),
-                session_id: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                event_sink: EventSink::none(),
-                working_directory: ".".to_string(),
-                sandbox: None,
-                mcp: None,
-                skills: Some(registry.clone()),
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            },
-        );
-        assert!(worker
+        let worker = build_agent(AgentMode::Worker, Some(registry.clone()));
+        assert!(!worker
             .tool_defs
             .iter()
             .any(|definition| definition.function.name == "activate_skill"));
-        assert!(worker.messages.iter().any(|message| match message {
+        assert!(!worker.messages.iter().any(|message| match message {
             Message::System { content } => content.contains("<available_skills>"),
             _ => false,
         }));
 
-        let orchestrator = Agent::with_config(
-            client,
-            AgentConfig {
-                mode: AgentMode::Orchestrator,
-                store_path: crate::store::default_store_path(),
-                session_id: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                event_sink: EventSink::none(),
-                working_directory: ".".to_string(),
-                sandbox: None,
-                mcp: None,
-                skills: Some(registry),
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            },
-        );
+        let orchestrator = build_agent(AgentMode::Orchestrator, Some(registry));
         assert!(!orchestrator
             .tool_defs
             .iter()
             .any(|definition| definition.function.name == "activate_skill"));
-        assert!(!orchestrator.messages.iter().any(|message| match message {
-            Message::System { content } => content.contains("<available_skills>"),
-            _ => false,
-        }));
+        let thread_tool = orchestrator
+            .tool_defs
+            .iter()
+            .find(|definition| definition.function.name == "thread")
+            .unwrap();
+        let skills = &thread_tool.function.parameters["properties"]["skills"];
+        assert_eq!(skills["items"]["enum"], serde_json::json!(["lint"]));
+        assert!(skills["description"]
+            .as_str()
+            .unwrap()
+            .contains("workers cannot activate skills themselves"));
     }
 
     #[test]
