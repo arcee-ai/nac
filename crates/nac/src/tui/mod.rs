@@ -67,7 +67,6 @@ const COMPOSER_HEIGHT: u16 = 6;
 const MIN_TERMINAL_WIDTH: u16 = 72;
 const MIN_TERMINAL_HEIGHT: u16 = 22;
 const TIMELINE_LIMIT: usize = 220;
-const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
 const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const VIEW_CHANGE_SCROLL_SUPPRESS: Duration = Duration::from_millis(750);
@@ -1194,13 +1193,36 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_o_still_focuses_tools() {
-        let dir = temp_dir("tools-focus");
+    fn ctrl_o_no_longer_focuses_a_panel() {
+        let dir = temp_dir("tools-focus-removed");
         let mut app = App::new(metadata_for(&dir), &[], false);
 
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert!(matches!(action, AppAction::None));
-        assert!(matches!(app.screen, ScreenMode::Focused(FocusPanel::Tools)));
+        assert_eq!(app.screen, ScreenMode::Dashboard);
+        assert!(app.prompt().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dashboard_and_help_do_not_show_tools_panel_or_shortcut() {
+        let dir = temp_dir("tools-panel-removed");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let dashboard = rendered_symbols(&terminal);
+        assert!(!dashboard.contains("TOOLS"));
+        assert!(!dashboard.contains("Ctrl-O"));
+
+        app.help_visible = true;
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let help = rendered_symbols(&terminal);
+        assert!(!help.contains("TOOLS"));
+        assert!(!help.contains("Ctrl-O"));
+        assert!(!help.contains("focus tools"));
+        assert!(help.contains("Ctrl-W / Ctrl-K"));
+
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1276,7 +1298,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_finishes_into_recent_history() {
+    fn tool_events_update_timeline_and_clear_context() {
         let dir = temp_dir("tool");
         let mut app = App::new(metadata_for(&dir), &[], false);
 
@@ -1287,6 +1309,10 @@ mod tests {
             args_preview: "crates/nac/src/tui.rs".to_string(),
             args_detail: None,
         });
+        let context = app.tool_event_contexts.get("call-1").unwrap();
+        assert_eq!(context.name, "edit");
+        assert_eq!(context.target, "crates/nac/src/tui.rs");
+
         app.apply_agent_event(AgentEvent::ToolCallFinished {
             thread_name: Some("coder-1".to_string()),
             call_id: "call-1".to_string(),
@@ -1295,10 +1321,15 @@ mod tests {
             is_error: false,
         });
 
-        assert!(app.active_tools.is_empty());
-        assert_eq!(app.recent_tools.len(), 1);
-        assert_eq!(app.recent_tools[0].name, "edit");
-        assert_eq!(app.recent_tools[0].status, ToolStatus::Ok);
+        assert!(app.tool_event_contexts.is_empty());
+        let entries = app.timeline.iter().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].actor, "coder-1");
+        assert_eq!(entries[0].detail, "edit • crates/nac/src/tui.rs");
+        assert_eq!(entries[0].tone, Tone::Info);
+        assert_eq!(entries[1].actor, "coder-1");
+        assert_eq!(entries[1].detail, "edit • crates/nac/src/tui.rs • ok");
+        assert_eq!(entries[1].tone, Tone::Success);
         let _ = std::fs::remove_dir_all(dir);
     }
 

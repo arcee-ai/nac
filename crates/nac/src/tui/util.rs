@@ -1,16 +1,13 @@
 use super::*;
 
-pub(super) fn classify_tool_status(is_error: bool, preview: &str) -> ToolStatus {
+pub(super) fn tool_finish_tone(is_error: bool, preview: &str) -> Tone {
     if is_error {
-        return ToolStatus::Error;
+        return Tone::Error;
     }
-    if preview.starts_with("Command timed out after") {
-        return ToolStatus::TimedOut;
+    if preview.starts_with("Command timed out after") || preview.starts_with("Exit code:") {
+        return Tone::Warning;
     }
-    if preview.starts_with("Exit code:") {
-        return ToolStatus::Failed;
-    }
-    ToolStatus::Ok
+    Tone::Success
 }
 
 pub(super) fn panel_is_selectable(panel: PanelId) -> bool {
@@ -35,25 +32,6 @@ pub(super) fn status_span(label: &str, tone: Tone) -> Span<'static> {
             .fg(tone.color())
             .add_modifier(Modifier::BOLD),
     )
-}
-
-pub(super) fn tool_label(thread_name: Option<&str>, tool_name: &str) -> String {
-    match thread_name {
-        Some(thread_name) => format!("{thread_name}/{tool_name}"),
-        None => tool_name.to_string(),
-    }
-}
-
-pub(super) fn format_duration(duration: Duration) -> String {
-    if duration.as_secs() >= 60 {
-        let minutes = duration.as_secs() / 60;
-        let seconds = duration.as_secs() % 60;
-        format!("{minutes}m{seconds:02}s")
-    } else if duration.as_secs() > 0 {
-        format!("{:.1}s", duration.as_secs_f64())
-    } else {
-        format!("{}ms", duration.as_millis())
-    }
 }
 
 pub(super) fn format_runtime(duration: Duration) -> String {

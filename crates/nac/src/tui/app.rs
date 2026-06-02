@@ -19,8 +19,7 @@ pub(super) struct App {
     pub(super) episode_markdown_cache: HashMap<String, Vec<Line<'static>>>,
     pub(super) response_markdown_cache: Option<(usize, String, usize, Vec<Line<'static>>)>,
     pub(super) selected_thread: Option<String>,
-    pub(super) active_tools: HashMap<String, ActiveTool>,
-    pub(super) recent_tools: VecDeque<ToolRecord>,
+    pub(super) tool_event_contexts: HashMap<String, ToolEventContext>,
     pub(super) workspace: WorkspaceSnapshot,
     pub(super) worksets: WorksetSnapshot,
     pub(super) last_workspace_refresh_at: Instant,
@@ -54,7 +53,6 @@ impl App {
         panel_scrolls.insert(PanelId::Threads, 0);
         panel_scrolls.insert(PanelId::Response, 0);
         panel_scrolls.insert(PanelId::Workspace, 0);
-        panel_scrolls.insert(PanelId::Tools, 0);
         panel_scrolls.insert(PanelId::Worksets, 0);
         panel_scrolls.insert(PanelId::ThreadList, 0);
         panel_scrolls.insert(PanelId::ThreadEpisodes, 0);
@@ -78,8 +76,7 @@ impl App {
             episode_markdown_cache: HashMap::new(),
             response_markdown_cache: None,
             selected_thread: None,
-            active_tools: HashMap::new(),
-            recent_tools: VecDeque::new(),
+            tool_event_contexts: HashMap::new(),
             workspace,
             worksets,
             last_workspace_refresh_at: Instant::now(),
@@ -269,14 +266,6 @@ impl App {
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_focus_panel(FocusPanel::Threads);
-                AppAction::None
-            }
-            KeyEvent {
-                code: KeyCode::Char('o'),
-                modifiers,
-                ..
-            } if modifiers.contains(KeyModifiers::CONTROL) => {
-                self.toggle_focus_panel(FocusPanel::Tools);
                 AppAction::None
             }
             KeyEvent {
@@ -720,7 +709,6 @@ impl App {
             ScreenMode::Focused(FocusPanel::Prompt) => PanelId::Prompt,
             ScreenMode::Focused(FocusPanel::Events) => PanelId::Events,
             ScreenMode::Focused(FocusPanel::Threads) => PanelId::ThreadEpisodes,
-            ScreenMode::Focused(FocusPanel::Tools) => PanelId::Tools,
             ScreenMode::Focused(FocusPanel::Workspace) => PanelId::Workspace,
             ScreenMode::Focused(FocusPanel::Worksets) => PanelId::Worksets,
             _ => PanelId::Response,
@@ -931,13 +919,12 @@ impl App {
                     return;
                 }
 
-                self.active_tools.insert(
+                self.tool_event_contexts.insert(
                     call_id,
-                    ActiveTool {
+                    ToolEventContext {
                         thread_name: thread_name.clone(),
                         name: name.clone(),
                         target: args_preview.clone(),
-                        started_at: Instant::now(),
                     },
                 );
                 let actor = thread_name.unwrap_or_else(|| "orchestrator".to_string());
@@ -954,53 +941,40 @@ impl App {
                     return;
                 }
 
+                let context = self.tool_event_contexts.remove(&call_id);
                 let actor = thread_name
                     .clone()
+                    .or_else(|| context.as_ref().and_then(|tool| tool.thread_name.clone()))
                     .unwrap_or_else(|| "orchestrator".to_string());
-                let active = self.active_tools.remove(&call_id);
-                let duration = active
+                let tool_name = context
                     .as_ref()
-                    .map(|tool| tool.started_at.elapsed())
-                    .unwrap_or_default();
-                let target = active
+                    .map(|tool| tool.name.clone())
+                    .unwrap_or(name);
+                let target = context
                     .as_ref()
                     .map(|tool| tool.target.clone())
                     .unwrap_or_default();
-                let status = classify_tool_status(is_error, &content_preview);
-                let record = ToolRecord {
-                    thread_name: active
-                        .as_ref()
-                        .and_then(|tool| tool.thread_name.clone())
-                        .or(thread_name.clone()),
-                    name: active
-                        .as_ref()
-                        .map(|tool| tool.name.clone())
-                        .unwrap_or_else(|| name.clone()),
-                    target: target.clone(),
-                    status,
-                    duration,
-                    summary: content_preview.clone(),
-                };
-                self.recent_tools.push_front(record.clone());
-                while self.recent_tools.len() > TOOL_HISTORY_LIMIT {
-                    self.recent_tools.pop_back();
-                }
 
-                if matches!(record.name.as_str(), "write" | "edit" | "exec_command")
-                    || matches!(record.status, ToolStatus::Failed | ToolStatus::Error)
+                if matches!(tool_name.as_str(), "write" | "edit" | "exec_command")
+                    || is_error
+                    || content_preview.starts_with("Exit code:")
                 {
                     self.request_workspace_refresh();
                 }
-                if record.name.starts_with("workset_") {
+                if tool_name.starts_with("workset_") {
                     self.refresh_worksets();
                 }
 
                 let detail = if target.is_empty() {
-                    record.summary.clone()
+                    content_preview.clone()
                 } else {
-                    format!("{target} • {}", record.summary)
+                    format!("{target} • {content_preview}")
                 };
-                self.push_timeline(actor, format!("{name} • {detail}"), status.tone());
+                self.push_timeline(
+                    actor,
+                    format!("{tool_name} • {detail}"),
+                    tool_finish_tone(is_error, &content_preview),
+                );
             }
             AgentEvent::ThreadStarted {
                 name,
@@ -1377,7 +1351,6 @@ impl App {
                 FocusPanel::Events => self.render_focused_events(frame, sections[1]),
                 FocusPanel::Response => self.render_focused_response(frame, sections[1]),
                 FocusPanel::Threads => self.render_focused_threads(frame, sections[1]),
-                FocusPanel::Tools => self.render_focused_tools(frame, sections[1]),
                 FocusPanel::Workspace => self.render_focused_workspace(frame, sections[1]),
                 FocusPanel::Worksets => self.render_focused_worksets(frame, sections[1]),
             }
@@ -1440,10 +1413,6 @@ impl App {
 
     pub(super) fn render_focused_response(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         self.render_responses_panel(frame, area);
-    }
-
-    pub(super) fn render_focused_tools(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        self.render_tools_panel(frame, area);
     }
 
     pub(super) fn render_focused_workspace(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1802,16 +1771,11 @@ impl App {
     pub(super) fn render_right_column(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(7),
-                Constraint::Min(8),
-                Constraint::Length(9),
-            ])
+            .constraints([Constraint::Min(8), Constraint::Length(9)])
             .split(area);
 
-        self.render_tools_panel(frame, sections[0]);
-        self.render_worksets_panel(frame, sections[1]);
-        self.render_file_changes_panel(frame, sections[2]);
+        self.render_worksets_panel(frame, sections[0]);
+        self.render_file_changes_panel(frame, sections[1]);
     }
 
     pub(super) fn prompt_panel_title(&self) -> Line<'static> {
@@ -1940,13 +1904,13 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "Ctrl-O / Ctrl-W / Ctrl-K",
+                    "Ctrl-W / Ctrl-K",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    " focus tools / workspace / worksets",
+                    " focus workspace / worksets",
                     Style::default().fg(Color::White),
                 ),
             ]),
@@ -2407,82 +2371,6 @@ impl App {
             Span::raw(" "),
             Span::styled("●".to_string(), Style::default().fg(dot_color)),
         ])
-    }
-
-    pub(super) fn render_tools_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let width = inner_width(area);
-        let tool_width = width.min(14).max(9);
-        let stat_width = 5usize;
-        let duration_width = 8usize;
-        let target_width = width
-            .saturating_sub(tool_width + stat_width + duration_width + 3) // 3 = three 1-space gaps
-            .max(8);
-        let mut lines = vec![header_line(
-            &[
-                ("STAT", 5),
-                ("TOOL", tool_width),
-                ("TARGET", target_width),
-                ("TIME", duration_width),
-            ],
-            width,
-        )];
-
-        let mut active: Vec<&ActiveTool> = self.active_tools.values().collect();
-        active.sort_by(|left, right| left.name.cmp(&right.name));
-        for tool in active {
-            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
-            let stat_label = ToolStatus::Running.label();
-            lines.push(Line::from(vec![
-                status_span(stat_label, ToolStatus::Running.tone()),
-                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
-                Span::raw(" "),
-                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(&fit_text(&tool.target, target_width), target_width),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(&format_duration(tool.started_at.elapsed()), duration_width),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]));
-        }
-
-        for tool in self
-            .recent_tools
-            .iter()
-            .take(area.height.saturating_sub(2) as usize)
-        {
-            let label = tool_label(tool.thread_name.as_deref(), &tool.name);
-            let stat_label = tool.status.label();
-            lines.push(Line::from(vec![
-                status_span(stat_label, tool.status.tone()),
-                Span::raw(pad_to("", stat_width.saturating_sub(stat_label.len()))),
-                Span::raw(" "),
-                Span::raw(pad_cell(&fit_text(&label, tool_width), tool_width)),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(&fit_text(&tool.target, target_width), target_width),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    pad_cell(&format_duration(tool.duration), duration_width),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]));
-        }
-
-        if lines.len() == 1 {
-            lines.push(Line::from(Span::styled(
-                "No tool activity yet.",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        self.render_scrollable_lines_panel(frame, area, PanelId::Tools, "TOOLS", lines);
     }
 
     pub(super) fn render_worksets_panel(&mut self, frame: &mut ratatui::Frame, area: Rect) {

@@ -43,37 +43,6 @@ impl ThreadState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ToolStatus {
-    Running,
-    Ok,
-    Failed,
-    Error,
-    TimedOut,
-}
-
-impl ToolStatus {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Running => "RUN",
-            Self::Ok => "OK",
-            Self::Failed => "FAIL",
-            Self::Error => "ERR",
-            Self::TimedOut => "TIME",
-        }
-    }
-
-    pub(super) fn tone(self) -> Tone {
-        match self {
-            Self::Running => Tone::Info,
-            Self::Ok => Tone::Success,
-            Self::Failed => Tone::Warning,
-            Self::Error => Tone::Error,
-            Self::TimedOut => Tone::Warning,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum PanelId {
     Prompt,
@@ -81,7 +50,6 @@ pub(super) enum PanelId {
     Threads,
     Response,
     Workspace,
-    Tools,
     Worksets,
     ThreadList,
     ThreadEpisodes,
@@ -113,21 +81,10 @@ pub(super) struct ThreadView {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ActiveTool {
+pub(super) struct ToolEventContext {
     pub(super) thread_name: Option<String>,
     pub(super) name: String,
     pub(super) target: String,
-    pub(super) started_at: Instant,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ToolRecord {
-    pub(super) thread_name: Option<String>,
-    pub(super) name: String,
-    pub(super) target: String,
-    pub(super) status: ToolStatus,
-    pub(super) duration: Duration,
-    pub(super) summary: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -348,7 +305,6 @@ pub(super) enum FocusPanel {
     Events,
     Response,
     Threads,
-    Tools,
     Workspace,
     Worksets,
 }
