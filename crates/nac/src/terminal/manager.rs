@@ -178,6 +178,7 @@ impl TerminalManager {
         })
     }
 
+    #[cfg(test)]
     pub async fn remove(&self, name: &str) -> Result<()> {
         let session = {
             let mut sessions = self.sessions.lock().await;
@@ -197,17 +198,6 @@ impl TerminalManager {
         for mut session in sessions {
             let _ = session.kill().await;
         }
-    }
-
-    pub async fn list(&self) -> Vec<TerminalInfo> {
-        let mut sessions = self.sessions.lock().await;
-        sessions
-            .iter_mut()
-            .map(|(name, s)| {
-                s.refresh_status();
-                self.session_info(name, s)
-            })
-            .collect()
     }
 
     pub async fn get(&self, name: &str) -> Option<TerminalInfo> {

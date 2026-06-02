@@ -67,11 +67,6 @@ pub struct ClientOverrides {
     pub api_key_env: Option<String>,
 }
 
-pub struct TextCompletion {
-    pub content: String,
-    pub usage: Usage,
-}
-
 #[derive(Debug, Clone)]
 pub struct AssistantTurn {
     pub content: Option<String>,
@@ -84,5 +79,4 @@ pub struct AssistantTurn {
 pub struct ModelTurnResponse {
     pub assistant: AssistantTurn,
     pub finish_reason: Option<String>,
-    pub usage: Usage,
 }

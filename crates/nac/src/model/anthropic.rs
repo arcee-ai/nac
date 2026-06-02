@@ -264,27 +264,5 @@ pub(super) fn parse_anthropic_messages_response(
             },
         },
         finish_reason,
-        usage: parse_anthropic_usage(value.get("usage")),
     })
-}
-
-fn parse_anthropic_usage(value: Option<&Value>) -> Usage {
-    let prompt_tokens = value
-        .and_then(|usage| usage.get("input_tokens"))
-        .and_then(Value::as_u64)
-        .map(|value| value as u32);
-    let completion_tokens = value
-        .and_then(|usage| usage.get("output_tokens"))
-        .and_then(Value::as_u64)
-        .map(|value| value as u32);
-    let total_tokens = prompt_tokens
-        .zip(completion_tokens)
-        .map(|(prompt, completion)| prompt + completion);
-
-    Usage {
-        prompt_tokens,
-        completion_tokens,
-        total_tokens,
-        reasoning_tokens: None,
-    }
 }

@@ -208,10 +208,6 @@ impl McpRegistry {
             },
         }
     }
-
-    pub fn has_tool(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
-    }
 }
 
 impl ClientHandler for NacMcpClientHandler {

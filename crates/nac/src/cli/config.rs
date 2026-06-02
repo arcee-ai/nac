@@ -3,8 +3,6 @@ use super::*;
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(super) struct NacConfig {
     #[serde(default)]
-    pub(super) ui: UiConfig,
-    #[serde(default)]
     pub(super) storage: StorageConfig,
     #[serde(default)]
     pub(super) model: ModelConfig,
@@ -12,18 +10,6 @@ pub(super) struct NacConfig {
     pub(super) sandbox: SandboxConfig,
     #[serde(default)]
     pub(super) worker: WorkerConfig,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(super) struct UiConfig {
-    pub(super) mode: Option<UiModeConfig>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum UiModeConfig {
-    Full,
-    Compact,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -124,7 +110,6 @@ pub(super) enum RunState {
     Orchestrator {
         run_config: OrchestratorRunConfig,
         start_in_session_picker: bool,
-        ui_mode: tui::UiMode,
     },
     ManagedWorker(ManagedWorkerRunConfig),
 }

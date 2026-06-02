@@ -85,10 +85,6 @@ impl PodmanSession {
         &self.spec
     }
 
-    pub(crate) fn container_name(&self) -> &str {
-        &self.container_name
-    }
-
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
         let exists = self.container_exists().await?;
         if !exists {

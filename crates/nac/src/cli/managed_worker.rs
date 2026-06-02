@@ -96,8 +96,6 @@ mod tests {
             name: "code-review".to_string(),
             description: "Review code quality".to_string(),
             compatibility: None,
-            skill_md_path: PathBuf::from("/tmp/code-review/SKILL.md"),
-            skill_root_host: PathBuf::from("/tmp/code-review"),
             skill_root_visible: PathBuf::from("/tmp/code-review"),
             body: "Review body instructions.".to_string(),
             resources: Vec::new(),

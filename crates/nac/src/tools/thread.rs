@@ -700,8 +700,6 @@ mod tests {
             name: name.to_string(),
             description: description.to_string(),
             compatibility: compatibility.map(str::to_string),
-            skill_md_path: std::path::PathBuf::from(format!("/tmp/{name}/SKILL.md")),
-            skill_root_host: std::path::PathBuf::from(format!("/tmp/{name}")),
             skill_root_visible: std::path::PathBuf::from(format!("/tmp/{name}")),
             body: format!("{name} body"),
             resources: Vec::new(),

@@ -45,6 +45,5 @@ pub(super) fn parse_chat_completions_response(
             .get("finish_reason")
             .and_then(Value::as_str)
             .map(ToString::to_string),
-        usage: parse_chat_usage(value.get("usage")),
     })
 }

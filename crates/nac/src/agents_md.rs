@@ -88,6 +88,7 @@ impl AgentsMdBundle {
         Some(render_system_message(&self.files))
     }
 
+    #[cfg(test)]
     pub fn files(&self) -> &[AgentsMdFile] {
         &self.files
     }

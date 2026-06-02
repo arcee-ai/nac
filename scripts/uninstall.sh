@@ -10,8 +10,3 @@ if [ -f "$BIN_PATH" ]; then
 else
   echo "nac is not installed at $BIN_PATH"
 fi
-
-if [ "${1:-}" = "--purge-data" ]; then
-  rm -rf "$HOME/.nac"
-  echo "removed $HOME/.nac"
-fi

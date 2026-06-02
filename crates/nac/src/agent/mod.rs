@@ -17,6 +17,9 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 mod preview;
 mod tool_exec;
 
+#[cfg(test)]
+mod live_tests;
+
 use preview::*;
 use tool_exec::execute_tools_parallel;
 
@@ -64,10 +67,6 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 }
 
 impl Agent {
-    pub fn new(client: ModelClient) -> Self {
-        Self::default(client)
-    }
-
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Self {
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
@@ -240,6 +239,7 @@ impl Agent {
         }
     }
 
+    #[cfg(test)]
     pub fn default(client: ModelClient) -> Self {
         Self::with_config(
             client,
@@ -426,8 +426,6 @@ mod tests {
                 name: "lint".to_string(),
                 description: "Run linting workflows.".to_string(),
                 compatibility: None,
-                skill_md_path: PathBuf::from("/tmp/lint/SKILL.md"),
-                skill_root_host: PathBuf::from("/tmp/lint"),
                 skill_root_visible: PathBuf::from("/tmp/lint"),
                 body: "lint body".to_string(),
                 resources: Vec::new(),

@@ -11,6 +11,7 @@ pub struct ModelClient {
 }
 
 impl ModelClient {
+    #[cfg(test)]
     pub fn from_env() -> Result<Self> {
         Self::from_env_with_overrides(ClientOverrides::default())
     }
@@ -70,32 +71,6 @@ impl ModelClient {
                 .await
             }
         }
-    }
-
-    pub async fn complete_text(
-        &self,
-        system_prompt: &str,
-        user_prompt: &str,
-    ) -> Result<TextCompletion> {
-        let messages = vec![
-            Message::System {
-                content: system_prompt.to_string(),
-            },
-            Message::User {
-                content: user_prompt.to_string(),
-            },
-        ];
-
-        let response = self.send_turn(messages, Vec::new()).await?;
-        let content = response
-            .assistant
-            .content
-            .ok_or_else(|| anyhow!("Text completion returned no text content"))?;
-
-        Ok(TextCompletion {
-            content,
-            usage: response.usage,
-        })
     }
 
     pub fn base_url(&self) -> &str {

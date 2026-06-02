@@ -1,10 +1,11 @@
-use nac::{agent::Agent, model::ModelClient};
+use super::Agent;
+use crate::model::ModelClient;
 
 #[tokio::test]
 #[ignore = "requires OPENAI_API_KEY"]
 async fn test_simple_prompt() {
     let client = ModelClient::from_env().expect("Need OPENAI_API_KEY");
-    let mut agent = Agent::new(client);
+    let mut agent = Agent::default(client);
     let result = agent.send("What is 2+2? Reply with just the number.").await;
 
     assert!(result.is_ok(), "Agent failed: {:?}", result.err());
@@ -27,7 +28,7 @@ async fn test_tool_usage() {
     std::fs::write(&path, "hello from test file").expect("failed to create temp file");
 
     let client = ModelClient::from_env().expect("Need OPENAI_API_KEY");
-    let mut agent = Agent::new(client);
+    let mut agent = Agent::default(client);
     let result = agent
         .send(&format!(
             "Read the file {} and tell me what it says",

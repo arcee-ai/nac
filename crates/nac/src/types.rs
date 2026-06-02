@@ -70,14 +70,6 @@ pub struct FunctionDef {
     pub parameters: Value,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct Usage {
-    pub prompt_tokens: Option<u32>,
-    pub completion_tokens: Option<u32>,
-    pub total_tokens: Option<u32>,
-    pub reasoning_tokens: Option<u32>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

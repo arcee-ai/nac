@@ -103,7 +103,6 @@ pub(super) fn parse_openai_responses_response(
             },
         },
         finish_reason,
-        usage: parse_responses_usage(value.get("usage")),
     })
 }
 

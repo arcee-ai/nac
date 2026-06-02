@@ -85,7 +85,6 @@ pub(super) enum PanelId {
     Worksets,
     ThreadList,
     ThreadEpisodes,
-    CompactStream,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

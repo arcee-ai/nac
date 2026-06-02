@@ -37,8 +37,6 @@ impl SkillRegistry {
                     name: parsed.name.clone(),
                     description: parsed.description,
                     compatibility: parsed.compatibility,
-                    skill_md_path,
-                    skill_root_host: skill_dir.clone(),
                     skill_root_visible,
                     body: parsed.body,
                     resources: list_skill_resources(&skill_dir)?,

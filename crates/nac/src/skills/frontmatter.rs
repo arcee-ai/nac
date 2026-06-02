@@ -5,13 +5,6 @@ pub(super) struct SkillFrontmatter {
     pub(super) name: String,
     pub(super) description: Option<String>,
     pub(super) compatibility: Option<String>,
-    #[allow(dead_code)]
-    license: Option<String>,
-    #[allow(dead_code)]
-    metadata: Option<serde_yaml::Value>,
-    #[allow(dead_code)]
-    #[serde(rename = "allowed-tools")]
-    allowed_tools: Option<serde_yaml::Value>,
 }
 
 pub(super) struct ParsedSkillFile {

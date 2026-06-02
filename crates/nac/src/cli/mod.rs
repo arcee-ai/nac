@@ -21,7 +21,7 @@ use crate::sandbox::{
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillRegistry};
 use crate::store::{self, WorkerContext};
-use crate::tui::{self, TuiMetadata, TuiOutcome, UiMode};
+use crate::tui::{self, TuiMetadata, TuiOutcome};
 use crate::types::Message;
 
 mod args;
@@ -93,7 +93,6 @@ pub async fn run() -> Result<()> {
             RunState::Orchestrator {
                 run_config,
                 start_in_session_picker,
-                ui_mode,
             } => {
                 let store_path = run_config.session.store_path();
                 let session_id = run_config.session.session_id().map(str::to_string);
@@ -106,18 +105,7 @@ pub async fn run() -> Result<()> {
                     workspace_host_path: run_config.workspace_host_path,
                     store_path: store_path.clone(),
                     model: client.model.clone(),
-                    base_url: client.base_url().to_string(),
                     backend: client.backend().as_str().to_string(),
-                    reasoning_effort: if matches!(
-                        client.backend(),
-                        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses
-                    ) {
-                        client
-                            .reasoning_effort()
-                            .map(|effort| effort.as_str().to_string())
-                    } else {
-                        None
-                    },
                     session_id,
                     sandbox_status: run_config.sandbox_status,
                     agents_md_status: run_config.agents_md_status,
@@ -129,7 +117,6 @@ pub async fn run() -> Result<()> {
                     restored_messages,
                     session_snapshot,
                     start_in_session_picker,
-                    ui_mode,
                 )
                 .await?
                 {
@@ -143,7 +130,6 @@ pub async fn run() -> Result<()> {
                             )
                             .await?,
                             start_in_session_picker: false,
-                            ui_mode,
                         };
                         continue;
                     }
@@ -155,33 +141,23 @@ pub async fn run() -> Result<()> {
 
 async fn build_run_state(cli: ParsedCli, config: &NacConfig) -> Result<RunState> {
     match cli {
-        ParsedCli::Run(cli) => {
-            let ui_mode = ui_mode_from_args(&cli.ui, config);
-            Ok(RunState::Orchestrator {
-                run_config: build_run_cli_config(cli, config).await?,
-                start_in_session_picker: false,
-                ui_mode,
-            })
-        }
+        ParsedCli::Run(cli) => Ok(RunState::Orchestrator {
+            run_config: build_run_cli_config(cli, config).await?,
+            start_in_session_picker: false,
+        }),
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
             build_managed_worker_config(cli, config).await?,
         )),
         ParsedCli::Resume(cli) if cli.session_id.is_none() && !cli.last => {
-            let ui_mode = ui_mode_from_args(&cli.ui, config);
             Ok(RunState::Orchestrator {
                 run_config: build_resume_picker_config(cli, config).await?,
                 start_in_session_picker: true,
-                ui_mode,
             })
         }
-        ParsedCli::Resume(cli) => {
-            let ui_mode = ui_mode_from_args(&cli.ui, config);
-            Ok(RunState::Orchestrator {
-                run_config: build_resume_config(cli, config).await?,
-                start_in_session_picker: false,
-                ui_mode,
-            })
-        }
+        ParsedCli::Resume(cli) => Ok(RunState::Orchestrator {
+            run_config: build_resume_config(cli, config).await?,
+            start_in_session_picker: false,
+        }),
         ParsedCli::CodexAuth(_) => unreachable!("codex-auth is handled before loading config"),
         ParsedCli::Upgrade(_) => unreachable!("upgrade is handled before loading config"),
     }
@@ -198,18 +174,6 @@ async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
             println!();
             Ok(())
         }
-    }
-}
-
-fn ui_mode_from_args(ui: &UiArgs, config: &NacConfig) -> UiMode {
-    if ui.compact {
-        UiMode::Compact
-    } else if ui.full {
-        UiMode::Full
-    } else if config.ui.mode == Some(UiModeConfig::Compact) {
-        UiMode::Compact
-    } else {
-        UiMode::Full
     }
 }
 
@@ -533,49 +497,11 @@ mod tests {
         }
     }
 
-    fn default_ui_args() -> UiArgs {
-        UiArgs {
-            compact: false,
-            full: false,
-        }
-    }
-
     fn restore_env(name: &str, value: Option<OsString>) {
         match value {
             Some(value) => unsafe { std::env::set_var(name, value) },
             None => unsafe { std::env::remove_var(name) },
         }
-    }
-
-    #[test]
-    fn ui_config_sets_default_and_cli_overrides() {
-        let mut config = NacConfig::default();
-        config.ui.mode = Some(UiModeConfig::Compact);
-
-        assert_eq!(
-            ui_mode_from_args(&default_ui_args(), &config),
-            UiMode::Compact
-        );
-        assert_eq!(
-            ui_mode_from_args(
-                &UiArgs {
-                    compact: false,
-                    full: true,
-                },
-                &config,
-            ),
-            UiMode::Full
-        );
-        assert_eq!(
-            ui_mode_from_args(
-                &UiArgs {
-                    compact: true,
-                    full: false,
-                },
-                &NacConfig::default(),
-            ),
-            UiMode::Compact
-        );
     }
 
     #[test]
@@ -682,9 +608,6 @@ mod tests {
         std::fs::write(
             root.join("config.toml"),
             r#"
-[ui]
-mode = "compact"
-
 [storage]
 store_path = "custom/store.db"
 
@@ -713,7 +636,6 @@ url = "https://mcp.context7.com/mcp"
         }
 
         let config = NacConfig::load().unwrap();
-        assert_eq!(config.ui.mode, Some(UiModeConfig::Compact));
         assert_eq!(
             config.storage.store_path.as_deref(),
             Some(Path::new("custom/store.db"))
@@ -786,42 +708,6 @@ url = "https://mcp.context7.com/mcp"
             ParsedCli::Resume(resume) => {
                 assert!(resume.session_id.is_none());
                 assert!(!resume.last);
-            }
-            ParsedCli::Run(_)
-            | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_)
-            | ParsedCli::Upgrade(_) => {
-                panic!("expected resume cli")
-            }
-        }
-    }
-
-    #[test]
-    fn parse_compact_flag_uses_run_ui_args() {
-        let parsed = parse_cli_from(vec![OsString::from("nac"), OsString::from("--compact")]);
-        match parsed {
-            ParsedCli::Run(run) => assert!(run.ui.compact),
-            ParsedCli::Resume(_)
-            | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_)
-            | ParsedCli::Upgrade(_) => {
-                panic!("expected run cli")
-            }
-        }
-    }
-
-    #[test]
-    fn parse_resume_compact_flag_uses_resume_ui_args() {
-        let parsed = parse_cli_from(vec![
-            OsString::from("nac"),
-            OsString::from("resume"),
-            OsString::from("--compact"),
-            OsString::from("--last"),
-        ]);
-        match parsed {
-            ParsedCli::Resume(resume) => {
-                assert!(resume.ui.compact);
-                assert!(resume.last);
             }
             ParsedCli::Run(_)
             | ParsedCli::ManagedWorker(_)
@@ -1083,7 +969,6 @@ url = "https://mcp.context7.com/mcp"
                 last: false,
                 directory: Some(session_cwd.clone()),
                 store: StoreArgs { store_path: None },
-                ui: default_ui_args(),
             },
             &NacConfig::default(),
         )

@@ -33,7 +33,6 @@ use tokio::time::{self, MissedTickBehavior};
 
 use crate::agent::Agent;
 use crate::events::{AgentEvent, EventSink};
-use crate::life::LifeField;
 use crate::sessions::{self, SessionSnapshot};
 use crate::store;
 use crate::types::Message;
@@ -67,18 +66,15 @@ use wrap::*;
 const COMPOSER_HEIGHT: u16 = 6;
 const MIN_TERMINAL_WIDTH: u16 = 72;
 const MIN_TERMINAL_HEIGHT: u16 = 22;
-const COMPACT_MIN_TERMINAL_WIDTH: u16 = 40;
-const COMPACT_MIN_TERMINAL_HEIGHT: u16 = 8;
 const TIMELINE_LIMIT: usize = 220;
 const TOOL_HISTORY_LIMIT: usize = 20;
 const FILE_CHANGE_LIMIT: usize = 36;
-const COMPACT_TIMELINE_LIMIT: usize = 24;
 const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const VIEW_CHANGE_SCROLL_SUPPRESS: Duration = Duration::from_millis(750);
 const PROMPT_SEPARATOR: &str = " › ";
 const COMMAND_SEPARATOR: &str = " / ";
 const CONTINUATION_PREFIX: &str = "   ";
-const COMPACT_LABEL_WIDTH: usize = 10;
+const RUNNING_COMPOSER_PLACEHOLDER: &str = "Awaiting orchestrator reply.";
 
 type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -88,18 +84,10 @@ pub struct TuiMetadata {
     pub workspace_host_path: Option<PathBuf>,
     pub store_path: PathBuf,
     pub model: String,
-    pub base_url: String,
     pub backend: String,
-    pub reasoning_effort: Option<String>,
     pub session_id: Option<String>,
     pub sandbox_status: String,
     pub agents_md_status: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiMode {
-    Full,
-    Compact,
 }
 
 #[derive(Debug)]
@@ -153,7 +141,6 @@ pub async fn run(
     restored_messages: Vec<Message>,
     mut session_snapshot: Option<SessionSnapshot>,
     start_in_session_picker: bool,
-    ui_mode: UiMode,
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentEvent>();
@@ -196,12 +183,7 @@ pub async fn run(
             )
         })
         .unwrap_or_default();
-    let mut app = App::new_with_mode(
-        metadata,
-        &restored_messages,
-        start_in_session_picker,
-        ui_mode,
-    );
+    let mut app = App::new(metadata, &restored_messages, start_in_session_picker);
     app.restore_response_duration_history(
         response_duration_history.as_deref(),
         last_response_duration,
@@ -210,8 +192,8 @@ pub async fn run(
     let (ws_tx, ws_rx) = mpsc::channel::<WorkspaceSnapshot>(1);
     app.workspace_tx = Some(ws_tx);
     app.workspace_rx = Some(ws_rx);
-    let mut animation_tick = time::interval(Duration::from_millis(75));
-    animation_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut ui_tick = time::interval(Duration::from_millis(75));
+    ui_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     terminal.draw(|frame| app.render(frame))?;
 
     let mut outcome = TuiOutcome::Exit;
@@ -291,9 +273,7 @@ pub async fn run(
                             .map(|started| started.elapsed())
                             .unwrap_or_default();
                         app.result_rx = None;
-                        app.working_frame = 0;
                         app.working_started_at = None;
-                        app.reset_life();
                         match result {
                             Ok(response) => {
                                 app.complete_top_level_response(response, completed_duration);
@@ -318,11 +298,7 @@ pub async fn run(
                         }
                     }
                 }
-                _ = animation_tick.tick() => {
-                    if app.result_rx.is_some() {
-                        app.working_frame = app.working_frame.wrapping_add(1);
-                        app.advance_life();
-                    }
+                _ = ui_tick.tick() => {
                     app.maybe_refresh_workspace();
                 }
             }
@@ -366,11 +342,8 @@ fn submit_prompt(
 ) -> Result<()> {
     let agent_prompt = expand_user_prompt(&prompt);
     app.note_prompt_submitted(&prompt);
-    app.current_prompt = prompt;
     app.clear_composer();
-    app.working_frame = 0;
     app.working_started_at = Some(Instant::now());
-    app.reset_life();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.result_rx = Some(rx);
@@ -398,6 +371,7 @@ fn build_composer() -> TextArea<'static> {
 mod tests {
     use super::*;
     use crossterm::event::KeyEventState;
+    use ratatui::backend::TestBackend;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -416,9 +390,7 @@ mod tests {
             workspace_host_path: Some(path.to_path_buf()),
             store_path: path.join(".nac").join("store.db"),
             model: "gpt-test".to_string(),
-            base_url: "https://example.com/v1".to_string(),
             backend: "openai-responses".to_string(),
-            reasoning_effort: Some("medium".to_string()),
             session_id: None,
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
@@ -451,6 +423,16 @@ mod tests {
             app.handle_key_event(KeyEvent::new(code, modifiers)),
             AppAction::None
         ));
+    }
+
+    fn rendered_symbols(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
     }
 
     #[test]
@@ -962,6 +944,51 @@ mod tests {
     }
 
     #[test]
+    fn running_composer_renders_static_placeholder_without_life_background() {
+        let dir = temp_dir("running-composer-placeholder");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        app.result_rx = Some(rx);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, COMPOSER_HEIGHT)).unwrap();
+        terminal
+            .draw(|frame| app.render_composer(frame, Rect::new(0, 0, 80, COMPOSER_HEIGHT)))
+            .unwrap();
+
+        let screen = rendered_symbols(&terminal);
+        assert!(screen.contains(RUNNING_COMPOSER_PLACEHOLDER));
+        assert!(!screen
+            .chars()
+            .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch)));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn running_composer_still_ignores_input_and_paste() {
+        let dir = temp_dir("running-composer-input");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("draft");
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        app.result_rx = Some(rx);
+
+        assert!(matches!(app.handle_paste(" pasted"), AppAction::None));
+        assert_eq!(app.prompt(), "draft");
+        assert!(matches!(
+            app.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            AppAction::None
+        ));
+        assert_eq!(app.prompt(), "draft");
+        assert!(matches!(
+            app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppAction::None
+        ));
+        assert_eq!(app.prompt(), "draft");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn prompt_history_focus_navigation_guard_and_reset_to_latest() {
         let dir = temp_dir("prompt-history-nav");
         let mut app = App::new(metadata_for(&dir), &[], false);
@@ -1038,92 +1065,6 @@ mod tests {
         app.screen = ScreenMode::Focused(FocusPanel::Prompt);
 
         assert_eq!(app.primary_scroll_panel(), PanelId::Prompt);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn compact_stream_uses_latest_prompt_from_history() {
-        let dir = temp_dir("compact-stream-latest-prompt");
-        let mut app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
-        app.note_prompt_submitted("first compact prompt");
-        app.note_prompt_submitted("second compact prompt");
-
-        let lines = app.compact_stream_lines(80);
-
-        assert!(line_to_plain_text(&lines[0]).contains("second compact prompt"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn compact_stream_uses_event_glyphs_and_latest_response() {
-        let dir = temp_dir("compact-stream");
-        let mut app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
-        app.note_prompt_submitted("implement compact mode");
-
-        app.apply_agent_event(AgentEvent::ThreadStarted {
-            name: "impl".to_string(),
-            action: "build compact ui".to_string(),
-            source_threads: Vec::new(),
-        });
-        app.complete_top_level_response("Compact mode ready.".to_string(), Duration::from_secs(2));
-
-        let rendered = app
-            .compact_stream_lines(80)
-            .iter()
-            .map(line_to_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(rendered.contains("implement compact mode"));
-        assert!(rendered.contains("+ impl"));
-        assert!(rendered.contains("Compact mode ready."));
-        assert!(!rendered.contains("assistant Compact mode ready."));
-        assert!(!rendered.contains("waiting for first reply"));
-        assert_eq!(app.primary_scroll_panel(), PanelId::CompactStream);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn compact_stream_keeps_full_response_scrollback() {
-        let dir = temp_dir("compact-stream-height");
-        let mut app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
-        app.note_prompt_submitted("implement compact mode with no required vertical scroll");
-        for index in 0..8 {
-            app.push_timeline(
-                format!("thread-{index}"),
-                format!("tool call • detail {index}"),
-                Tone::Info,
-            );
-        }
-        app.complete_top_level_response(
-            "Compact mode ready.\n\nIt still keeps the full response available for scrolling.\n\n- one\n- two\n- three".to_string(),
-            Duration::from_secs(2),
-        );
-
-        let lines = app.compact_stream_lines(48);
-
-        assert!(lines.len() > 4);
-        let rendered = lines
-            .iter()
-            .map(line_to_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(rendered.contains("you"));
-        assert!(rendered.contains("full response available"));
-        assert!(rendered.contains("three"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn compact_mode_allows_phone_height_terminals() {
-        let dir = temp_dir("compact-min-size");
-        let app = App::new_with_mode(metadata_for(&dir), &[], false, UiMode::Compact);
-
-        assert_eq!(
-            app.minimum_terminal_size(),
-            (COMPACT_MIN_TERMINAL_WIDTH, COMPACT_MIN_TERMINAL_HEIGHT)
-        );
-        assert!(COMPACT_MIN_TERMINAL_HEIGHT < MIN_TERMINAL_HEIGHT);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1454,7 +1395,7 @@ mod tests {
             dir.clone(),
             metadata.store_path.clone(),
             metadata.model.clone(),
-            metadata.base_url.clone(),
+            "https://example.com/v1".to_string(),
             crate::model::BackendKind::OpenAiResponses,
             None,
             None,
@@ -1476,7 +1417,7 @@ mod tests {
                 .map(|duration| duration.map(Duration::from_millis))
                 .collect::<Vec<_>>()
         });
-        let mut app = App::new_with_mode(metadata, &loaded.messages, false, UiMode::Full);
+        let mut app = App::new(metadata, &loaded.messages, false);
         app.restore_response_duration_history(
             restored_durations.as_deref(),
             loaded.last_response_duration_ms.map(Duration::from_millis),
@@ -1547,7 +1488,7 @@ mod tests {
             },
         ];
 
-        let mut app = App::new_with_mode(metadata, &messages, false, UiMode::Full);
+        let mut app = App::new(metadata, &messages, false);
         let response_durations = vec![
             Some(Duration::from_secs(1)),
             None,
@@ -1624,7 +1565,7 @@ mod tests {
             },
         ];
 
-        let mut app = App::new_with_mode(metadata, &messages, false, UiMode::Full);
+        let mut app = App::new(metadata, &messages, false);
         app.restore_response_duration_history(
             None,
             Some(Duration::from_secs(9)),

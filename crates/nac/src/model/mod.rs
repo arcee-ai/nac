@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use url::Url;
 
-use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition, Usage};
+use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 mod anthropic;
 mod backend;
@@ -17,7 +17,6 @@ mod client;
 mod requests;
 mod responses;
 mod types;
-mod usage;
 
 pub use backend::detect_backend;
 pub use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
@@ -29,7 +28,6 @@ use backend::*;
 use chat::*;
 use requests::*;
 use responses::*;
-use usage::*;
 
 #[cfg(test)]
 mod tests {
@@ -211,10 +209,6 @@ mod tests {
             Some(json!([thinking.clone(), redacted.clone()]))
         );
         assert_eq!(parsed.finish_reason.as_deref(), Some("tool_use"));
-        assert_eq!(parsed.usage.prompt_tokens, Some(10));
-        assert_eq!(parsed.usage.completion_tokens, Some(20));
-        assert_eq!(parsed.usage.total_tokens, Some(30));
-
         let tool_call = &parsed
             .assistant
             .tool_calls
@@ -377,7 +371,6 @@ mod tests {
             Some("worked through it")
         );
         assert!(parsed.assistant.tool_calls.is_none());
-        assert_eq!(parsed.usage.reasoning_tokens, Some(9));
     }
 
     #[test]
@@ -431,6 +424,5 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(parsed.usage.reasoning_tokens, Some(7));
     }
 }

@@ -37,8 +37,6 @@ pub struct SkillRecord {
     pub name: String,
     pub description: String,
     pub compatibility: Option<String>,
-    pub skill_md_path: PathBuf,
-    pub skill_root_host: PathBuf,
     pub skill_root_visible: PathBuf,
     pub body: String,
     pub resources: Vec<String>,

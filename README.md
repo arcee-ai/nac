@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/instal
 
 Pinned version installs are not supported yet.
 
-Set `OPENAI_API_KEY`, then run `nac`. Use `nac --compact` for the compact single-column TUI, or `nac --full` to override a compact config default.
+Set `OPENAI_API_KEY`, then run `nac`.
 
 To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. Launch with `nac --backend chatgpt-codex-responses`, or configure `backend = "chatgpt-codex-responses"` under `[model]`.
 
@@ -66,9 +66,6 @@ The `api_key_env` setting names the environment variable to read when `OPENAI_AP
 [agents_md]
 fallback_filenames = []
 max_bytes = 4194304
-
-[ui]
-mode = "full"
 
 [storage]
 store_path = ".nac/store.db"
