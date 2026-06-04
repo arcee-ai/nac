@@ -46,7 +46,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build nac
-        run: cargo build --release --locked -p nac --target ${{ matrix.target }}
+        run: cargo build --release --locked -p nac-tui --bin nac --target ${{ matrix.target }}
 
       - name: Package archive
         run: |

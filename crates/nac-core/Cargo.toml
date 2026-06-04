@@ -1,0 +1,26 @@
+[package]
+name = "nac-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nac_core"
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
+portable-pty = "0.8"
+rmcp = { version = "1.3.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+toml = "0.8"
+url = "2"
+serde_yaml_ng = "0.10"

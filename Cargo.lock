@@ -1419,17 +1419,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "nac"
+name = "nac-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arboard",
- "clap",
- "crossterm",
  "libc",
  "portable-pty",
- "ratatui",
- "ratatui-textarea",
  "reqwest",
  "rmcp",
  "rusqlite",
@@ -1440,6 +1435,20 @@ dependencies = [
  "toml",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "nac-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "clap",
+ "crossterm",
+ "nac-core",
+ "ratatui",
+ "ratatui-textarea",
+ "tokio",
 ]
 
 [[package]]

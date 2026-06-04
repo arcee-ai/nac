@@ -1,0 +1,24 @@
+[package]
+name = "nac-tui"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nac_tui"
+
+[[bin]]
+name = "nac"
+path = "src/main.rs"
+
+[dependencies]
+nac-core = { path = "../nac-core" }
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync", "time"] }
+anyhow = "1"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+ratatui = "0.30"
+crossterm = "0.29"
+ratatui-textarea = "0.8"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+nac-core = { path = "../nac-core", features = ["test-support"] }
