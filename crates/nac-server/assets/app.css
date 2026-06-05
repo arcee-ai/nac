@@ -678,7 +678,7 @@ button.session-card {
 }
 
 .prompt-form textarea {
-  min-height: 54px;
+  min-height: 50px;
   max-height: 96px;
   resize: none;
   border: 0;
@@ -688,7 +688,7 @@ button.session-card {
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.45;
-  padding: 8px 10px;
+  padding: 6px 4px;
 }
 
 .prompt-form textarea:focus {
