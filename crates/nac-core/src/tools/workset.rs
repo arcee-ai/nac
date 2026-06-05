@@ -266,34 +266,13 @@ fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, Tool
 
     let mut parsed = Vec::with_capacity(items.len());
     for item in items {
-        let title = match require_item_str(item, "title") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let scope = match require_item_str(item, "scope") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let description = match require_item_str(item, "description") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let role = match require_item_str(item, "role") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let depends_on = match require_string_array(item, "depends_on") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let acceptance = match require_item_str(item, "acceptance") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
-        let notes = match optional_string(item, "notes") {
-            Ok(value) => value,
-            Err(error) => return Err(error),
-        };
+        let title = require_item_str(item, "title")?;
+        let scope = require_item_str(item, "scope")?;
+        let description = require_item_str(item, "description")?;
+        let role = require_item_str(item, "role")?;
+        let depends_on = require_string_array(item, "depends_on")?;
+        let acceptance = require_item_str(item, "acceptance")?;
+        let notes = optional_string(item, "notes")?;
         parsed.push(WorksetItemDefinition {
             title,
             scope,

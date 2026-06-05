@@ -903,7 +903,7 @@ fn visible_response_count(messages: &[Message]) -> usize {
             matches!(
                 message,
                 Message::Assistant { tool_calls, .. }
-                    if tool_calls.as_ref().map_or(true, |tool_calls| tool_calls.is_empty())
+                    if tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
             )
         })
         .count()

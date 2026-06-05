@@ -110,7 +110,7 @@ pub fn codex_auth_logout() -> Result<()> {
 
 pub fn codex_auth_status() -> Result<()> {
     let path = auth_file_path()?;
-    let auth = with_auth_lock(|| read_auth_file_optional())?;
+    let auth = with_auth_lock(read_auth_file_optional)?;
     match auth {
         Some(auth) => {
             println!("Codex auth: signed in");
@@ -728,6 +728,7 @@ impl FileLock {
     fn acquire(path: &Path) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)

@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{sessions, store};
 
+pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
+pub type NumstatSummary = (NumstatPairs, u64, u64);
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionSummarySnapshot {
     pub session_id: String,
@@ -482,10 +485,7 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
     (counts, file_map)
 }
 
-pub fn parse_numstat_pairs(
-    raw: &str,
-    cached_raw: &str,
-) -> (HashMap<String, (Option<u64>, Option<u64>)>, u64, u64) {
+pub fn parse_numstat_pairs(raw: &str, cached_raw: &str) -> NumstatSummary {
     let mut map = HashMap::new();
     let mut total_additions = 0u64;
     let mut total_deletions = 0u64;

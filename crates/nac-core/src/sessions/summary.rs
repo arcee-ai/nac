@@ -9,7 +9,7 @@ pub(super) fn visible_message_count(messages: &[Message]) -> usize {
                 content,
                 tool_calls,
                 ..
-            } => content.is_some() && tool_calls.as_ref().map_or(true, |tc| tc.is_empty()),
+            } => content.is_some() && tool_calls.as_ref().is_none_or(|tc| tc.is_empty()),
             _ => false,
         })
         .count()

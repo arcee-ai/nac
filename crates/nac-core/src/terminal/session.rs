@@ -305,7 +305,7 @@ impl Drop for TerminalSession {
 fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
     #[cfg(target_os = "macos")]
     {
-        return descendant_pids_macos(root);
+        descendant_pids_macos(root)
     }
 
     #[cfg(not(target_os = "macos"))]

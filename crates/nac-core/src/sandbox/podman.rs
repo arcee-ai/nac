@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio as StdStdio;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -431,7 +431,7 @@ fn sanitize_name(input: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn shell_escape_path(path: &PathBuf) -> String {
+fn shell_escape_path(path: &Path) -> String {
     path.display().to_string().replace('\'', "'\"'\"'")
 }
 
@@ -459,6 +459,7 @@ fn should_enable_gpu_access_options() -> bool {
 mod tests {
     use super::*;
     use crate::sandbox::{DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use std::path::PathBuf;
 
     fn sample_session() -> PodmanSession {
         PodmanSession::new(

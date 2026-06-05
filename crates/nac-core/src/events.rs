@@ -390,10 +390,9 @@ fn recent_events_from_state(
         .recent
         .iter()
         .filter(|entry| {
-            after_sequence_id.map_or(true, |sequence_id| entry.envelope.sequence_id > sequence_id)
-                && up_to_sequence_id.map_or(true, |sequence_id| {
-                    entry.envelope.sequence_id <= sequence_id
-                })
+            after_sequence_id.is_none_or(|sequence_id| entry.envelope.sequence_id > sequence_id)
+                && up_to_sequence_id
+                    .is_none_or(|sequence_id| entry.envelope.sequence_id <= sequence_id)
         })
         .map(|entry| entry.envelope.clone())
         .collect();
@@ -456,10 +455,7 @@ impl Write for CountingWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.bytes = self.bytes.saturating_add(buffer.len());
         if self.bytes > self.max_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "serialized event exceeds replay byte cap",
-            ));
+            return Err(io::Error::other("serialized event exceeds replay byte cap"));
         }
         Ok(buffer.len())
     }

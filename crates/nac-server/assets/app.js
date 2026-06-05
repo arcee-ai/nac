@@ -243,7 +243,7 @@ async function submitPrompt(event) {
   const pendingMessage = queuePendingUserMessage(sessionId, prompt);
   el.promptInput.value = "";
   requestChatScrollToBottom();
-  renderInspector();
+  renderAll();
 
   try {
     const result = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt });
@@ -383,6 +383,8 @@ function renderSessionCard(entry) {
   const runState = entry.active_run ? "active" : "idle";
   const tone = entry.active_run ? "" : summary.sandboxed ? "warn" : "";
   const errorish = workspace?.error ? "errorish" : "";
+  const pendingCount = pendingMessages(sessionId).length;
+  const promptPreview = latestPendingUserPrompt(sessionId) || summary.last_user_prompt || "no prompt yet";
   return `
     <article class="session-card ${tone} ${errorish} ${sessionId === state.selectedId ? "selected" : ""}" data-session-id="${escapeAttr(sessionId)}">
       <div class="session-card-head">
@@ -398,11 +400,11 @@ function renderSessionCard(entry) {
         ${summary.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
       </div>
       <div class="telemetry-grid">
-        <div><span>msgs</span><strong>${summary.visible_message_count}</strong></div>
+        <div><span>msgs</span><strong>${summary.visible_message_count + pendingCount}</strong></div>
         <div><span>files</span><strong>${changes}</strong></div>
         <div><span>updated</span><strong>${relativeTime(summary.updated_at)}</strong></div>
       </div>
-      <div class="last-prompt">${escapeHtml(summary.last_user_prompt || "no prompt yet")}</div>
+      <div class="last-prompt">${escapeHtml(promptPreview)}</div>
     </article>`;
 }
 
@@ -602,6 +604,11 @@ function getSessionEvents(sessionId) {
 function pendingMessages(sessionId) {
   if (!sessionId) return [];
   return state.pendingMessagesBySession.get(sessionId) || [];
+}
+
+function latestPendingUserPrompt(sessionId) {
+  const pending = pendingMessages(sessionId);
+  return pending.at(-1)?.content || null;
 }
 
 function queuePendingUserMessage(sessionId, content) {
