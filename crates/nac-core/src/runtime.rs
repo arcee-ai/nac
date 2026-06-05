@@ -307,6 +307,16 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
 }
 
+pub fn resolve_store_path(cwd: &Path, options: StoreOptions, config: &NacConfig) -> PathBuf {
+    absolute_store_path(
+        cwd,
+        options
+            .store_path
+            .or_else(|| config.storage.store_path.clone())
+            .unwrap_or_else(store::default_store_path),
+    )
+}
+
 pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
@@ -335,14 +345,7 @@ pub async fn build_run_config(
     let agents_md_message = agents_md.system_message();
     let agents_md_status = agents_md.status_text();
 
-    let store_path = absolute_store_path(
-        &workspace_cwd,
-        options
-            .store
-            .store_path
-            .or_else(|| config.storage.store_path.clone())
-            .unwrap_or_else(store::default_store_path),
-    );
+    let store_path = resolve_store_path(&workspace_cwd, options.store, config);
     store::initialize(&store_path)?;
     let session_id = Uuid::new_v4().to_string();
     let agent = Agent::with_config(
@@ -409,14 +412,7 @@ pub async fn build_managed_worker_config(
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
     let agents_md_message = agents_md.system_message();
-    let store_path = absolute_store_path(
-        &workspace_cwd,
-        options
-            .store
-            .store_path
-            .or_else(|| config.storage.store_path.clone())
-            .unwrap_or_else(store::default_store_path),
-    );
+    let store_path = resolve_store_path(&workspace_cwd, options.store, config);
     let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &paths).await?;
     let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &paths)?;
     let extra_tool_defs = mcp
@@ -481,14 +477,7 @@ pub async fn build_resume_picker_config(
     let workspace_host_path = Some(lookup_cwd.clone());
     let sandbox_status = "off".to_string();
     let agents_md_status = agents_md.status_text();
-    let store_path = absolute_store_path(
-        &lookup_cwd,
-        options
-            .store
-            .store_path
-            .or_else(|| config.storage.store_path.clone())
-            .unwrap_or_else(store::default_store_path),
-    );
+    let store_path = resolve_store_path(&lookup_cwd, options.store, config);
     store::initialize(&store_path)?;
     let agent = Agent::with_config(
         client.clone(),
@@ -532,14 +521,7 @@ pub async fn build_resume_config(
     }
 
     let lookup_cwd = options.lookup_cwd;
-    let resume_store_path = absolute_store_path(
-        &lookup_cwd,
-        options
-            .store
-            .store_path
-            .or_else(|| config.storage.store_path.clone())
-            .unwrap_or_else(store::default_store_path),
-    );
+    let resume_store_path = resolve_store_path(&lookup_cwd, options.store, config);
 
     let snapshot = match (options.session_id.as_deref(), options.last) {
         (Some(session_id), false) => sessions::load_session(&resume_store_path, session_id)?,

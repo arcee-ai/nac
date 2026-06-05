@@ -27,6 +27,24 @@ Upgrade to the latest `edge` build:
 nac upgrade
 ```
 
+Run the HTTP session server:
+
+```sh
+cargo run -p nac-server -- --bind 127.0.0.1:3210
+```
+
+`nac-server` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
+
+- `GET /health`
+- `GET /store`
+- `GET /sessions`
+- `POST /sessions`
+- `GET /sessions/{session_id}`
+- `POST /sessions/{session_id}/runs`
+- `GET /sessions/{session_id}/events?after_sequence_id=0`
+- `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
+- `POST /sessions/{session_id}/cancel-active-run`
+
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 
 Uninstall:

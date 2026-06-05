@@ -1,0 +1,314 @@
+use std::{
+    ffi::{OsStr, OsString},
+    net::SocketAddr,
+    path::PathBuf,
+    process,
+};
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use nac_core::{
+    model::{BackendKind, ReasoningEffort},
+    runtime::{
+        self, ManagedWorkerOptions, ModelOptions, SandboxOptions, StoreOptions,
+        WorkerDispatchOptions,
+    },
+};
+use nac_server::{serve, ServerOptions, SessionManager};
+
+#[derive(Parser)]
+#[command(name = "nac-server", about = "HTTP server for managing nac sessions")]
+struct ServerCli {
+    /// Address to bind.
+    #[arg(long, default_value = "127.0.0.1:3210")]
+    bind: SocketAddr,
+
+    /// Server root directory used for default config and store resolution.
+    #[arg(short = 'C', long)]
+    directory: Option<PathBuf>,
+
+    /// Override the server SQLite store path.
+    #[arg(long)]
+    store_path: Option<PathBuf>,
+
+    /// Worker executable for managed worker dispatch. Defaults to this nac-server binary.
+    #[arg(long)]
+    worker_executable: Option<PathBuf>,
+}
+
+#[derive(Parser)]
+#[command(
+    name = "nac-server __worker",
+    about = "internal managed worker dispatch",
+    hide = true
+)]
+struct ManagedWorkerCli {
+    /// Internal workspace cwd used for managed worker path/config resolution.
+    #[arg(long, hide = true)]
+    workspace_cwd: Option<PathBuf>,
+
+    #[command(flatten)]
+    dispatch: WorkerDispatchArgs,
+
+    #[command(flatten)]
+    store: StoreArgs,
+
+    #[command(flatten)]
+    model: ModelArgs,
+
+    #[command(flatten)]
+    sandbox: SandboxArgs,
+}
+
+#[derive(clap::Args)]
+struct StoreArgs {
+    /// Override the SQLite store path.
+    #[arg(long)]
+    store_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum BackendArg {
+    #[value(name = "auto")]
+    Auto,
+    #[value(name = "deepseek-chat")]
+    DeepSeekChat,
+    #[value(name = "fireworks-chat")]
+    FireworksChat,
+    #[value(name = "openai-responses")]
+    OpenAiResponses,
+    #[value(name = "chatgpt-codex-responses")]
+    ChatGptCodexResponses,
+    #[value(name = "anthropic-messages")]
+    AnthropicMessages,
+}
+
+impl From<BackendArg> for BackendKind {
+    fn from(value: BackendArg) -> Self {
+        match value {
+            BackendArg::Auto => Self::Auto,
+            BackendArg::DeepSeekChat => Self::DeepSeekChat,
+            BackendArg::FireworksChat => Self::FireworksChat,
+            BackendArg::OpenAiResponses => Self::OpenAiResponses,
+            BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
+            BackendArg::AnthropicMessages => Self::AnthropicMessages,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum ReasoningEffortArg {
+    #[value(name = "none")]
+    None,
+    #[value(name = "minimal")]
+    Minimal,
+    #[value(name = "low")]
+    Low,
+    #[value(name = "medium")]
+    Medium,
+    #[value(name = "high")]
+    High,
+    #[value(name = "xhigh")]
+    Xhigh,
+}
+
+impl From<ReasoningEffortArg> for ReasoningEffort {
+    fn from(value: ReasoningEffortArg) -> Self {
+        match value {
+            ReasoningEffortArg::None => Self::None,
+            ReasoningEffortArg::Minimal => Self::Minimal,
+            ReasoningEffortArg::Low => Self::Low,
+            ReasoningEffortArg::Medium => Self::Medium,
+            ReasoningEffortArg::High => Self::High,
+            ReasoningEffortArg::Xhigh => Self::Xhigh,
+        }
+    }
+}
+
+#[derive(clap::Args, Default)]
+struct ModelArgs {
+    /// Backend wire shape to use for model requests.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
+
+    /// Reasoning effort to request when supported by the selected backend.
+    #[arg(long = "effort", value_enum)]
+    reasoning_effort: Option<ReasoningEffortArg>,
+
+    /// Internal API base URL override used by managed workers.
+    #[arg(long, hide = true)]
+    api_base_url: Option<String>,
+
+    /// Internal model override used by managed workers.
+    #[arg(long, hide = true)]
+    api_model: Option<String>,
+}
+
+#[derive(clap::Args)]
+struct WorkerDispatchArgs {
+    /// Session id for the managed worker dispatch.
+    #[arg(long)]
+    session_id: String,
+
+    /// Thread name for the managed worker dispatch.
+    #[arg(long)]
+    thread_name: String,
+
+    /// Action for the managed worker dispatch.
+    #[arg(long)]
+    action: String,
+
+    /// Source threads whose latest retained episodes should be loaded.
+    #[arg(long = "source-thread")]
+    source_threads: Vec<String>,
+
+    /// Skill names to preload for this managed worker dispatch.
+    #[arg(long = "skill")]
+    skills: Vec<String>,
+}
+
+#[derive(clap::Args)]
+struct SandboxArgs {
+    /// Run tool execution inside a session-scoped Podman sandbox.
+    #[arg(long)]
+    sandbox: bool,
+
+    /// Disable the implicit current-directory mount into /workspace.
+    #[arg(long)]
+    no_mount_cwd: bool,
+
+    /// Additional read-write mount in the form HOST:GUEST.
+    #[arg(long = "mount")]
+    mounts: Vec<String>,
+
+    /// Additional read-only mount in the form HOST:GUEST.
+    #[arg(long = "mount-ro")]
+    mounts_ro: Vec<String>,
+
+    /// Sandbox image to use when --sandbox is enabled.
+    #[arg(long)]
+    sandbox_image: Option<String>,
+
+    /// GPU CDI device to expose to the sandbox.
+    #[arg(long = "sandbox-gpu")]
+    sandbox_gpus: Vec<String>,
+
+    /// Sandbox /dev/shm size.
+    #[arg(long = "sandbox-shm-size")]
+    sandbox_shm_size: Option<String>,
+
+    /// Internal sandbox session key used to attach worker subprocesses.
+    #[arg(long, hide = true)]
+    sandbox_session_key: Option<String>,
+
+    /// Internal sandbox workdir used for worker subprocesses.
+    #[arg(long, hide = true)]
+    sandbox_workdir: Option<String>,
+}
+
+enum ParsedCli {
+    Serve(ServerCli),
+    ManagedWorker(ManagedWorkerCli),
+}
+
+fn parse_cli() -> ParsedCli {
+    let args: Vec<OsString> = std::env::args_os().collect();
+    if args
+        .get(1)
+        .is_some_and(|value| value == OsStr::new("__worker"))
+    {
+        ParsedCli::ManagedWorker(ManagedWorkerCli::parse_from(subcommand_args(
+            args,
+            "nac-server __worker",
+        )))
+    } else {
+        ParsedCli::Serve(ServerCli::parse_from(args))
+    }
+}
+
+fn subcommand_args(args: Vec<OsString>, name: &str) -> Vec<OsString> {
+    let mut parsed = Vec::with_capacity(args.len().saturating_sub(1));
+    parsed.push(OsString::from(name));
+    parsed.extend(args.into_iter().skip(2));
+    parsed
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("Error: {error:#}");
+        process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
+    match parse_cli() {
+        ParsedCli::Serve(cli) => run_server(cli).await,
+        ParsedCli::ManagedWorker(cli) => run_managed_worker(cli).await,
+    }
+}
+
+async fn run_server(cli: ServerCli) -> Result<()> {
+    let launch_cwd = std::env::current_dir()?;
+    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.directory.as_deref())?;
+    let manager = SessionManager::new(ServerOptions {
+        root_cwd,
+        store_path: cli.store_path,
+        worker_executable: cli.worker_executable,
+    })?;
+    let info = manager.store_info();
+    eprintln!("nac-server listening on http://{}", cli.bind);
+    eprintln!("store: {}", info.store_path.display());
+    serve(cli.bind, manager).await
+}
+
+async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
+    let launch_cwd = std::env::current_dir()?;
+    let workspace_cwd = resolve_cli_cwd(&launch_cwd, cli.workspace_cwd.as_deref())?;
+    let config = runtime::NacConfig::load_from_cwd(&workspace_cwd)?;
+    let options = ManagedWorkerOptions {
+        workspace_cwd,
+        dispatch: WorkerDispatchOptions {
+            session_id: cli.dispatch.session_id,
+            thread_name: cli.dispatch.thread_name,
+            action: cli.dispatch.action,
+            source_threads: cli.dispatch.source_threads,
+            skills: cli.dispatch.skills,
+        },
+        store: StoreOptions {
+            store_path: cli.store.store_path,
+        },
+        model: ModelOptions {
+            backend: cli.model.backend.map(Into::into),
+            reasoning_effort: cli.model.reasoning_effort.map(Into::into),
+            api_base_url: cli.model.api_base_url,
+            api_model: cli.model.api_model,
+        },
+        sandbox: SandboxOptions {
+            sandbox: cli.sandbox.sandbox,
+            no_mount_cwd: cli.sandbox.no_mount_cwd,
+            mounts: cli.sandbox.mounts,
+            mounts_ro: cli.sandbox.mounts_ro,
+            sandbox_image: cli.sandbox.sandbox_image,
+            sandbox_gpus: cli.sandbox.sandbox_gpus,
+            sandbox_shm_size: cli.sandbox.sandbox_shm_size,
+            sandbox_session_key: cli.sandbox.sandbox_session_key,
+            sandbox_workdir: cli.sandbox.sandbox_workdir,
+        },
+    };
+    runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
+}
+
+fn resolve_cli_cwd(
+    launch_cwd: &std::path::Path,
+    directory: Option<&std::path::Path>,
+) -> Result<PathBuf> {
+    let target = match directory {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => launch_cwd.join(path),
+        None => launch_cwd.to_path_buf(),
+    };
+    target
+        .canonicalize()
+        .with_context(|| format!("failed to resolve working directory {}", target.display()))
+}
