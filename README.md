@@ -11,9 +11,14 @@ curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/instal
 
 Pinned version installs are not supported yet.
 
-Set `OPENAI_API_KEY`, then run `nac`.
+The installer places two binaries in `$HOME/.local/bin` by default:
 
-To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. Launch with `nac --backend chatgpt-codex-responses`, or configure `backend = "chatgpt-codex-responses"` under `[model]`.
+- `nac-web`: the web dashboard for managing multiple sessions.
+- `nac`: the terminal UI and utility commands such as `codex-auth` and `upgrade`.
+
+Set `OPENAI_API_KEY`, then run `nac-web -C /path/to/project` and open the printed local URL.
+
+To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. In `nac-web`, choose `chatgpt-codex-responses` in the launch modal, or configure `backend = "chatgpt-codex-responses"` under `[model]`. For the TUI, launch with `nac --backend chatgpt-codex-responses`.
 
 Optional:
 - `OPENAI_BASE_URL`
@@ -27,13 +32,15 @@ Upgrade to the latest `edge` build:
 nac upgrade
 ```
 
-Run the HTTP session server:
+`nac upgrade` reinstalls both `nac` and `nac-web`.
+
+Run the web dashboard:
 
 ```sh
-cargo run -p nac-server -- --bind 127.0.0.1:3210
+nac-web -C /path/to/project --bind 127.0.0.1:3210
 ```
 
-Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-server` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
+Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
 
 - `GET /health`
 - `GET /store`

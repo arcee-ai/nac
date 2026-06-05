@@ -17,7 +17,7 @@ use nac_core::{
 use nac_server::{serve, ServerOptions, SessionManager};
 
 #[derive(Parser)]
-#[command(name = "nac-server", about = "HTTP server for managing nac sessions")]
+#[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
 struct ServerCli {
     /// Address to bind.
     #[arg(long, default_value = "127.0.0.1:3210")]
@@ -31,14 +31,14 @@ struct ServerCli {
     #[arg(long)]
     store_path: Option<PathBuf>,
 
-    /// Worker executable for managed worker dispatch. Defaults to this nac-server binary.
+    /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
 }
 
 #[derive(Parser)]
 #[command(
-    name = "nac-server __worker",
+    name = "nac-web __worker",
     about = "internal managed worker dispatch",
     hide = true
 )]
@@ -219,7 +219,7 @@ fn parse_cli() -> ParsedCli {
     {
         ParsedCli::ManagedWorker(ManagedWorkerCli::parse_from(subcommand_args(
             args,
-            "nac-server __worker",
+            "nac-web __worker",
         )))
     } else {
         ParsedCli::Serve(ServerCli::parse_from(args))
@@ -257,7 +257,7 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         worker_executable: cli.worker_executable,
     })?;
     let info = manager.store_info();
-    eprintln!("nac-server listening on http://{}", cli.bind);
+    eprintln!("nac-web listening on http://{}", cli.bind);
     eprintln!("store: {}", info.store_path.display());
     serve(cli.bind, manager).await
 }

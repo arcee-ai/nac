@@ -45,14 +45,20 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build nac
-        run: cargo build --release --locked -p nac-tui --bin nac --target ${{ matrix.target }}
+      - name: Build nac binaries
+        run: |
+          cargo build --release --locked \
+            -p nac-tui --bin nac \
+            -p nac-server --bin nac-web \
+            --target ${{ matrix.target }}
 
       - name: Package archive
         run: |
-          mkdir -p dist
+          mkdir -p dist/pkg
+          cp "target/${{ matrix.target }}/release/nac" dist/pkg/nac
+          cp "target/${{ matrix.target }}/release/nac-web" dist/pkg/nac-web
           tar -czf "dist/nac-${{ matrix.target }}.tar.gz" \
-            -C "target/${{ matrix.target }}/release" nac
+            -C dist/pkg nac nac-web
 
       - name: Upload archive
         uses: actions/upload-artifact@v4

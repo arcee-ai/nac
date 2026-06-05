@@ -7,7 +7,7 @@ edition = "2021"
 name = "nac_server"
 
 [[bin]]
-name = "nac-server"
+name = "nac-web"
 path = "src/main.rs"
 
 [dependencies]
