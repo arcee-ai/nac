@@ -11,9 +11,14 @@ curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/instal
 
 Pinned version installs are not supported yet.
 
-Set `OPENAI_API_KEY`, then run `nac`. Use `nac --compact` for the compact single-column TUI, or `nac --full` to override a compact config default.
+The installer places two binaries in `$HOME/.local/bin` by default:
 
-To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. Launch with `nac --backend chatgpt-codex-responses`, or configure `backend = "chatgpt-codex-responses"` under `[model]`.
+- `nac-web`: the web dashboard for managing multiple sessions.
+- `nac`: the terminal UI and utility commands such as `codex-auth` and `upgrade`.
+
+Set `OPENAI_API_KEY`, then run `nac-web -C /path/to/project` and open the printed local URL.
+
+To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. In `nac-web`, choose `chatgpt-codex-responses` in the launch modal, or configure `backend = "chatgpt-codex-responses"` under `[model]`. For the TUI, launch with `nac --backend chatgpt-codex-responses`.
 
 Optional:
 - `OPENAI_BASE_URL`
@@ -26,6 +31,26 @@ Upgrade to the latest `edge` build:
 ```sh
 nac upgrade
 ```
+
+`nac upgrade` reinstalls both `nac` and `nac-web`.
+
+Run the web dashboard:
+
+```sh
+nac-web -C /path/to/project --bind 127.0.0.1:3210
+```
+
+Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
+
+- `GET /health`
+- `GET /store`
+- `GET /sessions`
+- `POST /sessions`
+- `GET /sessions/{session_id}`
+- `POST /sessions/{session_id}/runs`
+- `GET /sessions/{session_id}/events?after_sequence_id=0`
+- `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
+- `POST /sessions/{session_id}/cancel-active-run`
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 
@@ -66,9 +91,6 @@ The `api_key_env` setting names the environment variable to read when `OPENAI_AP
 [agents_md]
 fallback_filenames = []
 max_bytes = 4194304
-
-[ui]
-mode = "full"
 
 [storage]
 store_path = ".nac/store.db"

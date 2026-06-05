@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nac sessions</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="board">
+        <header class="top-strip">
+          <div class="strip-cell">
+            <span>nac</span>
+            <strong id="storePath">store pending</strong>
+          </div>
+          <div class="strip-cell">
+            <span>Workspace</span>
+            <strong id="rootCwd">pending</strong>
+          </div>
+          <div class="strip-cell">
+            <span>Selected</span>
+            <strong id="selectedId">none</strong>
+          </div>
+          <div class="strip-cell">
+            <span>Events</span>
+            <strong id="eventCount">0</strong>
+          </div>
+        </header>
+
+        <section class="matrix-toolbar">
+          <div>
+            <div class="matrix-title">Session Matrix</div>
+            <div class="matrix-subtitle" id="matrixSubtitle">0 tracked sessions</div>
+          </div>
+        </section>
+
+        <section id="sessionGrid" class="session-grid"></section>
+      </main>
+
+      <aside class="inspector">
+        <header class="inspector-head">
+          <div>
+            <div class="eyebrow">Inspector</div>
+            <h1 id="inspectorTitle">No session selected</h1>
+            <p id="inspectorMeta">Launch or select a session.</p>
+          </div>
+          <button id="cancelRun" class="icon-button stop-button" type="button" aria-label="Stop active run" title="Stop active run">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
+            </svg>
+          </button>
+        </header>
+
+        <nav class="tabs" id="tabs">
+          <button class="active" data-tab="chat" type="button">Chat</button>
+          <button data-tab="events" type="button">Events</button>
+          <button data-tab="threads" type="button">Threads</button>
+          <button data-tab="worksets" type="button">Worksets</button>
+          <button data-tab="workspace" type="button">Workspace</button>
+        </nav>
+
+        <section class="summary-grid">
+          <div><span>Model</span><strong id="snapModel">--</strong></div>
+          <div><span>Backend</span><strong id="snapBackend">--</strong></div>
+          <div><span>Msgs</span><strong id="snapMessages">0</strong></div>
+          <div><span>Run</span><strong id="snapRun">idle</strong></div>
+        </section>
+
+        <div class="tab-panel active" id="tab-chat">
+          <div id="transcript" class="transcript"></div>
+          <form id="promptForm" class="prompt-form">
+            <textarea id="promptInput" rows="5" spellcheck="false"></textarea>
+          </form>
+        </div>
+
+        <div class="tab-panel" id="tab-events">
+          <div id="eventLog" class="event-log"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-threads">
+          <div id="threadsView" class="dense-list"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-worksets">
+          <div id="worksetsView" class="dense-list"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-workspace">
+          <div id="workspaceView" class="dense-list"></div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="launch-overlay" id="launchOverlay" hidden>
+      <section class="launch-dialog" role="dialog" aria-modal="true" aria-label="Launch session">
+        <header class="launch-dialog-head">
+          <div>
+            <div class="eyebrow">Launch</div>
+          </div>
+          <button id="closeLaunch" class="icon-button" type="button" aria-label="Close launch dialog" title="Close">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+
+        <form id="launchForm" class="launch-form">
+          <label>
+            <span>CWD</span>
+            <input id="launchCwd" name="cwd" autocomplete="off" />
+          </label>
+          <div class="form-grid two">
+            <label>
+              <span>Backend</span>
+              <select id="launchBackend" name="backend">
+                <option value="">config</option>
+                <option value="openai-responses">openai</option>
+                <option value="chatgpt-codex-responses">codex</option>
+                <option value="anthropic-messages">anthropic</option>
+                <option value="deepseek-chat">deepseek</option>
+                <option value="fireworks-chat">fireworks</option>
+              </select>
+            </label>
+            <label>
+              <span>Effort</span>
+              <select id="launchEffort" name="reasoning_effort">
+                <option value="">config</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Model</span>
+              <input id="launchModel" name="model" autocomplete="off" placeholder="config" />
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="config" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input id="sandboxEnabled" type="checkbox" />
+              <span>Sandbox</span>
+            </label>
+            <label class="toggle">
+              <input id="sandboxNoMount" type="checkbox" />
+              <span>No CWD mount</span>
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Image</span>
+              <input id="sandboxImage" autocomplete="off" placeholder="python:3.13-bookworm" />
+            </label>
+            <label>
+              <span>GPU</span>
+              <input id="sandboxGpu" autocomplete="off" placeholder="all" />
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Workdir</span>
+              <input id="sandboxWorkdir" autocomplete="off" placeholder="/workspace" />
+            </label>
+            <label>
+              <span>shm</span>
+              <input id="sandboxShm" autocomplete="off" placeholder="0" />
+            </label>
+          </div>
+          <label>
+            <span>Mounts</span>
+            <input id="sandboxMounts" autocomplete="off" placeholder="HOST:GUEST, ..." />
+          </label>
+          <label>
+            <span>Initial prompt</span>
+            <textarea id="initialPrompt" rows="4" spellcheck="false"></textarea>
+          </label>
+          <div class="launch-actions">
+            <button class="primary-action launch-submit" type="submit" aria-label="Launch session" title="Launch session">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h12"></path>
+                <path d="m13 6 6 6-6 6"></path>
+              </svg>
+            </button>
+            <div class="form-status" id="launchStatus"></div>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
