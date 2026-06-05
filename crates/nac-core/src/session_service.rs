@@ -1,11 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex};
+use tokio::{
+    sync::{mpsc, Mutex},
+    task::JoinHandle,
+};
 
 use crate::agent::Agent;
 use crate::commands::{self, PreparedPrompt, PreparedUserInput};
@@ -83,6 +86,8 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
+    #[serde(default)]
+    pub active_threads: Vec<String>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     pub worksets: WorksetsSnapshot,
@@ -127,15 +132,13 @@ impl std::error::Error for SessionSubmitError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCancelError {
-    Unsupported { run_id: SessionRunId },
+    NotActive { run_id: SessionRunId },
 }
 
 impl std::fmt::Display for SessionCancelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unsupported { run_id } => {
-                write!(formatter, "cancellation is not supported for run {run_id}")
-            }
+            Self::NotActive { run_id } => write!(formatter, "run {run_id} is not active"),
         }
     }
 }
@@ -203,11 +206,11 @@ impl SessionClientHandle {
             .try_submit_prompt_for_client(self.client_id.clone(), expanded_prompt)
     }
 
-    pub fn request_cancel(
+    pub async fn request_cancel(
         &self,
         run_id: &SessionRunId,
     ) -> std::result::Result<(), SessionCancelError> {
-        self.service.request_cancel(run_id)
+        self.service.request_cancel(run_id).await
     }
 }
 
@@ -218,17 +221,24 @@ pub struct SessionService {
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     event_bus: SessionEventBus,
     active_run: Arc<StdMutex<Option<ActiveRunState>>>,
+    active_threads: Arc<Mutex<HashSet<String>>>,
 }
 
 struct ActiveRunState {
     snapshot: ActiveRunSnapshot,
     started_at: Instant,
     finishing: bool,
+    task: Option<JoinHandle<()>>,
 }
 
 struct FinishingRun {
     snapshot: ActiveRunSnapshot,
     duration_ms: u64,
+}
+
+struct CancellingRun {
+    snapshot: ActiveRunSnapshot,
+    task: Option<JoinHandle<()>>,
 }
 
 enum RunOutcome {
@@ -266,12 +276,14 @@ impl SessionService {
             agents_md_status: run_config.agents_md_status,
         };
         let session_snapshot = run_config.session.into_snapshot();
+        let active_threads = run_config.agent.active_threads_handle();
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             event_bus,
             active_run: Arc::new(StdMutex::new(None)),
+            active_threads,
         };
         let init = SessionServiceInit {
             metadata,
@@ -357,6 +369,18 @@ impl SessionService {
         self.lock_active_run()
             .as_ref()
             .map(|active_run| active_run.snapshot.clone())
+    }
+
+    pub async fn active_thread_names(&self) -> Vec<String> {
+        let mut names = self
+            .active_threads
+            .lock()
+            .await
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort();
+        names
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
@@ -447,6 +471,7 @@ impl SessionService {
             response_timing,
             active_run: self.active_run(),
             sessions: self.list_sessions()?,
+            active_threads: self.active_thread_names().await,
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
             worksets: self.worksets_snapshot(),
@@ -469,13 +494,52 @@ impl SessionService {
         self.try_submit_prompt_inner(Some(client_id), expanded_prompt)
     }
 
-    pub fn request_cancel(
+    pub async fn request_cancel(
         &self,
         run_id: &SessionRunId,
     ) -> std::result::Result<(), SessionCancelError> {
-        Err(SessionCancelError::Unsupported {
-            run_id: run_id.clone(),
-        })
+        let Some(cancelling_run) = self.mark_run_cancelling(run_id) else {
+            return Err(SessionCancelError::NotActive {
+                run_id: run_id.clone(),
+            });
+        };
+
+        if let Some(task) = cancelling_run.task {
+            task.abort();
+            let _ = task.await;
+        }
+
+        self.append_cancellation_message().await;
+        let message = "run cancelled by user".to_string();
+        let persistence_error = match self
+            .persist_run_snapshot(&cancelling_run.snapshot, None)
+            .await
+        {
+            Ok(()) => None,
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to persist cancellation snapshot for run {}: {error:#}",
+                    cancelling_run.snapshot.run_id
+                );
+                Some(format!("{error:#}"))
+            }
+        };
+
+        let terminal_message = match persistence_error {
+            Some(error) => {
+                format!("{message}\nAdditionally, failed to persist session snapshot: {error}")
+            }
+            None => message,
+        };
+        self.event_bus.emit_with_context(
+            SessionEvent::RunFailed {
+                message: terminal_message,
+            },
+            Some(cancelling_run.snapshot.run_id.clone()),
+            cancelling_run.snapshot.client_id.clone(),
+        );
+        self.clear_finished_run(&cancelling_run.snapshot.run_id);
+        Ok(())
     }
 
     fn try_submit_prompt_inner(
@@ -485,15 +549,16 @@ impl SessionService {
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         let active_run = self.try_begin_run(client_id, &expanded_prompt)?;
         let run_id = active_run.run_id.clone();
+        let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
         let event_bus = self.event_bus.clone();
         let service = self.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let result = {
                 let mut agent = service.agent.lock().await;
                 agent.set_event_sink(EventSink::bus_with_context(
                     event_bus.clone(),
-                    Some(run_id.clone()),
+                    Some(task_run_id.clone()),
                     run_client_id.clone(),
                 ));
                 let result = agent
@@ -506,16 +571,17 @@ impl SessionService {
             match result {
                 Ok(response) => {
                     service
-                        .finish_run_once(&run_id, RunOutcome::Completed(response))
+                        .finish_run_once(&task_run_id, RunOutcome::Completed(response))
                         .await;
                 }
                 Err(message) => {
                     service
-                        .finish_run_once(&run_id, RunOutcome::Failed(message))
+                        .finish_run_once(&task_run_id, RunOutcome::Failed(message))
                         .await;
                 }
             }
         });
+        self.set_run_task(&run_id, task);
 
         Ok(SessionRunHandle {
             run_id: active_run.run_id,
@@ -545,6 +611,7 @@ impl SessionService {
             snapshot: active_run.clone(),
             started_at: Instant::now(),
             finishing: false,
+            task: None,
         });
         drop(guard);
 
@@ -618,6 +685,32 @@ impl SessionService {
         })
     }
 
+    fn mark_run_cancelling(&self, run_id: &SessionRunId) -> Option<CancellingRun> {
+        let mut guard = self.lock_active_run();
+        let active_run = guard.as_mut()?;
+        if &active_run.snapshot.run_id != run_id || active_run.finishing {
+            return None;
+        }
+        active_run.finishing = true;
+        Some(CancellingRun {
+            snapshot: active_run.snapshot.clone(),
+            task: active_run.task.take(),
+        })
+    }
+
+    fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {
+        let mut guard = self.lock_active_run();
+        let Some(active_run) = guard.as_mut() else {
+            task.abort();
+            return;
+        };
+        if &active_run.snapshot.run_id != run_id || active_run.finishing {
+            task.abort();
+            return;
+        }
+        active_run.task = Some(task);
+    }
+
     fn clear_finished_run(&self, run_id: &SessionRunId) {
         let mut guard = self.lock_active_run();
         if guard
@@ -675,6 +768,52 @@ impl SessionService {
         );
 
         Ok(())
+    }
+
+    async fn append_cancellation_message(&self) {
+        let mut agent = self.agent.lock().await;
+        truncate_incomplete_tool_turn(&mut agent.messages);
+        agent.messages.push(Message::Assistant {
+            content: Some("[run cancelled by user]".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        });
+    }
+}
+
+fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
+    let Some(index) = messages.iter().rposition(|message| {
+        matches!(
+            message,
+            Message::Assistant {
+                tool_calls: Some(tool_calls),
+                ..
+            } if !tool_calls.is_empty()
+        )
+    }) else {
+        return;
+    };
+    let Message::Assistant {
+        tool_calls: Some(tool_calls),
+        ..
+    } = &messages[index]
+    else {
+        return;
+    };
+    let expected = tool_calls
+        .iter()
+        .map(|tool_call| tool_call.id.as_str())
+        .collect::<HashSet<_>>();
+    let observed = messages[index + 1..]
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    if !expected.is_subset(&observed) {
+        messages.truncate(index);
     }
 }
 
@@ -1323,6 +1462,75 @@ mod tests {
             loaded.messages.len(),
             parts.init.restored_messages.len() + 1
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn request_cancel_persists_marker_and_emits_terminal_event() {
+        let store_path = test_store_path("active_cancel_persist");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-cancel-persist".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            store_path.clone(),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            agent.messages.clone(),
+        );
+        sessions::create_session(&snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        let mut events = parts.service.subscribe_events();
+        let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages.push(Message::User {
+                content: "cancel prompt".to_string(),
+            });
+        }
+
+        parts.service.request_cancel(&active.run_id).await.unwrap();
+
+        let started = events.recv().await.unwrap();
+        assert_run_started_event(started, &active, "cancel prompt");
+        let saved = events.recv().await.unwrap();
+        assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
+        assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
+        let failed = events.recv().await.unwrap();
+        assert_eq!(failed.run_id.as_ref(), Some(&active.run_id));
+        assert_eq!(
+            failed.event,
+            SessionEvent::RunFailed {
+                message: "run cancelled by user".to_string()
+            }
+        );
+        assert!(parts.service.active_run().is_none());
+
+        let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert!(matches!(
+            loaded.messages.last(),
+            Some(Message::Assistant {
+                content: Some(content),
+                ..
+            }) if content == "[run cancelled by user]"
+        ));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

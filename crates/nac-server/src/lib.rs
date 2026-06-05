@@ -11,10 +11,10 @@ use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
     extract::{Path as AxumPath, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
+        Html, IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -310,6 +310,7 @@ impl SessionManager {
         service
             .connect_client()
             .request_cancel(&active.run_id)
+            .await
             .map_err(|error| anyhow!(error.to_string()))
     }
 
@@ -336,6 +337,10 @@ impl SessionManager {
 
 pub fn router(manager: SessionManager) -> Router {
     Router::new()
+        .route("/", get(index_html))
+        .route("/app", get(index_html))
+        .route("/assets/app.css", get(app_css))
+        .route("/assets/app.js", get(app_js))
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
@@ -362,6 +367,27 @@ pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn index_html() -> Html<&'static str> {
+    Html(include_str!("../assets/index.html"))
+}
+
+async fn app_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/app.css"),
+    )
+}
+
+async fn app_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/app.js"),
+    )
 }
 
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {

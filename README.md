@@ -33,7 +33,7 @@ Run the HTTP session server:
 cargo run -p nac-server -- --bind 127.0.0.1:3210
 ```
 
-`nac-server` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
+Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-server` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
 
 - `GET /health`
 - `GET /store`

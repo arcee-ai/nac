@@ -623,6 +623,7 @@ async fn run_worker(
         command.args(sandbox.worker_cli_args());
     }
     isolate_process_group(&mut command);
+    command.kill_on_drop(true);
 
     let mut child = command.spawn()?;
 

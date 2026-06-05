@@ -367,6 +367,10 @@ impl Agent {
         self.tool_runtime.event_sink = sink;
     }
 
+    pub fn active_threads_handle(&self) -> Arc<Mutex<HashSet<String>>> {
+        self.tool_runtime.active_threads.clone()
+    }
+
     pub fn restore_messages(&mut self, messages: Vec<Message>) {
         self.messages = messages;
     }
