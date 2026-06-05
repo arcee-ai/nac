@@ -379,10 +379,11 @@ function renderSessionCard(entry) {
   const sessionId = summary.session_id;
   const snapshot = state.snapshots.get(sessionId);
   const workspace = snapshot?.workspace;
+  const workspaceError = workspace?.error || "";
   const changes = workspace?.changed_files?.length || 0;
   const runState = entry.active_run ? "active" : "idle";
   const tone = entry.active_run ? "" : summary.sandboxed ? "warn" : "";
-  const errorish = workspace?.error ? "errorish" : "";
+  const errorish = workspaceError && !workspaceError.includes("sandbox-only") ? "errorish" : "";
   const pendingCount = pendingMessages(sessionId).length;
   const promptPreview = latestPendingUserPrompt(sessionId) || summary.last_user_prompt || "no prompt yet";
   return `

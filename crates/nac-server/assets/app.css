@@ -271,8 +271,8 @@ textarea {
 }
 
 .status-dot.sandbox {
-  color: #b8b8bd;
-  background: #b8b8bd;
+  color: var(--faint);
+  background: var(--faint);
 }
 
 .status-dot.idle {
@@ -417,11 +417,13 @@ button.session-card {
   font-family: var(--mono);
 }
 
-.session-card.selected {
-  box-shadow: var(--neu-selected);
+.session-card.errorish {
+  border-color: rgba(208, 208, 212, 0.16);
+  box-shadow: var(--neu-raised), 0 0 0 1px rgba(208, 208, 212, 0.06);
 }
 
-.session-card.errorish {
+.session-card.selected,
+.session-card.selected.errorish {
   box-shadow: var(--neu-selected);
 }
 
