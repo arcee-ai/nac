@@ -857,31 +857,6 @@ button.session-card {
   margin-top: var(--space-xs);
 }
 
-.meter-row {
-  display: grid;
-  grid-template-columns: 72px 1fr 44px;
-  gap: var(--space-md);
-  align-items: center;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: var(--type-meta);
-}
-
-.meter {
-  height: 8px;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: var(--panel);
-  box-shadow: var(--neu-pressed);
-}
-
-.meter span {
-  display: block;
-  height: 100%;
-  width: var(--w);
-  background: #d6d6da;
-}
-
 .toast {
   color: var(--text);
 }
@@ -1086,11 +1061,6 @@ button.session-card {
   }
 
   .dense-detail-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-xs);
-  }
-
-  .meter-row {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-xs);
   }

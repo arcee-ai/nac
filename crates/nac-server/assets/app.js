@@ -367,7 +367,6 @@ function renderMobileMode() {
 function renderMetrics() {
   const active = state.sessions.filter((entry) => entry.active_run).length;
   const sandbox = state.sessions.filter((entry) => entry.summary.sandboxed).length;
-  const changed = state.sessions.filter((entry) => changedCount(entry.summary.session_id) > 0).length;
   const selectedEvents = getSessionEvents(state.selectedId);
   el.matrixSubtitle.textContent = `${state.sessions.length} tracked sessions / ${active} active / ${sandbox} sandboxed / creation ordered`;
   el.eventCount.textContent = selectedEvents.length;
@@ -685,10 +684,6 @@ function filteredSessions() {
   return state.sessions;
 }
 
-function changedCount(sessionId) {
-  return state.snapshots.get(sessionId)?.workspace?.changed_files?.length || 0;
-}
-
 function getSessionEvents(sessionId) {
   if (!sessionId) return [];
   return state.eventsBySession.get(sessionId) || [];
@@ -999,24 +994,6 @@ function basename(path) {
 function shortId(id) {
   if (!id) return "--";
   return id.length > 13 ? `${id.slice(0, 8)}:${id.slice(-4)}` : id;
-}
-
-function relativeTime(value) {
-  if (!value) return "--";
-  const time = Date.parse(value);
-  if (Number.isNaN(time)) return String(value).slice(0, 10);
-  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-function truncate(value, limit) {
-  const text = String(value || "");
-  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
 function escapeHtml(value) {

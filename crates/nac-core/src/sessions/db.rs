@@ -150,11 +150,11 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
         let backend = parse_backend(backend_raw, &base_url)?;
         let cwd = PathBuf::from(cwd);
         let sandbox_spec = deserialize_sandbox(sandbox_json)?;
-        let workspace_host_path = sandbox_spec
-            .as_ref()
-            .map(crate::sandbox::host_workdir_from_spec)
-            .unwrap_or_else(|| Some(cwd.clone()));
         let sandboxed = sandbox_spec.is_some();
+        let workspace_host_path = match sandbox_spec.as_ref() {
+            Some(spec) => crate::sandbox::host_workdir_from_spec(spec),
+            None => Some(cwd.clone()),
+        };
         let messages: Vec<Message> = serde_json::from_str(&messages_json)
             .context("failed to parse stored session messages")?;
         sessions.push(SessionSummary {
