@@ -41,6 +41,7 @@ pub struct SessionSnapshot {
 pub struct SessionSummary {
     pub session_id: String,
     pub cwd: PathBuf,
+    pub workspace_host_path: Option<PathBuf>,
     pub model: String,
     pub backend: BackendKind,
     pub visible_message_count: usize,

@@ -43,17 +43,7 @@ impl SandboxSession {
     }
 
     pub fn host_workdir(&self) -> Option<PathBuf> {
-        let spec = self.inner.spec();
-        for mount in &spec.mounts {
-            if spec.workdir.starts_with(&mount.guest) {
-                let suffix = spec
-                    .workdir
-                    .strip_prefix(&mount.guest)
-                    .unwrap_or_else(|_| Path::new(""));
-                return Some(join_host_path(&mount.host, suffix));
-            }
-        }
-        None
+        host_workdir_from_spec(self.inner.spec())
     }
 
     pub fn image(&self) -> &str {
@@ -188,6 +178,19 @@ pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountS
         guest,
         read_only,
     })
+}
+
+pub(crate) fn host_workdir_from_spec(spec: &SandboxSpec) -> Option<PathBuf> {
+    for mount in &spec.mounts {
+        if spec.workdir.starts_with(&mount.guest) {
+            let suffix = spec
+                .workdir
+                .strip_prefix(&mount.guest)
+                .unwrap_or_else(|_| Path::new(""));
+            return Some(join_host_path(&mount.host, suffix));
+        }
+    }
+    None
 }
 
 pub fn build_sandbox_spec(
