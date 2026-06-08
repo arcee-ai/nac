@@ -9,6 +9,7 @@ const state = {
   eventSource: null,
   lastSequence: new Map(),
   activeTab: "chat",
+  mobileDetailOpen: false,
   scrollChatToBottom: false,
 };
 
@@ -48,6 +49,7 @@ function bindElements() {
     "inspectorTitle",
     "inspectorMeta",
     "cancelRun",
+    "mobileBack",
     "tabs",
     "snapModel",
     "snapBackend",
@@ -70,6 +72,7 @@ function bindEvents() {
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
   el.cancelRun.addEventListener("click", cancelActiveRun);
+  el.mobileBack.addEventListener("click", showMobileSessions);
   el.closeLaunch.addEventListener("click", hideLaunchOverlay);
   el.launchOverlay.addEventListener("click", (event) => {
     if (event.target === el.launchOverlay) hideLaunchOverlay();
@@ -165,6 +168,7 @@ async function loadSnapshot(sessionId, openStream = false) {
 function selectSession(sessionId) {
   state.selectedId = sessionId;
   state.activeTab = "chat";
+  state.mobileDetailOpen = true;
   state.scrollChatToBottom = true;
   el.selectedId.textContent = shortId(sessionId);
   renderAll();
@@ -182,6 +186,11 @@ function showLaunchOverlay() {
 
 function hideLaunchOverlay() {
   el.launchOverlay.hidden = true;
+}
+
+function showMobileSessions() {
+  state.mobileDetailOpen = false;
+  renderMobileMode();
 }
 
 async function createSession(event) {
@@ -334,6 +343,11 @@ function renderAll() {
   renderMetrics();
   renderSessions();
   renderInspector();
+  renderMobileMode();
+}
+
+function renderMobileMode() {
+  document.body.classList.toggle("detail-open", Boolean(state.mobileDetailOpen && state.selectedId));
 }
 
 function renderMetrics() {

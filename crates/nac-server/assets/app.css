@@ -352,7 +352,7 @@ textarea {
 
 .top-strip {
   display: grid;
-  grid-template-columns: 140px minmax(220px, 1fr) minmax(150px, 0.7fr) 100px;
+  grid-template-columns: minmax(96px, 140px) minmax(0, 1fr) minmax(108px, 0.7fr) minmax(76px, 100px);
   gap: var(--space-md);
 }
 
@@ -865,39 +865,178 @@ button.session-card {
   border-radius: var(--radius-md);
 }
 
-@media (max-width: 1360px) {
-  .app-shell {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .inspector {
-    grid-column: 1 / -1;
-  }
+.mobile-back {
+  display: none;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1179px) {
   body {
-    overflow: auto;
+    overflow: hidden;
   }
 
   .app-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-    height: auto;
-    min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+    height: 100vh;
+    height: 100dvh;
+    padding: var(--space-md);
   }
 
   .board,
   .inspector {
-    min-height: 420px;
+    height: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .board {
+    width: min(100%, 760px);
+    padding: var(--space-md);
+  }
+
+  .inspector {
+    display: none;
+    width: min(100%, 880px);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: var(--space-md);
+    padding: var(--space-md);
+  }
+
+  body.detail-open .board {
+    display: none;
+  }
+
+  body.detail-open .inspector {
+    display: grid;
   }
 
   .top-strip {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .strip-cell,
+  .summary-grid div {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .matrix-toolbar {
+    align-items: start;
+  }
+
+  .session-grid {
+    grid-template-columns: minmax(0, 1fr);
+    margin: calc(-1 * var(--space-sm)) calc(-1 * var(--space-sm)) calc(-1 * var(--space-md));
+    padding: var(--space-lg) var(--space-lg) var(--space-2xl);
+  }
+
+  .new-session-card {
+    min-height: auto;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .telemetry-grid div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-back {
+    display: inline-flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: center;
+    justify-self: start;
+    gap: var(--space-sm);
+    width: auto;
+    height: var(--button-size-compact);
+    padding: 0 var(--space-md);
+    border-radius: var(--radius-pill);
+    background: var(--panel-2);
+    box-shadow: var(--neu-raised-small);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: var(--type-meta);
+    font-weight: var(--type-weight-strong);
+  }
+
+  .mobile-back .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .inspector-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-md);
+  }
+
+  .tabs {
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    gap: var(--space-sm);
+    margin: 0 calc(-1 * var(--space-xs));
+    padding: var(--space-xs);
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs button {
+    flex: 0 0 auto;
+    min-width: 76px;
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #tab-chat.active {
+    gap: var(--space-md);
+  }
+
+  .prompt-form textarea {
+    min-height: 64px;
+    max-height: 112px;
+  }
+
+  .dense-title,
+  .dense-meta,
+  .message-meta {
+    flex-wrap: wrap;
+  }
+
+  .dense-title > span:first-child,
+  .dense-meta > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .meter-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-xs);
+  }
+
+  .form-grid.two,
+  .toggle-row,
   .launch-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .launch-overlay {
+    padding: var(--space-md);
+  }
+
+  .launch-dialog {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .launch-submit {
+    justify-self: start;
   }
 }
