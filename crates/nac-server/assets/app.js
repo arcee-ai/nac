@@ -6,6 +6,8 @@ const state = {
   eventsBySession: new Map(),
   activeThreadsBySession: new Map(),
   pendingMessagesBySession: new Map(),
+  attentionSessions: new Set(),
+  activeRunsBySession: new Map(),
   eventSource: null,
   lastSequence: new Map(),
   activeTab: "chat",
@@ -132,7 +134,9 @@ async function readJson(response) {
 
 async function loadSessions() {
   try {
-    state.sessions = sortSessionsByCreation(await apiGet("/sessions"));
+    const sessions = sortSessionsByCreation(await apiGet("/sessions?workspace_stats=true"));
+    updateSessionActivity(sessions);
+    state.sessions = sessions;
     if (!state.selectedId && state.sessions.length > 0) {
       state.selectedId = state.sessions[0].summary.session_id;
       renderAll();
@@ -166,6 +170,11 @@ async function loadSnapshot(sessionId, openStream = false) {
 }
 
 function selectSession(sessionId) {
+  const previousId = state.selectedId;
+  if (previousId && previousId !== sessionId) {
+    clearSessionAttention(previousId);
+  }
+  clearSessionAttention(sessionId);
   state.selectedId = sessionId;
   state.activeTab = "chat";
   state.mobileDetailOpen = true;
@@ -177,6 +186,9 @@ function selectSession(sessionId) {
 }
 
 function showLaunchOverlay() {
+  if (!el.launchStatus.classList.contains("error")) {
+    setLaunchStatus("", false);
+  }
   el.launchOverlay.hidden = false;
   requestAnimationFrame(() => {
     el.launchCwd.focus();
@@ -249,6 +261,7 @@ async function submitPrompt(event) {
   const sessionId = state.selectedId;
   if (!sessionId || !prompt) return;
 
+  clearSessionAttention(sessionId);
   const pendingMessage = queuePendingUserMessage(sessionId, prompt);
   el.promptInput.value = "";
   requestChatScrollToBottom();
@@ -304,6 +317,7 @@ function openEventStream(sessionId) {
       loadSnapshot(sessionId, false);
     }
     if (isTerminalSessionEvent(envelope)) {
+      markSessionAttention(sessionId);
       loadSessions();
     }
     renderAll();
@@ -392,14 +406,12 @@ function renderSessionCard(entry) {
   const summary = entry.summary;
   const sessionId = summary.session_id;
   const snapshot = state.snapshots.get(sessionId);
-  const workspace = snapshot?.workspace;
-  const workspaceError = workspace?.error || "";
-  const changes = workspace?.changed_files?.length || 0;
-  const runState = entry.active_run ? "active" : "idle";
+  const workspaceError = snapshot?.workspace?.error || "";
+  const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
   const tone = entry.active_run ? "" : summary.sandboxed ? "warn" : "";
   const errorish = workspaceError && !workspaceError.includes("sandbox-only") ? "errorish" : "";
   const pendingCount = pendingMessages(sessionId).length;
-  const promptPreview = latestPendingUserPrompt(sessionId) || summary.last_user_prompt || "no prompt yet";
+  const promptPreview = latestPendingUserPrompt(sessionId) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
   return `
     <article class="session-card ${tone} ${errorish} ${sessionId === state.selectedId ? "selected" : ""}" data-session-id="${escapeAttr(sessionId)}">
       <div class="session-card-head">
@@ -407,17 +419,16 @@ function renderSessionCard(entry) {
           <h2>${escapeHtml(shortId(sessionId))}</h2>
           <div class="cwd">${escapeHtml(summary.cwd)}</div>
         </div>
-        <span class="status-dot ${entry.active_run ? "active" : summary.sandboxed ? "sandbox" : "idle"}"></span>
+        <span class="status-dot ${sessionStatusClass(entry)}"></span>
       </div>
       <div class="badge-row">
-        <span class="badge ${entry.active_run ? "active" : ""}">${runState}</span>
         <span class="badge">${escapeHtml(summary.backend)}</span>
         ${summary.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
       </div>
       <div class="telemetry-grid">
         <div><span>msgs</span><strong>${summary.visible_message_count + pendingCount}</strong></div>
-        <div><span>files</span><strong>${changes}</strong></div>
-        <div><span>updated</span><strong>${relativeTime(summary.updated_at)}</strong></div>
+        <div><span>add</span><strong>${escapeHtml(diffStats.additions)}</strong></div>
+        <div><span>del</span><strong>${escapeHtml(diffStats.deletions)}</strong></div>
       </div>
       <div class="last-prompt">${escapeHtml(promptPreview)}</div>
     </article>`;
@@ -470,7 +481,7 @@ function renderTranscript(sessionId, messages) {
 
   el.transcript.innerHTML = transcriptMessages.slice(-80).map((message, index) => {
     const role = message.role || "unknown";
-    const body = messageText(message);
+    const body = messageDisplayText(message);
     const pending = message.pending ? "pending" : "";
     const marker = message.pending ? "pending" : `#${index + 1}`;
     return `
@@ -522,23 +533,34 @@ function renderThreads(snapshot) {
   el.threadsView.innerHTML = names.map((name) => {
     const thread = persisted.get(name);
     const liveThread = live.get(name);
-    const status = liveThread?.status === "active" ? "active" : thread ? "stored" : liveThread?.status || "pending";
+    const status = liveThread?.status === "active" ? "active" : liveThread?.status || (thread ? "stored" : "pending");
     const episodes = snapshot.thread_episodes?.[name] || [];
-    const latest = episodes.at(-1);
     const action = liveThread?.action || thread?.latest_action || "no action";
-    const source = liveThread?.source_threads?.length
-      ? `sources ${liveThread.source_threads.join(", ")}`
-      : latest
-        ? relativeTime(latest.created_at)
-        : liveThread?.last_log || "waiting for worker output";
+    const episodeCount = thread?.episode_count ?? episodes.length;
     return `
       <div class="dense-item thread-row ${status === "active" ? "thread-active" : ""}">
         <div class="dense-title">
           <span><span class="status-dot ${status === "active" ? "active" : "idle"}"></span>${escapeHtml(name)}</span>
-          <span>${escapeHtml(status)}${thread ? ` / ${thread.episode_count} eps` : ""}</span>
+          <span>${escapeHtml(status)} / ${episodeCount} eps</span>
         </div>
-        <div class="dense-meta"><span>${escapeHtml(action)}</span><span>${escapeHtml(source)}</span></div>
-        <div class="dense-body">${escapeHtml(truncate(latest?.content || "", 320))}</div>
+        <div class="dense-meta"><span>${escapeHtml(action)}</span><span>${episodes.length} retained</span></div>
+        ${renderDetailRows([
+          ["session", thread?.session_id || sessionId],
+          ["created", thread?.created_at],
+          ["updated", thread?.updated_at],
+          ["latest action", thread?.latest_action],
+          ["live action", liveThread?.action],
+          ["sources", liveThread?.source_threads],
+          ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence],
+          ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence],
+          ["exit code", liveThread?.exit_code],
+          ["timed out", liveThread?.timed_out],
+          ["last log", liveThread?.last_log],
+        ])}
+        <div class="dense-section-title">retained episodes</div>
+        ${episodes.length === 0
+          ? `<div class="dense-body muted">No retained episodes.</div>`
+          : `<div class="dense-sublist">${episodes.map(renderThreadEpisode).join("")}</div>`}
       </div>`;
   }).join("");
 }
@@ -554,19 +576,75 @@ function renderWorksets(snapshot) {
     return;
   }
 
-  el.worksetsView.innerHTML = worksets.map((workset) => `
-    <div class="dense-item">
-      <div class="dense-title"><span>${escapeHtml(workset.id)}</span><span>${escapeHtml(workset.status)}</span></div>
-      <div class="dense-meta"><span>${workset.items.length} items</span><span>${relativeTime(workset.updated_at)}</span></div>
-      <div class="dense-body">${escapeHtml(workset.summary || workset.goal)}</div>
-      ${workset.items.slice(0, 6).map((item, index) => `
-        <div class="meter-row">
-          <span>${index + 1}. ${escapeHtml(truncate(item.role, 9))}</span>
-          <div class="meter"><span style="--w:${Math.max(12, Math.min(100, item.acceptance.length))}%"></span></div>
-          <span>${escapeHtml(truncate(item.scope, 8))}</span>
-        </div>`).join("")}
-    </div>
-  `).join("");
+  el.worksetsView.innerHTML = worksets.map((workset) => {
+    const items = workset.items || [];
+    return `
+      <div class="dense-item workset-row">
+        <div class="dense-title"><span>${escapeHtml(workset.id)}</span><span>${escapeHtml(workset.status)}</span></div>
+        <div class="dense-meta"><span>${items.length} items</span><span>updated ${escapeHtml(formatDetailValue(workset.updated_at))}</span></div>
+        ${renderDetailRows([
+          ["session", workset.session_id],
+          ["created", workset.created_at],
+          ["updated", workset.updated_at],
+          ["summary", workset.summary],
+          ["goal", workset.goal],
+          ["verification", workset.verification_recipe],
+        ])}
+        <div class="dense-section-title">items</div>
+        ${items.length === 0
+          ? `<div class="dense-body muted">No workset items.</div>`
+          : `<div class="dense-sublist">${items.map(renderWorksetItem).join("")}</div>`}
+      </div>`;
+  }).join("");
+}
+
+function renderThreadEpisode(episode) {
+  return `
+    <div class="dense-subitem">
+      ${renderDetailRows([
+        ["episode", episode.id],
+        ["session", episode.session_id],
+        ["created", episode.created_at],
+        ["action", episode.action],
+      ])}
+      <div class="dense-body">${escapeHtml(episode.content || "")}</div>
+    </div>`;
+}
+
+function renderWorksetItem(item, index) {
+  return `
+    <div class="dense-subitem">
+      <div class="dense-title dense-title-compact"><span>${index + 1}. ${escapeHtml(formatDetailValue(item.title))}</span><span>${escapeHtml(formatDetailValue(item.role))}</span></div>
+      ${renderDetailRows([
+        ["scope", item.scope],
+        ["description", item.description],
+        ["depends on", item.depends_on],
+        ["acceptance", item.acceptance],
+        ["notes", item.notes],
+        ["updated", item.updated_at],
+      ])}
+    </div>`;
+}
+
+function renderDetailRows(rows) {
+  return `<div class="dense-detail-grid">${rows.map(([label, value]) => renderDetailRow(label, value)).join("")}</div>`;
+}
+
+function renderDetailRow(label, value) {
+  return `
+    <div class="dense-detail-row">
+      <span>${escapeHtml(label)}</span>
+      <span>${escapeHtml(formatDetailValue(value))}</span>
+    </div>`;
+}
+
+function formatDetailValue(value) {
+  if (Array.isArray(value)) {
+    return value.length ? value.map(formatDetailValue).join(", ") : "--";
+  }
+  if (value === null || value === undefined || value === "") return "--";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
 }
 
 function renderWorkspace(snapshot) {
@@ -655,7 +733,7 @@ function reconcilePendingMessages(sessionId, snapshot) {
   const remaining = pending.filter((pendingMessage) => {
     for (let index = pendingMessage.baselineUserCount; index < userMessages.length; index += 1) {
       if (matchedIndexes.has(index)) continue;
-      if (messageText(userMessages[index]) === pendingMessage.content) {
+      if (messageDisplayText(userMessages[index]) === messageDisplayText(pendingMessage)) {
         matchedIndexes.add(index);
         return false;
       }
@@ -743,7 +821,7 @@ function observeThreadEvent(sessionId, envelope) {
   } else if (event.type === "thread_log") {
     threads.set(event.name, {
       ...existing,
-      last_log: truncate(event.line || "", 96),
+      last_log: event.line || "",
     });
   }
 
@@ -785,6 +863,73 @@ function eventDetail(envelope) {
   return event.response || event.message || event.prompt_preview || event.session_id || JSON.stringify(event);
 }
 
+function updateSessionActivity(sessions) {
+  const seen = new Set();
+  for (const entry of sessions) {
+    const sessionId = entry.summary.session_id;
+    const isActive = Boolean(entry.active_run);
+    const wasActive = state.activeRunsBySession.get(sessionId) === true;
+    if (isActive) {
+      clearSessionAttention(sessionId);
+    } else if (wasActive) {
+      state.attentionSessions.add(sessionId);
+    }
+    state.activeRunsBySession.set(sessionId, isActive);
+    seen.add(sessionId);
+  }
+
+  for (const sessionId of state.activeRunsBySession.keys()) {
+    if (!seen.has(sessionId)) {
+      state.activeRunsBySession.delete(sessionId);
+      state.attentionSessions.delete(sessionId);
+    }
+  }
+}
+
+function clearSessionAttention(sessionId) {
+  state.attentionSessions.delete(sessionId);
+}
+
+function markSessionAttention(sessionId) {
+  if (!sessionIsActive(sessionId)) return;
+  state.attentionSessions.add(sessionId);
+  state.activeRunsBySession.set(sessionId, false);
+}
+
+function sessionIsActive(sessionId) {
+  return state.activeRunsBySession.get(sessionId) === true
+    || state.sessions.some((entry) => entry.summary.session_id === sessionId && entry.active_run);
+}
+
+function sessionStatusClass(entry) {
+  const sessionId = entry.summary.session_id;
+  if (entry.active_run) return "active";
+  if (state.attentionSessions.has(sessionId)) return "attention";
+  if (entry.summary.sandboxed) return "sandbox";
+  return "idle";
+}
+
+function workspaceDiffStats(snapshot, listDiff) {
+  const workspace = snapshot?.workspace;
+  if (workspace && !workspace.error) {
+    return formatWorkspaceDiffTotals(workspace);
+  }
+  if (listDiff && !listDiff.error) {
+    return formatWorkspaceDiffTotals(listDiff);
+  }
+  return { additions: "--", deletions: "--" };
+}
+
+function formatWorkspaceDiffTotals(totals) {
+  const additions = Number(totals.total_additions);
+  const deletions = Number(totals.total_deletions);
+  if (!Number.isFinite(additions) || !Number.isFinite(deletions)) {
+    return { additions: "--", deletions: "--" };
+  }
+
+  return { additions: `+${additions}`, deletions: `-${deletions}` };
+}
+
 function formatToolCalls(toolCalls) {
   if (!toolCalls || toolCalls.length === 0) return "";
   return toolCalls.map((call) => `${call.function?.name || "tool"} ${call.id}`).join("\n");
@@ -792,6 +937,31 @@ function formatToolCalls(toolCalls) {
 
 function messageText(message) {
   return message.content || message.reasoning_text || formatToolCalls(message.tool_calls) || "";
+}
+
+function messageDisplayText(message) {
+  const text = messageText(message);
+  return message.role === "user" ? displayPromptFromMessageText(text) : text;
+}
+
+function displayPromptFromMessageText(content) {
+  const text = String(content || "");
+  const normalized = text.replaceAll("\r\n", "\n");
+  const header = normalized.split("\n", 1)[0] || "";
+  const match = header.match(/^# \/(plan|run)\s*:/);
+  if (!match) return text;
+
+  const kind = match[1];
+  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex === -1) return text;
+
+  const valueStart = markerIndex + marker.length;
+  const valueEnd = normalized.indexOf("\n\n", valueStart);
+  if (valueEnd === -1) return text;
+
+  const value = normalized.slice(valueStart, valueEnd).trim();
+  return value ? `/${kind} ${value}` : text;
 }
 
 function sortSessionsByCreation(sessions) {

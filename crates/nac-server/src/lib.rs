@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -35,6 +35,7 @@ use tokio::{net::TcpListener, sync::RwLock};
 use tower_http::cors::CorsLayer;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
+const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
@@ -53,6 +54,13 @@ struct SessionManagerInner {
     store_path: PathBuf,
     worker_executable: PathBuf,
     active_sessions: RwLock<HashMap<String, SessionService>>,
+    workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspaceDiffCacheEntry {
+    updated_at: Instant,
+    totals: view::WorkspaceDiffTotals,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +75,14 @@ pub struct ManagedSessionSummary {
     pub summary: SessionSummarySnapshot,
     pub active: bool,
     pub active_run: Option<ActiveRunSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_diff: Option<view::WorkspaceDiffTotals>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ListSessionsQuery {
+    #[serde(default)]
+    pub workspace_stats: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,6 +165,7 @@ impl SessionManager {
                 store_path,
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
+                workspace_diff_cache: RwLock::new(HashMap::new()),
             }),
         })
     }
@@ -161,24 +178,105 @@ impl SessionManager {
         }
     }
 
-    pub async fn list_sessions(&self) -> Result<Vec<ManagedSessionSummary>> {
+    pub async fn list_sessions(
+        &self,
+        include_workspace_stats: bool,
+    ) -> Result<Vec<ManagedSessionSummary>> {
         if !self.inner.store_path.exists() {
             return Ok(Vec::new());
         }
 
         let summaries = view::list_sessions(&self.inner.store_path)?;
-        let active = self.inner.active_sessions.read().await;
-        Ok(summaries
-            .into_iter()
-            .map(|summary| {
-                let active_service = active.get(&summary.session_id);
-                ManagedSessionSummary {
-                    active: active_service.is_some(),
-                    active_run: active_service.and_then(SessionService::active_run),
-                    summary,
+        let mut sessions = {
+            let active = self.inner.active_sessions.read().await;
+            summaries
+                .into_iter()
+                .map(|summary| {
+                    let active_service = active.get(&summary.session_id);
+                    ManagedSessionSummary {
+                        active: active_service.is_some(),
+                        active_run: active_service.and_then(SessionService::active_run),
+                        summary,
+                        workspace_diff: None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        if include_workspace_stats {
+            self.populate_workspace_diff(&mut sessions).await?;
+        }
+
+        Ok(sessions)
+    }
+
+    async fn populate_workspace_diff(&self, sessions: &mut [ManagedSessionSummary]) -> Result<()> {
+        let mut workspace_displays = HashMap::new();
+        for entry in sessions.iter() {
+            if let Some(path) = entry.summary.workspace_host_path.clone() {
+                workspace_displays
+                    .entry(path)
+                    .or_insert_with(|| entry.summary.cwd.display().to_string());
+            }
+        }
+
+        let now = Instant::now();
+        let mut totals_by_path = HashMap::new();
+        let mut missing_paths = Vec::new();
+        {
+            let cache = self.inner.workspace_diff_cache.read().await;
+            for path in workspace_displays.keys() {
+                if let Some(entry) = cache.get(path) {
+                    if now.duration_since(entry.updated_at) < WORKSPACE_DIFF_CACHE_TTL {
+                        totals_by_path.insert(path.clone(), entry.totals.clone());
+                        continue;
+                    }
                 }
-            })
-            .collect())
+                missing_paths.push(path.clone());
+            }
+        }
+
+        let mut tasks = Vec::new();
+        for path in missing_paths {
+            let display = workspace_displays
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| path.display().to_string());
+            let task_path = path.clone();
+            tasks.push((
+                path,
+                tokio::task::spawn_blocking(move || {
+                    view::workspace_diff_totals(&display, Some(&task_path))
+                }),
+            ));
+        }
+
+        let mut cache_updates = Vec::new();
+        for (path, task) in tasks {
+            let totals = task.await.context("workspace diff task failed")?;
+            totals_by_path.insert(path.clone(), totals.clone());
+            cache_updates.push((path, totals));
+        }
+
+        if !cache_updates.is_empty() {
+            let updated_at = Instant::now();
+            let mut cache = self.inner.workspace_diff_cache.write().await;
+            for (path, totals) in cache_updates {
+                cache.insert(path, WorkspaceDiffCacheEntry { updated_at, totals });
+            }
+        }
+
+        for entry in sessions.iter_mut() {
+            entry.workspace_diff = match entry.summary.workspace_host_path.as_ref() {
+                Some(path) => totals_by_path.get(path).cloned(),
+                None => Some(view::workspace_diff_totals(
+                    &entry.summary.cwd.display().to_string(),
+                    None,
+                )),
+            };
+        }
+
+        Ok(())
     }
 
     pub async fn create_session(
@@ -316,7 +414,7 @@ impl SessionManager {
 
     async fn resume_session(&self, session_id: &str) -> Result<SessionService> {
         let summary = self
-            .list_sessions()
+            .list_sessions(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -396,8 +494,9 @@ async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
 
 async fn list_sessions(
     State(manager): State<SessionManager>,
+    Query(query): Query<ListSessionsQuery>,
 ) -> std::result::Result<Json<Vec<ManagedSessionSummary>>, ApiError> {
-    Ok(Json(manager.list_sessions().await?))
+    Ok(Json(manager.list_sessions(query.workspace_stats).await?))
 }
 
 async fn create_session(

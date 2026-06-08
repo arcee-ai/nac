@@ -14,6 +14,8 @@ pub type NumstatSummary = (NumstatPairs, u64, u64);
 pub struct SessionSummarySnapshot {
     pub session_id: String,
     pub cwd: PathBuf,
+    #[serde(default, skip)]
+    pub workspace_host_path: Option<PathBuf>,
     pub model: String,
     pub backend: String,
     pub visible_message_count: usize,
@@ -102,6 +104,13 @@ pub struct ChangedFileStat {
     pub deletions: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceDiffTotals {
+    pub total_additions: u64,
+    pub total_deletions: u64,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceSnapshot {
     pub host_root: Option<PathBuf>,
@@ -119,6 +128,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
         Self {
             session_id: summary.session_id,
             cwd: summary.cwd,
+            workspace_host_path: summary.workspace_host_path,
             model: summary.model,
             backend: summary.backend.as_str().to_string(),
             visible_message_count: summary.visible_message_count,
@@ -287,6 +297,44 @@ fn load_workset_records(store_path: &Path, session_id: &str) -> Result<Vec<Works
         }
     }
     Ok(worksets)
+}
+
+pub fn workspace_diff_totals(
+    workspace_display: &str,
+    host_root: Option<&Path>,
+) -> WorkspaceDiffTotals {
+    let Some(cwd) = host_root else {
+        return WorkspaceDiffTotals {
+            total_additions: 0,
+            total_deletions: 0,
+            error: Some(format!(
+                "workspace '{}' is sandbox-only; host-side inspection unavailable",
+                workspace_display
+            )),
+        };
+    };
+
+    let Some(diff_raw) = run_git(cwd, &["diff", "--numstat"]) else {
+        return WorkspaceDiffTotals {
+            total_additions: 0,
+            total_deletions: 0,
+            error: Some("git diff unavailable".to_string()),
+        };
+    };
+    let Some(cached_raw) = run_git(cwd, &["diff", "--cached", "--numstat"]) else {
+        return WorkspaceDiffTotals {
+            total_additions: 0,
+            total_deletions: 0,
+            error: Some("git cached diff unavailable".to_string()),
+        };
+    };
+
+    let (_, total_additions, total_deletions) = parse_numstat_pairs(&diff_raw, &cached_raw);
+    WorkspaceDiffTotals {
+        total_additions,
+        total_deletions,
+        error: None,
+    }
 }
 
 pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> WorkspaceSnapshot {

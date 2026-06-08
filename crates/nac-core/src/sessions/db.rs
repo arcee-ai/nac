@@ -148,16 +148,24 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
             updated_at,
         ) = row?;
         let backend = parse_backend(backend_raw, &base_url)?;
+        let cwd = PathBuf::from(cwd);
+        let sandbox_spec = deserialize_sandbox(sandbox_json)?;
+        let workspace_host_path = sandbox_spec
+            .as_ref()
+            .map(crate::sandbox::host_workdir_from_spec)
+            .unwrap_or_else(|| Some(cwd.clone()));
+        let sandboxed = sandbox_spec.is_some();
         let messages: Vec<Message> = serde_json::from_str(&messages_json)
             .context("failed to parse stored session messages")?;
         sessions.push(SessionSummary {
             session_id,
-            cwd: PathBuf::from(cwd),
+            cwd,
+            workspace_host_path,
             model,
             backend,
             visible_message_count: visible_message_count(&messages),
             last_user_prompt: last_user_prompt(&messages),
-            sandboxed: sandbox_json.is_some(),
+            sandboxed,
             created_at,
             updated_at,
         });
