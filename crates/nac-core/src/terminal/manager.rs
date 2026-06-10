@@ -6,15 +6,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 
 use crate::process::{isolate_process_group, terminate_child_tree};
-use crate::sandbox::SandboxSession;
+use crate::sandbox::ExecutionBackend;
 
 use super::keyparse::parse_keys;
-use super::session::{terminal_env, terminal_env_owned, TerminalSession};
+use super::session::{terminal_env_owned, TerminalSession};
 use super::{TerminalInfo, TerminalOutput};
 
 #[derive(Clone)]
@@ -37,7 +36,7 @@ impl TerminalManager {
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
-        sandbox: Option<&SandboxSession>,
+        backend: &Arc<ExecutionBackend>,
     ) -> Result<TerminalInfo> {
         let old = {
             let mut sessions = self.sessions.lock().await;
@@ -69,7 +68,7 @@ impl TerminalManager {
             let _ = s.kill().await;
         }
 
-        let session = TerminalSession::spawn(name.clone(), cwd, cols, rows, sandbox)?;
+        let session = TerminalSession::spawn(name.clone(), cwd, cols, rows, backend)?;
         let info = self.session_info(&name, &session);
         self.sessions.lock().await.insert(name, session);
         Ok(info)
@@ -149,10 +148,10 @@ impl TerminalManager {
         _rows: u16,
         yield_ms: u64,
         max_output: usize,
-        sandbox: Option<&SandboxSession>,
+        backend: &ExecutionBackend,
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
-        let outcome = run_pipe_command(cmd, cwd, Duration::from_millis(yield_ms), sandbox).await?;
+        let outcome = run_pipe_command(cmd, cwd, Duration::from_millis(yield_ms), backend).await?;
         let (exit_code, combined) = match outcome {
             PipeCommandOutcome::Completed(output) => {
                 let mut combined = String::new();
@@ -275,27 +274,11 @@ async fn run_pipe_command(
     cmd: &str,
     cwd: Option<PathBuf>,
     timeout_duration: Duration,
-    sandbox: Option<&SandboxSession>,
+    backend: &ExecutionBackend,
 ) -> Result<PipeCommandOutcome> {
-    let mut sandbox_pidfile: Option<String> = None;
-    let mut command = if let Some(sb) = sandbox {
-        let envs = terminal_env_owned();
-        let (mut command, pidfile) = sb.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
-        sandbox_pidfile = Some(pidfile);
-        isolate_process_group(&mut command);
-        command
-    } else {
-        let mut command = Command::new("bash");
-        command.arg("-c").arg(cmd);
-        if let Some(cwd) = cwd {
-            command.current_dir(cwd);
-        }
-        for (key, value) in terminal_env() {
-            command.env(key, value);
-        }
-        isolate_process_group(&mut command);
-        command
-    };
+    let envs = terminal_env_owned();
+    let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
+    isolate_process_group(&mut command);
 
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().context("failed to spawn command")?;
@@ -314,8 +297,8 @@ async fn run_pipe_command(
     let status = match timeout(timeout_duration, child.wait()).await {
         Ok(status) => status.context("failed to wait for command")?,
         Err(_) => {
-            if let (Some(sb), Some(pidfile)) = (sandbox, sandbox_pidfile.as_deref()) {
-                let _ = sb.terminal_pipe_kill(pidfile).await;
+            if let Some(pidfile) = pidfile.as_deref() {
+                let _ = backend.terminal_pipe_kill(pidfile).await;
             }
             terminate_child_tree(&mut child).await;
             return Ok(PipeCommandOutcome::TimedOut {

@@ -177,7 +177,13 @@ fn effective_cli_cwd(cli: &ParsedCli, launch_cwd: &Path) -> Result<PathBuf> {
     match cli {
         ParsedCli::Run(cli) => resolve_cli_cwd(launch_cwd, cli.directory.as_deref()),
         ParsedCli::Resume(cli) => resolve_cli_cwd(launch_cwd, cli.directory.as_deref()),
-        ParsedCli::ManagedWorker(cli) => resolve_cli_cwd(launch_cwd, cli.workspace_cwd.as_deref()),
+        ParsedCli::ManagedWorker(cli) => match (&cli.ssh_host, &cli.workspace_cwd) {
+            // Remote workers receive their session's remote working
+            // directory: a path on the ssh host, used verbatim (it does not
+            // exist locally, so it must not be canonicalized).
+            (Some(_), Some(remote_cwd)) => Ok(remote_cwd.clone()),
+            _ => resolve_cli_cwd(launch_cwd, cli.workspace_cwd.as_deref()),
+        },
         ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
     }
 }
@@ -239,6 +245,9 @@ fn run_options(cli: RunCli, workspace_cwd: PathBuf, worker_executable: PathBuf) 
         store: store_options(cli.store),
         model: model_options(cli.model),
         sandbox: sandbox_options(cli.sandbox),
+        // The TUI only creates local/sandbox sessions; remote SSH session
+        // creation is wired through the REST layer.
+        ssh_host: None,
     }
 }
 
@@ -249,6 +258,7 @@ fn managed_worker_options(cli: ManagedWorkerCli, workspace_cwd: PathBuf) -> Mana
         store: store_options(cli.store),
         model: model_options(cli.model),
         sandbox: sandbox_options(cli.sandbox),
+        ssh_host: cli.ssh_host,
     }
 }
 
@@ -347,6 +357,43 @@ mod tests {
                 panic!("expected managed worker cli")
             }
         }
+    }
+
+    #[test]
+    fn parse_hidden_worker_ssh_host_uses_remote_workspace_cwd_verbatim() {
+        let parsed = parse_cli_from(vec![
+            OsString::from("nac"),
+            OsString::from("__worker"),
+            OsString::from("--session-id"),
+            OsString::from("session-123"),
+            OsString::from("--thread-name"),
+            OsString::from("impl"),
+            OsString::from("--action"),
+            OsString::from("do work"),
+            OsString::from("--workspace-cwd"),
+            OsString::from("/remote/workspace/does-not-exist-locally"),
+            OsString::from("--ssh-host"),
+            OsString::from("build-box"),
+        ]);
+        match &parsed {
+            ParsedCli::ManagedWorker(worker) => {
+                assert_eq!(worker.ssh_host.as_deref(), Some("build-box"));
+            }
+            ParsedCli::Run(_)
+            | ParsedCli::Resume(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::Upgrade(_) => {
+                panic!("expected managed worker cli")
+            }
+        }
+
+        // The remote cwd does not exist locally: it must pass through
+        // verbatim instead of being canonicalized.
+        let effective = effective_cli_cwd(&parsed, Path::new("/launch")).unwrap();
+        assert_eq!(
+            effective,
+            PathBuf::from("/remote/workspace/does-not-exist-locally")
+        );
     }
 
     #[test]

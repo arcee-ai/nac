@@ -92,6 +92,11 @@ pub struct CreateSessionRequest {
     pub base_url: Option<String>,
     pub backend: Option<String>,
     pub reasoning_effort: Option<String>,
+    /// OpenSSH/freeform target to create the session on. When set, the session
+    /// runs over ssh, `cwd` is a remote path (default `~`), and sandbox options
+    /// must be absent. `None`/missing = local session.
+    #[serde(default, alias = "host_id")]
+    pub ssh_host: Option<String>,
     #[serde(default)]
     pub sandbox: SandboxRequest,
 }
@@ -283,11 +288,40 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let workspace_cwd = match request.cwd {
-            Some(cwd) => canonicalize_dir(cwd)?,
-            None => self.inner.root_cwd.clone(),
+        let ssh_host = request
+            .ssh_host
+            .as_deref()
+            .map(str::trim)
+            .filter(|ssh_host| !ssh_host.is_empty())
+            .map(str::to_string);
+        if ssh_host.is_some() && sandbox_requested(&request.sandbox) {
+            return Err(anyhow!(
+                "invalid request: ssh_host and sandbox options cannot both be set"
+            ));
+        }
+        let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
+            // Remote sessions: cwd is a remote path and must not be
+            // canonicalized locally. Blank/missing remote cwd defaults to `~`.
+            let remote_cwd = request
+                .cwd
+                .and_then(|cwd| {
+                    let trimmed = cwd.as_os_str().to_string_lossy().trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(trimmed))
+                    }
+                })
+                .unwrap_or_else(|| PathBuf::from("~"));
+            (remote_cwd, self.inner.root_cwd.clone())
+        } else {
+            let local_cwd = match request.cwd {
+                Some(cwd) => canonicalize_dir(cwd)?,
+                None => self.inner.root_cwd.clone(),
+            };
+            (local_cwd.clone(), local_cwd)
         };
-        let config = NacConfig::load_from_cwd(&workspace_cwd)?;
+        let config = NacConfig::load_from_cwd(&config_cwd)?;
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd,
@@ -302,6 +336,7 @@ impl SessionManager {
                     request.reasoning_effort,
                 )?,
                 sandbox: sandbox_options(request.sandbox),
+                ssh_host,
             },
             &config,
         )
@@ -420,7 +455,12 @@ impl SessionManager {
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let config = NacConfig::load_from_cwd(&summary.cwd)?;
+        let config_cwd = if summary.ssh_host.is_some() {
+            &self.inner.root_cwd
+        } else {
+            &summary.cwd
+        };
+        let config = NacConfig::load_from_cwd(config_cwd)?;
         let run_config = runtime::build_resume_config_for_session(
             self.inner.store_path.clone(),
             session_id,
@@ -627,6 +667,20 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
     }
 }
 
+/// Whether the request carries any sandbox configuration (remote sessions
+/// reject these; the runtime hard-errors as a backstop).
+fn sandbox_requested(request: &SandboxRequest) -> bool {
+    request.enabled
+        || request.no_mount_cwd
+        || !request.mounts.is_empty()
+        || !request.mounts_ro.is_empty()
+        || request.image.is_some()
+        || !request.gpus.is_empty()
+        || request.shm_size.is_some()
+        || request.session_key.is_some()
+        || request.workdir.is_some()
+}
+
 fn parse_json_string_enum<T>(value: &str) -> Result<T>
 where
     T: for<'de> Deserialize<'de>,
@@ -707,7 +761,10 @@ pub struct ApiError {
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
-        let status = if message.contains("was not found") || message.contains("not found") {
+        let status = if message.contains("was not found")
+            || message.contains("not found")
+            || message.contains("unknown host")
+        {
             StatusCode::NOT_FOUND
         } else if message.contains("busy") || message.contains("no active run") {
             StatusCode::CONFLICT
@@ -778,5 +835,66 @@ mod tests {
 
         assert!(payload.contains("\"sequence_id\":42"));
         assert!(payload.contains("\"message\":\"boom\""));
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("nac_server_test_{}_{}", label, unique));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+
+    fn test_manager(root: &std::path::Path) -> SessionManager {
+        SessionManager::new(ServerOptions {
+            root_cwd: root.to_path_buf(),
+            store_path: Some(root.join("store.db")),
+            worker_executable: None,
+        })
+        .expect("session manager")
+    }
+
+    #[test]
+    fn create_session_request_deserializes_optional_ssh_host() {
+        let with_host: CreateSessionRequest =
+            serde_json::from_str(r#"{"ssh_host":"build-box"}"#).unwrap();
+        assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
+
+        let alias_host: CreateSessionRequest =
+            serde_json::from_str(r#"{"host_id":"legacy-box"}"#).unwrap();
+        assert_eq!(alias_host.ssh_host.as_deref(), Some("legacy-box"));
+        assert_eq!(with_host.cwd, None);
+        assert!(!with_host.sandbox.enabled);
+
+        let without_host: CreateSessionRequest =
+            serde_json::from_str(r#"{"cwd":"/tmp/project"}"#).unwrap();
+        assert_eq!(without_host.ssh_host, None);
+        assert_eq!(without_host.cwd, Some(PathBuf::from("/tmp/project")));
+    }
+
+    #[tokio::test]
+    async fn create_session_rejects_ssh_host_combined_with_sandbox() {
+        let root = temp_root("host_sandbox_conflict");
+        let manager = test_manager(&root);
+
+        let request = CreateSessionRequest {
+            cwd: None,
+            model: None,
+            base_url: None,
+            backend: None,
+            reasoning_effort: None,
+            ssh_host: Some("build-box".to_string()),
+            sandbox: SandboxRequest {
+                enabled: true,
+                ..SandboxRequest::default()
+            },
+        };
+        let error = manager.create_session(request).await.unwrap_err();
+        assert!(error.to_string().contains("ssh_host and sandbox"));
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1729,7 +1729,7 @@ impl App {
                 .unwrap_or("No user prompt recorded.");
             let detail = format!(
                 "# Session: {}\n\
-                 Updated: {}  |  Created: {}  |  Messages: {}  |  Sandbox: {}\n\
+                 Updated: {}  |  Created: {}  |  Messages: {}  |  Sandbox: {}  |  SSH: {}\n\
                  Model: {}  |  Backend: {}\n\
                  Cwd: {}\n\n\
                  ---\n\n\
@@ -1740,6 +1740,7 @@ impl App {
                 session.created_at,
                 session.visible_message_count,
                 if session.sandboxed { "on" } else { "off" },
+                session.ssh_host.as_deref().unwrap_or("local"),
                 session.model,
                 session.backend,
                 session.cwd.display(),
@@ -1897,7 +1898,7 @@ impl App {
             format!("workspace  {}", self.workspace.workspace_display),
             match self.workspace.host_root.as_ref() {
                 Some(path) => format!("source     {}", path.display()),
-                None => "source     sandbox-only".to_string(),
+                None => "source     remote/sandbox-only".to_string(),
             },
             format!(
                 "repo       {}",

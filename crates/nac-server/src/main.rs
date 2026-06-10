@@ -19,15 +19,17 @@ use nac_server::{serve, ServerOptions, SessionManager};
 #[derive(Parser)]
 #[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
 struct ServerCli {
-    /// Address to bind.
+    /// Address to bind. Defaults to localhost-only; bind a tailscale IP
+    /// (e.g. 100.x.y.z:3210) to share the dashboard over your tailnet.
+    /// There is no auth: the tailnet (or localhost) is the perimeter.
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
 
-    /// Server root directory used for default config and store resolution.
+    /// Server root directory used for default config and relative store path resolution.
     #[arg(short = 'C', long)]
     directory: Option<PathBuf>,
 
-    /// Override the server SQLite store path.
+    /// Override the server SQLite store path (default: the global store at $NAC_HOME/store.db, typically ~/.config/nac/store.db).
     #[arg(long)]
     store_path: Option<PathBuf>,
 
@@ -46,6 +48,11 @@ struct ManagedWorkerCli {
     /// Internal workspace cwd used for managed worker path/config resolution.
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
+
+    /// Internal OpenSSH target used to re-attach worker subprocesses to a
+    /// remote session; workspace-cwd is then a remote path used verbatim.
+    #[arg(long = "ssh-host", alias = "host-id", hide = true)]
+    ssh_host: Option<String>,
 
     #[command(flatten)]
     dispatch: WorkerDispatchArgs,
@@ -264,7 +271,13 @@ async fn run_server(cli: ServerCli) -> Result<()> {
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let workspace_cwd = resolve_cli_cwd(&launch_cwd, cli.workspace_cwd.as_deref())?;
+    let workspace_cwd = match (&cli.ssh_host, &cli.workspace_cwd) {
+        // Remote workers receive their session's remote working directory: a
+        // path on the ssh host, used verbatim (it does not exist locally, so
+        // it must not be canonicalized).
+        (Some(_), Some(remote_cwd)) => remote_cwd.clone(),
+        _ => resolve_cli_cwd(&launch_cwd, cli.workspace_cwd.as_deref())?,
+    };
     let config = runtime::NacConfig::load_from_cwd(&workspace_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
@@ -295,6 +308,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_session_key: cli.sandbox.sandbox_session_key,
             sandbox_workdir: cli.sandbox.sandbox_workdir,
         },
+        ssh_host: cli.ssh_host,
     };
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }

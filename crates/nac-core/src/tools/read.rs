@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use crate::sandbox::FileIoMode;
 use crate::tools::{require_str, resolve_workspace_path, ToolResult, ToolRuntime};
 
 const SANDBOX_READ_SCRIPT: &str = r#"
@@ -9,7 +10,7 @@ from pathlib import Path
 import sys
 
 orig = sys.argv[1]
-path = Path(sys.argv[2])
+path = Path(sys.argv[2]).expanduser()
 offset = int(sys.argv[3])
 limit = int(sys.argv[4])
 
@@ -45,8 +46,8 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
 
-    if let Some(sandbox) = &runtime.sandbox {
-        let guest_path = match sandbox.resolve_path(&path) {
+    if runtime.backend.file_io() == FileIoMode::RemoteExec {
+        let guest_path = match runtime.backend.resolve_path(&path) {
             Ok(path) => path,
             Err(error) => {
                 return ToolResult {
@@ -65,10 +66,15 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
             limit.to_string(),
         ];
 
-        return match sandbox.exec("python3", &args, None).await {
+        return match runtime.backend.exec("python3", &args, None).await {
             Ok(output) => sandbox_output(output),
             Err(error) => ToolResult {
-                content: format!("Error reading {} in sandbox: {}", path, error),
+                content: format!(
+                    "Error reading {} in {}: {}",
+                    path,
+                    runtime.backend.remote_io_label(),
+                    error
+                ),
                 is_error: true,
             },
         };
@@ -165,6 +171,7 @@ mod tests {
     }
 
     fn local_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
         ToolRuntime {
             workspace_cwd,
             store_path: PathBuf::new(),
@@ -172,7 +179,7 @@ mod tests {
             worker_executable: None,
             active_threads: Arc::new(Mutex::new(HashSet::new())),
             event_sink: EventSink::none(),
-            sandbox: None,
+            backend,
             mcp: None,
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),

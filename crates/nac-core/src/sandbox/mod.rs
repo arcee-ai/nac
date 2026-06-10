@@ -5,7 +5,14 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
 
+mod backend;
 mod podman;
+mod ssh;
+
+#[cfg(test)]
+pub use backend::execution_backend_from_sandbox;
+pub use backend::{select_execution_backend, ExecutionBackend, FileIoMode};
+pub use ssh::SshBackend;
 
 pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";

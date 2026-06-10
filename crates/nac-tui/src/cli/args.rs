@@ -32,6 +32,11 @@ pub(super) struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     pub(super) workspace_cwd: Option<PathBuf>,
 
+    /// Internal OpenSSH target used to re-attach worker subprocesses to a
+    /// remote session; workspace-cwd is then a remote path used verbatim.
+    #[arg(long = "ssh-host", alias = "host-id", hide = true)]
+    pub(super) ssh_host: Option<String>,
+
     #[command(flatten)]
     pub(super) dispatch: WorkerDispatchArgs,
 
@@ -47,7 +52,7 @@ pub(super) struct ManagedWorkerCli {
 
 #[derive(clap::Args)]
 pub(super) struct StoreArgs {
-    /// Override the SQLite store path (default: .nac/store.db)
+    /// Override the SQLite store path (default: the global store at $NAC_HOME/store.db, typically ~/.config/nac/store.db)
     #[arg(long)]
     pub(super) store_path: Option<PathBuf>,
 }

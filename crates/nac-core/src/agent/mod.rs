@@ -42,6 +42,11 @@ pub struct AgentConfig {
     pub working_directory: String,
     pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
+    /// OpenSSH/freeform target for remote sessions (`None` = local or
+    /// podman-sandboxed). `workspace_cwd` is then the session's working
+    /// directory on the remote host. Setting both `ssh_host` and `sandbox` is a
+    /// configuration error.
+    pub ssh_host: Option<String>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
@@ -69,7 +74,7 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 }
 
 impl Agent {
-    pub fn with_config(client: ModelClient, config: AgentConfig) -> Self {
+    pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
 
@@ -221,7 +226,15 @@ impl Agent {
             messages.extend(config.initial_messages);
         }
 
-        Self {
+        // Execution target selection: an ssh target selects remote OpenSSH, a
+        // sandbox session selects podman, otherwise commands run locally. SSH
+        // + sandbox together is a hard configuration error.
+        let backend = crate::sandbox::select_execution_backend(
+            config.ssh_host,
+            config.sandbox,
+            &config.workspace_cwd,
+        )?;
+        Ok(Self {
             client,
             messages,
             tool_defs,
@@ -232,7 +245,7 @@ impl Agent {
                 active_threads: Arc::new(Mutex::new(HashSet::new())),
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
-                sandbox: config.sandbox,
+                backend,
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager: crate::terminal::TerminalManager::new(),
@@ -240,7 +253,7 @@ impl Agent {
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
-        }
+        })
     }
 
     #[cfg(test)]
@@ -261,6 +274,7 @@ impl Agent {
                 working_directory,
                 worker_executable: None,
                 sandbox: None,
+                ssh_host: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -268,6 +282,14 @@ impl Agent {
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             },
         )
+        .expect("default test agent config must be valid")
+    }
+
+    /// Bring the execution backend to a usable state, failing fast when it
+    /// cannot (e.g. an unreachable ssh host). Called once per managed worker
+    /// run before any model traffic; backends stay cheap when already ready.
+    pub async fn ensure_backend_ready(&self) -> Result<()> {
+        self.tool_runtime.backend.ensure_ready().await
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
@@ -278,6 +300,15 @@ impl Agent {
         self.messages.push(Message::User {
             content: prompt.to_string(),
         });
+
+        if let Err(error) = self.ensure_backend_ready().await {
+            self.emit(AgentEvent::Error {
+                thread_name: self.thread_name.clone(),
+                message: error.to_string(),
+            });
+            self.tool_runtime.terminal_manager.remove_all().await;
+            return Err(error);
+        }
 
         let mut iteration = 0usize;
         loop {
@@ -371,7 +402,17 @@ impl Agent {
         self.tool_runtime.active_threads.clone()
     }
 
-    pub fn restore_messages(&mut self, messages: Vec<Message>) {
+    /// Replace the transcript with a stored session's messages, refreshing
+    /// the leading system prompt: the first stored `System` message is
+    /// swapped for the prompt freshly built for this agent (which carries the
+    /// currently resolved working directory), so resumes never replay a stale
+    /// pinned working-directory line. Everything else is restored verbatim.
+    pub fn restore_messages(&mut self, mut messages: Vec<Message>) {
+        if let Some(Message::System { content: stored }) = messages.first_mut() {
+            if let Some(Message::System { content: fresh }) = self.messages.first() {
+                *stored = fresh.clone();
+            }
+        }
         self.messages = messages;
     }
 
@@ -390,6 +431,55 @@ mod tests {
         let agent = Agent::default(client);
         assert!(!agent.messages.is_empty());
         assert!(!agent.tool_defs.is_empty());
+    }
+
+    #[test]
+    fn restore_messages_refreshes_leading_system_prompt() {
+        let client = ModelClient::new_for_test();
+        let mut agent = Agent::with_config(
+            client,
+            AgentConfig {
+                mode: AgentMode::Orchestrator,
+                store_path: crate::store::default_store_path(),
+                session_id: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: PathBuf::from("/resolved/workspace"),
+                working_directory: "/resolved/workspace".to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh_host: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            },
+        )
+        .expect("agent config must be valid");
+
+        agent.restore_messages(vec![
+            Message::System {
+                content: "You are nac. Working directory: /old/stale/path.".to_string(),
+            },
+            Message::User {
+                content: "hello".to_string(),
+            },
+        ]);
+
+        assert_eq!(agent.messages.len(), 2);
+        match &agent.messages[0] {
+            Message::System { content } => {
+                assert!(content.contains("Working directory: /resolved/workspace"));
+                assert!(!content.contains("/old/stale/path"));
+            }
+            other => panic!("expected refreshed system prompt, got {:?}", other),
+        }
+        match &agent.messages[1] {
+            Message::User { content } => assert_eq!(content, "hello"),
+            other => panic!("expected restored user message, got {:?}", other),
+        }
     }
 
     #[test]
@@ -456,6 +546,7 @@ mod tests {
                     working_directory: ".".to_string(),
                     worker_executable: None,
                     sandbox: None,
+                    ssh_host: None,
                     mcp: None,
                     skills,
                     extra_tool_defs: Vec::new(),
@@ -463,6 +554,7 @@ mod tests {
                     thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 },
             )
+            .expect("agent config must be valid")
         };
 
         let worker = build_agent(AgentMode::Worker, Some(registry.clone()));

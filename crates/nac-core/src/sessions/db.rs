@@ -1,10 +1,6 @@
 use super::*;
 
-pub fn create_session(snapshot: &SessionSnapshot) -> Result<()> {
-    create_session_at(&snapshot.store_path, snapshot)
-}
-
-pub fn create_session_at(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
 
@@ -23,19 +19,15 @@ pub fn create_session_at(path: &Path, snapshot: &SessionSnapshot) -> Result<()> 
         ));
     }
 
-    insert_or_replace_session(&tx, snapshot)?;
+    insert_or_replace_session(&tx, path, snapshot)?;
     tx.commit()?;
     Ok(())
 }
 
-pub fn save_session(snapshot: &SessionSnapshot) -> Result<()> {
-    save_session_at(&snapshot.store_path, snapshot)
-}
-
-pub fn save_session_at(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
-    insert_or_replace_session(&tx, snapshot)?;
+    insert_or_replace_session(&tx, path, snapshot)?;
     tx.commit()?;
     Ok(())
 }
@@ -44,28 +36,11 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
-            |row| {
-                Ok(SessionRow {
-                    session_id: row.get(0)?,
-                    cwd: row.get(1)?,
-                    store_path: row.get(2)?,
-                    model: row.get(3)?,
-                    base_url: row.get(4)?,
-                    backend: row.get(5)?,
-                    reasoning_effort: row.get(6)?,
-                    sandbox_json: row.get(7)?,
-                    messages_json: row.get(8)?,
-                    last_response_duration_ms: row.get(9)?,
-                    previous_response_duration_ms: row.get(10)?,
-                    response_durations_ms_json: row.get(11)?,
-                    created_at: row.get(12)?,
-                    updated_at: row.get(13)?,
-                })
-            },
+            map_session_row,
         )
         .optional()?;
 
@@ -80,29 +55,12 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
             [],
-            |row| {
-                Ok(SessionRow {
-                    session_id: row.get(0)?,
-                    cwd: row.get(1)?,
-                    store_path: row.get(2)?,
-                    model: row.get(3)?,
-                    base_url: row.get(4)?,
-                    backend: row.get(5)?,
-                    reasoning_effort: row.get(6)?,
-                    sandbox_json: row.get(7)?,
-                    messages_json: row.get(8)?,
-                    last_response_duration_ms: row.get(9)?,
-                    previous_response_duration_ms: row.get(10)?,
-                    response_durations_ms_json: row.get(11)?,
-                    created_at: row.get(12)?,
-                    updated_at: row.get(13)?,
-                })
-            },
+            map_session_row,
         )
         .optional()?;
 
@@ -113,10 +71,29 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
+fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
+    Ok(SessionRow {
+        session_id: row.get(0)?,
+        cwd: row.get(1)?,
+        model: row.get(2)?,
+        base_url: row.get(3)?,
+        backend: row.get(4)?,
+        reasoning_effort: row.get(5)?,
+        sandbox_json: row.get(6)?,
+        messages_json: row.get(7)?,
+        last_response_duration_ms: row.get(8)?,
+        previous_response_duration_ms: row.get(9)?,
+        response_durations_ms_json: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        ssh_host: row.get(13)?,
+    })
+}
+
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
     let conn = crate::store::open_connection(path)?;
     let mut stmt = conn.prepare(
-        "SELECT session_id, cwd, model, base_url, backend, sandbox_json, messages_json, created_at, updated_at
+        "SELECT session_id, cwd, model, base_url, backend, sandbox_json, messages_json, created_at, updated_at, host_id
          FROM sessions
          ORDER BY updated_at DESC, created_at DESC",
     )?;
@@ -131,6 +108,7 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
             row.get::<_, String>(6)?,
             row.get::<_, String>(7)?,
             row.get::<_, String>(8)?,
+            row.get::<_, Option<String>>(9)?,
         ))
     })?;
 
@@ -146,14 +124,21 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
             messages_json,
             created_at,
             updated_at,
+            ssh_host,
         ) = row?;
         let backend = parse_backend(backend_raw, &base_url)?;
         let cwd = PathBuf::from(cwd);
         let sandbox_spec = deserialize_sandbox(sandbox_json)?;
         let sandboxed = sandbox_spec.is_some();
-        let workspace_host_path = match sandbox_spec.as_ref() {
-            Some(spec) => crate::sandbox::host_workdir_from_spec(spec),
-            None => Some(cwd.clone()),
+        let workspace_host_path = if ssh_host.is_some() {
+            // Remote session: the stored cwd lives on the remote host, so
+            // there is no local path for host-side inspection (git stats).
+            None
+        } else {
+            match sandbox_spec.as_ref() {
+                Some(spec) => crate::sandbox::host_workdir_from_spec(spec),
+                None => Some(cwd.clone()),
+            }
         };
         let messages: Vec<Message> = serde_json::from_str(&messages_json)
             .context("failed to parse stored session messages")?;
@@ -166,6 +151,7 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
             visible_message_count: visible_message_count(&messages),
             last_user_prompt: last_user_prompt(&messages),
             sandboxed,
+            ssh_host,
             created_at,
             updated_at,
         });
@@ -176,6 +162,7 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
 
 fn insert_or_replace_session(
     tx: &rusqlite::Transaction<'_>,
+    path: &Path,
     snapshot: &SessionSnapshot,
 ) -> Result<()> {
     let sandbox_json = snapshot
@@ -192,10 +179,13 @@ fn insert_or_replace_session(
         .transpose()
         .context("failed to serialize session response durations")?;
 
+    // The legacy `store_path` column is kept physically (NOT NULL in existing
+    // stores) but is informational only: it records the store that was
+    // actually opened for this write and is never read back.
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
@@ -208,11 +198,12 @@ fn insert_or_replace_session(
              last_response_duration_ms = excluded.last_response_duration_ms,
              previous_response_duration_ms = excluded.previous_response_duration_ms,
              response_durations_ms_json = excluded.response_durations_ms_json,
-             updated_at = excluded.updated_at",
+             updated_at = excluded.updated_at,
+             host_id = excluded.host_id",
         params![
             snapshot.session_id,
             snapshot.cwd.display().to_string(),
-            snapshot.store_path.display().to_string(),
+            path.display().to_string(),
             snapshot.model,
             snapshot.base_url,
             snapshot.backend.as_str(),
@@ -224,6 +215,7 @@ fn insert_or_replace_session(
             response_durations_ms_json,
             snapshot.created_at,
             snapshot.updated_at,
+            snapshot.ssh_host,
         ],
     )?;
     Ok(())
@@ -232,7 +224,6 @@ fn insert_or_replace_session(
 struct SessionRow {
     session_id: String,
     cwd: String,
-    store_path: String,
     model: String,
     base_url: String,
     backend: Option<String>,
@@ -244,6 +235,7 @@ struct SessionRow {
     response_durations_ms_json: Option<String>,
     created_at: String,
     updated_at: String,
+    ssh_host: Option<String>,
 }
 
 impl SessionRow {
@@ -262,12 +254,12 @@ impl SessionRow {
         Ok(SessionSnapshot {
             session_id: self.session_id,
             cwd: PathBuf::from(self.cwd),
-            store_path: PathBuf::from(self.store_path),
             model: self.model,
             base_url,
             backend,
             reasoning_effort: parse_reasoning_effort(self.reasoning_effort)?,
             sandbox_spec: deserialize_sandbox(self.sandbox_json)?,
+            ssh_host: self.ssh_host,
             messages,
             last_response_duration_ms: self.last_response_duration_ms,
             previous_response_duration_ms: self.previous_response_duration_ms,

@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
-use crate::sandbox::SandboxSession;
+use crate::sandbox::ExecutionBackend;
 
 const MAX_SESSION_OUTPUT_BYTES: usize = 1024 * 1024;
 
@@ -27,7 +27,9 @@ pub struct TerminalSession {
     pub last_output_at: Instant,
     alive: Arc<AtomicBool>,
     exit_code: Option<i32>,
-    sandbox_cleanup: Option<(SandboxSession, String)>,
+    /// Remote process-tree cleanup: backends that return a pidfile from
+    /// `terminal_pty_command` get a backend-side kill on session teardown.
+    backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -39,7 +41,7 @@ impl TerminalSession {
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
-        sandbox: Option<&SandboxSession>,
+        backend: &Arc<ExecutionBackend>,
     ) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
@@ -51,36 +53,13 @@ impl TerminalSession {
             })
             .context("Failed to open PTY pair")?;
 
-        let mut cmd = CommandBuilder::new("bash");
-        for (key, value) in terminal_env() {
-            cmd.env(key, value);
-        }
-
-        let resolved_cwd: PathBuf;
-        let mut sandbox_cleanup = None;
-
-        if let Some(sb) = sandbox {
-            // resolved_cwd mirrors the --workdir fallback inside terminal_pty_command.
-            // Both use cwd if provided, otherwise the sandbox workdir. Keep these in sync.
-            resolved_cwd = match cwd.as_ref() {
-                Some(p) => p.clone(),
-                None => PathBuf::from(sb.workdir_display()),
-            };
-
-            let envs = terminal_env_owned();
-
-            let (sandbox_cmd, pidfile) = sb.terminal_pty_command(cwd.as_deref(), &envs);
-            cmd = sandbox_cmd;
-            sandbox_cleanup = Some((sb.clone(), pidfile));
-        } else {
-            if let Some(ref p) = cwd {
-                cmd.cwd(p);
-            }
-            resolved_cwd = match cwd {
-                Some(p) => p,
-                None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-            };
-        }
+        let envs = terminal_env_owned();
+        let (cmd, pidfile) = backend.terminal_pty_command(cwd.as_deref(), &envs);
+        // resolved_cwd mirrors the default-workdir fallback inside each
+        // backend's terminal_pty_command: explicit cwd if provided, otherwise
+        // the backend's default terminal directory. Keep these in sync.
+        let resolved_cwd = cwd.unwrap_or_else(|| backend.default_terminal_cwd());
+        let backend_cleanup = pidfile.map(|pidfile| (Arc::clone(backend), pidfile));
 
         let child = pty_pair
             .slave
@@ -135,7 +114,7 @@ impl TerminalSession {
             last_output_at: Instant::now(),
             alive,
             exit_code: None,
-            sandbox_cleanup,
+            backend_cleanup,
             cwd: resolved_cwd,
             cols,
             rows,
@@ -197,8 +176,8 @@ impl TerminalSession {
     }
 
     pub async fn kill(&mut self) -> Result<()> {
-        if let Some((sandbox, pidfile)) = &self.sandbox_cleanup {
-            let _ = sandbox.terminal_pipe_kill(pidfile).await;
+        if let Some((backend, pidfile)) = &self.backend_cleanup {
+            let _ = backend.terminal_pipe_kill(pidfile).await;
         }
 
         #[cfg(unix)]
@@ -539,7 +518,12 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn kill_removes_background_jobs_from_pty_shell() {
-        let mut session = TerminalSession::spawn("test".to_string(), None, 120, 40, None).unwrap();
+        let backend = crate::sandbox::execution_backend_from_sandbox(
+            None,
+            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+        );
+        let mut session =
+            TerminalSession::spawn("test".to_string(), None, 120, 40, &backend).unwrap();
         session.write(b"sleep 30 & echo NAC_CHILD:$!\r").unwrap();
 
         let mut output = String::new();

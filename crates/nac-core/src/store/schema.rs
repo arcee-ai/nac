@@ -1,7 +1,15 @@
 use super::*;
 
+/// Default store location: one global store under the nac home directory
+/// (`$NAC_HOME`, `$XDG_CONFIG_HOME/nac`, or `~/.config/nac`), shared by every
+/// workspace. Falls back to the legacy per-workspace `.nac/store.db` when no
+/// home directory can be determined. A relative result (e.g. from a relative
+/// `$NAC_HOME`) is resolved against the workspace cwd by
+/// `runtime::resolve_store_path`; the parent directory is created on open.
 pub fn default_store_path() -> PathBuf {
-    PathBuf::from(".nac").join("store.db")
+    crate::paths::nac_home_dir()
+        .map(|home| home.join("store.db"))
+        .unwrap_or_else(|| PathBuf::from(".nac").join("store.db"))
 }
 
 pub fn initialize(path: &Path) -> Result<()> {
@@ -101,6 +109,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER",
     )?;
     ensure_column(&conn, "sessions", "response_durations_ms_json", "TEXT")?;
+    ensure_column(&conn, "sessions", "host_id", "TEXT")?;
     Ok(conn)
 }
 

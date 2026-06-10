@@ -19,16 +19,23 @@ pub use snapshot::{new_snapshot, refresh_snapshot};
 use codec::*;
 use summary::*;
 
+/// In-memory session state. Note: there is intentionally no `store_path`
+/// field. Sessions always persist to the store that was actually opened
+/// (passed explicitly to `create_session`/`save_session`), never to a path
+/// remembered inside the row.
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
     pub cwd: PathBuf,
-    pub store_path: PathBuf,
     pub model: String,
     pub base_url: String,
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub sandbox_spec: Option<SandboxSpec>,
+    /// OpenSSH/freeform target the session runs on. `None` = local session
+    /// (exactly the pre-remote behavior). When set, `cwd` is a path on that
+    /// remote host and must not be checked or canonicalized locally.
+    pub ssh_host: Option<String>,
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
@@ -47,6 +54,8 @@ pub struct SessionSummary {
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
+    /// OpenSSH/freeform target the session runs on; `None` = local session.
+    pub ssh_host: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -75,11 +84,11 @@ mod tests {
         let mut snapshot = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
             Some(ReasoningEffort::Xhigh),
+            None,
             None,
             vec![Message::User {
                 content: "hello".to_string(),
@@ -88,7 +97,7 @@ mod tests {
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
         snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
-        create_session(&snapshot).unwrap();
+        create_session(&store_path, &snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
         assert_eq!(loaded.cwd, PathBuf::from("/repo"));
@@ -163,6 +172,129 @@ mod tests {
         assert_eq!(loaded.last_response_duration_ms, Some(12_345));
         assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
         assert_eq!(loaded.response_durations_ms, None);
+        assert_eq!(
+            loaded.ssh_host, None,
+            "legacy rows without a host_id column load as local sessions"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn save_session_persists_to_opened_store_not_path_recorded_in_row() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("persist_target");
+        let foreign_store_path = store_path
+            .parent()
+            .unwrap()
+            .join("foreign")
+            .join("store.db");
+        std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
+        let messages_json = serde_json::to_string(&vec![Message::User {
+            content: "hello".to_string(),
+        }])
+        .unwrap();
+
+        // Legacy row claiming it belongs to a different store file.
+        {
+            let conn = crate::store::open_connection(&store_path).unwrap();
+            conn.execute(
+                "INSERT INTO sessions (
+                    session_id, cwd, store_path, model, base_url, messages_json,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    "session-foreign",
+                    "/repo",
+                    foreign_store_path.display().to_string(),
+                    "model-a",
+                    "https://api.openai.com/v1",
+                    messages_json,
+                    "2026-01-01 00:00:00.000000000",
+                    "2026-01-01 00:00:01.000000000",
+                ],
+            )
+            .unwrap();
+        }
+
+        let loaded = load_session(&store_path, "session-foreign").unwrap();
+        let refreshed = refresh_snapshot(
+            &loaded,
+            vec![Message::User {
+                content: "updated".to_string(),
+            }],
+            None,
+            None,
+            None,
+        );
+        save_session(&store_path, &refreshed).unwrap();
+
+        assert!(
+            !foreign_store_path.exists(),
+            "save must not write to the store path recorded inside the row"
+        );
+        let reloaded = load_session(&store_path, "session-foreign").unwrap();
+        assert_eq!(reloaded.messages.len(), 1);
+        match &reloaded.messages[0] {
+            Message::User { content } => assert_eq!(content, "updated"),
+            other => panic!("expected updated user message, got {:?}", other),
+        }
+
+        // The legacy NOT NULL column is rewritten with the store actually opened.
+        let conn = crate::store::open_connection(&store_path).unwrap();
+        let recorded: String = conn
+            .query_row(
+                "SELECT store_path FROM sessions WHERE session_id = ?1",
+                rusqlite::params!["session-foreign"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, store_path.display().to_string());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn ssh_host_round_trips_through_store_refresh_and_summaries() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("ssh_host_round_trip");
+
+        let snapshot = new_snapshot(
+            "session-remote".to_string(),
+            PathBuf::from("/remote/workspace"),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            Some("build-box".to_string()),
+            vec![Message::User {
+                content: "hello".to_string(),
+            }],
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "session-remote").unwrap();
+        assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
+
+        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None);
+        assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
+        save_session(&store_path, &refreshed).unwrap();
+        assert_eq!(
+            load_session(&store_path, "session-remote")
+                .unwrap()
+                .ssh_host
+                .as_deref(),
+            Some("build-box")
+        );
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(
+            summaries[0].workspace_host_path, None,
+            "remote sessions must not expose a local path for host-side git inspection"
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -175,30 +307,30 @@ mod tests {
         let first = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo-one"),
-            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
             Some(ReasoningEffort::Xhigh),
             None,
+            None,
             Vec::new(),
         );
-        create_session(&first).unwrap();
+        create_session(&store_path, &first).unwrap();
 
         let second = new_snapshot(
             "session-2".to_string(),
             PathBuf::from("/repo-two"),
-            store_path.clone(),
             "model-b".to_string(),
             "https://api.fireworks.ai/inference/v1".to_string(),
             BackendKind::FireworksChat,
+            None,
             None,
             None,
             vec![Message::User {
                 content: "latest".to_string(),
             }],
         );
-        save_session(&second).unwrap();
+        save_session(&store_path, &second).unwrap();
 
         let loaded = load_last_session(&store_path).unwrap();
         assert_eq!(loaded.session_id, "session-2");
@@ -214,10 +346,10 @@ mod tests {
         let first = new_snapshot(
             "session-1".to_string(),
             PathBuf::from("/repo-one"),
-            store_path.clone(),
             "model-a".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
+            None,
             None,
             None,
             vec![
@@ -229,12 +361,11 @@ mod tests {
                 },
             ],
         );
-        create_session(&first).unwrap();
+        create_session(&store_path, &first).unwrap();
 
         let second = new_snapshot(
             "session-2".to_string(),
             PathBuf::from("/repo-two"),
-            store_path.clone(),
             "model-b".to_string(),
             "https://api.fireworks.ai/inference/v1".to_string(),
             BackendKind::FireworksChat,
@@ -246,6 +377,7 @@ mod tests {
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
             }),
+            None,
             vec![
                 Message::System {
                     content: "system".to_string(),
@@ -261,7 +393,7 @@ mod tests {
                 },
             ],
         );
-        save_session(&second).unwrap();
+        save_session(&store_path, &second).unwrap();
 
         let sessions = list_sessions(&store_path).unwrap();
         assert_eq!(sessions.len(), 2);

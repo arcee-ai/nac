@@ -94,6 +94,10 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
+    // Fail fast before any model traffic when the execution backend is
+    // unusable (e.g. the remote ssh host is unreachable).
+    agent.ensure_backend_ready().await?;
+
     let send_result = agent.send(&action).await;
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
@@ -168,13 +172,15 @@ mod tests {
                 working_directory: ".".to_string(),
                 worker_executable: None,
                 sandbox: None,
+                ssh_host: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: Some("AGENTS.md worker instructions".to_string()),
                 thread_timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
             },
-        );
+        )
+        .expect("agent config must be valid");
         let system_messages = agent
             .messages
             .iter()
