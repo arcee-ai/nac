@@ -717,6 +717,167 @@ button.session-card {
   color: var(--muted);
 }
 
+.message-body.markdown {
+  white-space: normal;
+}
+
+.message-body.markdown :where(p, blockquote, ul, ol, pre, hr, table, h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+
+.message-body.markdown > * + * {
+  margin-top: var(--space-md);
+}
+
+.message-body.markdown > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown > * + :is(h1, h2, h3, h4, h5, h6),
+.message-body.markdown > * + pre,
+.message-body.markdown > pre + *,
+.message-body.markdown > p + p {
+  margin-top: var(--space-lg);
+}
+
+.message-body.markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text);
+  font-weight: var(--type-weight-strong);
+  line-height: 1.25;
+}
+
+.message-body.markdown h1 {
+  font-size: calc(var(--type-body) + 5px);
+}
+
+.message-body.markdown h2 {
+  font-size: calc(var(--type-body) + 4px);
+}
+
+.message-body.markdown h3 {
+  font-size: calc(var(--type-body) + 3px);
+}
+
+.message-body.markdown :is(h4, h5, h6) {
+  font-size: calc(var(--type-body) + 1px);
+}
+
+.message-body.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.message-body.markdown blockquote {
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  padding-left: var(--space-md);
+}
+
+.message-body.markdown blockquote > * + * {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown :is(ul, ol) {
+  list-style-position: outside;
+  padding-left: 1.55em;
+}
+
+.message-body.markdown ol {
+  padding-left: 2.15em;
+}
+
+.message-body.markdown li {
+  padding-left: 0.15em;
+}
+
+.message-body.markdown li + li {
+  margin-top: var(--space-2xs);
+}
+
+.message-body.markdown li > :is(p, blockquote, ul, ol, pre, table) {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown li > :first-child {
+  margin-top: 0;
+}
+
+.message-body.markdown ol li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+.message-body.markdown code {
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--amber);
+  padding: 0 3px;
+  white-space: break-spaces;
+}
+
+.message-body.markdown pre {
+  overflow-x: auto;
+  overflow-wrap: normal;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.22);
+  padding: var(--space-md);
+  white-space: pre;
+}
+
+.message-body.markdown pre code {
+  display: block;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  white-space: inherit;
+}
+
+.message-body.markdown a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-body.markdown a:hover {
+  color: var(--highlight);
+}
+
+.message-body.markdown .md-image-text {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.message-body.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.message-body.markdown th,
+.message-body.markdown td {
+  border: 1px solid var(--line-soft);
+  padding: var(--space-xs) var(--space-sm);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-body.markdown th {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-weight: var(--type-weight-strong);
+}
+
+.message-body.markdown strong {
+  font-weight: var(--type-weight-strong);
+}
+
+.message-body.markdown :is(s, del) {
+  color: var(--muted);
+}
+
 .prompt-form {
   display: grid;
   border-radius: var(--radius-xl);

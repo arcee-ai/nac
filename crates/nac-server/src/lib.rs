@@ -476,6 +476,11 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
+        .route("/assets/vendor/purify.min.js", get(vendor_purify_js))
+        .route(
+            "/assets/vendor/markdown-it.min.js",
+            get(vendor_markdown_it_js),
+        )
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
@@ -522,6 +527,26 @@ async fn app_js() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/app.js"),
+    )
+}
+
+async fn vendor_purify_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/purify.min.js"),
+    )
+}
+
+async fn vendor_markdown_it_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/markdown-it.min.js"),
     )
 }
 
