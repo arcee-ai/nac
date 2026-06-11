@@ -29,11 +29,14 @@ function bindElements() {
     "launchOverlay",
     "closeLaunch",
     "launchForm",
+    "launchSshHost",
+    "launchCwdField",
     "launchCwd",
     "launchBackend",
     "launchEffort",
     "launchModel",
     "launchBaseUrl",
+    "sandboxFields",
     "sandboxEnabled",
     "sandboxNoMount",
     "sandboxImage",
@@ -71,6 +74,7 @@ function bindElements() {
 
 function bindEvents() {
   el.launchForm.addEventListener("submit", createSession);
+  el.launchSshHost.addEventListener("input", renderLaunchHostFields);
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
   el.cancelRun.addEventListener("click", cancelActiveRun);
@@ -80,7 +84,8 @@ function bindEvents() {
     if (event.target === el.launchOverlay) hideLaunchOverlay();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !el.launchOverlay.hidden) hideLaunchOverlay();
+    if (event.key !== "Escape") return;
+    if (!el.launchOverlay.hidden) hideLaunchOverlay();
   });
 
   el.tabs.addEventListener("click", (event) => {
@@ -101,6 +106,7 @@ async function boot() {
     setLaunchStatus(error.message, true);
   }
 
+  renderLaunchHostFields();
   await loadSessions();
   setInterval(loadSessions, 5000);
 }
@@ -146,6 +152,20 @@ async function loadSessions() {
   } catch (error) {
     setLaunchStatus(error.message, true);
   }
+}
+
+function renderLaunchHostFields() {
+  const remote = Boolean(el.launchSshHost.value.trim());
+  if (remote && state.store && el.launchCwd.value === state.store.root_cwd) {
+    el.launchCwd.value = "~";
+  } else if (!remote && state.store && el.launchCwd.value === "~") {
+    el.launchCwd.value = state.store.root_cwd;
+  }
+  setVisible(el.sandboxFields, !remote);
+}
+
+function setVisible(element, visible) {
+  element.style.display = visible ? "" : "none";
 }
 
 async function loadSnapshot(sessionId, openStream = false) {
@@ -209,13 +229,17 @@ async function createSession(event) {
   event.preventDefault();
   setLaunchStatus("launching", false);
   const initialPrompt = el.initialPrompt.value.trim();
+  const sshHost = nullable(el.launchSshHost.value);
   const body = {
-    cwd: nullable(el.launchCwd.value),
+    cwd: sshHost ? (nullable(el.launchCwd.value) || "~") : nullable(el.launchCwd.value),
+    ssh_host: sshHost,
     model: nullable(el.launchModel.value),
     base_url: nullable(el.launchBaseUrl.value),
     backend: nullable(el.launchBackend.value),
     reasoning_effort: nullable(el.launchEffort.value),
-    sandbox: {
+  };
+  if (!sshHost) {
+    body.sandbox = {
       enabled: el.sandboxEnabled.checked,
       no_mount_cwd: el.sandboxNoMount.checked,
       image: nullable(el.sandboxImage.value),
@@ -224,8 +248,8 @@ async function createSession(event) {
       shm_size: nullable(el.sandboxShm.value),
       mounts: csv(el.sandboxMounts.value),
       mounts_ro: [],
-    },
-  };
+    };
+  }
 
   try {
     const snapshot = await apiPost("/sessions", body);
@@ -396,7 +420,7 @@ function renderNewSessionCard() {
       </span>
       <span>
         <strong>New Session</strong>
-        <small>cwd, sandbox, model, prompt</small>
+        <small>ssh, cwd, sandbox, model, prompt</small>
       </span>
     </button>`;
 }
@@ -408,7 +432,7 @@ function renderSessionCard(entry) {
   const workspaceError = snapshot?.workspace?.error || "";
   const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
   const tone = entry.active_run ? "" : summary.sandboxed ? "warn" : "";
-  const errorish = workspaceError && !workspaceError.includes("sandbox-only") ? "errorish" : "";
+  const errorish = workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "";
   const pendingCount = pendingMessages(sessionId).length;
   const promptPreview = latestPendingUserPrompt(sessionId) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
   return `
@@ -422,6 +446,7 @@ function renderSessionCard(entry) {
       </div>
       <div class="badge-row">
         <span class="badge">${escapeHtml(summary.backend)}</span>
+        ${summary.ssh_host ? `<span class="badge host">${escapeHtml(summary.ssh_host)}</span>` : ""}
         ${summary.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
       </div>
       <div class="telemetry-grid">

@@ -754,7 +754,9 @@ impl SessionService {
         };
 
         let saved_snapshot = refreshed.clone();
-        tokio::task::spawn_blocking(move || sessions::save_session(&saved_snapshot)).await??;
+        let store_path = self.metadata.store_path.clone();
+        tokio::task::spawn_blocking(move || sessions::save_session(&store_path, &saved_snapshot))
+            .await??;
 
         let saved_session_id = refreshed.session_id.clone();
         let mut snapshot = self.session_snapshot.lock().await;
@@ -936,9 +938,11 @@ mod tests {
                 thread_name: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("/repo"),
+                config_cwd: PathBuf::from("/repo"),
                 working_directory: "/repo".to_string(),
                 worker_executable: None,
                 sandbox: None,
+                ssh_host: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -946,6 +950,7 @@ mod tests {
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             },
         )
+        .expect("agent config must be valid")
     }
 
     fn test_picker_service(label: &str) -> SessionServiceParts {
@@ -992,11 +997,11 @@ mod tests {
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
+            None,
             None,
             agent.messages.clone(),
         );
@@ -1009,6 +1014,7 @@ mod tests {
             client,
             session: OrchestratorSession::Active {
                 session_id: session_id.clone(),
+                store_path: store_path.clone(),
                 snapshot,
             },
             sandbox_status: "off".to_string(),
@@ -1042,20 +1048,21 @@ mod tests {
         let snapshot = sessions::new_snapshot(
             session_id.clone(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
             None,
+            None,
             agent.messages.clone(),
         );
-        sessions::create_session(&snapshot).unwrap();
+        sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
             session: OrchestratorSession::Active {
                 session_id: session_id.clone(),
+                store_path: store_path.clone(),
                 snapshot,
             },
             sandbox_status: "off".to_string(),
@@ -1146,11 +1153,11 @@ mod tests {
         let snapshot = sessions::new_snapshot(
             session_id,
             PathBuf::from("/repo"),
-            store_path,
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
+            None,
             None,
             agent.messages.clone(),
         );
@@ -1159,6 +1166,7 @@ mod tests {
             client,
             session: OrchestratorSession::Active {
                 session_id: snapshot.session_id.clone(),
+                store_path,
                 snapshot,
             },
             sandbox_status: "off".to_string(),
@@ -1221,11 +1229,11 @@ mod tests {
         let snapshot = sessions::new_snapshot(
             session_id.clone(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
+            None,
             None,
             agent.messages.clone(),
         );
@@ -1234,6 +1242,7 @@ mod tests {
             client,
             session: OrchestratorSession::Active {
                 session_id: session_id.clone(),
+                store_path: store_path.clone(),
                 snapshot,
             },
             sandbox_status: "off".to_string(),
@@ -1401,22 +1410,23 @@ mod tests {
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
             None,
+            None,
             agent.messages.clone(),
         );
         snapshot.last_response_duration_ms = Some(123);
         snapshot.response_durations_ms = Some(vec![Some(123)]);
-        sessions::create_session(&snapshot).unwrap();
+        sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
             session: OrchestratorSession::Active {
                 session_id: session_id.clone(),
+                store_path: store_path.clone(),
                 snapshot,
             },
             sandbox_status: "off".to_string(),
@@ -1475,20 +1485,21 @@ mod tests {
         let snapshot = sessions::new_snapshot(
             session_id.clone(),
             PathBuf::from("/repo"),
-            store_path.clone(),
             client.model.clone(),
             client.base_url().to_string(),
             client.backend(),
             client.reasoning_effort(),
             None,
+            None,
             agent.messages.clone(),
         );
-        sessions::create_session(&snapshot).unwrap();
+        sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
             session: OrchestratorSession::Active {
                 session_id: session_id.clone(),
+                store_path: store_path.clone(),
                 snapshot,
             },
             sandbox_status: "off".to_string(),

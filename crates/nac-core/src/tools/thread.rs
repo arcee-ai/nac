@@ -587,7 +587,9 @@ async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
-    command.current_dir(&runtime.workspace_cwd);
+    if runtime.backend.workspace_cwd_is_local() {
+        command.current_dir(&runtime.workspace_cwd);
+    }
     command
         .arg("__worker")
         .arg("--session-id")
@@ -605,9 +607,15 @@ async fn run_worker(
         .arg("--store-path")
         .arg(runtime.store_path.as_os_str())
         .arg("--workspace-cwd")
-        .arg(runtime.workspace_cwd.as_os_str())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .arg(runtime.workspace_cwd.as_os_str());
+
+    if !runtime.backend.workspace_cwd_is_local() || runtime.config_cwd != runtime.workspace_cwd {
+        command
+            .arg("--config-cwd")
+            .arg(runtime.config_cwd.as_os_str());
+    }
+
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     if let Some(reasoning_effort) = client.reasoning_effort() {
         command.arg("--effort").arg(reasoning_effort.as_str());
@@ -619,9 +627,7 @@ async fn run_worker(
     for skill in invocation.scheduled_skills {
         command.arg("--skill").arg(skill);
     }
-    if let Some(sandbox) = &runtime.sandbox {
-        command.args(sandbox.worker_cli_args());
-    }
+    command.args(runtime.backend.worker_cli_args());
     isolate_process_group(&mut command);
     command.kill_on_drop(true);
 

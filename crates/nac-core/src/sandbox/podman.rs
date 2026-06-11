@@ -13,7 +13,7 @@ use tokio::time::timeout;
 
 use super::{MountSpec, SandboxSpec};
 
-const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
+pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
 if command -v setsid >/dev/null 2>&1; then
   setsid bash -c "$1" &
 else
@@ -27,14 +27,14 @@ status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
-const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
+pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
 printf '%s' "$$" > "$pidfile"
 bash -i
 status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
-const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
+pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
 pid=$(cat "$pidfile" 2>/dev/null) || exit 0
 if [ -n "$pid" ]; then
   descendants() {
@@ -403,7 +403,7 @@ impl Drop for PodmanSession {
     }
 }
 
-fn make_sandbox_pidfile() -> String {
+pub(crate) fn make_sandbox_pidfile() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())

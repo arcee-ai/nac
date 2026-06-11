@@ -21,6 +21,8 @@ pub struct SessionSummarySnapshot {
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
+    /// OpenSSH/freeform target the session runs on; `None` = local session.
+    pub ssh_host: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -134,6 +136,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             visible_message_count: summary.visible_message_count,
             last_user_prompt: summary.last_user_prompt,
             sandboxed: summary.sandboxed,
+            ssh_host: summary.ssh_host,
             created_at: summary.created_at,
             updated_at: summary.updated_at,
         }
@@ -308,7 +311,7 @@ pub fn workspace_diff_totals(
             total_additions: 0,
             total_deletions: 0,
             error: Some(format!(
-                "workspace '{}' is sandbox-only; host-side inspection unavailable",
+                "workspace '{}' is remote/sandbox-only; host-side inspection unavailable",
                 workspace_display
             )),
         };
@@ -348,7 +351,7 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
             total_additions: 0,
             total_deletions: 0,
             error: Some(format!(
-                "workspace '{}' is sandbox-only; host-side inspection unavailable",
+                "workspace '{}' is remote/sandbox-only; host-side inspection unavailable",
                 workspace_display
             )),
         };

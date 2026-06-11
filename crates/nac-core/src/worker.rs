@@ -165,16 +165,19 @@ mod tests {
                 thread_name: Some("impl".to_string()),
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("."),
+                config_cwd: PathBuf::from("."),
                 working_directory: ".".to_string(),
                 worker_executable: None,
                 sandbox: None,
+                ssh_host: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: Some("AGENTS.md worker instructions".to_string()),
                 thread_timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
             },
-        );
+        )
+        .expect("agent config must be valid");
         let system_messages = agent
             .messages
             .iter()

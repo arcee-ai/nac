@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::events::EventSink;
 use crate::mcp::McpRegistry;
-use crate::sandbox::SandboxSession;
+use crate::sandbox::ExecutionBackend;
 use crate::skills::SkillRegistry;
 use crate::terminal::TerminalManager;
 use crate::types::ToolDefinition;
@@ -28,12 +28,13 @@ pub struct ToolResult {
 #[derive(Clone)]
 pub struct ToolRuntime {
     pub workspace_cwd: PathBuf,
+    pub config_cwd: PathBuf,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub worker_executable: Option<PathBuf>,
     pub active_threads: Arc<Mutex<HashSet<String>>>,
     pub event_sink: EventSink,
-    pub sandbox: Option<SandboxSession>,
+    pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,

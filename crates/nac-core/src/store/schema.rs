@@ -1,7 +1,10 @@
 use super::*;
 
+/// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
-    PathBuf::from(".nac").join("store.db")
+    crate::paths::nac_home_dir()
+        .map(|home| home.join("store.db"))
+        .unwrap_or_else(|| PathBuf::from(".nac").join("store.db"))
 }
 
 pub fn initialize(path: &Path) -> Result<()> {
@@ -101,6 +104,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER",
     )?;
     ensure_column(&conn, "sessions", "response_durations_ms_json", "TEXT")?;
+    ensure_column(&conn, "sessions", "host_id", "TEXT")?;
     Ok(conn)
 }
 

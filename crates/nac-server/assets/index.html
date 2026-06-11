@@ -114,8 +114,12 @@
 
         <form id="launchForm" class="launch-form">
           <label>
+            <span>SSH host (optional)</span>
+            <input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="build-box or user@host" />
+          </label>
+          <label id="launchCwdField">
             <span>CWD</span>
-            <input id="launchCwd" name="cwd" autocomplete="off" />
+            <input id="launchCwd" name="cwd" autocomplete="off" placeholder="local path or remote cwd (default ~)" />
           </label>
           <div class="form-grid two">
             <label>
@@ -151,40 +155,42 @@
               <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="config" />
             </label>
           </div>
-          <div class="toggle-row">
-            <label class="toggle">
-              <input id="sandboxEnabled" type="checkbox" />
-              <span>Sandbox</span>
-            </label>
-            <label class="toggle">
-              <input id="sandboxNoMount" type="checkbox" />
-              <span>No CWD mount</span>
+          <div id="sandboxFields" class="launch-form">
+            <div class="toggle-row">
+              <label class="toggle">
+                <input id="sandboxEnabled" type="checkbox" />
+                <span>Sandbox</span>
+              </label>
+              <label class="toggle">
+                <input id="sandboxNoMount" type="checkbox" />
+                <span>No CWD mount</span>
+              </label>
+            </div>
+            <div class="form-grid two">
+              <label>
+                <span>Image</span>
+                <input id="sandboxImage" autocomplete="off" placeholder="python:3.13-bookworm" />
+              </label>
+              <label>
+                <span>GPU</span>
+                <input id="sandboxGpu" autocomplete="off" placeholder="all" />
+              </label>
+            </div>
+            <div class="form-grid two">
+              <label>
+                <span>Workdir</span>
+                <input id="sandboxWorkdir" autocomplete="off" placeholder="/workspace" />
+              </label>
+              <label>
+                <span>shm</span>
+                <input id="sandboxShm" autocomplete="off" placeholder="0" />
+              </label>
+            </div>
+            <label>
+              <span>Mounts</span>
+              <input id="sandboxMounts" autocomplete="off" placeholder="HOST:GUEST, ..." />
             </label>
           </div>
-          <div class="form-grid two">
-            <label>
-              <span>Image</span>
-              <input id="sandboxImage" autocomplete="off" placeholder="python:3.13-bookworm" />
-            </label>
-            <label>
-              <span>GPU</span>
-              <input id="sandboxGpu" autocomplete="off" placeholder="all" />
-            </label>
-          </div>
-          <div class="form-grid two">
-            <label>
-              <span>Workdir</span>
-              <input id="sandboxWorkdir" autocomplete="off" placeholder="/workspace" />
-            </label>
-            <label>
-              <span>shm</span>
-              <input id="sandboxShm" autocomplete="off" placeholder="0" />
-            </label>
-          </div>
-          <label>
-            <span>Mounts</span>
-            <input id="sandboxMounts" autocomplete="off" placeholder="HOST:GUEST, ..." />
-          </label>
           <label>
             <span>Initial prompt</span>
             <textarea id="initialPrompt" rows="4" spellcheck="false"></textarea>

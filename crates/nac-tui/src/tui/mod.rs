@@ -1457,10 +1457,10 @@ mod tests {
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
             dir.clone(),
-            metadata.store_path.clone(),
             metadata.model.clone(),
             "https://example.com/v1".to_string(),
             nac_core::model::BackendKind::OpenAiResponses,
+            None,
             None,
             None,
             messages,
@@ -1468,7 +1468,7 @@ mod tests {
         snapshot.last_response_duration_ms = Some(3_333);
         snapshot.previous_response_duration_ms = Some(2_222);
         snapshot.response_durations_ms = Some(vec![Some(1_111), Some(2_222), Some(3_333)]);
-        sessions::create_session(&snapshot).unwrap();
+        sessions::create_session(&metadata.store_path, &snapshot).unwrap();
 
         let loaded = sessions::load_session(&metadata.store_path, &session_id).unwrap();
         assert_eq!(

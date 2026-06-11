@@ -2,14 +2,17 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::tools::{require_str, resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::sandbox::FileIoMode;
+use crate::tools::{
+    acquire_write_lock, require_str, resolve_workspace_path, ToolResult, ToolRuntime,
+};
 
-const SANDBOX_WRITE_SCRIPT: &str = r#"
+const REMOTE_WRITE_SCRIPT: &str = r#"
 from pathlib import Path
 import sys
 
 orig = sys.argv[1]
-path = Path(sys.argv[2])
+path = Path(sys.argv[2]).expanduser()
 
 try:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,8 +33,8 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         Err(error) => return error,
     };
 
-    if let Some(sandbox) = &runtime.sandbox {
-        let guest_path = match sandbox.resolve_path(&path) {
+    if runtime.backend.file_io() == FileIoMode::RemoteExec {
+        let guest_path = match runtime.backend.resolve_path(&path) {
             Ok(path) => path,
             Err(error) => {
                 return ToolResult {
@@ -42,11 +45,13 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         };
         let args = vec![
             "-c".to_string(),
-            SANDBOX_WRITE_SCRIPT.to_string(),
+            REMOTE_WRITE_SCRIPT.to_string(),
             path.clone(),
             guest_path.display().to_string(),
         ];
-        return match sandbox
+        let _guard = acquire_write_lock().await;
+        return match runtime
+            .backend
             .exec("python3", &args, Some(content.into_bytes()))
             .await
         {
@@ -59,7 +64,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                 is_error: true,
             },
             Err(error) => ToolResult {
-                content: format!("Error writing {} in sandbox: {}", path, error),
+                content: format!(
+                    "Error writing {} in {}: {}",
+                    path,
+                    runtime.backend.remote_io_label(),
+                    error
+                ),
                 is_error: true,
             },
         };
@@ -104,14 +114,16 @@ mod tests {
     }
 
     fn local_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
         ToolRuntime {
+            config_cwd: workspace_cwd.clone(),
             workspace_cwd,
             store_path: PathBuf::new(),
             session_id: None,
             worker_executable: None,
             active_threads: Arc::new(Mutex::new(HashSet::new())),
             event_sink: EventSink::none(),
-            sandbox: None,
+            backend,
             mcp: None,
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),

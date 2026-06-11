@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use crate::tools::{resolve_workspace_path, ToolRuntime};
+use crate::tools::ToolRuntime;
 use crate::types::{FunctionDef, ToolDefinition};
 
 // ============================================================================
@@ -67,7 +67,7 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result
                 40,
                 yield_ms,
                 max_output,
-                runtime.sandbox.as_ref(),
+                runtime.backend.as_ref(),
             )
             .await?;
         return Ok(serde_json::to_string_pretty(&output)?);
@@ -75,7 +75,7 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result
 
     let session_name = make_session_name();
     let _info = manager
-        .create(session_name.clone(), cwd, 120, 40, runtime.sandbox.as_ref())
+        .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
         .await?;
 
     if cmd.trim().is_empty() {
@@ -152,17 +152,7 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> Result<
 
 fn resolve_command_cwd(args: &Value, runtime: &ToolRuntime) -> Result<Option<PathBuf>> {
     let requested = args.get("workdir").and_then(|v| v.as_str());
-
-    if let Some(sandbox) = &runtime.sandbox {
-        return requested
-            .map(|workdir| sandbox.resolve_path(workdir))
-            .transpose();
-    }
-
-    Ok(Some(match requested {
-        Some(workdir) => resolve_workspace_path(runtime, PathBuf::from(workdir)),
-        None => runtime.workspace_cwd.clone(),
-    }))
+    runtime.backend.resolve_terminal_cwd(requested)
 }
 
 fn require_str(args: &Value, key: &str) -> Result<String> {
@@ -205,14 +195,16 @@ mod tests {
     }
 
     fn test_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
         ToolRuntime {
+            config_cwd: workspace_cwd.clone(),
             workspace_cwd,
             store_path: PathBuf::new(),
             session_id: None,
             worker_executable: None,
             active_threads: Arc::new(Mutex::new(HashSet::new())),
             event_sink: EventSink::none(),
-            sandbox: None,
+            backend,
             mcp: None,
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
@@ -489,7 +481,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-poll".to_string(), None, 120, 40, None)
+            .create("test-poll".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         runtime
@@ -511,7 +503,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-input".to_string(), None, 120, 40, None)
+            .create("test-input".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -528,7 +520,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-raw".to_string(), None, 120, 40, None)
+            .create("test-raw".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -546,7 +538,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-ctrl".to_string(), None, 120, 40, None)
+            .create("test-ctrl".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -565,7 +557,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-ctrz".to_string(), None, 120, 40, None)
+            .create("test-ctrz".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -582,7 +574,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-arrow".to_string(), None, 120, 40, None)
+            .create("test-arrow".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -599,7 +591,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-tab".to_string(), None, 120, 40, None)
+            .create("test-tab".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(
@@ -616,7 +608,7 @@ mod tests {
         let runtime = test_runtime();
         runtime
             .terminal_manager
-            .create("test-exit".to_string(), None, 120, 40, None)
+            .create("test-exit".to_string(), None, 120, 40, &runtime.backend)
             .await
             .unwrap();
         let result = execute_write_stdin(

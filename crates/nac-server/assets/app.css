@@ -690,15 +690,15 @@ button.session-card {
 }
 
 .message-role.user {
-  color: var(--text);
+  color: var(--blue);
 }
 
 .message-role.assistant {
-  color: #cfcfd3;
+  color: #4fd2a8;
 }
 
 .message-role.tool {
-  color: var(--muted);
+  color: #dc767e;
 }
 
 .message-body,

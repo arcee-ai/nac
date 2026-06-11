@@ -28,9 +28,17 @@ pub(super) struct RunCli {
     hide = true
 )]
 pub(super) struct ManagedWorkerCli {
-    /// Internal workspace cwd used for managed worker path/config resolution
+    /// Internal workspace cwd used for managed worker path resolution
     #[arg(long, hide = true)]
     pub(super) workspace_cwd: Option<PathBuf>,
+
+    /// Internal local cwd used to resolve nac config for managed workers.
+    #[arg(long, hide = true)]
+    pub(super) config_cwd: Option<PathBuf>,
+
+    /// Internal OpenSSH target for remote workers.
+    #[arg(long = "ssh-host", alias = "host-id", hide = true)]
+    pub(super) ssh_host: Option<String>,
 
     #[command(flatten)]
     pub(super) dispatch: WorkerDispatchArgs,
@@ -47,7 +55,7 @@ pub(super) struct ManagedWorkerCli {
 
 #[derive(clap::Args)]
 pub(super) struct StoreArgs {
-    /// Override the SQLite store path (default: .nac/store.db)
+    /// Override the SQLite store path
     #[arg(long)]
     pub(super) store_path: Option<PathBuf>,
 }
