@@ -19,10 +19,7 @@ pub use snapshot::{new_snapshot, refresh_snapshot};
 use codec::*;
 use summary::*;
 
-/// In-memory session state. Note: there is intentionally no `store_path`
-/// field. Sessions always persist to the store that was actually opened
-/// (passed explicitly to `create_session`/`save_session`), never to a path
-/// remembered inside the row.
+/// In-memory session state; persistence uses the store path passed by the caller.
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
@@ -32,9 +29,7 @@ pub struct SessionSnapshot {
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub sandbox_spec: Option<SandboxSpec>,
-    /// OpenSSH/freeform target the session runs on. `None` = local session
-    /// (exactly the pre-remote behavior). When set, `cwd` is a path on that
-    /// remote host and must not be checked or canonicalized locally.
+    /// OpenSSH target for remote sessions; `None` for local sessions.
     pub ssh_host: Option<String>,
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
@@ -54,7 +49,7 @@ pub struct SessionSummary {
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
-    /// OpenSSH/freeform target the session runs on; `None` = local session.
+    /// OpenSSH target for remote sessions.
     pub ssh_host: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -195,7 +190,6 @@ mod tests {
         }])
         .unwrap();
 
-        // Legacy row claiming it belongs to a different store file.
         {
             let conn = crate::store::open_connection(&store_path).unwrap();
             conn.execute(
@@ -240,7 +234,6 @@ mod tests {
             other => panic!("expected updated user message, got {:?}", other),
         }
 
-        // The legacy NOT NULL column is rewritten with the store actually opened.
         let conn = crate::store::open_connection(&store_path).unwrap();
         let recorded: String = conn
             .query_row(

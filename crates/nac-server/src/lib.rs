@@ -92,9 +92,7 @@ pub struct CreateSessionRequest {
     pub base_url: Option<String>,
     pub backend: Option<String>,
     pub reasoning_effort: Option<String>,
-    /// OpenSSH/freeform target to create the session on. When set, the session
-    /// runs over ssh, `cwd` is a remote path (default `~`), and sandbox options
-    /// must be absent. `None`/missing = local session.
+    /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
     #[serde(default)]
@@ -300,8 +298,6 @@ impl SessionManager {
             ));
         }
         let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
-            // Remote sessions: cwd is a remote path and must not be
-            // canonicalized locally. Blank/missing remote cwd defaults to `~`.
             let remote_cwd = request
                 .cwd
                 .and_then(|cwd| {
@@ -668,8 +664,6 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
     }
 }
 
-/// Whether the request carries any sandbox configuration (remote sessions
-/// reject these; the runtime hard-errors as a backstop).
 fn sandbox_requested(request: &SandboxRequest) -> bool {
     request.enabled
         || request.no_mount_cwd

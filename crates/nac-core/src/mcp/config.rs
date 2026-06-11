@@ -57,7 +57,7 @@ fn streamable_http_config_from_raw(raw: &str) -> Result<McpConfigFile> {
     for (server_name, server_value) in raw_config.mcp_servers {
         if !raw_transport_is_streamable_http(&server_value) {
             eprintln!(
-                "MCP server '{}' is not streamable_http and will be skipped by the active MCP transport policy",
+                "Skipping MCP server '{}': transport is not streamable_http",
                 server_name
             );
             continue;

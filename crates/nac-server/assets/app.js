@@ -155,8 +155,6 @@ async function loadSessions() {
 }
 
 function renderLaunchHostFields() {
-  // Remote sessions use a freeform OpenSSH target. Their cwd is a remote path
-  // (default `~`) and cannot be combined with local podman sandbox options.
   const remote = Boolean(el.launchSshHost.value.trim());
   if (remote && state.store && el.launchCwd.value === state.store.root_cwd) {
     el.launchCwd.value = "~";
@@ -167,7 +165,6 @@ function renderLaunchHostFields() {
 }
 
 function setVisible(element, visible) {
-  // The hidden attribute loses to author display rules, so toggle inline.
   element.style.display = visible ? "" : "none";
 }
 

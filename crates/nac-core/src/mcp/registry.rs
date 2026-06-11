@@ -110,7 +110,7 @@ impl McpRegistry {
             }
             if !transport_policy.allows(&server_config.transport) {
                 eprintln!(
-                    "MCP server '{}' uses a non-streamable_http transport and will be skipped by the active MCP transport policy",
+                    "Skipping MCP server '{}': transport is disabled by policy",
                     server_name
                 );
                 continue;

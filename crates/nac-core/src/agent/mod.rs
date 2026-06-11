@@ -39,16 +39,12 @@ pub struct AgentConfig {
     pub thread_name: Option<String>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
-    /// Local cwd used to resolve nac config paths for child managed workers.
-    /// This differs from workspace_cwd for SSH sessions, where workspace_cwd is remote.
+    /// Local cwd for nac config/store paths; differs from workspace_cwd for SSH.
     pub config_cwd: PathBuf,
     pub working_directory: String,
     pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
-    /// OpenSSH/freeform target for remote sessions (`None` = local or
-    /// podman-sandboxed). `workspace_cwd` is then the session's working
-    /// directory on the remote host. Setting both `ssh_host` and `sandbox` is a
-    /// configuration error.
+    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
     pub ssh_host: Option<String>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
@@ -229,11 +225,6 @@ impl Agent {
             messages.extend(config.initial_messages);
         }
 
-        // Execution target selection: an ssh target selects remote OpenSSH, a
-        // sandbox session selects podman, otherwise commands run locally. SSH
-        // + sandbox together is a hard configuration error. The config path
-        // context is passed through so host-side SSH state (e.g. control
-        // sockets) resolves relative NAC_HOME the same way as config/store.
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
         let backend = crate::sandbox::select_execution_backend(
             config.ssh_host,
@@ -294,9 +285,7 @@ impl Agent {
         .expect("default test agent config must be valid")
     }
 
-    /// Bring the execution backend to a usable state, failing fast when it
-    /// cannot (e.g. an unreachable ssh host). Called once per managed worker
-    /// run before any model traffic; backends stay cheap when already ready.
+    /// Verify the execution backend before model traffic.
     pub async fn ensure_backend_ready(&self) -> Result<()> {
         self.tool_runtime.backend.ensure_ready().await
     }
@@ -407,6 +396,14 @@ impl Agent {
         &self.tool_defs
     }
 
+    #[cfg(test)]
+    pub(crate) fn ssh_control_path_for_test(&self) -> Option<&std::path::Path> {
+        match self.tool_runtime.backend.as_ref() {
+            crate::sandbox::ExecutionBackend::Ssh(ssh) => Some(ssh.control_path_for_test()),
+            _ => None,
+        }
+    }
+
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
         self.tool_runtime.event_sink = sink;
@@ -416,11 +413,7 @@ impl Agent {
         self.tool_runtime.active_threads.clone()
     }
 
-    /// Replace the transcript with a stored session's messages, refreshing
-    /// the leading system prompt: the first stored `System` message is
-    /// swapped for the prompt freshly built for this agent (which carries the
-    /// currently resolved working directory), so resumes never replay a stale
-    /// pinned working-directory line. Everything else is restored verbatim.
+    /// Restore a stored transcript while keeping the current system prompt.
     pub fn restore_messages(&mut self, mut messages: Vec<Message>) {
         if let Some(Message::System { content: stored }) = messages.first_mut() {
             if let Some(Message::System { content: fresh }) = self.messages.first() {

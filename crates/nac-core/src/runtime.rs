@@ -137,35 +137,26 @@ pub struct WorkerDispatchOptions {
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub workspace_cwd: PathBuf,
-    /// Local cwd used to resolve nac config paths (defaults to workspace_cwd
-    /// locally, or the process cwd for SSH when not supplied). For SSH sessions,
-    /// workspace_cwd is remote and config_cwd must remain local.
+    /// Local cwd for config/store resolution; SSH workspaces are remote.
     pub config_cwd: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
     pub sandbox: SandboxOptions,
-    /// Create the session on an OpenSSH/freeform target instead of the local
-    /// machine. `workspace_cwd` is then the remote cwd (defaulting to `~` at
-    /// the REST layer). Mutually exclusive with sandbox flags.
+    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
     pub ssh_host: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ManagedWorkerOptions {
     pub workspace_cwd: PathBuf,
-    /// Local cwd used to resolve nac config paths (defaults to workspace_cwd
-    /// locally, or the process cwd for SSH when not supplied). For SSH workers,
-    /// workspace_cwd is remote and config_cwd must remain local.
+    /// Local cwd for config/store resolution; SSH workspaces are remote.
     pub config_cwd: Option<PathBuf>,
     pub dispatch: WorkerDispatchOptions,
     pub store: StoreOptions,
     pub model: ModelOptions,
     pub sandbox: SandboxOptions,
-    /// Re-attach a hub-spawned worker to its session's OpenSSH target (set
-    /// from the internal `--ssh-host` worker CLI flag emitted by
-    /// `SshBackend::worker_cli_args`). `workspace_cwd` is then the session's
-    /// working directory on the remote host, used verbatim.
+    /// OpenSSH target for remote workers; mutually exclusive with sandbox.
     pub ssh_host: Option<String>,
 }
 
@@ -286,6 +277,28 @@ pub(crate) fn effective_sandbox_options(
     }
 }
 
+fn validate_target_sandbox_options(
+    ssh_host: Option<&str>,
+    options: &EffectiveSandboxOptions,
+    remote_label: &str,
+) -> Result<()> {
+    if ssh_host.is_some()
+        && (options.sandbox_enabled() || options.explicit_sandbox_config_flags_present())
+    {
+        anyhow::bail!(
+            "invalid remote {remote_label}: ssh_host and podman sandbox options cannot both be set"
+        );
+    }
+    validate_sandbox_options(options)
+}
+
+fn validate_sandbox_options(options: &EffectiveSandboxOptions) -> Result<()> {
+    if !options.sandbox_enabled() && options.explicit_sandbox_config_flags_present() {
+        anyhow::bail!("sandbox configuration flags require --sandbox");
+    }
+    Ok(())
+}
+
 fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
@@ -336,12 +349,7 @@ fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     }
 }
 
-/// Resolve the effective store path: CLI override, then `[storage] store_path`
-/// from config.toml, then the global default store under the nac home
-/// directory (`store::default_store_path`, typically `~/.config/nac/store.db`).
-/// Relative paths (from overrides or a relative `$NAC_HOME`) are resolved
-/// against the caller-supplied local base cwd. SSH callers pass their local
-/// config cwd; local/podman callers pass the workspace cwd.
+/// Resolve the SQLite store path against the caller's local base cwd.
 pub fn resolve_store_path(cwd: &Path, options: StoreOptions, config: &NacConfig) -> PathBuf {
     absolute_store_path(
         cwd,
@@ -362,6 +370,8 @@ pub async fn build_run_config(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
+    let sandbox_options = effective_sandbox_options(options.sandbox, config);
+    validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
         &config_cwd
     } else {
@@ -370,23 +380,10 @@ pub async fn build_run_config(
     let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
 
-    let sandbox_options = effective_sandbox_options(options.sandbox, config);
-    if ssh_host.is_some()
-        && (sandbox_options.sandbox_enabled()
-            || sandbox_options.explicit_sandbox_config_flags_present())
-    {
-        anyhow::bail!(
-            "invalid remote session: ssh_host and podman sandbox options cannot both be set"
-        );
-    }
-
     if let Some(ssh_host) = ssh_host {
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
         let session_id = Uuid::new_v4().to_string();
-        // Remote orchestrators skip AGENTS.md, skills, and MCP: those are
-        // worker-facing integrations, and the session's workspace only exists
-        // on the remote host.
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
@@ -433,10 +430,8 @@ pub async fn build_run_config(
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: working_directory,
-            // The remote cwd is not a path on this machine: local host-side
-            // inspection (git stats) is unavailable for remote sessions.
             workspace_host_path: None,
-            resume_base_cwd: options.workspace_cwd,
+            resume_base_cwd: config_cwd,
         });
     }
 
@@ -525,6 +520,8 @@ pub async fn build_managed_worker_config(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let workspace_cwd = options.workspace_cwd;
+    let sandbox_options = effective_sandbox_options(options.sandbox, config);
+    validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "worker")?;
     let store_base_cwd = if ssh_host.is_some() {
         &config_cwd
     } else {
@@ -532,16 +529,6 @@ pub async fn build_managed_worker_config(
     };
     let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
-
-    let sandbox_options = effective_sandbox_options(options.sandbox, config);
-    if ssh_host.is_some()
-        && (sandbox_options.sandbox_enabled()
-            || sandbox_options.explicit_sandbox_config_flags_present())
-    {
-        anyhow::bail!(
-            "invalid remote worker: ssh_host and podman sandbox options cannot both be set"
-        );
-    }
     let sandbox = if ssh_host.is_some() {
         None
     } else {
@@ -549,10 +536,6 @@ pub async fn build_managed_worker_config(
     };
     let workspace_paths = PathContext::new(&workspace_cwd);
     let config_paths = PathContext::new(&config_cwd);
-    // Remote workers still skip AGENTS.md and skills because those load from
-    // the workspace filesystem, but streamable_http MCP servers are local
-    // network clients and can be exposed safely without advertising the remote
-    // SSH path as a local file:// root.
     let (agents_md_message, mcp, skills) = if ssh_host.is_some() {
         let mcp = McpRegistry::load_with_policy(
             &workspace_cwd,
@@ -762,9 +745,6 @@ async fn build_resume_config_from_snapshot(
 
     store::initialize(&store_path)?;
 
-    // Remote sessions skip AGENTS.md and skills on resume: those load from
-    // the local filesystem, but the session's workspace only exists on the
-    // remote host.
     let (skills, agents_md_status) = if ssh_host.is_some() {
         (None, "off".to_string())
     } else {
@@ -778,8 +758,6 @@ async fn build_resume_config_from_snapshot(
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
     let workspace_host_path = if ssh_host.is_some() {
-        // The remote cwd is not a path on this machine: local host-side
-        // inspection (git stats) is unavailable for remote sessions.
         None
     } else if let Some(session) = sandbox.as_ref() {
         session.host_workdir()
@@ -836,10 +814,7 @@ fn normalize_snapshot_paths(
     mut snapshot: SessionSnapshot,
     resume_base_cwd: &Path,
 ) -> Result<SessionSnapshot> {
-    // Remote sessions (ssh_host set): the stored cwd is a path on the remote
-    // host. Use it verbatim — no joins against the local resume cwd, no
-    // existence checks, no canonicalization. If the path is wrong, tools fail
-    // downstream on the remote host; that hard failure is intentional.
+    // Remote cwd values are not local paths.
     if snapshot.ssh_host.is_some() {
         return Ok(snapshot);
     }
@@ -874,10 +849,8 @@ pub async fn build_sandbox_session(
     options: &EffectiveSandboxOptions,
     cwd: &Path,
 ) -> Result<Option<SandboxSession>> {
+    validate_sandbox_options(options)?;
     if !options.sandbox {
-        if options.explicit_sandbox_config_flags_present {
-            anyhow::bail!("sandbox configuration flags require --sandbox");
-        }
         return Ok(None);
     }
 
@@ -1280,8 +1253,6 @@ url = "https://mcp.context7.com/mcp"
         }
         let cwd = Path::new("/workspace/repo");
 
-        // config.toml [storage] store_path beats the global default; relative
-        // overrides still resolve against the caller-supplied base cwd.
         let mut config = NacConfig::default();
         config.storage.store_path = Some(PathBuf::from("custom/store.db"));
         assert_eq!(
@@ -1289,7 +1260,6 @@ url = "https://mcp.context7.com/mcp"
             Path::new("/workspace/repo/custom/store.db")
         );
 
-        // CLI --store-path beats config; absolute overrides are used as-is.
         assert_eq!(
             resolve_store_path(
                 cwd,
@@ -1301,7 +1271,6 @@ url = "https://mcp.context7.com/mcp"
             Path::new("/elsewhere/store.db")
         );
 
-        // Relative CLI override (legacy per-repo store) resolves against cwd.
         assert_eq!(
             resolve_store_path(
                 cwd,
@@ -1561,8 +1530,6 @@ url = "https://mcp.context7.com/mcp"
             "remote cwd must be used verbatim with no canonicalization"
         );
 
-        // Even a relative stored cwd stays verbatim: remote paths are never
-        // joined against the local resume directory.
         let relative = sessions::new_snapshot(
             "remote-relative".to_string(),
             PathBuf::from("workspace/repo"),
@@ -1792,6 +1759,183 @@ url = "https://mcp.context7.com/mcp"
         assert!(stored.sandbox_spec.is_none());
 
         let _ = std::fs::remove_dir_all(&store_root);
+        restore_env("OPENAI_API_KEY", original_api_key);
+    }
+
+    #[tokio::test]
+    async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cwd() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let local_root = std::env::temp_dir().join(format!("nac_remote_run_resume_{unique}"));
+        let config_cwd = local_root.join("hub");
+        let nac_home_rel = PathBuf::from(format!("relative-nac-home-{unique}"));
+        let expected_nac_home = config_cwd.join(&nac_home_rel);
+        let remote_cwd = PathBuf::from(format!("/remote/workspace/run-{unique}"));
+        assert!(!remote_cwd.exists());
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home_rel);
+        }
+
+        let run_config = build_run_config(
+            RunOptions {
+                workspace_cwd: remote_cwd.clone(),
+                config_cwd: Some(config_cwd.clone()),
+                worker_executable: None,
+                store: StoreOptions::default(),
+                model: ModelOptions::default(),
+                sandbox: SandboxOptions::default(),
+                ssh_host: Some("build-box".to_string()),
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("fresh remote session should use local config cwd for nac state");
+
+        assert_eq!(run_config.resume_base_cwd(), config_cwd.as_path());
+        assert_eq!(
+            run_config.session.store_path(),
+            expected_nac_home.join("store.db")
+        );
+        let fresh_control_path = run_config
+            .agent
+            .ssh_control_path_for_test()
+            .expect("fresh remote session should use ssh backend");
+        assert!(
+            fresh_control_path.starts_with(expected_nac_home.join("ssh")),
+            "fresh control socket should be under local config cwd, got {}",
+            fresh_control_path.display()
+        );
+
+        let session_id = run_config.session.session_id().unwrap().to_string();
+        let store_path = run_config.session.store_path();
+        let resume_base_cwd = run_config.resume_base_cwd().to_path_buf();
+        let resumed = build_resume_config_for_session(
+            store_path,
+            &session_id,
+            &NacConfig::default(),
+            resume_base_cwd,
+            None,
+        )
+        .await
+        .expect("remote resume should keep using the local config cwd");
+
+        assert_eq!(resumed.resume_base_cwd(), config_cwd.as_path());
+        let resumed_control_path = resumed
+            .agent
+            .ssh_control_path_for_test()
+            .expect("resumed remote session should use ssh backend");
+        assert!(
+            resumed_control_path.starts_with(expected_nac_home.join("ssh")),
+            "resumed control socket should be under local config cwd, got {}",
+            resumed_control_path.display()
+        );
+        assert!(
+            !resumed_control_path.starts_with(remote_cwd.join(&nac_home_rel)),
+            "remote cwd must not be used as the relative NAC_HOME base"
+        );
+
+        let _ = std::fs::remove_dir_all(&local_root);
+        restore_env("OPENAI_API_KEY", original_api_key);
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+    }
+
+    #[tokio::test]
+    async fn invalid_ssh_sandbox_configs_do_not_initialize_store() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
+        }
+
+        let run_store_path = temp_store_path("invalid_ssh_sandbox_run");
+        let run_store_root = run_store_path.parent().unwrap().to_path_buf();
+        assert!(!run_store_root.exists());
+        let run_error = match build_run_config(
+            RunOptions {
+                workspace_cwd: PathBuf::from("~"),
+                config_cwd: Some(std::env::temp_dir()),
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(run_store_path.clone()),
+                },
+                model: ModelOptions::default(),
+                sandbox: SandboxOptions {
+                    sandbox: true,
+                    ..SandboxOptions::default()
+                },
+                ssh_host: Some("build-box".to_string()),
+            },
+            &NacConfig::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("ssh run with sandbox should fail before creating the store"),
+            Err(error) => error,
+        };
+        assert!(
+            run_error.to_string().contains("ssh_host") && run_error.to_string().contains("sandbox"),
+            "got: {run_error:#}"
+        );
+        assert!(
+            !run_store_root.exists(),
+            "invalid run config created store dir {}",
+            run_store_root.display()
+        );
+
+        let worker_store_path = temp_store_path("invalid_ssh_sandbox_worker");
+        let worker_store_root = worker_store_path.parent().unwrap().to_path_buf();
+        assert!(!worker_store_root.exists());
+        let worker_error = match build_managed_worker_config(
+            ManagedWorkerOptions {
+                workspace_cwd: PathBuf::from("~"),
+                config_cwd: Some(std::env::temp_dir()),
+                dispatch: WorkerDispatchOptions {
+                    session_id: "remote-session".to_string(),
+                    thread_name: "impl".to_string(),
+                    action: "do remote work".to_string(),
+                    source_threads: Vec::new(),
+                    skills: Vec::new(),
+                },
+                store: StoreOptions {
+                    store_path: Some(worker_store_path.clone()),
+                },
+                model: ModelOptions::default(),
+                sandbox: SandboxOptions {
+                    sandbox: true,
+                    ..SandboxOptions::default()
+                },
+                ssh_host: Some("build-box".to_string()),
+            },
+            &NacConfig::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("ssh worker with sandbox should fail before creating the store"),
+            Err(error) => error,
+        };
+        assert!(
+            worker_error.to_string().contains("ssh_host")
+                && worker_error.to_string().contains("sandbox"),
+            "got: {worker_error:#}"
+        );
+        assert!(
+            !worker_store_root.exists(),
+            "invalid worker config created store dir {}",
+            worker_store_root.display()
+        );
+
         restore_env("OPENAI_API_KEY", original_api_key);
     }
 

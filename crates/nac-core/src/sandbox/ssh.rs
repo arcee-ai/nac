@@ -1,7 +1,4 @@
-//! SSH execution target: agent commands and file IO run on a remote host.
-//!
-//! The target string is handed directly to OpenSSH, so users can use aliases
-//! from `~/.ssh/config` or freeform destinations like `user@example.com`.
+//! OpenSSH execution backend.
 
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
@@ -21,18 +18,13 @@ use crate::paths::PathContext;
 
 use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
 
-/// How long a remote kill-tree invocation may take before we give up.
 const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Per-user remote directory for pidfiles used to clean up SSH terminal trees.
-/// Created with 0700 permissions before a wrapped terminal command starts.
 const SSH_PIDFILE_DIR: &str = "~/.cache/nac/exec";
 
 pub struct SshBackend {
     ssh_host: String,
-    /// The session's working directory on the remote host.
     remote_cwd: PathBuf,
-    /// Multiplexing control socket for this OpenSSH target.
     control_path: PathBuf,
 }
 
@@ -56,9 +48,6 @@ impl SshBackend {
         }
     }
 
-    /// Common ssh client arguments: multiplexing and non-interactive auth. The
-    /// target is appended after `--` so a hostile target string cannot inject
-    /// ssh options.
     fn ssh_args(&self) -> Vec<String> {
         vec![
             "-o".to_string(),
@@ -74,8 +63,6 @@ impl SshBackend {
         ]
     }
 
-    /// Build a `tokio::process::Command` that runs `remote_command` through the
-    /// multiplexed OpenSSH connection.
     fn ssh_command(&self, remote_command: &str) -> Command {
         let mut command = Command::new("ssh");
         command.args(self.ssh_args());
@@ -85,7 +72,6 @@ impl SshBackend {
         command
     }
 
-    /// Compose `cd <dir> && [env K=V ...] <words...>` for the remote shell.
     fn remote_command_in_dir(
         &self,
         dir: &Path,
@@ -155,11 +141,6 @@ impl SshBackend {
         if self.remote_cwd.is_absolute() {
             Ok(self.remote_cwd.join(requested))
         } else {
-            // For relative/tilde remote cwd values (notably the default `~`),
-            // commands already run after `cd <remote_cwd>`, so keep relative
-            // tool paths relative to that shell cwd instead of manufacturing
-            // `~/path` or `relative/path` arguments that Python would resolve
-            // from the post-cd directory incorrectly.
             Ok(requested)
         }
     }
@@ -289,11 +270,6 @@ impl SshBackend {
     }
 }
 
-/// Per-target multiplexing socket under a nac-owned local config directory:
-/// `$NAC_HOME/ssh/<sanitized target>-<hash>.sock` (typically
-/// `~/.config/nac/ssh/...`), falling back to temp when no home can be resolved.
-/// Relative `$NAC_HOME`/`$XDG_CONFIG_HOME` values are resolved by the caller's
-/// [`PathContext`] so SSH workers use the same local base cwd as config/store.
 fn ssh_control_path(ssh_host: &str, paths: &PathContext) -> PathBuf {
     let dir = paths
         .nac_home_dir()
@@ -344,7 +320,6 @@ fn sanitize_socket_name(input: &str) -> String {
     }
 }
 
-/// POSIX single-quote escaping: the result is always a single shell word.
 fn shell_quote(value: &str) -> String {
     if value.is_empty() {
         return "''".to_string();
@@ -352,9 +327,6 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// Quote a path for the remote shell while preserving tilde expansion for `~`
-/// and `~/...`. Quoting exact `~` as `'~'` would make the default remote cwd a
-/// literal directory named `~` instead of the user's home.
 fn shell_quote_path(value: &str) -> String {
     if value == "~" {
         return "~".to_string();
@@ -371,6 +343,13 @@ mod tests {
 
     fn backend() -> SshBackend {
         SshBackend::new("build-box".to_string(), PathBuf::from("/srv/work/project"))
+    }
+
+    fn restore_env(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
     }
 
     #[test]
@@ -547,14 +526,8 @@ mod tests {
             backend.control_path.display()
         );
 
-        match original_nac_home {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
-        match original_xdg {
-            Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
-            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
-        }
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
     }
 
     #[test]

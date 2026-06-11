@@ -94,10 +94,6 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
-    // Fail fast before any model traffic when the execution backend is
-    // unusable (e.g. the remote ssh host is unreachable).
-    agent.ensure_backend_ready().await?;
-
     let send_result = agent.send(&action).await;
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;

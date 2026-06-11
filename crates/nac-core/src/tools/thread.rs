@@ -587,9 +587,6 @@ async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
-    // Remote (ssh) sessions: the session's workspace cwd only exists on the
-    // remote host, so the worker subprocess cannot chdir into it; it inherits
-    // the hub's cwd and re-attaches to the host via worker_cli_args below.
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
     }

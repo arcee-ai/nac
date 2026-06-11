@@ -186,9 +186,6 @@ fn effective_cli_cwd(cli: &ParsedCli, launch_cwd: &Path) -> Result<PathBuf> {
         ParsedCli::Run(cli) => resolve_cli_cwd(launch_cwd, cli.directory.as_deref()),
         ParsedCli::Resume(cli) => resolve_cli_cwd(launch_cwd, cli.directory.as_deref()),
         ParsedCli::ManagedWorker(cli) => match (&cli.ssh_host, &cli.workspace_cwd) {
-            // Remote workers receive their session's remote working
-            // directory: a path on the ssh host, used verbatim (it does not
-            // exist locally, so it must not be canonicalized).
             (Some(_), Some(remote_cwd)) => Ok(remote_cwd.clone()),
             _ => resolve_cli_cwd(launch_cwd, cli.workspace_cwd.as_deref()),
         },
@@ -275,8 +272,6 @@ fn run_options(
         store: store_options(cli.store),
         model: model_options(cli.model),
         sandbox: sandbox_options(cli.sandbox),
-        // The TUI only creates local/sandbox sessions; remote SSH session
-        // creation is wired through the REST layer.
         ssh_host: None,
     }
 }
@@ -422,8 +417,6 @@ mod tests {
             }
         }
 
-        // The remote cwd does not exist locally: it must pass through
-        // verbatim instead of being canonicalized.
         let effective = effective_cli_cwd(&parsed, Path::new("/launch")).unwrap();
         assert_eq!(
             effective,

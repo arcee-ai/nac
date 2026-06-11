@@ -1,9 +1,4 @@
-//! Closed execution target abstraction for agent commands and file IO.
-//!
-//! The supported targets are deliberately finite: local host execution, a
-//! Podman [`SandboxSession`], or an OpenSSH [`super::SshBackend`]. Keeping this
-//! as an enum avoids trait-object/boxed-future plumbing while still giving
-//! tools and terminals one small surface to call.
+//! Execution backend selection and dispatch.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -18,14 +13,9 @@ use tokio::process::Command;
 use super::SandboxSession;
 use crate::paths::PathContext;
 
-/// How the `read`/`write`/`edit` tools reach the target filesystem.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileIoMode {
-    /// The workspace filesystem is directly accessible from this process;
-    /// file tools use native Rust file IO.
     Native,
-    /// The workspace filesystem is reachable only by executing helper scripts
-    /// on the target (Podman container or SSH host).
     RemoteExec,
 }
 
@@ -37,7 +27,6 @@ pub enum ExecutionTargetKind {
     Ssh,
 }
 
-/// Where commands spawned on behalf of the agent execute.
 pub enum ExecutionBackend {
     Local { workspace_cwd: PathBuf },
     Sandbox(SandboxSession),
@@ -69,8 +58,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Bring the target to a usable state (e.g. start a container or verify ssh).
-    /// Cheap when already ready.
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Local { .. } => Ok(()),
@@ -79,7 +66,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Map a user/tool supplied path to the namespace commands run in.
     pub fn resolve_path(&self, path: &str) -> Result<PathBuf> {
         match self {
             Self::Local { workspace_cwd } => {
@@ -95,7 +81,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Resolve a cwd for terminal commands. `None` means use target default.
     pub fn resolve_terminal_cwd(&self, requested: Option<&str>) -> Result<Option<PathBuf>> {
         match self {
             Self::Local { workspace_cwd } => match requested {
@@ -109,8 +94,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Run a one-shot program to completion, optionally piping stdin. Used by
-    /// file tools for RemoteExec targets; local support is retained for tests.
     pub async fn exec(
         &self,
         program: &str,
@@ -204,8 +187,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Extra CLI flags appended to worker subprocesses so they reattach to the
-    /// same target. Empty for local execution.
     pub fn worker_cli_args(&self) -> Vec<OsString> {
         match self {
             Self::Local { .. } => Vec::new(),
@@ -214,7 +195,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Directory terminal sessions land in when no explicit cwd is requested.
     pub fn default_terminal_cwd(&self) -> PathBuf {
         match self {
             Self::Local { workspace_cwd } => workspace_cwd.clone(),
@@ -223,7 +203,6 @@ impl ExecutionBackend {
         }
     }
 
-    /// Whether the session workspace cwd is a directory on this machine.
     pub fn workspace_cwd_is_local(&self) -> bool {
         match self {
             Self::Local { .. } | Self::Sandbox(_) => true,
@@ -232,7 +211,6 @@ impl ExecutionBackend {
     }
 }
 
-/// Select a local or podman execution target.
 pub fn execution_backend_from_sandbox(
     sandbox: Option<SandboxSession>,
     workspace_cwd: &Path,
@@ -245,8 +223,6 @@ pub fn execution_backend_from_sandbox(
     })
 }
 
-/// Select the execution target from a session's full configuration: SSH target,
-/// podman sandbox, or local execution rooted at `workspace_cwd`.
 pub fn select_execution_backend(
     ssh_host: Option<String>,
     sandbox: Option<SandboxSession>,
@@ -255,7 +231,7 @@ pub fn select_execution_backend(
 ) -> Result<Arc<ExecutionBackend>> {
     match (ssh_host, sandbox) {
         (Some(ssh_host), Some(_)) => anyhow::bail!(
-            "invalid session configuration: ssh_host '{}' and a podman sandbox cannot both be set; remote sessions cannot run inside a local sandbox",
+            "invalid session configuration: ssh_host '{}' and podman sandbox cannot both be set",
             ssh_host
         ),
         (Some(ssh_host), None) => Ok(Arc::new(ExecutionBackend::Ssh(

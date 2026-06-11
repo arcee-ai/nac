@@ -1,12 +1,6 @@
 use super::*;
 
-/// Default store location: one global store under the nac home directory
-/// (`$NAC_HOME`, `$XDG_CONFIG_HOME/nac`, or `~/.config/nac`), shared by every
-/// workspace. Falls back to the legacy per-workspace `.nac/store.db` when no
-/// home directory can be determined. A relative result (e.g. from a relative
-/// `$NAC_HOME`) is resolved by `runtime::resolve_store_path` against that
-/// caller's local base cwd (workspace cwd locally, config cwd for SSH); the
-/// parent directory is created on open.
+/// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
     crate::paths::nac_home_dir()
         .map(|home| home.join("store.db"))

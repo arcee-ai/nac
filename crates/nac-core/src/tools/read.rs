@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::sandbox::FileIoMode;
 use crate::tools::{require_str, resolve_workspace_path, ToolResult, ToolRuntime};
 
-const SANDBOX_READ_SCRIPT: &str = r#"
+const REMOTE_READ_SCRIPT: &str = r#"
 from pathlib import Path
 import sys
 
@@ -59,7 +59,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
 
         let args = vec![
             "-c".to_string(),
-            SANDBOX_READ_SCRIPT.to_string(),
+            REMOTE_READ_SCRIPT.to_string(),
             path.clone(),
             guest_path.display().to_string(),
             offset.to_string(),
@@ -67,7 +67,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         ];
 
         return match runtime.backend.exec("python3", &args, None).await {
-            Ok(output) => sandbox_output(output),
+            Ok(output) => remote_output(output),
             Err(error) => ToolResult {
                 content: format!(
                     "Error reading {} in {}: {}",
@@ -134,7 +134,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     }
 }
 
-fn sandbox_output(output: std::process::Output) -> ToolResult {
+fn remote_output(output: std::process::Output) -> ToolResult {
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if output.status.success() {

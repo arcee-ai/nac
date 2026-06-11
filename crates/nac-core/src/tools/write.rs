@@ -7,7 +7,7 @@ use crate::tools::{
     acquire_write_lock, require_str, resolve_workspace_path, ToolResult, ToolRuntime,
 };
 
-const SANDBOX_WRITE_SCRIPT: &str = r#"
+const REMOTE_WRITE_SCRIPT: &str = r#"
 from pathlib import Path
 import sys
 
@@ -45,7 +45,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         };
         let args = vec![
             "-c".to_string(),
-            SANDBOX_WRITE_SCRIPT.to_string(),
+            REMOTE_WRITE_SCRIPT.to_string(),
             path.clone(),
             guest_path.display().to_string(),
         ];
