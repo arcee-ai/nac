@@ -169,6 +169,7 @@ mod tests {
                 thread_name: Some("impl".to_string()),
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("."),
+                config_cwd: PathBuf::from("."),
                 working_directory: ".".to_string(),
                 worker_executable: None,
                 sandbox: None,

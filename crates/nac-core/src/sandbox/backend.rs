@@ -16,6 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use super::SandboxSession;
+use crate::paths::PathContext;
 
 /// How the `read`/`write`/`edit` tools reach the target filesystem.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,16 +251,16 @@ pub fn select_execution_backend(
     ssh_host: Option<String>,
     sandbox: Option<SandboxSession>,
     workspace_cwd: &Path,
+    local_paths: &PathContext,
 ) -> Result<Arc<ExecutionBackend>> {
     match (ssh_host, sandbox) {
         (Some(ssh_host), Some(_)) => anyhow::bail!(
             "invalid session configuration: ssh_host '{}' and a podman sandbox cannot both be set; remote sessions cannot run inside a local sandbox",
             ssh_host
         ),
-        (Some(ssh_host), None) => Ok(Arc::new(ExecutionBackend::Ssh(super::SshBackend::new(
-            ssh_host,
-            workspace_cwd.to_path_buf(),
-        )))),
+        (Some(ssh_host), None) => Ok(Arc::new(ExecutionBackend::Ssh(
+            super::SshBackend::new_with_paths(ssh_host, workspace_cwd.to_path_buf(), local_paths),
+        ))),
         (None, sandbox) => Ok(execution_backend_from_sandbox(sandbox, workspace_cwd)),
     }
 }
@@ -268,6 +269,7 @@ pub fn select_execution_backend(
 mod tests {
     use super::*;
     use crate::sandbox::{SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::TEST_ENV_LOCK;
 
     fn local() -> ExecutionBackend {
         ExecutionBackend::Local {
@@ -285,12 +287,61 @@ mod tests {
         })
     }
 
+    fn local_paths() -> PathContext {
+        PathContext::new("/local/config")
+    }
+
+    fn restore_env(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
+    #[test]
+    fn select_backend_uses_local_path_context_for_ssh_control_socket() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let config_cwd = std::env::temp_dir().join(format!("nac-select-ssh-config-cwd-{unique}"));
+        let nac_home = PathBuf::from(format!("relative-nac-home-{unique}"));
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+
+        let backend = select_execution_backend(
+            Some("build-box".to_string()),
+            None,
+            Path::new("~"),
+            &PathContext::new(&config_cwd),
+        )
+        .unwrap();
+        let ExecutionBackend::Ssh(ssh) = backend.as_ref() else {
+            panic!("expected ssh backend");
+        };
+        assert!(
+            ssh.control_path_for_test()
+                .starts_with(config_cwd.join(&nac_home).join("ssh")),
+            "control socket should use config cwd, got {}",
+            ssh.control_path_for_test().display()
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+    }
+
     #[test]
     fn select_backend_uses_ssh_for_remote_sessions() {
         let backend = select_execution_backend(
             Some("build-box".to_string()),
             None,
             Path::new("/remote/project"),
+            &local_paths(),
         )
         .unwrap();
         assert_eq!(backend.file_io(), FileIoMode::RemoteExec);
@@ -312,6 +363,7 @@ mod tests {
             Some("build-box".to_string()),
             Some(sandbox()),
             Path::new("/x"),
+            &local_paths(),
         ) {
             Ok(_) => panic!("ssh + sandbox must be rejected"),
             Err(error) => error,
@@ -324,12 +376,16 @@ mod tests {
 
     #[test]
     fn select_backend_without_ssh_matches_sandbox_selection() {
-        let local = select_execution_backend(None, None, Path::new("/workspace-root")).unwrap();
+        let local =
+            select_execution_backend(None, None, Path::new("/workspace-root"), &local_paths())
+                .unwrap();
         assert_eq!(local.file_io(), FileIoMode::Native);
         assert_eq!(local.kind(), ExecutionTargetKind::Local);
         assert!(local.workspace_cwd_is_local());
 
-        let podman = select_execution_backend(None, Some(sandbox()), Path::new("/unused")).unwrap();
+        let podman =
+            select_execution_backend(None, Some(sandbox()), Path::new("/unused"), &local_paths())
+                .unwrap();
         assert_eq!(podman.file_io(), FileIoMode::RemoteExec);
         assert_eq!(podman.kind(), ExecutionTargetKind::Sandbox);
         assert!(podman.workspace_cwd_is_local());

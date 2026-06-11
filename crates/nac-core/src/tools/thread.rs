@@ -610,9 +610,15 @@ async fn run_worker(
         .arg("--store-path")
         .arg(runtime.store_path.as_os_str())
         .arg("--workspace-cwd")
-        .arg(runtime.workspace_cwd.as_os_str())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .arg(runtime.workspace_cwd.as_os_str());
+
+    if !runtime.backend.workspace_cwd_is_local() || runtime.config_cwd != runtime.workspace_cwd {
+        command
+            .arg("--config-cwd")
+            .arg(runtime.config_cwd.as_os_str());
+    }
+
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     if let Some(reasoning_effort) = client.reasoning_effort() {
         command.arg("--effort").arg(reasoning_effort.as_str());

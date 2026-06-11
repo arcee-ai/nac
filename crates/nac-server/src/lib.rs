@@ -325,6 +325,7 @@ impl SessionManager {
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd,
+                config_cwd: Some(config_cwd.clone()),
                 worker_executable: Some(self.inner.worker_executable.clone()),
                 store: StoreOptions {
                     store_path: Some(self.inner.store_path.clone()),

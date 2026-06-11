@@ -17,6 +17,8 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+use crate::paths::PathContext;
+
 use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
 
 /// How long a remote kill-tree invocation may take before we give up.
@@ -35,8 +37,18 @@ pub struct SshBackend {
 }
 
 impl SshBackend {
+    #[cfg(test)]
     pub fn new(ssh_host: String, remote_cwd: PathBuf) -> Self {
-        let control_path = ssh_control_path(&ssh_host);
+        let config_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::new_with_paths(ssh_host, remote_cwd, &PathContext::new(config_cwd))
+    }
+
+    pub(crate) fn new_with_paths(
+        ssh_host: String,
+        remote_cwd: PathBuf,
+        paths: &PathContext,
+    ) -> Self {
+        let control_path = ssh_control_path(&ssh_host, paths);
         Self {
             ssh_host,
             remote_cwd,
@@ -270,13 +282,21 @@ impl SshBackend {
     pub(crate) fn default_terminal_cwd(&self) -> PathBuf {
         self.remote_cwd.clone()
     }
+
+    #[cfg(test)]
+    pub(crate) fn control_path_for_test(&self) -> &Path {
+        &self.control_path
+    }
 }
 
-/// Per-target multiplexing socket under a nac-owned directory:
+/// Per-target multiplexing socket under a nac-owned local config directory:
 /// `$NAC_HOME/ssh/<sanitized target>-<hash>.sock` (typically
 /// `~/.config/nac/ssh/...`), falling back to temp when no home can be resolved.
-fn ssh_control_path(ssh_host: &str) -> PathBuf {
-    let dir = crate::paths::nac_home_dir()
+/// Relative `$NAC_HOME`/`$XDG_CONFIG_HOME` values are resolved by the caller's
+/// [`PathContext`] so SSH workers use the same local base cwd as config/store.
+fn ssh_control_path(ssh_host: &str, paths: &PathContext) -> PathBuf {
+    let dir = paths
+        .nac_home_dir()
         .unwrap_or_else(|| std::env::temp_dir().join("nac"))
         .join("ssh");
     dir.join(format!(
@@ -498,9 +518,51 @@ mod tests {
     }
 
     #[test]
+    fn control_socket_relative_nac_home_uses_supplied_local_path_context() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let config_cwd = std::env::temp_dir().join(format!("nac-ssh-config-cwd-{unique}"));
+        let nac_home = PathBuf::from(format!("relative-nac-home-{unique}"));
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+
+        let backend = SshBackend::new_with_paths(
+            "build-box".to_string(),
+            PathBuf::from("~"),
+            &PathContext::new(&config_cwd),
+        );
+
+        assert!(
+            backend
+                .control_path
+                .starts_with(config_cwd.join(&nac_home).join("ssh")),
+            "control socket should use config cwd, got {}",
+            backend.control_path.display()
+        );
+
+        match original_nac_home {
+            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
+            None => unsafe { std::env::remove_var("NAC_HOME") },
+        }
+        match original_xdg {
+            Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
+            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+        }
+    }
+
+    #[test]
     fn control_socket_name_includes_hash_to_avoid_sanitization_collisions() {
-        let first = ssh_control_path("a/b");
-        let second = ssh_control_path("a:b");
+        let paths =
+            PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let first = ssh_control_path("a/b", &paths);
+        let second = ssh_control_path("a:b", &paths);
         assert_ne!(first, second);
         assert!(first.to_string_lossy().contains("a-b-"));
     }

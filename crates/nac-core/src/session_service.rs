@@ -938,6 +938,7 @@ mod tests {
                 thread_name: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("/repo"),
+                config_cwd: PathBuf::from("/repo"),
                 working_directory: "/repo".to_string(),
                 worker_executable: None,
                 sandbox: None,

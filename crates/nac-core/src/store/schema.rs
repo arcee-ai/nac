@@ -4,8 +4,9 @@ use super::*;
 /// (`$NAC_HOME`, `$XDG_CONFIG_HOME/nac`, or `~/.config/nac`), shared by every
 /// workspace. Falls back to the legacy per-workspace `.nac/store.db` when no
 /// home directory can be determined. A relative result (e.g. from a relative
-/// `$NAC_HOME`) is resolved against the workspace cwd by
-/// `runtime::resolve_store_path`; the parent directory is created on open.
+/// `$NAC_HOME`) is resolved by `runtime::resolve_store_path` against that
+/// caller's local base cwd (workspace cwd locally, config cwd for SSH); the
+/// parent directory is created on open.
 pub fn default_store_path() -> PathBuf {
     crate::paths::nac_home_dir()
         .map(|home| home.join("store.db"))

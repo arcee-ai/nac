@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
-use crate::mcp::McpRegistry;
+use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{BackendKind, ClientOverrides, ModelClient, ReasoningEffort};
 use crate::paths::PathContext;
 use crate::sandbox::{
@@ -137,6 +137,10 @@ pub struct WorkerDispatchOptions {
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub workspace_cwd: PathBuf,
+    /// Local cwd used to resolve nac config paths (defaults to workspace_cwd
+    /// locally, or the process cwd for SSH when not supplied). For SSH sessions,
+    /// workspace_cwd is remote and config_cwd must remain local.
+    pub config_cwd: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
@@ -150,6 +154,10 @@ pub struct RunOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ManagedWorkerOptions {
     pub workspace_cwd: PathBuf,
+    /// Local cwd used to resolve nac config paths (defaults to workspace_cwd
+    /// locally, or the process cwd for SSH when not supplied). For SSH workers,
+    /// workspace_cwd is remote and config_cwd must remain local.
+    pub config_cwd: Option<PathBuf>,
     pub dispatch: WorkerDispatchOptions,
     pub store: StoreOptions,
     pub model: ModelOptions,
@@ -317,11 +325,23 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
 }
 
+fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
+    let is_ssh = ssh_host
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    if is_ssh {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        workspace_cwd.to_path_buf()
+    }
+}
+
 /// Resolve the effective store path: CLI override, then `[storage] store_path`
 /// from config.toml, then the global default store under the nac home
 /// directory (`store::default_store_path`, typically `~/.config/nac/store.db`).
 /// Relative paths (from overrides or a relative `$NAC_HOME`) are resolved
-/// against the workspace cwd.
+/// against the caller-supplied local base cwd. SSH callers pass their local
+/// config cwd; local/podman callers pass the workspace cwd.
 pub fn resolve_store_path(cwd: &Path, options: StoreOptions, config: &NacConfig) -> PathBuf {
     absolute_store_path(
         cwd,
@@ -336,11 +356,20 @@ pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
+    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let config_cwd = options
+        .config_cwd
+        .clone()
+        .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
-    let store_path = resolve_store_path(&options.workspace_cwd, options.store, config);
+    let store_base_cwd = if ssh_host.is_some() {
+        &config_cwd
+    } else {
+        &options.workspace_cwd
+    };
+    let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
 
-    let ssh_host = trim_ssh_host(options.ssh_host);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     if ssh_host.is_some()
         && (sandbox_options.sandbox_enabled()
@@ -355,9 +384,9 @@ pub async fn build_run_config(
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
         let session_id = Uuid::new_v4().to_string();
-        // Remote sessions skip AGENTS.md, skills, and MCP for now: those all
-        // load from the local filesystem, but the session's workspace only
-        // exists on the remote host.
+        // Remote orchestrators skip AGENTS.md, skills, and MCP: those are
+        // worker-facing integrations, and the session's workspace only exists
+        // on the remote host.
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
@@ -368,6 +397,7 @@ pub async fn build_run_config(
                 thread_name: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: remote_cwd.clone(),
+                config_cwd: config_cwd.clone(),
                 working_directory: working_directory.clone(),
                 worker_executable: options.worker_executable,
                 sandbox: None,
@@ -443,6 +473,7 @@ pub async fn build_run_config(
             thread_name: None,
             event_sink: EventSink::none(),
             workspace_cwd: workspace_cwd.clone(),
+            config_cwd: config_cwd.clone(),
             working_directory: working_directory.clone(),
             worker_executable: options.worker_executable,
             sandbox: sandbox.clone(),
@@ -488,11 +519,20 @@ pub async fn build_managed_worker_config(
     config: &NacConfig,
 ) -> Result<ManagedWorkerRunConfig> {
     let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
+    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let config_cwd = options
+        .config_cwd
+        .clone()
+        .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let workspace_cwd = options.workspace_cwd;
-    let store_path = resolve_store_path(&workspace_cwd, options.store, config);
+    let store_base_cwd = if ssh_host.is_some() {
+        &config_cwd
+    } else {
+        &workspace_cwd
+    };
+    let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
 
-    let ssh_host = trim_ssh_host(options.ssh_host);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     if ssh_host.is_some()
         && (sandbox_options.sandbox_enabled()
@@ -507,17 +547,28 @@ pub async fn build_managed_worker_config(
     } else {
         build_sandbox_session(&sandbox_options, &workspace_cwd).await?
     };
-    let paths = PathContext::new(&workspace_cwd);
-    // Remote workers skip AGENTS.md, skills, and MCP for now: those all load
-    // from the local filesystem, but the session's workspace only exists on
-    // the remote host.
+    let workspace_paths = PathContext::new(&workspace_cwd);
+    let config_paths = PathContext::new(&config_cwd);
+    // Remote workers still skip AGENTS.md and skills because those load from
+    // the workspace filesystem, but streamable_http MCP servers are local
+    // network clients and can be exposed safely without advertising the remote
+    // SSH path as a local file:// root.
     let (agents_md_message, mcp, skills) = if ssh_host.is_some() {
-        (None, None, None)
+        let mcp = McpRegistry::load_with_policy(
+            &workspace_cwd,
+            None,
+            &config_paths,
+            McpTransportPolicy::StreamableHttpOnly,
+            McpRootPolicy::None,
+        )
+        .await?;
+        (None, mcp, None)
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
-        let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
-        let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &paths).await?;
-        let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &paths)?;
+        let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
+        let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &workspace_paths).await?;
+        let skills =
+            SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &workspace_paths)?;
         (agents_md.system_message(), mcp, skills)
     };
     let working_directory = sandbox
@@ -551,6 +602,7 @@ pub async fn build_managed_worker_config(
             thread_name: Some(options.dispatch.thread_name.clone()),
             event_sink: EventSink::stderr_prefixed(),
             workspace_cwd,
+            config_cwd,
             working_directory,
             worker_executable: None,
             sandbox,
@@ -598,6 +650,7 @@ pub async fn build_resume_picker_config(
             thread_name: None,
             event_sink: EventSink::none(),
             workspace_cwd: lookup_cwd.clone(),
+            config_cwd: lookup_cwd.clone(),
             working_directory: working_directory.clone(),
             worker_executable: options.worker_executable,
             sandbox: None,
@@ -683,6 +736,11 @@ async fn build_resume_config_from_snapshot(
     }
 
     let workspace_cwd = snapshot.cwd.clone();
+    let config_cwd = if ssh_host.is_some() {
+        resume_base_cwd.clone()
+    } else {
+        workspace_cwd.clone()
+    };
     let paths = PathContext::new(&workspace_cwd);
     let client = ModelClient::from_env_with_overrides(ClientOverrides {
         base_url: Some(snapshot.base_url.clone()),
@@ -743,6 +801,7 @@ async fn build_resume_config_from_snapshot(
             thread_name: None,
             event_sink: EventSink::none(),
             workspace_cwd,
+            config_cwd,
             working_directory: working_directory.clone(),
             worker_executable,
             sandbox,
@@ -929,6 +988,7 @@ pub(crate) fn absolute_store_path(cwd: &Path, store_path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::test_support::{shell_single_quote, start_fake_http_mcp_server, toml_string};
     use crate::sandbox::SandboxSpec;
     use crate::types::Message;
     use crate::TEST_ENV_LOCK;
@@ -1221,7 +1281,7 @@ url = "https://mcp.context7.com/mcp"
         let cwd = Path::new("/workspace/repo");
 
         // config.toml [storage] store_path beats the global default; relative
-        // overrides still resolve against the workspace cwd.
+        // overrides still resolve against the caller-supplied base cwd.
         let mut config = NacConfig::default();
         config.storage.store_path = Some(PathBuf::from("custom/store.db"));
         assert_eq!(
@@ -1320,6 +1380,7 @@ url = "https://mcp.context7.com/mcp"
         let workspace_cwd = store_path.parent().unwrap().to_path_buf();
         let options = ManagedWorkerOptions {
             workspace_cwd,
+            config_cwd: None,
             dispatch: WorkerDispatchOptions {
                 session_id: session_id.to_string(),
                 thread_name: "impl".to_string(),
@@ -1689,6 +1750,7 @@ url = "https://mcp.context7.com/mcp"
         let run_config = build_run_config(
             RunOptions {
                 workspace_cwd: remote_cwd.clone(),
+                config_cwd: None,
                 worker_executable: None,
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
@@ -1746,6 +1808,7 @@ url = "https://mcp.context7.com/mcp"
 
         let options = |workspace_cwd: PathBuf, sandbox: SandboxOptions| RunOptions {
             workspace_cwd,
+            config_cwd: None,
             worker_executable: None,
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
@@ -1814,6 +1877,7 @@ url = "https://mcp.context7.com/mcp"
         let run_config = build_managed_worker_config(
             ManagedWorkerOptions {
                 workspace_cwd: remote_cwd.clone(),
+                config_cwd: None,
                 dispatch: WorkerDispatchOptions {
                     session_id: "remote-session".to_string(),
                     thread_name: "impl".to_string(),
@@ -1844,5 +1908,177 @@ url = "https://mcp.context7.com/mcp"
 
         let _ = std::fs::remove_dir_all(&store_root);
         restore_env("OPENAI_API_KEY", original_api_key);
+    }
+
+    #[tokio::test]
+    async fn ssh_managed_worker_skips_stdio_mcp_without_spawning() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
+        }
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let nac_home = std::env::temp_dir().join(format!("nac_remote_worker_stdio_mcp_{unique}"));
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let marker = nac_home.join("stdio-spawned");
+        let shell = format!("printf spawned > {}", shell_single_quote(&marker));
+        std::fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.local]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", {}]
+"#,
+                toml_string(&shell)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let store_path = temp_store_path("remote_worker_stdio_mcp");
+        store::initialize(&store_path).unwrap();
+        let run_config = build_managed_worker_config(
+            ManagedWorkerOptions {
+                workspace_cwd: PathBuf::from("~"),
+                config_cwd: None,
+                dispatch: WorkerDispatchOptions {
+                    session_id: "remote-session".to_string(),
+                    thread_name: "impl".to_string(),
+                    action: "do remote work".to_string(),
+                    source_threads: Vec::new(),
+                    skills: Vec::new(),
+                },
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: ModelOptions::default(),
+                sandbox: SandboxOptions::default(),
+                ssh_host: Some("build-box".to_string()),
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("remote workers should skip stdio MCP instead of spawning it");
+
+        assert!(run_config
+            .agent
+            .tool_definitions_for_test()
+            .iter()
+            .all(|def| !def.function.name.starts_with("mcp__")));
+        assert!(
+            !marker.exists(),
+            "stdio MCP server was spawned despite SSH HTTP-only policy"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(&nac_home);
+        restore_env("OPENAI_API_KEY", original_api_key);
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+    }
+
+    #[tokio::test]
+    async fn ssh_managed_worker_resolves_relative_nac_home_against_local_config_cwd() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let local_root =
+            std::env::temp_dir().join(format!("nac_remote_worker_relative_config_{unique}"));
+        let config_cwd = local_root.join("hub");
+        let nac_home_rel = PathBuf::from(format!("relative-nac-home-{unique}"));
+        let nac_home = config_cwd.join(&nac_home_rel);
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let marker = nac_home.join("stdio-spawned");
+        let shell = format!("printf spawned > {}", shell_single_quote(&marker));
+        let (http_url, http_server) = start_fake_http_mcp_server();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.http]
+transport = "streamable_http"
+url = {}
+
+[mcp_servers.local]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", {}]
+"#,
+                toml_string(&http_url),
+                toml_string(&shell)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home_rel);
+        }
+
+        let store_path = temp_store_path("remote_worker_relative_config_mcp");
+        store::initialize(&store_path).unwrap();
+        let run_config = build_managed_worker_config(
+            ManagedWorkerOptions {
+                workspace_cwd: PathBuf::from("~"),
+                config_cwd: Some(config_cwd.clone()),
+                dispatch: WorkerDispatchOptions {
+                    session_id: "remote-session".to_string(),
+                    thread_name: "impl".to_string(),
+                    action: "do remote work".to_string(),
+                    source_threads: Vec::new(),
+                    skills: Vec::new(),
+                },
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: ModelOptions::default(),
+                sandbox: SandboxOptions::default(),
+                ssh_host: Some("build-box".to_string()),
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("remote workers should resolve MCP config from local config cwd");
+
+        let tool_names: Vec<_> = run_config
+            .agent
+            .tool_definitions_for_test()
+            .iter()
+            .map(|def| def.function.name.as_str())
+            .collect();
+        assert!(
+            tool_names.contains(&"mcp__http__echo"),
+            "HTTP MCP config under relative NAC_HOME was not loaded: {tool_names:?}"
+        );
+        assert!(
+            !marker.exists(),
+            "stdio MCP server was spawned despite SSH HTTP-only policy"
+        );
+
+        drop(run_config);
+        http_server.join().unwrap();
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(&local_root);
+        restore_env("OPENAI_API_KEY", original_api_key);
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
     }
 }

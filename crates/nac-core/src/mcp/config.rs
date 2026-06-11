@@ -6,6 +6,12 @@ pub(super) struct McpConfigFile {
     pub(super) mcp_servers: BTreeMap<String, McpServerConfig>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct RawMcpConfigFile {
+    #[serde(default)]
+    mcp_servers: BTreeMap<String, toml::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct McpServerConfig {
     #[serde(default = "default_enabled")]
@@ -33,6 +39,42 @@ pub(super) enum McpTransportConfig {
 
 pub(super) fn default_config_path(paths: &PathContext) -> Option<PathBuf> {
     paths.nac_config_path()
+}
+
+pub(super) fn mcp_config_for_policy(
+    raw: &str,
+    transport_policy: McpTransportPolicy,
+) -> Result<McpConfigFile> {
+    match transport_policy {
+        McpTransportPolicy::All => toml::from_str(raw).context("failed to parse MCP config"),
+        McpTransportPolicy::StreamableHttpOnly => streamable_http_config_from_raw(raw),
+    }
+}
+
+fn streamable_http_config_from_raw(raw: &str) -> Result<McpConfigFile> {
+    let raw_config: RawMcpConfigFile = toml::from_str(raw).context("failed to parse MCP config")?;
+    let mut config = McpConfigFile::default();
+    for (server_name, server_value) in raw_config.mcp_servers {
+        if !raw_transport_is_streamable_http(&server_value) {
+            eprintln!(
+                "MCP server '{}' is not streamable_http and will be skipped by the active MCP transport policy",
+                server_name
+            );
+            continue;
+        }
+        let server_config = server_value.try_into().with_context(|| {
+            format!(
+                "failed to parse streamable_http MCP server '{}'",
+                server_name
+            )
+        })?;
+        config.mcp_servers.insert(server_name, server_config);
+    }
+    Ok(config)
+}
+
+fn raw_transport_is_streamable_http(value: &toml::Value) -> bool {
+    value.get("transport").and_then(toml::Value::as_str) == Some("streamable_http")
 }
 
 fn default_enabled() -> bool {

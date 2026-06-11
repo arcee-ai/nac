@@ -28,6 +28,7 @@ pub struct ToolResult {
 #[derive(Clone)]
 pub struct ToolRuntime {
     pub workspace_cwd: PathBuf,
+    pub config_cwd: PathBuf,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub worker_executable: Option<PathBuf>,

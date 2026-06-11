@@ -39,6 +39,9 @@ pub struct AgentConfig {
     pub thread_name: Option<String>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
+    /// Local cwd used to resolve nac config paths for child managed workers.
+    /// This differs from workspace_cwd for SSH sessions, where workspace_cwd is remote.
+    pub config_cwd: PathBuf,
     pub working_directory: String,
     pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
@@ -228,11 +231,15 @@ impl Agent {
 
         // Execution target selection: an ssh target selects remote OpenSSH, a
         // sandbox session selects podman, otherwise commands run locally. SSH
-        // + sandbox together is a hard configuration error.
+        // + sandbox together is a hard configuration error. The config path
+        // context is passed through so host-side SSH state (e.g. control
+        // sockets) resolves relative NAC_HOME the same way as config/store.
+        let local_paths = crate::paths::PathContext::new(&config.config_cwd);
         let backend = crate::sandbox::select_execution_backend(
             config.ssh_host,
             config.sandbox,
             &config.workspace_cwd,
+            &local_paths,
         )?;
         Ok(Self {
             client,
@@ -240,6 +247,7 @@ impl Agent {
             tool_defs,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
+                config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
                 active_threads: Arc::new(Mutex::new(HashSet::new())),
@@ -270,7 +278,8 @@ impl Agent {
                 initial_messages: Vec::new(),
                 thread_name: None,
                 event_sink: EventSink::none(),
-                workspace_cwd,
+                workspace_cwd: workspace_cwd.clone(),
+                config_cwd: workspace_cwd,
                 working_directory,
                 worker_executable: None,
                 sandbox: None,
@@ -393,6 +402,11 @@ impl Agent {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn tool_definitions_for_test(&self) -> &[ToolDefinition] {
+        &self.tool_defs
+    }
+
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
         self.tool_runtime.event_sink = sink;
@@ -446,6 +460,7 @@ mod tests {
                 thread_name: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("/resolved/workspace"),
+                config_cwd: PathBuf::from("/resolved/workspace"),
                 working_directory: "/resolved/workspace".to_string(),
                 worker_executable: None,
                 sandbox: None,
@@ -543,6 +558,7 @@ mod tests {
                     thread_name: None,
                     event_sink: EventSink::none(),
                     workspace_cwd: PathBuf::from("."),
+                    config_cwd: PathBuf::from("."),
                     working_directory: ".".to_string(),
                     worker_executable: None,
                     sandbox: None,

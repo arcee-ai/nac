@@ -5,6 +5,29 @@ pub struct McpRegistry {
     tools: Arc<HashMap<String, Arc<McpToolBinding>>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpTransportPolicy {
+    All,
+    StreamableHttpOnly,
+}
+
+impl McpTransportPolicy {
+    fn allows(self, transport: &McpTransportConfig) -> bool {
+        match self {
+            Self::All => true,
+            Self::StreamableHttpOnly => {
+                matches!(transport, McpTransportConfig::StreamableHttp { .. })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpRootPolicy {
+    Workspace,
+    None,
+}
+
 #[derive(Clone)]
 struct McpToolBinding {
     tool_name: String,
@@ -18,8 +41,7 @@ struct McpServer {
 
 #[derive(Clone)]
 pub(super) struct NacMcpClientHandler {
-    root_uri: String,
-    root_name: String,
+    roots: Vec<Root>,
 }
 
 impl McpRegistry {
@@ -27,6 +49,23 @@ impl McpRegistry {
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
+    ) -> Result<Option<Arc<Self>>> {
+        Self::load_with_policy(
+            cwd,
+            sandbox,
+            paths,
+            McpTransportPolicy::All,
+            McpRootPolicy::Workspace,
+        )
+        .await
+    }
+
+    pub async fn load_with_policy(
+        cwd: &Path,
+        sandbox: Option<&SandboxSession>,
+        paths: &PathContext,
+        transport_policy: McpTransportPolicy,
+        root_policy: McpRootPolicy,
     ) -> Result<Option<Arc<Self>>> {
         let Some(path) = default_config_path(paths) else {
             return Ok(None);
@@ -46,7 +85,7 @@ impl McpRegistry {
                 return Ok(None);
             }
         };
-        let config: McpConfigFile = match toml::from_str(&raw) {
+        let config = match mcp_config_for_policy(&raw, transport_policy) {
             Ok(config) => config,
             Err(error) => {
                 eprintln!(
@@ -58,25 +97,8 @@ impl McpRegistry {
             }
         };
 
-        let root_uri = if sandbox.is_some() {
-            "file:///workspace".to_string()
-        } else {
-            Url::from_directory_path(cwd)
-                .map_err(|_| anyhow!("failed to build file:// root for {}", cwd.display()))?
-                .to_string()
-        };
-        let root_name = if sandbox.is_some() {
-            "workspace".to_string()
-        } else {
-            cwd.file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("workspace")
-                .to_string()
-        };
-
         let handler = NacMcpClientHandler {
-            root_uri,
-            root_name,
+            roots: mcp_roots_for_policy(cwd, sandbox, root_policy)?,
         };
 
         let mut tools = HashMap::new();
@@ -84,6 +106,13 @@ impl McpRegistry {
 
         for (server_name, server_config) in config.mcp_servers {
             if !server_config.enabled {
+                continue;
+            }
+            if !transport_policy.allows(&server_config.transport) {
+                eprintln!(
+                    "MCP server '{}' uses a non-streamable_http transport and will be skipped by the active MCP transport policy",
+                    server_name
+                );
                 continue;
             }
 
@@ -216,13 +245,17 @@ impl McpRegistry {
 
 impl ClientHandler for NacMcpClientHandler {
     fn get_info(&self) -> ClientInfo {
-        ClientInfo::new(
-            serde_json::from_value(serde_json::json!({
+        let capabilities = if self.roots.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({
                 "roots": {
                     "listChanged": true
                 }
-            }))
-            .expect("valid MCP client capabilities"),
+            })
+        };
+        ClientInfo::new(
+            serde_json::from_value(capabilities).expect("valid MCP client capabilities"),
             Implementation::new("nac", env!("CARGO_PKG_VERSION")),
         )
     }
@@ -231,9 +264,35 @@ impl ClientHandler for NacMcpClientHandler {
         &self,
         _request_context: rmcp::service::RequestContext<RoleClient>,
     ) -> std::result::Result<ListRootsResult, rmcp::model::ErrorData> {
-        Ok(ListRootsResult::new(vec![
-            Root::new(self.root_uri.clone()).with_name(self.root_name.clone())
-        ]))
+        Ok(ListRootsResult::new(self.roots.clone()))
+    }
+}
+
+pub(super) fn mcp_roots_for_policy(
+    cwd: &Path,
+    sandbox: Option<&SandboxSession>,
+    root_policy: McpRootPolicy,
+) -> Result<Vec<Root>> {
+    match root_policy {
+        McpRootPolicy::None => Ok(Vec::new()),
+        McpRootPolicy::Workspace => {
+            let root_uri = if sandbox.is_some() {
+                "file:///workspace".to_string()
+            } else {
+                Url::from_directory_path(cwd)
+                    .map_err(|_| anyhow!("failed to build file:// root for {}", cwd.display()))?
+                    .to_string()
+            };
+            let root_name = if sandbox.is_some() {
+                "workspace".to_string()
+            } else {
+                cwd.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("workspace")
+                    .to_string()
+            };
+            Ok(vec![Root::new(root_uri).with_name(root_name)])
+        }
     }
 }
 

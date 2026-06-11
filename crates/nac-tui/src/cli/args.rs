@@ -28,9 +28,13 @@ pub(super) struct RunCli {
     hide = true
 )]
 pub(super) struct ManagedWorkerCli {
-    /// Internal workspace cwd used for managed worker path/config resolution
+    /// Internal workspace cwd used for managed worker path resolution
     #[arg(long, hide = true)]
     pub(super) workspace_cwd: Option<PathBuf>,
+
+    /// Internal local cwd used to resolve nac config for managed workers.
+    #[arg(long, hide = true)]
+    pub(super) config_cwd: Option<PathBuf>,
 
     /// Internal OpenSSH target used to re-attach worker subprocesses to a
     /// remote session; workspace-cwd is then a remote path used verbatim.

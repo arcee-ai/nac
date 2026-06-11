@@ -47,10 +47,17 @@ pub async fn run() -> Result<()> {
 
     let launch_cwd = std::env::current_dir()?;
     let effective_cwd = effective_cli_cwd(&cli, &launch_cwd)?;
-    let app_config = runtime::NacConfig::load_from_cwd(&effective_cwd)?;
+    let config_cwd = effective_cli_config_cwd(&cli, &launch_cwd, &effective_cwd)?;
+    let app_config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
     let worker_executable = current_worker_executable()?;
-    let mut run_state =
-        build_run_state(cli, &app_config, effective_cwd, worker_executable.clone()).await?;
+    let mut run_state = build_run_state(
+        cli,
+        &app_config,
+        effective_cwd,
+        config_cwd,
+        worker_executable.clone(),
+    )
+    .await?;
 
     loop {
         match run_state {
@@ -99,12 +106,13 @@ async fn build_run_state(
     cli: ParsedCli,
     config: &runtime::NacConfig,
     effective_cwd: PathBuf,
+    config_cwd: PathBuf,
     worker_executable: PathBuf,
 ) -> Result<RunState> {
     match cli {
         ParsedCli::Run(cli) => Ok(RunState::Orchestrator {
             run_config: runtime::build_run_config(
-                run_options(cli, effective_cwd, worker_executable),
+                run_options(cli, effective_cwd, config_cwd, worker_executable),
                 config,
             )
             .await?,
@@ -112,7 +120,7 @@ async fn build_run_state(
         }),
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
             runtime::build_managed_worker_config(
-                managed_worker_options(cli, effective_cwd),
+                managed_worker_options(cli, effective_cwd, config_cwd),
                 config,
             )
             .await?,
@@ -188,6 +196,22 @@ fn effective_cli_cwd(cli: &ParsedCli, launch_cwd: &Path) -> Result<PathBuf> {
     }
 }
 
+fn effective_cli_config_cwd(
+    cli: &ParsedCli,
+    launch_cwd: &Path,
+    effective_cwd: &Path,
+) -> Result<PathBuf> {
+    match cli {
+        ParsedCli::ManagedWorker(worker) => match worker.config_cwd.as_deref() {
+            Some(config_cwd) => resolve_cli_cwd(launch_cwd, Some(config_cwd)),
+            None if worker.ssh_host.is_some() => Ok(launch_cwd.to_path_buf()),
+            None => Ok(effective_cwd.to_path_buf()),
+        },
+        ParsedCli::Run(_) | ParsedCli::Resume(_) => Ok(effective_cwd.to_path_buf()),
+        ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
+    }
+}
+
 fn resolve_cli_cwd(launch_cwd: &Path, directory: Option<&Path>) -> Result<PathBuf> {
     let target = match directory {
         Some(path) if path.is_absolute() => path.to_path_buf(),
@@ -238,9 +262,15 @@ fn worker_dispatch_options(cli: WorkerDispatchArgs) -> WorkerDispatchOptions {
     }
 }
 
-fn run_options(cli: RunCli, workspace_cwd: PathBuf, worker_executable: PathBuf) -> RunOptions {
+fn run_options(
+    cli: RunCli,
+    workspace_cwd: PathBuf,
+    config_cwd: PathBuf,
+    worker_executable: PathBuf,
+) -> RunOptions {
     RunOptions {
         workspace_cwd,
+        config_cwd: Some(config_cwd),
         worker_executable: Some(worker_executable),
         store: store_options(cli.store),
         model: model_options(cli.model),
@@ -251,9 +281,14 @@ fn run_options(cli: RunCli, workspace_cwd: PathBuf, worker_executable: PathBuf) 
     }
 }
 
-fn managed_worker_options(cli: ManagedWorkerCli, workspace_cwd: PathBuf) -> ManagedWorkerOptions {
+fn managed_worker_options(
+    cli: ManagedWorkerCli,
+    workspace_cwd: PathBuf,
+    config_cwd: PathBuf,
+) -> ManagedWorkerOptions {
     ManagedWorkerOptions {
         workspace_cwd,
+        config_cwd: Some(config_cwd),
         dispatch: worker_dispatch_options(cli.dispatch),
         store: store_options(cli.store),
         model: model_options(cli.model),

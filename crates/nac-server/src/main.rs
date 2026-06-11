@@ -45,9 +45,13 @@ struct ServerCli {
     hide = true
 )]
 struct ManagedWorkerCli {
-    /// Internal workspace cwd used for managed worker path/config resolution.
+    /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
+
+    /// Internal local cwd used to resolve nac config for managed workers.
+    #[arg(long, hide = true)]
+    config_cwd: Option<PathBuf>,
 
     /// Internal OpenSSH target used to re-attach worker subprocesses to a
     /// remote session; workspace-cwd is then a remote path used verbatim.
@@ -278,9 +282,15 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         (Some(_), Some(remote_cwd)) => remote_cwd.clone(),
         _ => resolve_cli_cwd(&launch_cwd, cli.workspace_cwd.as_deref())?,
     };
-    let config = runtime::NacConfig::load_from_cwd(&workspace_cwd)?;
+    let config_cwd = match cli.config_cwd.as_deref() {
+        Some(config_cwd) => resolve_cli_cwd(&launch_cwd, Some(config_cwd))?,
+        None if cli.ssh_host.is_some() => launch_cwd.clone(),
+        None => workspace_cwd.clone(),
+    };
+    let config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
+        config_cwd: Some(config_cwd),
         dispatch: WorkerDispatchOptions {
             session_id: cli.dispatch.session_id,
             thread_name: cli.dispatch.thread_name,
