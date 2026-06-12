@@ -483,8 +483,12 @@ button.session-card {
 
 .session-card-head {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-md);
+  min-width: 0;
+}
+
+.session-card-head > div {
   min-width: 0;
 }
 
@@ -498,6 +502,9 @@ button.session-card {
 }
 
 .session-card .cwd {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--muted);
   font-family: var(--mono);
@@ -1243,5 +1250,11 @@ button.session-card {
 
   .launch-submit {
     justify-self: start;
+  }
+}
+
+@media (min-width: 360px) and (max-width: 767px) {
+  .session-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
