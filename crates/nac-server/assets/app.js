@@ -17,6 +17,16 @@ const state = {
 
 const el = {};
 
+const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+const MARKDOWN_ALLOWED_TAGS = [
+  "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+];
+const MARKDOWN_ALLOWED_ATTR = ["class", "href", "rel", "start", "target"];
+const MARKDOWN_FORBID_TAGS = ["base", "button", "embed", "form", "iframe", "img", "input", "link", "math", "meta", "object", "script", "select", "style", "svg", "textarea"];
+const MARKDOWN_FORBID_ATTR = ["id", "name", "src", "srcdoc", "style"];
+
+let markdownRenderer = null;
+
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   bindEvents();
@@ -499,26 +509,164 @@ function renderTranscript(sessionId, messages) {
     ...pendingMessages(sessionId),
   ];
   if (transcriptMessages.length === 0) {
-    el.transcript.innerHTML = `<div class="empty-state">No messages yet.</div>`;
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No messages yet.";
+    el.transcript.replaceChildren(empty);
     return;
   }
 
-  el.transcript.innerHTML = transcriptMessages.slice(-80).map((message, index) => {
+  const fragment = document.createDocumentFragment();
+  transcriptMessages.slice(-80).forEach((message, index) => {
     const role = message.role || "unknown";
     const body = messageDisplayText(message);
-    const pending = message.pending ? "pending" : "";
-    const marker = message.pending ? "pending" : `#${index + 1}`;
-    return `
-      <div class="message-row ${pending}">
-        <div class="message-meta"><span class="message-role ${escapeAttr(role)}">${escapeHtml(role)}</span><span>${marker}</span></div>
-        <div class="message-body ${body ? "" : "muted"}">${escapeHtml(body || "[empty]")}</div>
-      </div>`;
-  }).join("");
+    const row = document.createElement("div");
+    row.className = "message-row";
+    if (message.pending) row.classList.add("pending");
+
+    const meta = document.createElement("div");
+    meta.className = "message-meta";
+
+    const roleElement = document.createElement("span");
+    roleElement.className = "message-role";
+    const roleClass = safeClassToken(role);
+    if (roleClass) roleElement.classList.add(roleClass);
+    roleElement.textContent = role;
+
+    const markerElement = document.createElement("span");
+    markerElement.textContent = message.pending ? "pending" : `#${index + 1}`;
+
+    meta.append(roleElement, markerElement);
+
+    const bodyElement = document.createElement("div");
+    bodyElement.className = "message-body markdown";
+    if (!body) bodyElement.classList.add("muted");
+    bodyElement.append(renderMarkdownFragment(body || "[empty]"));
+
+    row.append(meta, bodyElement);
+    fragment.append(row);
+  });
+  el.transcript.replaceChildren(fragment);
   if (state.scrollChatToBottom) {
     state.scrollChatToBottom = false;
     requestAnimationFrame(() => {
       el.transcript.scrollTop = el.transcript.scrollHeight;
     });
+  }
+}
+
+function renderMarkdownFragment(text) {
+  const normalized = String(text ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  const renderer = getMarkdownRenderer();
+  if (!renderer || typeof window.DOMPurify?.sanitize !== "function") {
+    return renderPlainTextFragment(normalized);
+  }
+
+  const html = renderer.render(normalized);
+  const sanitized = window.DOMPurify.sanitize(html, {
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
+    ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR,
+    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
+    FORBID_ATTR: MARKDOWN_FORBID_ATTR,
+    FORBID_TAGS: MARKDOWN_FORBID_TAGS,
+    RETURN_DOM_FRAGMENT: true,
+  });
+  return hardenMarkdownFragment(sanitized);
+}
+
+function getMarkdownRenderer() {
+  if (markdownRenderer) return markdownRenderer;
+  if (typeof window === "undefined" || typeof window.markdownit !== "function") return null;
+
+  markdownRenderer = window.markdownit({
+    html: false,
+    breaks: true,
+    linkify: false,
+    typographer: false,
+  });
+  markdownRenderer.validateLink = (target) => Boolean(safeMarkdownLinkHref(target));
+  markdownRenderer.renderer.rules.image = renderMarkdownImageToken;
+  return markdownRenderer;
+}
+
+function renderMarkdownImageToken(tokens, index, options, env, renderer) {
+  const token = tokens[index];
+  const target = token.attrGet("src") || "";
+  const alt = renderer.renderInlineAsText(token.children || [], options, env) || "image";
+  const text = `image: ${alt}${target ? ` <${target}>` : ""}`;
+  return `<span class="md-image-text">${escapeHtml(text)}</span>`;
+}
+
+function renderPlainTextFragment(text) {
+  const fragment = document.createDocumentFragment();
+  String(text ?? "").split("\n").forEach((line, index) => {
+    if (index > 0) fragment.append(document.createElement("br"));
+    fragment.append(document.createTextNode(line));
+  });
+  return fragment;
+}
+
+function hardenMarkdownFragment(fragment) {
+  if (!fragment || typeof fragment.querySelectorAll !== "function") {
+    return renderPlainTextFragment("");
+  }
+
+  fragment.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on") || MARKDOWN_FORBID_ATTR.includes(name)) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+
+    const tag = element.tagName.toLowerCase();
+    if (tag === "a") {
+      const href = safeMarkdownLinkHref(element.getAttribute("href") || "");
+      if (!href) {
+        element.replaceWith(document.createTextNode(element.textContent || ""));
+        return;
+      }
+      element.setAttribute("href", href);
+      element.setAttribute("target", "_blank");
+      element.setAttribute("rel", "noopener noreferrer");
+    } else {
+      element.removeAttribute("href");
+      element.removeAttribute("target");
+      element.removeAttribute("rel");
+    }
+
+    if (tag === "span" && element.classList.contains("md-image-text")) {
+      element.className = "md-image-text";
+    } else {
+      element.removeAttribute("class");
+    }
+
+    if (tag === "ol") {
+      const start = element.getAttribute("start");
+      if (start && !/^[1-9][0-9]{0,5}$/.test(start)) element.removeAttribute("start");
+    } else {
+      element.removeAttribute("start");
+    }
+  });
+
+  return fragment;
+}
+
+function safeMarkdownLinkHref(target) {
+  const raw = String(target || "");
+  if (!raw || /[\s\u0000-\u001f\u007f]/.test(raw)) return null;
+  const trimmed = raw.trim();
+  const protocolMatch = trimmed.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (!protocolMatch) return null;
+  const protocol = `${protocolMatch[1].toLowerCase()}:`;
+  if (!SAFE_MARKDOWN_LINK_PROTOCOLS.has(protocol)) return null;
+
+  try {
+    const url = new URL(trimmed);
+    return SAFE_MARKDOWN_LINK_PROTOCOLS.has(url.protocol) ? url.href : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -1032,6 +1180,11 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value);
+}
+
+function safeClassToken(value) {
+  const token = String(value || "");
+  return /^[A-Za-z0-9_-]+$/.test(token) ? token : null;
 }
 
 function makeLocalId() {

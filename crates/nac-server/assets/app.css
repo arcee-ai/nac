@@ -483,8 +483,12 @@ button.session-card {
 
 .session-card-head {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-md);
+  min-width: 0;
+}
+
+.session-card-head > div {
   min-width: 0;
 }
 
@@ -498,6 +502,9 @@ button.session-card {
 }
 
 .session-card .cwd {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--muted);
   font-family: var(--mono);
@@ -661,6 +668,10 @@ button.session-card {
   box-shadow: var(--neu-sunken);
 }
 
+.transcript {
+  overflow-x: hidden;
+}
+
 .message-row {
   display: grid;
   gap: var(--space-xs);
@@ -714,6 +725,188 @@ button.session-card {
 
 .message-body.muted,
 .dense-body.muted {
+  color: var(--muted);
+}
+
+.message-row,
+.message-body.markdown {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.message-body.markdown {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.message-body.markdown :where(p, blockquote, ul, ol, pre, hr, table, h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+
+.message-body.markdown > * + * {
+  margin-top: var(--space-md);
+}
+
+.message-body.markdown > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown > * + :is(h1, h2, h3, h4, h5, h6),
+.message-body.markdown > * + pre,
+.message-body.markdown > pre + *,
+.message-body.markdown > p + p {
+  margin-top: var(--space-lg);
+}
+
+.message-body.markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text);
+  font-weight: var(--type-weight-strong);
+  line-height: 1.25;
+}
+
+.message-body.markdown h1 {
+  font-size: calc(var(--type-body) + 5px);
+}
+
+.message-body.markdown h2 {
+  font-size: calc(var(--type-body) + 4px);
+}
+
+.message-body.markdown h3 {
+  font-size: calc(var(--type-body) + 3px);
+}
+
+.message-body.markdown :is(h4, h5, h6) {
+  font-size: calc(var(--type-body) + 1px);
+}
+
+.message-body.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.message-body.markdown blockquote {
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  padding-left: var(--space-md);
+}
+
+.message-body.markdown blockquote > * + * {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown :is(ul, ol) {
+  list-style-position: outside;
+  padding-left: 1.55em;
+}
+
+.message-body.markdown ol {
+  padding-left: 2.15em;
+}
+
+.message-body.markdown li {
+  padding-left: 0.15em;
+}
+
+.message-body.markdown li + li {
+  margin-top: var(--space-2xs);
+}
+
+.message-body.markdown li > :is(p, blockquote, ul, ol, pre, table) {
+  margin-top: var(--space-xs);
+}
+
+.message-body.markdown li > :first-child {
+  margin-top: 0;
+}
+
+.message-body.markdown ol li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+.message-body.markdown code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--amber);
+  padding: 0 3px;
+  white-space: break-spaces;
+  word-break: break-word;
+}
+
+.message-body.markdown pre {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.22);
+  padding: var(--space-md);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-body.markdown pre code {
+  display: block;
+  overflow-wrap: inherit;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  white-space: inherit;
+  word-break: inherit;
+}
+
+.message-body.markdown a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-body.markdown a:hover {
+  color: var(--highlight);
+}
+
+.message-body.markdown .md-image-text {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.message-body.markdown table {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  table-layout: fixed;
+  border-collapse: collapse;
+  word-break: break-word;
+}
+
+.message-body.markdown th,
+.message-body.markdown td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line-soft);
+  padding: var(--space-xs) var(--space-sm);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.message-body.markdown th {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-weight: var(--type-weight-strong);
+}
+
+.message-body.markdown strong {
+  font-weight: var(--type-weight-strong);
+}
+
+.message-body.markdown :is(s, del) {
   color: var(--muted);
 }
 
@@ -1082,5 +1275,11 @@ button.session-card {
 
   .launch-submit {
     justify-self: start;
+  }
+}
+
+@media (min-width: 360px) and (max-width: 767px) {
+  .session-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
