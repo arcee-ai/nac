@@ -8,11 +8,15 @@ const state = {
   pendingMessagesBySession: new Map(),
   attentionSessions: new Set(),
   activeRunsBySession: new Map(),
+  terminalRunsBySession: new Map(),
+  submittingRunsBySession: new Set(),
+  submittingRunTimersBySession: new Map(),
   eventSource: null,
   lastSequence: new Map(),
   activeTab: "chat",
   mobileDetailOpen: false,
   scrollChatToBottom: false,
+  waitingLife: null,
 };
 
 const el = {};
@@ -102,7 +106,7 @@ function bindEvents() {
     const button = event.target.closest("button[data-tab]");
     if (!button) return;
     state.activeTab = button.dataset.tab;
-    renderTabs();
+    renderInspector();
   });
 }
 
@@ -151,6 +155,7 @@ async function readJson(response) {
 async function loadSessions() {
   try {
     const sessions = sortSessionsByCreation(await apiGet("/sessions?workspace_stats=true"));
+    sanitizeSessionListActiveRuns(sessions);
     updateSessionActivity(sessions);
     state.sessions = sessions;
     if (!state.selectedId && state.sessions.length > 0) {
@@ -183,6 +188,11 @@ async function loadSnapshot(sessionId, openStream = false) {
   try {
     const previousMessageCount = effectiveMessageCount(sessionId);
     const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}`);
+    sanitizeSnapshotActiveRun(sessionId, snapshot);
+    if (activeRunCountsForSession(sessionId, snapshot.active_run)) {
+      clearRunSubmitting(sessionId);
+      state.activeRunsBySession.set(sessionId, true);
+    }
     state.snapshots.set(sessionId, snapshot);
     reconcilePendingMessages(sessionId, snapshot);
     syncActiveThreadsFromSnapshot(sessionId, snapshot);
@@ -233,6 +243,7 @@ function hideLaunchOverlay() {
 function showMobileSessions() {
   state.mobileDetailOpen = false;
   renderMobileMode();
+  syncPromptBusy(state.selectedId);
 }
 
 async function createSession(event) {
@@ -272,14 +283,20 @@ async function createSession(event) {
     setLaunchStatus(`launched ${shortId(sessionId)}`, false);
     if (initialPrompt) {
       const pendingMessage = queuePendingUserMessage(sessionId, initialPrompt);
+      state.activeRunsBySession.set(sessionId, true);
+      markRunSubmitting(sessionId);
+      clearSessionAttention(sessionId);
       requestChatScrollToBottom();
       renderAll();
       try {
         await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
+        scheduleRunSubmittingGrace(sessionId);
         el.initialPrompt.value = "";
         setLaunchStatus(`running ${shortId(sessionId)}`, false);
       } catch (error) {
         removePendingMessage(sessionId, pendingMessage.id);
+        clearRunSubmitting(sessionId);
+        state.activeRunsBySession.set(sessionId, false);
         renderAll();
         throw error;
       }
@@ -291,10 +308,16 @@ async function createSession(event) {
 
 async function submitPrompt(event) {
   event.preventDefault();
-  const prompt = el.promptInput.value.trim();
   const sessionId = state.selectedId;
+  const prompt = el.promptInput.value.trim();
   if (!sessionId || !prompt) return;
+  if (sessionHasActiveRun(sessionId)) {
+    syncPromptBusy(sessionId);
+    return;
+  }
 
+  state.activeRunsBySession.set(sessionId, true);
+  markRunSubmitting(sessionId);
   clearSessionAttention(sessionId);
   const pendingMessage = queuePendingUserMessage(sessionId, prompt);
   el.promptInput.value = "";
@@ -303,12 +326,16 @@ async function submitPrompt(event) {
 
   try {
     const result = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt });
+    scheduleRunSubmittingGrace(sessionId);
     pushLocalEvent("submit", `${result.display_prompt} -> ${shortId(result.run_id)}`, sessionId);
     await loadSessions();
     await loadSnapshot(sessionId, false);
     renderAll();
   } catch (error) {
     removePendingMessage(sessionId, pendingMessage.id);
+    clearRunSubmitting(sessionId);
+    state.activeRunsBySession.set(sessionId, false);
+    stopWaitingLife();
     pushLocalEvent("submit_error", error.message, sessionId);
     renderAll();
   }
@@ -347,12 +374,18 @@ function openEventStream(sessionId) {
     const envelope = JSON.parse(event.data);
     state.lastSequence.set(sessionId, envelope.sequence_id);
     pushEnvelopeForSession(sessionId, envelope);
+    const runStarted = isRunStartedSessionEvent(envelope);
+    const terminalRun = isTerminalSessionEvent(envelope);
+    if (runStarted) {
+      handleRunStarted(sessionId, envelope);
+      loadSessions();
+    }
+    if (terminalRun) {
+      handleTerminalRun(sessionId, envelope);
+      loadSessions();
+    }
     if (shouldRefreshSnapshot(envelope)) {
       loadSnapshot(sessionId, false);
-    }
-    if (isTerminalSessionEvent(envelope)) {
-      markSessionAttention(sessionId);
-      loadSessions();
     }
     renderAll();
   });
@@ -376,30 +409,175 @@ function openEventStream(sessionId) {
   };
 }
 
+function isRunStartedSessionEvent(envelope) {
+  return envelope.event?.type === "run_started";
+}
+
 function isTerminalSessionEvent(envelope) {
   const type = envelope.event?.type;
-  return type === "run_completed" || type === "run_failed" || type === "snapshot_saved";
+  return type === "run_completed" || type === "run_failed";
+}
+
+function isSnapshotSavedSessionEvent(envelope) {
+  return envelope.event?.type === "snapshot_saved";
 }
 
 function shouldRefreshSnapshot(envelope) {
-  if (isTerminalSessionEvent(envelope)) return true;
+  if (isRunStartedSessionEvent(envelope) || isTerminalSessionEvent(envelope) || isSnapshotSavedSessionEvent(envelope)) return true;
   const event = agentEvent(envelope);
   return event?.type === "thread_started" || event?.type === "thread_finished";
+}
+
+function activeRunFromStartedEnvelope(envelope) {
+  return {
+    run_id: runIdFromEnvelope(envelope),
+    prompt_preview: envelope.event?.prompt_preview || "",
+    started_at_epoch_ms: envelope.event?.started_at_epoch_ms || Date.now(),
+  };
+}
+
+function terminalRunIdForSession(sessionId, envelope) {
+  return runIdFromEnvelope(envelope)
+    || activeRunId(state.snapshots.get(sessionId)?.active_run)
+    || activeRunId(sessionEntryById(sessionId)?.active_run)
+    || "";
+}
+
+function runIdFromEnvelope(envelope) {
+  return String(envelope?.run_id || envelope?.event?.run_id || "");
+}
+
+function activeRunId(activeRun) {
+  return String(activeRun?.run_id || activeRun?.id || activeRun?.runId || "");
+}
+
+function sessionEntryById(sessionId) {
+  return state.sessions.find((entry) => entry.summary.session_id === sessionId) || null;
+}
+
+function activeRunMatchesRunId(activeRun, runId) {
+  if (!activeRun) return false;
+  const activeId = activeRunId(activeRun);
+  return !runId || !activeId || activeId === runId;
+}
+
+function activeRunCountsForSession(sessionId, activeRun) {
+  if (!activeRun) return false;
+  const terminal = state.terminalRunsBySession.get(sessionId);
+  if (!terminal) return true;
+  return !activeRunMatchesRunId(activeRun, terminal.runId);
+}
+
+function sanitizeSnapshotActiveRun(sessionId, snapshot) {
+  if (snapshot && activeRunCountsForSession(sessionId, snapshot.active_run) === false) {
+    snapshot.active_run = null;
+  }
+}
+
+function sanitizeSessionListActiveRuns(sessions) {
+  for (const entry of sessions) {
+    if (!activeRunCountsForSession(entry.summary.session_id, entry.active_run)) {
+      entry.active_run = null;
+    }
+  }
+}
+
+function clearCachedActiveRun(sessionId, runId) {
+  const snapshot = state.snapshots.get(sessionId);
+  if (snapshot && activeRunMatchesRunId(snapshot.active_run, runId)) snapshot.active_run = null;
+  const entry = sessionEntryById(sessionId);
+  if (entry && activeRunMatchesRunId(entry.active_run, runId)) entry.active_run = null;
+}
+
+function markRunSubmitting(sessionId) {
+  if (!sessionId) return;
+  clearRunSubmittingTimer(sessionId);
+  state.submittingRunsBySession.add(sessionId);
+}
+
+function scheduleRunSubmittingGrace(sessionId) {
+  if (!sessionId || !state.submittingRunsBySession.has(sessionId)) return;
+  clearRunSubmittingTimer(sessionId);
+  if (typeof setTimeout !== "function") return;
+
+  const timerId = setTimeout(() => expireRunSubmitting(sessionId), SUBMITTING_RUN_GRACE_MS);
+  state.submittingRunTimersBySession.set(sessionId, timerId);
+}
+
+function clearRunSubmitting(sessionId) {
+  if (!sessionId) return;
+  state.submittingRunsBySession.delete(sessionId);
+  clearRunSubmittingTimer(sessionId);
+}
+
+function clearRunSubmittingTimer(sessionId) {
+  const timerId = state.submittingRunTimersBySession.get(sessionId);
+  if (timerId !== undefined && typeof clearTimeout === "function") clearTimeout(timerId);
+  state.submittingRunTimersBySession.delete(sessionId);
+}
+
+function expireRunSubmitting(sessionId) {
+  state.submittingRunTimersBySession.delete(sessionId);
+  if (!state.submittingRunsBySession.delete(sessionId)) return;
+
+  const stillActive = cachedActiveRunCountsForSession(sessionId);
+  state.activeRunsBySession.set(sessionId, stillActive);
+  if (!stillActive && state.selectedId === sessionId) stopWaitingLife();
+  if (state.selectedId === sessionId) {
+    renderAll();
+  } else {
+    renderMetrics();
+    renderSessions();
+  }
+}
+
+function cachedActiveRunCountsForSession(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  if (!sessionId) return false;
+  return Boolean(activeRunCountsForSession(sessionId, snapshot?.active_run)
+    || state.sessions.some((entry) => entry.summary.session_id === sessionId && activeRunCountsForSession(sessionId, entry.active_run)));
+}
+
+function handleRunStarted(sessionId, envelope) {
+  const activeRun = activeRunFromStartedEnvelope(envelope);
+  state.terminalRunsBySession.delete(sessionId);
+  state.activeRunsBySession.set(sessionId, true);
+  clearRunSubmitting(sessionId);
+  clearSessionAttention(sessionId);
+  const snapshot = state.snapshots.get(sessionId);
+  if (snapshot) snapshot.active_run = activeRun;
+  const entry = sessionEntryById(sessionId);
+  if (entry) entry.active_run = activeRun;
+  if (state.selectedId === sessionId) requestChatScrollToBottom();
+}
+
+function handleTerminalRun(sessionId, envelope) {
+  const wasActive = sessionHasActiveRun(sessionId);
+  const runId = terminalRunIdForSession(sessionId, envelope);
+  state.terminalRunsBySession.set(sessionId, {
+    runId,
+    sequenceId: envelope.sequence_id || 0,
+  });
+  state.activeRunsBySession.set(sessionId, false);
+  clearRunSubmitting(sessionId);
+  clearCachedActiveRun(sessionId, runId);
+  if (wasActive) state.attentionSessions.add(sessionId);
+  if (state.selectedId === sessionId) stopWaitingLife();
 }
 
 function renderAll() {
   renderMetrics();
   renderSessions();
-  renderInspector();
   renderMobileMode();
+  renderInspector();
 }
 
 function renderMobileMode() {
   document.body.classList.toggle("detail-open", Boolean(state.mobileDetailOpen && state.selectedId));
+  if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
 }
 
 function renderMetrics() {
-  const active = state.sessions.filter((entry) => entry.active_run).length;
+  const active = state.sessions.filter((entry) => activeRunCountsForSession(entry.summary.session_id, entry.active_run)).length;
   const sandbox = state.sessions.filter((entry) => entry.summary.sandboxed).length;
   const selectedEvents = getSessionEvents(state.selectedId);
   el.matrixSubtitle.textContent = `${state.sessions.length} tracked sessions / ${active} active / ${sandbox} sandboxed / creation ordered`;
@@ -441,7 +619,8 @@ function renderSessionCard(entry) {
   const snapshot = state.snapshots.get(sessionId);
   const workspaceError = snapshot?.workspace?.error || "";
   const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
-  const tone = entry.active_run ? "" : summary.sandboxed ? "warn" : "";
+  const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
+  const tone = cardActive ? "" : summary.sandboxed ? "warn" : "";
   const errorish = workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "";
   const pendingCount = pendingMessages(sessionId).length;
   const promptPreview = latestPendingUserPrompt(sessionId) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
@@ -484,23 +663,26 @@ function renderInspector() {
     el.worksetsView.innerHTML = "";
     el.workspaceView.innerHTML = "";
     renderTabs();
+    syncPromptBusy(sessionId, snapshot);
     return;
   }
 
   const metadata = snapshot.metadata;
+  const runActive = sessionHasActiveRun(metadata.session_id, snapshot);
   el.inspectorTitle.textContent = shortId(metadata.session_id);
   el.inspectorMeta.textContent = metadata.cwd;
   el.snapModel.textContent = metadata.model;
   el.snapBackend.textContent = metadata.backend;
   el.snapMessages.textContent = effectiveMessageCount(metadata.session_id, snapshot);
-  el.snapRun.textContent = snapshot.active_run ? "active" : "idle";
-  el.cancelRun.disabled = !snapshot.active_run;
+  el.snapRun.textContent = runActive ? "active" : "idle";
+  el.cancelRun.disabled = !runActive;
+  renderTabs();
   renderTranscript(metadata.session_id, snapshot.messages);
+  syncPromptBusy(metadata.session_id, snapshot);
   renderThreads(snapshot);
   renderWorksets(snapshot);
   renderWorkspace(snapshot);
   renderEvents();
-  renderTabs();
 }
 
 function renderTranscript(sessionId, messages) {
@@ -546,6 +728,7 @@ function renderTranscript(sessionId, messages) {
     row.append(meta, bodyElement);
     fragment.append(row);
   });
+
   el.transcript.replaceChildren(fragment);
   if (state.scrollChatToBottom) {
     state.scrollChatToBottom = false;
@@ -553,6 +736,464 @@ function renderTranscript(sessionId, messages) {
       el.transcript.scrollTop = el.transcript.scrollHeight;
     });
   }
+}
+
+const SUBMITTING_RUN_GRACE_MS = 15000;
+const WAITING_LIFE_TICK_MS = 75;
+const WAITING_LIFE_MAX_CATCHUP_STEPS = 2;
+const WAITING_LIFE_SIZE_CHECK_MS = 500;
+const WAITING_LIFE_SQUARE_SCALE = 0.29;
+const WAITING_LIFE_MOBILE_QUERY = "(max-width: 1179px)";
+const WAITING_LIFE_PATTERNS = [
+  {
+    name: "glider",
+    width: 3,
+    height: 3,
+    cells: [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]],
+  },
+  {
+    name: "r-pentomino",
+    width: 3,
+    height: 3,
+    cells: [[1, 0], [2, 0], [0, 1], [1, 1], [1, 2]],
+  },
+  {
+    name: "acorn",
+    width: 7,
+    height: 3,
+    cells: [[1, 0], [3, 1], [0, 2], [1, 2], [4, 2], [5, 2], [6, 2]],
+  },
+  {
+    name: "lwss",
+    width: 5,
+    height: 4,
+    cells: [[1, 0], [2, 0], [3, 0], [4, 0], [0, 1], [4, 1], [4, 2], [0, 3], [3, 3]],
+  },
+];
+
+function waitingLifeSeedKey(sessionId, snapshot, messages) {
+  const activeRun = snapshot?.active_run;
+  const prompt = activeRun?.prompt_preview
+    || latestPendingUserPrompt(sessionId)
+    || latestUserPromptFromMessages(messages || snapshot?.messages || [])
+    || "";
+  return [
+    "life-generator-v1",
+    sessionId || "",
+    activeRun?.run_id || "",
+    prompt,
+  ].join("|");
+}
+
+function latestUserPromptFromMessages(messages) {
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") return messageDisplayText(message);
+  }
+  return "";
+}
+
+function chatPanelIsVisible(sessionId) {
+  if (!sessionId || state.selectedId !== sessionId || state.activeTab !== "chat") return false;
+  const mobileMode = typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches;
+  return !mobileMode || Boolean(state.mobileDetailOpen);
+}
+
+function waitingLifeIsStillActive(life) {
+  if (!life?.canvas || !life.canvas.isConnected) return false;
+  if (!chatPanelIsVisible(life.sessionId)) return false;
+  if (!el.promptForm?.isConnected) return false;
+
+  const promptLife = el.promptLife?.isConnected
+    ? el.promptLife
+    : el.promptForm.querySelector(".prompt-life");
+  if (!promptLife || promptLife.hidden || promptLife.getAttribute("aria-hidden") === "true") return false;
+  if (!el.promptForm.contains(promptLife)) return false;
+
+  const promptCanvas = el.promptLifeCanvas?.isConnected && promptLife.contains(el.promptLifeCanvas)
+    ? el.promptLifeCanvas
+    : promptLife.querySelector(".prompt-life-canvas");
+  if (promptCanvas !== life.canvas || !promptLife.contains(life.canvas)) return false;
+  return promptLife.dataset.sessionId === life.sessionId;
+}
+
+function syncWaitingLife(canvas, sessionId, seedKey, runActive) {
+  if (!runActive || !canvas || !canvas.isConnected || !chatPanelIsVisible(sessionId)) {
+    stopWaitingLife();
+    return;
+  }
+
+  const current = state.waitingLife;
+  const sameVisibleLife = current
+    && current.canvas === canvas
+    && current.sessionId === sessionId;
+  let created = false;
+  if (!sameVisibleLife) {
+    stopWaitingLife();
+    state.waitingLife = createWaitingLife(canvas, sessionId, seedKey);
+    created = true;
+  }
+
+  const life = state.waitingLife;
+  const resized = ensureWaitingLifeSize(life);
+  if (resized || created) drawLifeField(life);
+  if (resized || created) scheduleWaitingLifePostLayoutDraw(life);
+  if (life.rafId) return;
+
+  life.lastTime = performanceNow();
+  life.rafId = requestAnimationFrame(tickWaitingLife);
+}
+
+function createWaitingLife(canvas, sessionId, seedKey) {
+  const life = {
+    canvas,
+    context: canvas.getContext("2d"),
+    sessionId,
+    seedKey,
+    rafId: null,
+    lastTime: 0,
+    accumulator: 0,
+    pixelWidth: 0,
+    pixelHeight: 0,
+    cssWidth: 0,
+    cssHeight: 0,
+    dpr: 1,
+    cols: 0,
+    rows: 0,
+    field: null,
+    postLayoutRafId: null,
+    sizeDirty: true,
+    lastSizeCheck: 0,
+    resizeObserver: null,
+  };
+
+  if (typeof ResizeObserver === "function") {
+    try {
+      life.resizeObserver = new ResizeObserver(() => markWaitingLifeSizeDirty(life));
+      life.resizeObserver.observe(canvas);
+    } catch (_) {
+      life.resizeObserver = null;
+    }
+  }
+
+  return life;
+}
+
+function markWaitingLifeSizeDirty(life) {
+  if (!life || state.waitingLife !== life) return;
+  life.sizeDirty = true;
+  scheduleWaitingLifePostLayoutDraw(life);
+}
+
+function stopWaitingLife() {
+  const life = state.waitingLife;
+  if (life?.rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.rafId);
+  if (life?.postLayoutRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.postLayoutRafId);
+  if (life?.resizeObserver) life.resizeObserver.disconnect();
+  state.waitingLife = null;
+}
+
+function scheduleWaitingLifePostLayoutDraw(life) {
+  if (!life || life.postLayoutRafId || typeof requestAnimationFrame !== "function") return;
+  life.postLayoutRafId = requestAnimationFrame(() => {
+    if (state.waitingLife !== life) return;
+    life.postLayoutRafId = null;
+    if (!waitingLifeIsStillActive(life)) {
+      stopWaitingLife();
+      return;
+    }
+    const resized = ensureWaitingLifeSize(life);
+    if (resized) drawLifeField(life);
+  });
+}
+
+function tickWaitingLife(time) {
+  const life = state.waitingLife;
+  if (!life) return;
+  life.rafId = null;
+
+  if (!waitingLifeIsStillActive(life)) {
+    stopWaitingLife();
+    return;
+  }
+
+  const now = Number.isFinite(time) ? time : performanceNow();
+  const lastTime = Number.isFinite(life.lastTime) ? life.lastTime : now;
+  const lastSizeCheck = Number.isFinite(life.lastSizeCheck) ? life.lastSizeCheck : 0;
+  const shouldCheckSize = !life.field
+    || life.sizeDirty
+    || now - lastSizeCheck >= WAITING_LIFE_SIZE_CHECK_MS;
+  const resized = shouldCheckSize ? ensureWaitingLifeSize(life, now) : false;
+  const elapsed = Math.min(Math.max(0, now - lastTime), 500);
+  life.lastTime = now;
+  life.accumulator = Number.isFinite(life.accumulator) ? life.accumulator + elapsed : elapsed;
+
+  const tickMs = WAITING_LIFE_TICK_MS;
+  let stepped = false;
+  let steps = 0;
+  while (life.accumulator >= tickMs && steps < WAITING_LIFE_MAX_CATCHUP_STEPS) {
+    stepLifeField(life.field);
+    life.accumulator -= tickMs;
+    stepped = true;
+    steps += 1;
+  }
+  if (life.accumulator >= tickMs) life.accumulator %= tickMs;
+
+  if (stepped || resized) drawLifeField(life);
+  life.rafId = requestAnimationFrame(tickWaitingLife);
+}
+
+function ensureWaitingLifeSize(life, now = performanceNow()) {
+  life.lastSizeCheck = Number.isFinite(now) ? now : performanceNow();
+  const rect = life.canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width || life.canvas.clientWidth || life.canvas.width || 320));
+  const cssHeight = Math.max(1, Math.round(rect.height || life.canvas.clientHeight || life.canvas.height || 96));
+  const dpr = Math.max(1, Math.min(2, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1));
+  const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
+  const cols = clampInt(Math.floor(cssWidth / 6), 24, 96);
+  const rows = clampInt(Math.floor(cssHeight / 6), 10, 44);
+
+  if (life.pixelWidth === pixelWidth
+    && life.pixelHeight === pixelHeight
+    && life.cols === cols
+    && life.rows === rows
+    && life.field) {
+    life.sizeDirty = false;
+    return false;
+  }
+
+  life.canvas.width = pixelWidth;
+  life.canvas.height = pixelHeight;
+  life.pixelWidth = pixelWidth;
+  life.pixelHeight = pixelHeight;
+  life.cssWidth = cssWidth;
+  life.cssHeight = cssHeight;
+  life.dpr = dpr;
+  life.cols = cols;
+  life.rows = rows;
+  life.field = createLifeField(cols, rows, `${life.seedKey}|${cols}x${rows}`);
+  life.accumulator = 0;
+  life.sizeDirty = false;
+  return true;
+}
+
+function performanceNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
+function createLifeField(cols, rows, seedKey) {
+  const field = {
+    cols,
+    rows,
+    cells: new Uint8Array(cols * rows),
+    next: new Uint8Array(cols * rows),
+    changed: new Uint8Array(cols * rows),
+    rng: mulberry32(fnv1a32(seedKey)),
+    generation: 0,
+    aliveCount: 0,
+  };
+  seedLifeField(field);
+  return field;
+}
+
+function seedLifeField(field) {
+  const rng = field.rng;
+  for (let index = 0; index < field.cells.length; index += 1) {
+    if (rng() < 0.01) setLifeCell(field, index % field.cols, Math.floor(index / field.cols), 1);
+  }
+
+  const methuselahs = WAITING_LIFE_PATTERNS.filter((pattern) => pattern.name === "r-pentomino" || pattern.name === "acorn");
+  for (let index = 0, count = randomRangeInclusive(rng, 2, 5); index < count; index += 1) {
+    placeLifePattern(field, randomChoice(rng, methuselahs), randomInt(rng, field.cols), randomInt(rng, field.rows), randomInt(rng, 4), rng() < 0.5, rng);
+  }
+
+  const movers = WAITING_LIFE_PATTERNS.filter((pattern) => pattern.name === "glider" || pattern.name === "lwss");
+  for (let index = 0, count = randomRangeInclusive(rng, 2, 4); index < count; index += 1) {
+    const pattern = randomChoice(rng, movers);
+    const x = randomInt(rng, field.cols);
+    const y = randomInt(rng, field.rows);
+    const rotation = randomInt(rng, 4);
+    const flip = rng() < 0.5;
+    placeLifePattern(field, pattern, x, y, rotation, flip, rng);
+    placeLifePattern(field, pattern, (field.cols - x) % field.cols, (field.rows - y) % field.rows, (rotation + 2) % 4, flip, rng);
+  }
+
+  for (let index = 0, count = randomRangeInclusive(rng, 2, 4); index < count; index += 1) {
+    placeLifeBlob(field, randomInt(rng, field.cols), randomInt(rng, field.rows), randomRangeInclusive(rng, 4, 6), rng);
+  }
+
+  field.aliveCount = 0;
+  for (let index = 0; index < field.cells.length; index += 1) {
+    if (field.cells[index]) {
+      field.changed[index] = 1;
+      field.aliveCount += 1;
+    }
+  }
+}
+
+function placeLifePattern(field, pattern, originX, originY, rotation, flip, rng) {
+  for (const [cellX, cellY] of pattern.cells) {
+    let [x, y] = rotateLifePatternCell(cellX, cellY, pattern, rotation);
+    if (flip) x = pattern.width - 1 - x;
+
+    const mutate = rng() < 0.05;
+    if (mutate && rng() < 0.5) continue;
+    setLifeCell(field, originX + x, originY + y, 1);
+    if (mutate && rng() < 0.3) {
+      setLifeCell(field, originX + x + randomRangeInclusive(rng, -1, 1), originY + y + randomRangeInclusive(rng, -1, 1), 1);
+    }
+  }
+}
+
+function rotateLifePatternCell(x, y, pattern, rotation) {
+  switch (rotation % 4) {
+    case 1:
+      return [pattern.height - 1 - y, x];
+    case 2:
+      return [pattern.width - 1 - x, pattern.height - 1 - y];
+    case 3:
+      return [y, pattern.width - 1 - x];
+    default:
+      return [x, y];
+  }
+}
+
+function placeLifeBlob(field, originX, originY, size, rng) {
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if (rng() < 0.5) setLifeCell(field, originX + x, originY + y, 1);
+    }
+  }
+}
+
+function setLifeCell(field, rawX, rawY, alive) {
+  const x = wrapIndex(rawX, field.cols);
+  const y = wrapIndex(rawY, field.rows);
+  const index = y * field.cols + x;
+  field.cells[index] = alive ? 1 : 0;
+}
+
+function stepLifeField(field) {
+  if (!field) return;
+  let aliveCount = 0;
+  for (let y = 0; y < field.rows; y += 1) {
+    for (let x = 0; x < field.cols; x += 1) {
+      const index = y * field.cols + x;
+      const alive = field.cells[index] === 1;
+      const neighbors = countLifeNeighbors(field, x, y);
+      const nextAlive = alive
+        ? neighbors === 2 || neighbors === 3 || neighbors === 6
+        : neighbors === 3;
+      field.next[index] = nextAlive ? 1 : 0;
+      field.changed[index] = alive === nextAlive ? 0 : 1;
+      if (nextAlive) aliveCount += 1;
+    }
+  }
+
+  const previous = field.cells;
+  field.cells = field.next;
+  field.next = previous;
+  field.generation += 1;
+  field.aliveCount = aliveCount;
+}
+
+function countLifeNeighbors(field, x, y) {
+  let count = 0;
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      if (dx === 0 && dy === 0) continue;
+      const neighborX = wrapIndex(x + dx, field.cols);
+      const neighborY = wrapIndex(y + dy, field.rows);
+      count += field.cells[neighborY * field.cols + neighborX];
+    }
+  }
+  return count;
+}
+
+function drawLifeField(life) {
+  if (!life?.context || !life.field) return;
+  const { context, field } = life;
+  const cellSize = Math.max(1, Math.min(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
+  const squareSize = Math.max(0.5, cellSize * WAITING_LIFE_SQUARE_SCALE);
+  const inset = (cellSize - squareSize) / 2;
+  const offsetX = (life.pixelWidth - cellSize * field.cols) / 2;
+  const offsetY = (life.pixelHeight - cellSize * field.rows) / 2;
+
+  context.save();
+  context.clearRect(0, 0, life.pixelWidth, life.pixelHeight);
+  context.shadowBlur = 0;
+  context.shadowColor = "transparent";
+  context.globalCompositeOperation = "source-over";
+  context.imageSmoothingEnabled = false;
+
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", "rgba(255, 255, 255, 0.10)");
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", "rgba(255, 255, 255, 0.68)");
+  context.globalCompositeOperation = "lighter";
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", "rgba(255, 255, 255, 0.34)");
+
+  context.restore();
+}
+
+function drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, mode, fillStyle) {
+  context.fillStyle = fillStyle;
+  for (let y = 0; y < field.rows; y += 1) {
+    const rowOffset = y * field.cols;
+    const top = offsetY + y * cellSize + inset;
+    for (let x = 0; x < field.cols; x += 1) {
+      const index = rowOffset + x;
+      const alive = field.cells[index] === 1;
+      const changed = field.changed[index] === 1;
+      if (mode === "alive" && !alive) continue;
+      if (mode === "born" && (!alive || !changed)) continue;
+      if (mode === "dead" && (alive || !changed)) continue;
+      context.fillRect(offsetX + x * cellSize + inset, top, squareSize, squareSize);
+    }
+  }
+}
+
+function fnv1a32(value) {
+  let hash = 0x811c9dc5;
+  const text = String(value ?? "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed) {
+  let stateValue = seed >>> 0;
+  return () => {
+    stateValue = (stateValue + 0x6d2b79f5) >>> 0;
+    let mixed = stateValue;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInt(rng, max) {
+  if (max <= 0) return 0;
+  return Math.floor(rng() * max);
+}
+
+function randomRangeInclusive(rng, min, max) {
+  return min + randomInt(rng, max - min + 1);
+}
+
+function randomChoice(rng, items) {
+  return items[randomInt(rng, items.length)];
+}
+
+function wrapIndex(value, size) {
+  return ((value % size) + size) % size;
+}
+
+function clampInt(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function renderMarkdownFragment(text) {
@@ -851,6 +1492,7 @@ function renderTabs() {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `tab-${state.activeTab}`);
   });
+  if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
 }
 
 function filteredSessions() {
@@ -925,6 +1567,105 @@ function effectiveMessageCount(sessionId, snapshot = state.snapshots.get(session
 
 function requestChatScrollToBottom() {
   state.scrollChatToBottom = true;
+}
+
+function syncPromptBusy(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  const hasSession = Boolean(sessionId);
+  const hasUsableSession = Boolean(sessionId && snapshot);
+  const busy = hasSession && sessionHasActiveRun(sessionId, snapshot);
+  const disabled = !hasUsableSession || busy;
+  const showLife = busy && chatPanelIsVisible(sessionId);
+  el.promptForm.classList.toggle("busy", busy);
+  el.promptForm.dataset.busyText = busy && !showLife ? "Awaiting orchestrator reply." : "";
+  el.promptForm.setAttribute("aria-busy", busy ? "true" : "false");
+  el.promptInput.disabled = disabled;
+  el.promptInput.hidden = showLife;
+  el.promptInput.setAttribute("aria-busy", busy ? "true" : "false");
+  const submitButton = el.promptForm.querySelector(".prompt-submit");
+  if (submitButton) {
+    submitButton.disabled = disabled;
+    submitButton.setAttribute("aria-disabled", disabled ? "true" : "false");
+  }
+  syncPromptLife(sessionId, snapshot, showLife);
+}
+
+function ensurePromptLifeElement() {
+  let promptLife = el.promptLife && el.promptLife.isConnected
+    ? el.promptLife
+    : el.promptForm.querySelector(".prompt-life");
+
+  if (!promptLife) {
+    promptLife = document.createElement("div");
+    promptLife.className = "prompt-life life-waiting";
+    promptLife.hidden = true;
+    promptLife.setAttribute("role", "status");
+    promptLife.setAttribute("aria-live", "polite");
+    promptLife.setAttribute("aria-atomic", "true");
+  } else {
+    promptLife.classList.add("prompt-life", "life-waiting");
+    promptLife.setAttribute("role", promptLife.getAttribute("role") || "status");
+    promptLife.setAttribute("aria-live", promptLife.getAttribute("aria-live") || "polite");
+    promptLife.setAttribute("aria-atomic", promptLife.getAttribute("aria-atomic") || "true");
+  }
+
+  promptLife.style.background = "transparent";
+
+  let canvas = promptLife.querySelector(".prompt-life-canvas");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.className = "prompt-life-canvas life-waiting-canvas";
+    canvas.setAttribute("aria-hidden", "true");
+    promptLife.prepend(canvas);
+  } else {
+    canvas.classList.add("prompt-life-canvas", "life-waiting-canvas");
+    canvas.setAttribute("aria-hidden", "true");
+  }
+  canvas.style.background = "transparent";
+
+  let label = promptLife.querySelector(".prompt-life-label");
+  if (!label) {
+    label = document.createElement("div");
+    label.className = "prompt-life-label life-waiting-label";
+    promptLife.append(label);
+  } else {
+    label.classList.add("prompt-life-label", "life-waiting-label");
+  }
+  label.textContent = "Awaiting orchestrator reply.";
+
+  const submitButton = el.promptForm.querySelector(".prompt-submit");
+  if (promptLife.parentElement !== el.promptForm || promptLife.nextElementSibling !== submitButton) {
+    if (submitButton && submitButton.parentElement === el.promptForm) {
+      el.promptForm.insertBefore(promptLife, submitButton);
+    } else if (el.promptInput.parentElement === el.promptForm) {
+      el.promptInput.insertAdjacentElement("afterend", promptLife);
+    } else {
+      el.promptForm.append(promptLife);
+    }
+  }
+
+  el.promptLife = promptLife;
+  el.promptLifeCanvas = canvas;
+  el.promptLifeLabel = label;
+  return promptLife;
+}
+
+function syncPromptLife(sessionId, snapshot, showLife) {
+  const promptLife = ensurePromptLifeElement();
+  promptLife.hidden = !showLife;
+  promptLife.setAttribute("aria-hidden", showLife ? "false" : "true");
+  if (!showLife) {
+    delete promptLife.dataset.sessionId;
+    stopWaitingLife();
+    return;
+  }
+
+  promptLife.dataset.sessionId = sessionId || "";
+  syncWaitingLife(
+    el.promptLifeCanvas,
+    sessionId,
+    waitingLifeSeedKey(sessionId, snapshot, snapshot?.messages),
+    true,
+  );
 }
 
 function pushEnvelopeForSession(sessionId, envelope) {
@@ -1035,7 +1776,10 @@ function updateSessionActivity(sessions) {
   const seen = new Set();
   for (const entry of sessions) {
     const sessionId = entry.summary.session_id;
-    const isActive = Boolean(entry.active_run);
+    const remoteActive = activeRunCountsForSession(sessionId, entry.active_run);
+    if (remoteActive) clearRunSubmitting(sessionId);
+    const isSubmitting = state.submittingRunsBySession.has(sessionId);
+    const isActive = remoteActive || isSubmitting;
     const wasActive = state.activeRunsBySession.get(sessionId) === true;
     if (isActive) {
       clearSessionAttention(sessionId);
@@ -1049,6 +1793,8 @@ function updateSessionActivity(sessions) {
   for (const sessionId of state.activeRunsBySession.keys()) {
     if (!seen.has(sessionId)) {
       state.activeRunsBySession.delete(sessionId);
+      state.terminalRunsBySession.delete(sessionId);
+      clearRunSubmitting(sessionId);
       state.attentionSessions.delete(sessionId);
     }
   }
@@ -1065,13 +1811,22 @@ function markSessionAttention(sessionId) {
 }
 
 function sessionIsActive(sessionId) {
-  return state.activeRunsBySession.get(sessionId) === true
-    || state.sessions.some((entry) => entry.summary.session_id === sessionId && entry.active_run);
+  if (!sessionId) return false;
+  if (state.submittingRunsBySession.has(sessionId)) return true;
+  if (state.activeRunsBySession.get(sessionId) === true) return true;
+  return state.sessions.some((entry) => entry.summary.session_id === sessionId && activeRunCountsForSession(sessionId, entry.active_run));
+}
+
+function sessionHasActiveRun(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  if (!sessionId) return false;
+  if (state.submittingRunsBySession.has(sessionId)) return true;
+  if (state.activeRunsBySession.get(sessionId) === true) return true;
+  return Boolean(activeRunCountsForSession(sessionId, snapshot?.active_run) || sessionIsActive(sessionId));
 }
 
 function sessionStatusClass(entry) {
   const sessionId = entry.summary.session_id;
-  if (entry.active_run) return "active";
+  if (activeRunCountsForSession(sessionId, entry.active_run)) return "active";
   if (state.attentionSessions.has(sessionId)) return "attention";
   if (entry.summary.sandboxed) return "sandbox";
   return "idle";
