@@ -922,6 +922,10 @@ button.session-card {
   box-shadow: var(--neu-pressed);
 }
 
+.prompt-submit {
+  display: none;
+}
+
 .prompt-form textarea {
   min-height: 50px;
   max-height: 96px;
@@ -1236,9 +1240,22 @@ button.session-card {
     gap: var(--space-md);
   }
 
+  .prompt-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: var(--space-sm);
+  }
+
   .prompt-form textarea {
     min-height: 64px;
     max-height: 112px;
+  }
+
+  .prompt-submit {
+    display: grid;
+    flex: 0 0 auto;
+    align-self: end;
+    background: var(--panel-2);
   }
 
   .dense-title,
