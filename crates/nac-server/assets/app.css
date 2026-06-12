@@ -1249,6 +1249,8 @@ button.session-card {
   .prompt-form textarea {
     min-height: 64px;
     max-height: 112px;
+    /* 16px avoids iOS/Safari focus zoom on mobile. */
+    font-size: 16px;
   }
 
   .prompt-submit {
