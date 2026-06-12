@@ -668,6 +668,10 @@ button.session-card {
   box-shadow: var(--neu-sunken);
 }
 
+.transcript {
+  overflow-x: hidden;
+}
+
 .message-row {
   display: grid;
   gap: var(--space-xs);
@@ -724,8 +728,16 @@ button.session-card {
   color: var(--muted);
 }
 
+.message-row,
 .message-body.markdown {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.message-body.markdown {
+  overflow-wrap: anywhere;
   white-space: normal;
+  word-break: break-word;
 }
 
 .message-body.markdown :where(p, blockquote, ul, ol, pre, hr, table, h1, h2, h3, h4, h5, h6) {
@@ -814,31 +826,38 @@ button.session-card {
 }
 
 .message-body.markdown code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.055);
   color: var(--amber);
   padding: 0 3px;
   white-space: break-spaces;
+  word-break: break-word;
 }
 
 .message-body.markdown pre {
-  overflow-x: auto;
-  overflow-wrap: normal;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(255, 255, 255, 0.065);
   border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.22);
   padding: var(--space-md);
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-body.markdown pre code {
   display: block;
+  overflow-wrap: inherit;
   border: 0;
   background: transparent;
   color: inherit;
   padding: 0;
   white-space: inherit;
+  word-break: inherit;
 }
 
 .message-body.markdown a {
@@ -857,18 +876,24 @@ button.session-card {
 }
 
 .message-body.markdown table {
-  display: block;
+  display: table;
+  width: 100%;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
+  table-layout: fixed;
   border-collapse: collapse;
+  word-break: break-word;
 }
 
 .message-body.markdown th,
 .message-body.markdown td {
+  min-width: 0;
+  overflow-wrap: anywhere;
   border: 1px solid var(--line-soft);
   padding: var(--space-xs) var(--space-sm);
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
 }
 
 .message-body.markdown th {
