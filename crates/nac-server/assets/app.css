@@ -728,6 +728,51 @@ button.session-card {
   color: var(--muted);
 }
 
+.life-waiting {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--space-sm);
+  overflow: hidden;
+  border: 1px solid rgba(79, 210, 168, 0.16);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(79, 210, 168, 0.08), rgba(110, 168, 255, 0.05)), var(--bg-sunken);
+  box-shadow: var(--neu-sunken-soft);
+  padding: var(--space-sm);
+  white-space: normal;
+}
+
+.life-waiting-canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 96px;
+  min-height: 72px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045), 0 0 24px rgba(79, 210, 168, 0.08);
+}
+
+.life-waiting-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+}
+
+.life-waiting-label::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--teal);
+  box-shadow: 0 0 10px rgba(79, 210, 168, 0.48), 0 0 16px rgba(110, 168, 255, 0.18);
+}
+
 .message-row,
 .message-body.markdown {
   max-width: 100%;
@@ -911,6 +956,8 @@ button.session-card {
 }
 
 .prompt-form {
+  --prompt-life-height: 92px;
+  --prompt-life-padding: var(--space-lg);
   display: grid;
   border-radius: var(--radius-xl);
   background: var(--panel);
@@ -942,6 +989,102 @@ button.session-card {
 
 .prompt-form textarea:focus {
   box-shadow: none;
+}
+
+.prompt-life {
+  display: none;
+  align-self: stretch;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prompt-life[hidden] {
+  display: none !important;
+}
+
+.prompt-life.life-waiting {
+  position: relative;
+  overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
+  height: var(--prompt-life-height);
+  min-height: var(--prompt-life-height);
+  max-height: var(--prompt-life-height);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+  padding: var(--prompt-life-padding);
+}
+
+.prompt-life-canvas.life-waiting-canvas {
+  height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
+  min-height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
+  max-height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.prompt-life-label.life-waiting-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.prompt-life-label.life-waiting-label::before {
+  content: none;
+  display: none;
+}
+
+.prompt-form.busy {
+  gap: var(--space-sm);
+  box-shadow: var(--neu-pressed);
+}
+
+.prompt-form.busy::after {
+  content: none;
+  display: none;
+}
+
+.prompt-form.busy textarea {
+  display: none;
+  pointer-events: none;
+}
+
+.prompt-form.busy .prompt-life:not([hidden]) {
+  display: grid;
+}
+
+.prompt-form textarea:disabled {
+  cursor: not-allowed;
+  color: var(--faint);
+  opacity: 1;
+  -webkit-text-fill-color: var(--faint);
+}
+
+.prompt-form.busy textarea:disabled {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.prompt-form.busy .prompt-submit {
+  pointer-events: none;
+}
+
+.prompt-form .prompt-submit:disabled,
+.prompt-form .prompt-submit[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--faint);
+  opacity: 0.42;
+  background: var(--bg-sunken);
+  box-shadow: var(--neu-pressed);
 }
 
 .event-log,
@@ -1240,7 +1383,12 @@ button.session-card {
     gap: var(--space-md);
   }
 
+  .life-waiting-canvas {
+    height: 84px;
+  }
+
   .prompt-form {
+    --prompt-life-height: 112px;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
     gap: var(--space-sm);
