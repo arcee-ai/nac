@@ -5,7 +5,6 @@ const state = {
   selectedId: null,
   eventsBySession: new Map(),
   activeThreadsBySession: new Map(),
-  pendingMessagesBySession: new Map(),
   attentionSessions: new Set(),
   activeRunsBySession: new Map(),
   terminalRunsBySession: new Map(),
@@ -203,7 +202,6 @@ async function loadSnapshot(sessionId, openStream = false) {
       state.activeRunsBySession.set(sessionId, true);
     }
     state.snapshots.set(sessionId, snapshot);
-    reconcilePendingMessages(sessionId, snapshot);
     syncActiveThreadsFromSnapshot(sessionId, snapshot);
     if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
       requestChatScrollToBottom();
@@ -291,8 +289,6 @@ async function createSession(event) {
     selectSession(sessionId);
     setLaunchStatus(`launched ${shortId(sessionId)}`, false);
     if (initialPrompt) {
-      const pendingMessage = queuePendingUserMessage(sessionId, initialPrompt);
-      state.activeRunsBySession.set(sessionId, true);
       markRunSubmitting(sessionId);
       clearSessionAttention(sessionId);
       requestChatScrollToBottom();
@@ -302,8 +298,8 @@ async function createSession(event) {
         scheduleRunSubmittingGrace(sessionId);
         el.initialPrompt.value = "";
         setLaunchStatus(`running ${shortId(sessionId)}`, false);
+        await loadSnapshot(sessionId, false);
       } catch (error) {
-        removePendingMessage(sessionId, pendingMessage.id);
         clearRunSubmitting(sessionId);
         state.activeRunsBySession.set(sessionId, false);
         renderAll();
@@ -325,10 +321,8 @@ async function submitPrompt(event) {
     return;
   }
 
-  state.activeRunsBySession.set(sessionId, true);
   markRunSubmitting(sessionId);
   clearSessionAttention(sessionId);
-  const pendingMessage = queuePendingUserMessage(sessionId, prompt);
   el.promptInput.value = "";
   requestChatScrollToBottom();
   renderAll();
@@ -341,7 +335,6 @@ async function submitPrompt(event) {
     await loadSnapshot(sessionId, false);
     renderAll();
   } catch (error) {
-    removePendingMessage(sessionId, pendingMessage.id);
     clearRunSubmitting(sessionId);
     state.activeRunsBySession.set(sessionId, false);
     stopWaitingLife();
@@ -438,9 +431,17 @@ function shouldRefreshSnapshot(envelope) {
 }
 
 function activeRunFromStartedEnvelope(envelope) {
+  const runId = runIdFromEnvelope(envelope);
+  const submitted = envelope.event?.submitted_user_message || null;
   return {
-    run_id: runIdFromEnvelope(envelope),
+    run_id: runId,
+    client_id: envelope.client_id || submitted?.client_id || null,
     prompt_preview: envelope.event?.prompt_preview || "",
+    submitted_user_message: submitted ? {
+      ...submitted,
+      run_id: submitted.run_id || runId,
+      client_id: submitted.client_id || envelope.client_id || null,
+    } : null,
     started_at_epoch_ms: envelope.event?.started_at_epoch_ms || Date.now(),
   };
 }
@@ -553,7 +554,9 @@ function handleRunStarted(sessionId, envelope) {
   clearRunSubmitting(sessionId);
   clearSessionAttention(sessionId);
   const snapshot = state.snapshots.get(sessionId);
-  if (snapshot) snapshot.active_run = activeRun;
+  if (snapshot) {
+    snapshot.active_run = activeRun;
+  }
   const entry = sessionEntryById(sessionId);
   if (entry) entry.active_run = activeRun;
   if (state.selectedId === sessionId) requestChatScrollToBottom();
@@ -631,8 +634,13 @@ function renderSessionCard(entry) {
   const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
   const tone = cardActive ? "" : summary.sandboxed ? "warn" : "";
   const errorish = workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "";
-  const pendingCount = pendingMessages(sessionId).length;
-  const promptPreview = latestPendingUserPrompt(sessionId) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
+  const cardSnapshot = {
+    ...(snapshot || {}),
+    active_run: snapshot?.active_run || entry.active_run,
+    messages: snapshot?.messages || [],
+  };
+  const pendingCount = effectivePendingMessages(sessionId, cardSnapshot).length;
+  const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
   return `
     <article class="session-card ${tone} ${errorish} ${sessionId === state.selectedId ? "selected" : ""}" data-session-id="${escapeAttr(sessionId)}">
       <div class="session-card-head">
@@ -686,7 +694,7 @@ function renderInspector() {
   el.snapRun.textContent = runActive ? "active" : "idle";
   el.cancelRun.disabled = !runActive;
   renderTabs();
-  renderTranscript(metadata.session_id, snapshot.messages);
+  renderTranscript(metadata.session_id, snapshot.messages, snapshot);
   syncPromptBusy(metadata.session_id, snapshot);
   renderThreads(snapshot);
   renderWorksets(snapshot);
@@ -694,10 +702,10 @@ function renderInspector() {
   renderEvents();
 }
 
-function renderTranscript(sessionId, messages) {
+function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(sessionId)) {
   const transcriptMessages = [
     ...(messages || []),
-    ...pendingMessages(sessionId),
+    ...effectivePendingMessages(sessionId, snapshot),
   ];
   if (transcriptMessages.length === 0) {
     const empty = document.createElement("div");
@@ -725,7 +733,7 @@ function renderTranscript(sessionId, messages) {
     roleElement.textContent = role;
 
     const markerElement = document.createElement("span");
-    markerElement.textContent = message.pending ? "pending" : `#${index + 1}`;
+    markerElement.textContent = message.pending ? "submitted" : `#${index + 1}`;
 
     meta.append(roleElement, markerElement);
 
@@ -1797,65 +1805,54 @@ function getSessionEvents(sessionId) {
   return state.eventsBySession.get(sessionId) || [];
 }
 
-function pendingMessages(sessionId) {
-  if (!sessionId) return [];
-  return state.pendingMessagesBySession.get(sessionId) || [];
-}
-
-function latestPendingUserPrompt(sessionId) {
-  const pending = pendingMessages(sessionId);
-  return pending.at(-1)?.content || null;
-}
-
-function queuePendingUserMessage(sessionId, content) {
-  const message = {
-    id: makeLocalId(),
+function serverSubmittedUserMessages(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  const activeRun = snapshot?.active_run;
+  const submitted = activeRun?.submitted_user_message;
+  if (!submitted || !submitted.content) return [];
+  const runId = String(submitted.run_id || activeRunId(activeRun) || "");
+  return [{
+    id: `server-pending-${runId || submitted.submitted_at_epoch_ms || sessionId}`,
     role: "user",
-    content,
+    content: submitted.content,
     pending: true,
-    baselineUserCount: userMessageCount(state.snapshots.get(sessionId)),
-  };
-  state.pendingMessagesBySession.set(sessionId, [...pendingMessages(sessionId), message]);
-  return message;
+    run_id: runId,
+    client_id: submitted.client_id || activeRun?.client_id || null,
+    baselineUserCount: Number.isInteger(submitted.baseline_user_message_count) ? submitted.baseline_user_message_count : null,
+    submitted_at_epoch_ms: submitted.submitted_at_epoch_ms || activeRun?.started_at_epoch_ms || null,
+  }];
 }
 
-function removePendingMessage(sessionId, messageId) {
-  const remaining = pendingMessages(sessionId).filter((message) => message.id !== messageId);
-  if (remaining.length === 0) {
-    state.pendingMessagesBySession.delete(sessionId);
-  } else {
-    state.pendingMessagesBySession.set(sessionId, remaining);
+function effectivePendingMessages(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  const canonicalMessages = snapshot?.messages || [];
+  return serverSubmittedUserMessages(sessionId, snapshot)
+    .filter((message) => !pendingMessageCoveredByCanonical(message, canonicalMessages));
+}
+
+function latestPendingUserPrompt(sessionId, snapshot = state.snapshots.get(sessionId)) {
+  const pending = effectivePendingMessages(sessionId, snapshot);
+  const message = pending.at(-1);
+  return message ? messageDisplayText(message) : null;
+}
+
+function pendingMessageCoveredByCanonical(pendingMessage, canonicalMessages) {
+  const baseline = pendingMessage?.baselineUserCount;
+  if (!Number.isInteger(baseline)) return false;
+  const userMessages = (canonicalMessages || []).filter((message) => message.role === "user");
+  for (let index = baseline; index < userMessages.length; index += 1) {
+    if (pendingMessagesMatch(userMessages[index], pendingMessage)) return true;
   }
+  return false;
 }
 
-function reconcilePendingMessages(sessionId, snapshot) {
-  const pending = pendingMessages(sessionId);
-  if (pending.length === 0) return;
-  const userMessages = (snapshot.messages || []).filter((message) => message.role === "user");
-  const matchedIndexes = new Set();
-  const remaining = pending.filter((pendingMessage) => {
-    for (let index = pendingMessage.baselineUserCount; index < userMessages.length; index += 1) {
-      if (matchedIndexes.has(index)) continue;
-      if (messageDisplayText(userMessages[index]) === messageDisplayText(pendingMessage)) {
-        matchedIndexes.add(index);
-        return false;
-      }
-    }
-    return true;
-  });
-  if (remaining.length === 0) {
-    state.pendingMessagesBySession.delete(sessionId);
-  } else {
-    state.pendingMessagesBySession.set(sessionId, remaining);
-  }
-}
-
-function userMessageCount(snapshot) {
-  return (snapshot?.messages || []).filter((message) => message.role === "user").length;
+function pendingMessagesMatch(left, right) {
+  const leftRunId = String(left?.run_id || "");
+  const rightRunId = String(right?.run_id || "");
+  if (leftRunId && rightRunId && leftRunId === rightRunId) return true;
+  return messageText(left) === messageText(right);
 }
 
 function effectiveMessageCount(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  return (snapshot?.messages?.length || 0) + pendingMessages(sessionId).length;
+  return (snapshot?.messages?.length || 0) + effectivePendingMessages(sessionId, snapshot).length;
 }
 
 function requestChatScrollToBottom() {
@@ -2233,9 +2230,4 @@ function escapeAttr(value) {
 function safeClassToken(value) {
   const token = String(value || "");
   return /^[A-Za-z0-9_-]+$/.test(token) ? token : null;
-}
-
-function makeLocalId() {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
