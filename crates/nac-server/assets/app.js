@@ -17,9 +17,16 @@ const state = {
   mobileDetailOpen: false,
   scrollChatToBottom: false,
   waitingLife: null,
+  workspaceSelectedPathBySession: new Map(),
+  workspaceDiffEntries: new Map(),
+  workspaceDiffRequestSeq: 0,
 };
 
 const el = {};
+
+const WORKSPACE_DIFF_STAGE = "all";
+const WORKSPACE_DIFF_CONTEXT = 3;
+const WORKSPACE_FILE_LIMIT = 80;
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -108,6 +115,8 @@ function bindEvents() {
     state.activeTab = button.dataset.tab;
     renderInspector();
   });
+
+  el.workspaceView.addEventListener("click", handleWorkspaceFileClick);
 }
 
 async function boot() {
@@ -1460,7 +1469,91 @@ function formatDetailValue(value) {
   return String(value);
 }
 
+function handleWorkspaceFileClick(event) {
+  const button = event.target.closest("button[data-workspace-path]");
+  if (!button || !el.workspaceView.contains(button) || button.disabled) return;
+
+  const sessionId = state.selectedId;
+  const path = button.dataset.workspacePath;
+  if (!sessionId || !path) return;
+
+  const selectedPath = state.workspaceSelectedPathBySession.get(sessionId);
+  if (selectedPath === path) {
+    state.workspaceSelectedPathBySession.delete(sessionId);
+    clearResolvedWorkspaceDiff(sessionId, path);
+    renderInspector();
+    return;
+  }
+
+  if (selectedPath) clearResolvedWorkspaceDiff(sessionId, selectedPath);
+  state.workspaceSelectedPathBySession.set(sessionId, path);
+  requestWorkspaceDiff(sessionId, path);
+  renderInspector();
+}
+
+function requestWorkspaceDiff(sessionId, path) {
+  if (!sessionId || !path) return null;
+
+  const entryKey = workspaceDiffEntryKey(sessionId, path);
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  if (entry?.status === "loading") return entry;
+
+  const requestId = ++state.workspaceDiffRequestSeq;
+  const loadingEntry = { status: "loading", requestId };
+  state.workspaceDiffEntries.set(entryKey, loadingEntry);
+  loadWorkspaceDiff(sessionId, path, entryKey, requestId);
+  return loadingEntry;
+}
+
+async function loadWorkspaceDiff(sessionId, path, entryKey = workspaceDiffEntryKey(sessionId, path), requestId = ++state.workspaceDiffRequestSeq) {
+  state.workspaceDiffEntries.set(entryKey, { status: "loading", requestId });
+
+  try {
+    const params = new URLSearchParams({
+      path,
+      stage: WORKSPACE_DIFF_STAGE,
+      context: String(WORKSPACE_DIFF_CONTEXT),
+    });
+    const payload = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/workspace/diff?${params.toString()}`);
+    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
+    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
+      state.workspaceDiffEntries.delete(entryKey);
+      return;
+    }
+    state.workspaceDiffEntries.set(entryKey, { status: "ready", payload });
+  } catch (error) {
+    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
+    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
+      state.workspaceDiffEntries.delete(entryKey);
+      return;
+    }
+    state.workspaceDiffEntries.set(entryKey, {
+      status: "error",
+      error: error.message || String(error),
+    });
+  }
+
+  if (state.selectedId === sessionId) renderInspector();
+}
+
+function workspaceDiffRequestIsCurrent(entryKey, requestId) {
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  return entry?.status === "loading" && entry.requestId === requestId;
+}
+
+function clearResolvedWorkspaceDiff(sessionId, path) {
+  const entryKey = workspaceDiffEntryKey(sessionId, path);
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  if (entry?.status !== "loading") state.workspaceDiffEntries.delete(entryKey);
+}
+
+function workspaceDiffEntryKey(sessionId, path) {
+  return JSON.stringify([sessionId, path, WORKSPACE_DIFF_STAGE, WORKSPACE_DIFF_CONTEXT]);
+}
+
 function renderWorkspace(snapshot) {
+  const sessionId = snapshot.metadata?.session_id || state.selectedId;
+
   const workspace = snapshot.workspace;
   if (!workspace) {
     el.workspaceView.innerHTML = `<div class="empty-state">No workspace snapshot.</div>`;
@@ -1470,19 +1563,219 @@ function renderWorkspace(snapshot) {
     el.workspaceView.innerHTML = `<div class="empty-state">${escapeHtml(workspace.error)}</div>`;
     return;
   }
+
   const files = workspace.changed_files || [];
+  const visibleFiles = files.slice(0, WORKSPACE_FILE_LIMIT);
+  let selectedPath = sessionId ? state.workspaceSelectedPathBySession.get(sessionId) : null;
+  if (selectedPath && !visibleFiles.some((file) => file.path === selectedPath && workspaceFileIsExpandable(file))) {
+    clearResolvedWorkspaceDiff(sessionId, selectedPath);
+    state.workspaceSelectedPathBySession.delete(sessionId);
+    selectedPath = null;
+  }
+
   const header = `
-    <div class="dense-item">
+    <div class="dense-item workspace-summary">
       <div class="dense-title"><span>${escapeHtml(workspace.repo_label || "workspace")}</span><span>${escapeHtml(workspace.branch || "detached")}</span></div>
       <div class="dense-meta"><span>${files.length} files</span><span>+${workspace.total_additions} -${workspace.total_deletions}</span></div>
     </div>`;
-  const rows = files.length === 0 ? `<div class="empty-state">Working tree clean.</div>` : files.slice(0, 80).map((file) => `
-    <div class="dense-item">
-      <div class="dense-title"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></div>
-      <div class="dense-meta"><span>+${file.additions ?? 0}</span><span>-${file.deletions ?? 0}</span></div>
-    </div>
-  `).join("");
-  el.workspaceView.innerHTML = header + rows;
+  const rows = files.length === 0
+    ? `<div class="empty-state">Working tree clean.</div>`
+    : visibleFiles.map((file, index) => renderWorkspaceFile(sessionId, file, selectedPath, index)).join("");
+  const limitNotice = files.length > visibleFiles.length
+    ? `<div class="workspace-limit">Showing first ${WORKSPACE_FILE_LIMIT} of ${files.length} changed files.</div>`
+    : "";
+  el.workspaceView.innerHTML = header + rows + limitNotice;
+}
+
+function renderWorkspaceFile(sessionId, file, selectedPath, index) {
+  const path = file?.path || "";
+  const status = file?.status || "";
+  const additions = file?.additions ?? 0;
+  const deletions = file?.deletions ?? 0;
+  const unsupportedReason = workspaceFileUnsupportedReason(file);
+  const regionId = `workspace-diff-${index}`;
+
+  if (unsupportedReason) {
+    return `
+      <div class="workspace-file-block">
+        <button type="button" class="dense-item workspace-file unsupported" disabled aria-disabled="true" title="${escapeAttr(unsupportedReason)}">
+          <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
+          <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span><span class="workspace-file-affordance">${escapeHtml(workspaceFileUnsupportedLabel(file))}</span></span>
+        </button>
+      </div>`;
+  }
+
+  const isSelected = path === selectedPath;
+  return `
+    <div class="workspace-file-block">
+      <button type="button" class="dense-item workspace-file ${isSelected ? "selected" : ""}" data-workspace-path="${escapeAttr(path)}" aria-expanded="${isSelected ? "true" : "false"}"${isSelected ? ` aria-controls="${escapeAttr(regionId)}"` : ""}>
+        <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
+        <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span></span>
+      </button>
+      ${isSelected ? renderWorkspaceDiff(sessionId, path, regionId) : ""}
+    </div>`;
+}
+
+function workspaceFileIsExpandable(file) {
+  return !workspaceFileUnsupportedReason(file);
+}
+
+function workspaceFileUnsupportedReason(file) {
+  if (workspaceFileHasPathPair(file)) return null;
+
+  const kind = workspaceFileUnsupportedKind(file);
+  if (!kind) return null;
+
+  return `${kind} diff unavailable: workspace data does not include separate old/new paths.`;
+}
+
+function workspaceFileUnsupportedLabel(file) {
+  const kind = workspaceFileUnsupportedKind(file);
+  return kind ? `${kind.toLowerCase()} unsupported` : "unsupported";
+}
+
+function workspaceFileUnsupportedKind(file) {
+  const status = String(file?.status || "").toUpperCase();
+  if (status.includes("C")) return "Copy";
+  if (status.includes("R")) return "Rename";
+  if (/\s(?:->|=>)\s/.test(String(file?.path || ""))) return "Rename/copy";
+  return null;
+}
+
+function workspaceFileHasPathPair(file) {
+  return Boolean(file?.old_path && file?.path && file.old_path !== file.path);
+}
+
+function renderWorkspaceDiff(sessionId, path, regionId) {
+  const entry = state.workspaceDiffEntries.get(workspaceDiffEntryKey(sessionId, path));
+
+  if (!entry) {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state">Diff is not loaded. Close and reopen this row to fetch it.</div>
+      </section>`;
+  }
+  if (entry.status === "loading") {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-live="polite" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state">Loading diff...</div>
+      </section>`;
+  }
+  if (entry.status === "error") {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state error">Failed to load diff: ${escapeHtml(entry.error)}. Close and reopen this row to retry.</div>
+      </section>`;
+  }
+  return renderWorkspaceDiffPayload(entry.payload, path, regionId);
+}
+
+function renderWorkspaceDiffPayload(payload, fallbackPath, regionId) {
+  const path = payload?.path || fallbackPath;
+  const oldPath = payload?.old_path && payload.old_path !== path ? payload.old_path : null;
+  const title = oldPath ? `${oldPath} -> ${path}` : path;
+  const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const rootError = payload?.error ? renderDiffState(payload.error, "error") : "";
+  const body = sections.length
+    ? sections.map((section) => renderWorkspaceDiffSection(section, path)).join("")
+    : renderDiffState("No diff sections returned.", "muted");
+
+  return `
+    <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+      <div class="diff-viewer-title"><span>${escapeHtml(title)}</span><span>${sections.length} section${sections.length === 1 ? "" : "s"}</span></div>
+      ${rootError}${body}
+    </section>`;
+}
+
+function renderWorkspaceDiffSection(section, path) {
+  const stage = section?.stage || "diff";
+  const status = section?.status || "changed";
+  const additions = section?.additions ?? 0;
+  const deletions = section?.deletions ?? 0;
+  const hunks = Array.isArray(section?.hunks) ? section.hunks : [];
+  const flags = [
+    section?.binary ? "binary" : null,
+    section?.too_large ? "too large" : null,
+    section?.truncated ? "truncated" : null,
+  ].filter(Boolean);
+  const meta = [`${additions} additions`, `${deletions} deletions`, ...flags];
+  const messages = [];
+  if (section?.error) messages.push(renderDiffState(section.error, "error"));
+  if (section?.binary) messages.push(renderDiffState("Binary or non-UTF-8 content; inline hunks are unavailable.", "muted"));
+  if (section?.too_large) messages.push(renderDiffState("File is too large for inline diff rendering.", "muted"));
+  if (section?.truncated) messages.push(`<div class="diff-warning">Diff was truncated by the backend.</div>`);
+
+  let body = messages.join("");
+  if (!section?.error && !section?.binary && !section?.too_large) {
+    body += hunks.length
+      ? renderWorkspaceDiffTable(path, stage, hunks)
+      : renderDiffState("No hunks for this section.", "muted");
+  }
+
+  return `
+    <div class="diff-section">
+      <div class="diff-section-head">
+        <div><span class="diff-section-stage">${escapeHtml(stage)}</span><span>${escapeHtml(status)}</span></div>
+        <div>${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+      </div>
+      ${body}
+    </div>`;
+}
+
+function renderWorkspaceDiffTable(path, stage, hunks) {
+  return `
+    <div class="diff-table-wrap">
+      <table class="diff-table">
+        <caption>${escapeHtml(path)} ${escapeHtml(stage)} unified diff</caption>
+        <thead>
+          <tr><th scope="col">Old</th><th scope="col">New</th><th scope="col">Mark</th><th scope="col">Content</th></tr>
+        </thead>
+        ${hunks.map(renderWorkspaceDiffHunk).join("")}
+      </table>
+    </div>`;
+}
+
+function renderWorkspaceDiffHunk(hunk) {
+  const lines = Array.isArray(hunk?.lines) ? hunk.lines : [];
+  const oldStart = hunk?.old_start ?? 0;
+  const oldLines = hunk?.old_lines ?? 0;
+  const newStart = hunk?.new_start ?? 0;
+  const newLines = hunk?.new_lines ?? 0;
+  const hunkLabel = `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@${hunk?.function_context ? ` ${hunk.function_context}` : ""}`;
+  return `
+    <tbody>
+      <tr class="diff-line hunk">
+        <td class="diff-gutter old">${escapeHtml(oldStart)}</td>
+        <td class="diff-gutter new">${escapeHtml(newStart)}</td>
+        <td class="diff-marker">@@</td>
+        <td class="diff-code">${escapeHtml(hunkLabel)}</td>
+      </tr>
+      ${lines.map(renderWorkspaceDiffLine).join("")}
+    </tbody>`;
+}
+
+function renderWorkspaceDiffLine(line) {
+  const kind = line?.kind || "context";
+  const lineClass = kind === "insert" ? "add" : kind === "delete" ? "del" : "context";
+  const marker = kind === "insert" ? "+" : kind === "delete" ? "-" : " ";
+  const markerLabel = kind === "insert" ? "added" : kind === "delete" ? "deleted" : "context";
+  const oldLine = line?.old_lineno ?? "";
+  const newLine = line?.new_lineno ?? "";
+  const noNewline = line?.has_trailing_newline === false
+    ? `<span class="diff-no-newline"> No newline at end of file</span>`
+    : "";
+
+  return `
+    <tr class="diff-line ${lineClass}">
+      <td class="diff-gutter old">${escapeHtml(oldLine)}</td>
+      <td class="diff-gutter new">${escapeHtml(newLine)}</td>
+      <td class="diff-marker" aria-label="${escapeAttr(markerLabel)}">${marker === " " ? "&nbsp;" : escapeHtml(marker)}</td>
+      <td class="diff-code">${escapeHtml(line?.content ?? "")}${noNewline}</td>
+    </tr>`;
+}
+
+function renderDiffState(message, tone) {
+  return `<div class="diff-state ${tone === "error" ? "error" : ""}">${escapeHtml(message)}</div>`;
 }
 
 function renderTabs() {

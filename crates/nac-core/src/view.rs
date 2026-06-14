@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{sessions, store};
 
+mod workspace_diff;
+
+pub use workspace_diff::{
+    workspace_file_diff, WorkspaceDiffHunk, WorkspaceDiffLine, WorkspaceDiffSection,
+    WorkspaceDiffStage, WorkspaceFileDiff,
+};
+
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
 pub type NumstatSummary = (NumstatPairs, u64, u64);
 
