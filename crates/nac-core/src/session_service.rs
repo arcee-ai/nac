@@ -15,7 +15,7 @@ use crate::commands::{self, PreparedPrompt, PreparedUserInput};
 use crate::events::{AgentEvent, EventSink, SessionEvent, SessionEventBus};
 pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
-    SessionEventSubscription, SessionRunId, SessionSubscriptionId,
+    SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
@@ -68,6 +68,8 @@ pub struct ActiveRunSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<SessionClientId>,
     pub prompt_preview: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_user_message: Option<SubmittedUserMessageSnapshot>,
     pub started_at_epoch_ms: u64,
 }
 
@@ -601,11 +603,21 @@ impl SessionService {
             });
         }
 
+        let run_id = SessionRunId::new();
+        let submitted_at_epoch_ms = now_epoch_ms();
+        let submitted_user_message = SubmittedUserMessageSnapshot {
+            run_id: run_id.clone(),
+            client_id: client_id.clone(),
+            content: expanded_prompt.to_string(),
+            baseline_user_message_count: self.current_user_message_count(),
+            submitted_at_epoch_ms,
+        };
         let active_run = ActiveRunSnapshot {
-            run_id: SessionRunId::new(),
+            run_id,
             client_id,
             prompt_preview: prompt_preview(expanded_prompt, 160),
-            started_at_epoch_ms: now_epoch_ms(),
+            submitted_user_message: Some(submitted_user_message),
+            started_at_epoch_ms: submitted_at_epoch_ms,
         };
         *guard = Some(ActiveRunState {
             snapshot: active_run.clone(),
@@ -618,6 +630,7 @@ impl SessionService {
         self.event_bus.emit_with_context(
             SessionEvent::RunStarted {
                 prompt_preview: active_run.prompt_preview.clone(),
+                submitted_user_message: active_run.submitted_user_message.clone(),
                 started_at_epoch_ms: active_run.started_at_epoch_ms,
             },
             Some(active_run.run_id.clone()),
@@ -679,6 +692,7 @@ impl SessionService {
             return None;
         }
         active_run.finishing = true;
+        active_run.snapshot.submitted_user_message = None;
         Some(FinishingRun {
             snapshot: active_run.snapshot.clone(),
             duration_ms: duration_ms(active_run.started_at.elapsed()),
@@ -692,6 +706,7 @@ impl SessionService {
             return None;
         }
         active_run.finishing = true;
+        active_run.snapshot.submitted_user_message = None;
         Some(CancellingRun {
             snapshot: active_run.snapshot.clone(),
             task: active_run.task.take(),
@@ -719,6 +734,21 @@ impl SessionService {
         {
             *guard = None;
         }
+    }
+
+    fn current_user_message_count(&self) -> Option<usize> {
+        if let Ok(agent) = self.agent.try_lock() {
+            return Some(count_user_messages(&agent.messages));
+        }
+        if let Ok(snapshot) = self.session_snapshot.try_lock() {
+            return Some(
+                snapshot
+                    .as_ref()
+                    .map(|snapshot| count_user_messages(&snapshot.messages))
+                    .unwrap_or_default(),
+            );
+        }
+        None
     }
 
     fn lock_active_run(&self) -> std::sync::MutexGuard<'_, Option<ActiveRunState>> {
@@ -759,8 +789,10 @@ impl SessionService {
             .await??;
 
         let saved_session_id = refreshed.session_id.clone();
-        let mut snapshot = self.session_snapshot.lock().await;
-        *snapshot = Some(refreshed);
+        {
+            let mut snapshot = self.session_snapshot.lock().await;
+            *snapshot = Some(refreshed);
+        }
         self.event_bus.emit_with_context(
             SessionEvent::SnapshotSaved {
                 session_id: saved_session_id,
@@ -782,6 +814,13 @@ impl SessionService {
             tool_calls: None,
         });
     }
+}
+
+fn count_user_messages(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .filter(|message| matches!(message, Message::User { .. }))
+        .count()
 }
 
 fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
@@ -979,9 +1018,11 @@ mod tests {
         match envelope.event {
             SessionEvent::RunStarted {
                 prompt_preview: emitted_preview,
+                submitted_user_message,
                 started_at_epoch_ms,
             } => {
                 assert_eq!(emitted_preview, prompt_preview);
+                assert_eq!(submitted_user_message, active_run.submitted_user_message);
                 assert_eq!(started_at_epoch_ms, active_run.started_at_epoch_ms);
             }
             other => panic!("expected run started, got {other:?}"),
@@ -1307,6 +1348,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.active_run, Some(active.clone()));
+        let submitted = snapshot
+            .active_run
+            .as_ref()
+            .and_then(|active_run| active_run.submitted_user_message.as_ref())
+            .expect("active run should expose server-submitted user message");
+        assert_eq!(submitted.run_id, active.run_id);
+        assert_eq!(submitted.content, "blocked prompt");
+        assert_eq!(submitted.baseline_user_message_count, Some(0));
         assert!(snapshot.messages.is_empty());
 
         drop(agent_guard);
@@ -1316,6 +1365,123 @@ mod tests {
                 .finish_run_once(&active.run_id, RunOutcome::Failed("cleanup".to_string()))
                 .await
         );
+        let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
+        let store_path = test_store_path("active_pending_cleared_on_finish");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-pending-clear".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        let mut events = parts.service.subscribe_events();
+        let active = parts
+            .service
+            .try_begin_run(None, "persisted prompt")
+            .unwrap();
+        assert!(active.submitted_user_message.is_some());
+        assert_eq!(parts.service.active_run(), Some(active.clone()));
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages.push(Message::User {
+                content: "persisted prompt".to_string(),
+            });
+        }
+
+        let finishing = parts
+            .service
+            .mark_run_finishing(&active.run_id)
+            .expect("run should transition to finishing");
+        assert_eq!(finishing.snapshot.run_id, active.run_id);
+        assert!(finishing.snapshot.submitted_user_message.is_none());
+        let active_after_finishing = parts.service.active_run().unwrap();
+        assert_eq!(active_after_finishing.run_id, active.run_id);
+        assert!(active_after_finishing.submitted_user_message.is_none());
+
+        let frontend_before_persist = parts.service.frontend_snapshot().await.unwrap();
+        assert!(frontend_before_persist
+            .active_run
+            .as_ref()
+            .unwrap()
+            .submitted_user_message
+            .is_none());
+        assert!(matches!(
+            frontend_before_persist.messages.last(),
+            Some(Message::User { content }) if content == "persisted prompt"
+        ));
+
+        parts
+            .service
+            .persist_run_snapshot(&finishing.snapshot, Some(42))
+            .await
+            .unwrap();
+
+        let started = events.recv().await.unwrap();
+        assert_run_started_event(started, &active, "persisted prompt");
+        let saved = events.recv().await.unwrap();
+        assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
+        assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
+        let active_after_save = parts.service.active_run().unwrap();
+        assert_eq!(active_after_save.run_id, active.run_id);
+        assert!(active_after_save.submitted_user_message.is_none());
+
+        let frontend_after_persist = parts.service.frontend_snapshot().await.unwrap();
+        assert!(frontend_after_persist
+            .active_run
+            .as_ref()
+            .unwrap()
+            .submitted_user_message
+            .is_none());
+        assert!(matches!(
+            frontend_after_persist.messages.last(),
+            Some(Message::User { content }) if content == "persisted prompt"
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn mark_run_cancelling_clears_submitted_user_message() {
+        let parts = test_picker_service("active_pending_cleared_on_cancel");
+        let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        assert!(active.submitted_user_message.is_some());
+
+        let cancelling = parts
+            .service
+            .mark_run_cancelling(&active.run_id)
+            .expect("run should transition to cancelling");
+
+        assert_eq!(cancelling.snapshot.run_id, active.run_id);
+        assert!(cancelling.snapshot.submitted_user_message.is_none());
+        let active_after_cancelling = parts.service.active_run().unwrap();
+        assert_eq!(active_after_cancelling.run_id, active.run_id);
+        assert!(active_after_cancelling.submitted_user_message.is_none());
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
     }
 

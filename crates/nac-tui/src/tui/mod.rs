@@ -303,6 +303,7 @@ fn handle_session_event(app: &mut App, envelope: SessionEventEnvelope) {
         }
         SessionEvent::RunStarted {
             prompt_preview,
+            submitted_user_message: _,
             started_at_epoch_ms: _,
         } => {
             if let Some(run_id) = envelope.run_id {

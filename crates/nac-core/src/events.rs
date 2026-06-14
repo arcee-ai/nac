@@ -163,6 +163,17 @@ pub struct SessionReplayGap {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubmittedUserMessageSnapshot {
+    pub run_id: SessionRunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<SessionClientId>,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_user_message_count: Option<usize>,
+    pub submitted_at_epoch_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
     /// Agent/model progress. The canonical top-level session busy lifecycle is
@@ -173,6 +184,8 @@ pub enum SessionEvent {
     },
     RunStarted {
         prompt_preview: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        submitted_user_message: Option<SubmittedUserMessageSnapshot>,
         started_at_epoch_ms: u64,
     },
     RunCompleted {
