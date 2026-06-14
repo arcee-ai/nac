@@ -140,6 +140,13 @@ pub struct RecentEventsResponse {
     pub events: Vec<SessionEventEnvelope>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceDiffQuery {
+    pub path: String,
+    pub stage: Option<String>,
+    pub context: Option<usize>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayGapEvent {
     pub replay_gap: SessionReplayGap,
@@ -375,6 +382,32 @@ impl SessionManager {
             .await
     }
 
+    pub async fn workspace_file_diff(
+        &self,
+        session_id: &str,
+        query: WorkspaceDiffQuery,
+    ) -> Result<view::WorkspaceFileDiff> {
+        let stage = view::WorkspaceDiffStage::parse(query.stage.as_deref().unwrap_or("all"))?;
+        let context = query.context.unwrap_or(3).min(100);
+        let path = query.path;
+        let summary = self
+            .list_sessions(false)
+            .await?
+            .into_iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .map(|entry| entry.summary)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let host_root = summary.workspace_host_path.ok_or_else(|| {
+            anyhow!("workspace diff is not supported for remote/sandbox-only sessions")
+        })?;
+
+        tokio::task::spawn_blocking(move || {
+            view::workspace_file_diff(&host_root, &path, stage, context)
+        })
+        .await
+        .context("workspace diff task failed")?
+    }
+
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -484,6 +517,7 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
+        .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route("/sessions/{session_id}", get(session_snapshot))
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
@@ -576,6 +610,14 @@ async fn session_snapshot(
     AxumPath(session_id): AxumPath<String>,
 ) -> std::result::Result<Json<SessionFrontendSnapshot>, ApiError> {
     Ok(Json(manager.snapshot(&session_id).await?))
+}
+
+async fn workspace_diff(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<WorkspaceDiffQuery>,
+) -> std::result::Result<Json<view::WorkspaceFileDiff>, ApiError> {
+    Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
 }
 
 async fn submit_prompt(
@@ -855,6 +897,12 @@ mod tests {
 
         assert!(payload.contains("\"sequence_id\":42"));
         assert!(payload.contains("\"message\":\"boom\""));
+    }
+
+    #[test]
+    fn invalid_workspace_diff_stage_maps_to_bad_request() {
+        let error = view::WorkspaceDiffStage::parse("sideways").unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
     }
 
     fn temp_root(label: &str) -> PathBuf {

@@ -17,9 +17,17 @@ const state = {
   mobileDetailOpen: false,
   scrollChatToBottom: false,
   waitingLife: null,
+  workspaceSelectedPathBySession: new Map(),
+  workspaceDiffCache: new Map(),
+  workspaceSignatureBySession: new Map(),
+  workspaceDiffRequestSeq: 0,
 };
 
 const el = {};
+
+const WORKSPACE_DIFF_STAGE = "all";
+const WORKSPACE_DIFF_CONTEXT = 3;
+const WORKSPACE_FILE_LIMIT = 80;
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -108,6 +116,8 @@ function bindEvents() {
     state.activeTab = button.dataset.tab;
     renderInspector();
   });
+
+  el.workspaceView.addEventListener("click", handleWorkspaceFileClick);
 }
 
 async function boot() {
@@ -194,6 +204,7 @@ async function loadSnapshot(sessionId, openStream = false) {
       state.activeRunsBySession.set(sessionId, true);
     }
     state.snapshots.set(sessionId, snapshot);
+    syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
     reconcilePendingMessages(sessionId, snapshot);
     syncActiveThreadsFromSnapshot(sessionId, snapshot);
     if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
@@ -276,6 +287,7 @@ async function createSession(event) {
     const snapshot = await apiPost("/sessions", body);
     const sessionId = snapshot.metadata.session_id;
     state.snapshots.set(sessionId, snapshot);
+    syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
     state.selectedId = sessionId;
     await loadSessions();
     hideLaunchOverlay();
@@ -1460,7 +1472,166 @@ function formatDetailValue(value) {
   return String(value);
 }
 
+function handleWorkspaceFileClick(event) {
+  const button = event.target.closest("button[data-workspace-path]");
+  if (!button || !el.workspaceView.contains(button)) return;
+
+  const sessionId = state.selectedId;
+  const path = button.dataset.workspacePath;
+  if (!sessionId || !path) return;
+
+  const selectedPath = state.workspaceSelectedPathBySession.get(sessionId);
+  if (selectedPath === path) {
+    state.workspaceSelectedPathBySession.delete(sessionId);
+    renderInspector();
+    return;
+  }
+
+  state.workspaceSelectedPathBySession.set(sessionId, path);
+  requestWorkspaceDiff(sessionId, path, { retryError: true });
+  renderInspector();
+}
+
+function requestWorkspaceDiff(sessionId, path, options = {}) {
+  if (!sessionId || !path) return null;
+
+  const cacheKey = workspaceDiffCacheKey(sessionId, path);
+  const signature = currentWorkspaceSignature(sessionId);
+  const entry = state.workspaceDiffCache.get(cacheKey);
+  const entryIsCurrent = entry?.signature === signature;
+
+  if (entryIsCurrent && entry.status === "loading") return entry;
+  if (entryIsCurrent && entry.status === "ready") return entry;
+  if (entryIsCurrent && entry.status === "error" && !options.retryError) return entry;
+
+  const requestId = ++state.workspaceDiffRequestSeq;
+  const loadingEntry = {
+    status: "loading",
+    signature,
+    requestId,
+    renderRetryAttempted: Boolean(options.renderRetryAttempted),
+  };
+  state.workspaceDiffCache.set(cacheKey, loadingEntry);
+  loadWorkspaceDiff(sessionId, path, cacheKey, {
+    requestId,
+    signature,
+    renderRetryAttempted: loadingEntry.renderRetryAttempted,
+  });
+  return loadingEntry;
+}
+
+async function loadWorkspaceDiff(sessionId, path, cacheKey = workspaceDiffCacheKey(sessionId, path), request = {}) {
+  const requestId = request.requestId || ++state.workspaceDiffRequestSeq;
+  const signature = request.signature ?? currentWorkspaceSignature(sessionId);
+  const renderRetryAttempted = Boolean(request.renderRetryAttempted);
+
+  if (!request.requestId) {
+    state.workspaceDiffCache.set(cacheKey, {
+      status: "loading",
+      signature,
+      requestId,
+      renderRetryAttempted,
+    });
+  }
+
+  try {
+    const params = new URLSearchParams({
+      path,
+      stage: WORKSPACE_DIFF_STAGE,
+      context: String(WORKSPACE_DIFF_CONTEXT),
+    });
+    const payload = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/workspace/diff?${params.toString()}`);
+    if (!workspaceDiffRequestIsCurrent(cacheKey, requestId, signature)) return;
+    state.workspaceDiffCache.set(cacheKey, { status: "ready", signature, payload });
+  } catch (error) {
+    if (!workspaceDiffRequestIsCurrent(cacheKey, requestId, signature)) return;
+    state.workspaceDiffCache.set(cacheKey, {
+      status: "error",
+      signature,
+      error: error.message || String(error),
+      renderRetryAttempted,
+    });
+  }
+
+  if (state.selectedId === sessionId) renderInspector();
+}
+
+function workspaceDiffRequestIsCurrent(cacheKey, requestId, signature) {
+  const entry = state.workspaceDiffCache.get(cacheKey);
+  return entry?.status === "loading" && entry.requestId === requestId && entry.signature === signature;
+}
+
+function currentWorkspaceSignature(sessionId) {
+  const signature = state.workspaceSignatureBySession.get(sessionId);
+  if (signature !== undefined) return signature;
+
+  const snapshot = state.snapshots.get(sessionId);
+  if (!snapshot) return "";
+  return syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
+}
+
+function syncWorkspaceSignatureForSnapshot(sessionId, snapshot) {
+  if (!sessionId) return "";
+
+  const signature = workspaceSnapshotSignature(snapshot?.workspace);
+  const previousSignature = state.workspaceSignatureBySession.get(sessionId);
+  state.workspaceSignatureBySession.set(sessionId, signature);
+  if (previousSignature !== undefined && previousSignature !== signature) {
+    invalidateWorkspaceDiffCacheForSession(sessionId);
+  }
+  return signature;
+}
+
+function workspaceSnapshotSignature(workspace) {
+  if (!workspace) return JSON.stringify(["missing"]);
+
+  const files = Array.isArray(workspace.changed_files)
+    ? workspace.changed_files.map((file) => ({
+      path: file?.path || "",
+      status: file?.status || "",
+      additions: file?.additions ?? null,
+      deletions: file?.deletions ?? null,
+    })).sort((left, right) => {
+      const leftKey = `${left.path}\0${left.status}`;
+      const rightKey = `${right.path}\0${right.status}`;
+      return leftKey.localeCompare(rightKey);
+    })
+    : [];
+
+  return JSON.stringify({
+    branch: workspace.branch || "",
+    error: workspace.error || "",
+    total_additions: workspace.total_additions ?? 0,
+    total_deletions: workspace.total_deletions ?? 0,
+    files,
+  });
+}
+
+function invalidateWorkspaceDiffCacheForSession(sessionId) {
+  for (const cacheKey of state.workspaceDiffCache.keys()) {
+    if (workspaceDiffCacheSessionId(cacheKey) === sessionId) {
+      state.workspaceDiffCache.delete(cacheKey);
+    }
+  }
+}
+
+function workspaceDiffCacheSessionId(cacheKey) {
+  try {
+    const parts = JSON.parse(cacheKey);
+    return Array.isArray(parts) ? parts[0] : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function workspaceDiffCacheKey(sessionId, path) {
+  return JSON.stringify([sessionId, path, WORKSPACE_DIFF_STAGE, WORKSPACE_DIFF_CONTEXT]);
+}
+
 function renderWorkspace(snapshot) {
+  const sessionId = snapshot.metadata?.session_id || state.selectedId;
+  syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
+
   const workspace = snapshot.workspace;
   if (!workspace) {
     el.workspaceView.innerHTML = `<div class="empty-state">No workspace snapshot.</div>`;
@@ -1470,19 +1641,174 @@ function renderWorkspace(snapshot) {
     el.workspaceView.innerHTML = `<div class="empty-state">${escapeHtml(workspace.error)}</div>`;
     return;
   }
+
   const files = workspace.changed_files || [];
+  const visibleFiles = files.slice(0, WORKSPACE_FILE_LIMIT);
+  let selectedPath = sessionId ? state.workspaceSelectedPathBySession.get(sessionId) : null;
+  if (selectedPath && !visibleFiles.some((file) => file.path === selectedPath)) {
+    state.workspaceSelectedPathBySession.delete(sessionId);
+    selectedPath = null;
+  }
+
   const header = `
-    <div class="dense-item">
+    <div class="dense-item workspace-summary">
       <div class="dense-title"><span>${escapeHtml(workspace.repo_label || "workspace")}</span><span>${escapeHtml(workspace.branch || "detached")}</span></div>
       <div class="dense-meta"><span>${files.length} files</span><span>+${workspace.total_additions} -${workspace.total_deletions}</span></div>
     </div>`;
-  const rows = files.length === 0 ? `<div class="empty-state">Working tree clean.</div>` : files.slice(0, 80).map((file) => `
-    <div class="dense-item">
-      <div class="dense-title"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></div>
-      <div class="dense-meta"><span>+${file.additions ?? 0}</span><span>-${file.deletions ?? 0}</span></div>
-    </div>
-  `).join("");
-  el.workspaceView.innerHTML = header + rows;
+  const rows = files.length === 0
+    ? `<div class="empty-state">Working tree clean.</div>`
+    : visibleFiles.map((file, index) => renderWorkspaceFile(sessionId, file, selectedPath, index)).join("");
+  const limitNotice = files.length > visibleFiles.length
+    ? `<div class="workspace-limit">Showing first ${WORKSPACE_FILE_LIMIT} of ${files.length} changed files.</div>`
+    : "";
+  el.workspaceView.innerHTML = header + rows + limitNotice;
+}
+
+function renderWorkspaceFile(sessionId, file, selectedPath, index) {
+  const isSelected = file.path === selectedPath;
+  const regionId = `workspace-diff-${index}`;
+  return `
+    <div class="workspace-file-block">
+      <button type="button" class="dense-item workspace-file ${isSelected ? "selected" : ""}" data-workspace-path="${escapeAttr(file.path)}" aria-expanded="${isSelected ? "true" : "false"}"${isSelected ? ` aria-controls="${escapeAttr(regionId)}"` : ""}>
+        <span class="dense-title"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></span>
+        <span class="dense-meta"><span>+${file.additions ?? 0}</span><span>-${file.deletions ?? 0}</span></span>
+      </button>
+      ${isSelected ? renderWorkspaceDiff(sessionId, file.path, regionId) : ""}
+    </div>`;
+}
+
+function renderWorkspaceDiff(sessionId, path, regionId) {
+  const cacheKey = workspaceDiffCacheKey(sessionId, path);
+  const signature = currentWorkspaceSignature(sessionId);
+  let entry = state.workspaceDiffCache.get(cacheKey);
+
+  if (!entry || entry.signature !== signature) {
+    entry = requestWorkspaceDiff(sessionId, path);
+  } else if (entry.status === "error" && !entry.renderRetryAttempted) {
+    entry = requestWorkspaceDiff(sessionId, path, { retryError: true, renderRetryAttempted: true });
+  }
+
+  if (!entry || entry.status === "loading") {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-live="polite" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state">Loading diff...</div>
+      </section>`;
+  }
+  if (entry.status === "error") {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state error">Failed to load diff: ${escapeHtml(entry.error)}</div>
+      </section>`;
+  }
+  return renderWorkspaceDiffPayload(entry.payload, path, regionId);
+}
+
+function renderWorkspaceDiffPayload(payload, fallbackPath, regionId) {
+  const path = payload?.path || fallbackPath;
+  const oldPath = payload?.old_path && payload.old_path !== path ? payload.old_path : null;
+  const title = oldPath ? `${oldPath} -> ${path}` : path;
+  const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const rootError = payload?.error ? renderDiffState(payload.error, "error") : "";
+  const body = sections.length
+    ? sections.map((section) => renderWorkspaceDiffSection(section, path)).join("")
+    : renderDiffState("No diff sections returned.", "muted");
+
+  return `
+    <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+      <div class="diff-viewer-title"><span>${escapeHtml(title)}</span><span>${sections.length} section${sections.length === 1 ? "" : "s"}</span></div>
+      ${rootError}${body}
+    </section>`;
+}
+
+function renderWorkspaceDiffSection(section, path) {
+  const stage = section?.stage || "diff";
+  const status = section?.status || "changed";
+  const additions = section?.additions ?? 0;
+  const deletions = section?.deletions ?? 0;
+  const hunks = Array.isArray(section?.hunks) ? section.hunks : [];
+  const flags = [
+    section?.binary ? "binary" : null,
+    section?.too_large ? "too large" : null,
+    section?.truncated ? "truncated" : null,
+  ].filter(Boolean);
+  const meta = [`${additions} additions`, `${deletions} deletions`, ...flags];
+  const messages = [];
+  if (section?.error) messages.push(renderDiffState(section.error, "error"));
+  if (section?.binary) messages.push(renderDiffState("Binary or non-UTF-8 content; inline hunks are unavailable.", "muted"));
+  if (section?.too_large) messages.push(renderDiffState("File is too large for inline diff rendering.", "muted"));
+  if (section?.truncated) messages.push(`<div class="diff-warning">Diff was truncated by the backend.</div>`);
+
+  let body = messages.join("");
+  if (!section?.error && !section?.binary && !section?.too_large) {
+    body += hunks.length
+      ? renderWorkspaceDiffTable(path, stage, hunks)
+      : renderDiffState("No hunks for this section.", "muted");
+  }
+
+  return `
+    <div class="diff-section">
+      <div class="diff-section-head">
+        <div><span class="diff-section-stage">${escapeHtml(stage)}</span><span>${escapeHtml(status)}</span></div>
+        <div>${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+      </div>
+      ${body}
+    </div>`;
+}
+
+function renderWorkspaceDiffTable(path, stage, hunks) {
+  return `
+    <div class="diff-table-wrap">
+      <table class="diff-table">
+        <caption>${escapeHtml(path)} ${escapeHtml(stage)} unified diff</caption>
+        <thead>
+          <tr><th scope="col">Old</th><th scope="col">New</th><th scope="col">Mark</th><th scope="col">Content</th></tr>
+        </thead>
+        ${hunks.map(renderWorkspaceDiffHunk).join("")}
+      </table>
+    </div>`;
+}
+
+function renderWorkspaceDiffHunk(hunk) {
+  const lines = Array.isArray(hunk?.lines) ? hunk.lines : [];
+  const oldStart = hunk?.old_start ?? 0;
+  const oldLines = hunk?.old_lines ?? 0;
+  const newStart = hunk?.new_start ?? 0;
+  const newLines = hunk?.new_lines ?? 0;
+  const hunkLabel = `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@${hunk?.function_context ? ` ${hunk.function_context}` : ""}`;
+  return `
+    <tbody>
+      <tr class="diff-line hunk">
+        <td class="diff-gutter old">${escapeHtml(oldStart)}</td>
+        <td class="diff-gutter new">${escapeHtml(newStart)}</td>
+        <td class="diff-marker">@@</td>
+        <td class="diff-code">${escapeHtml(hunkLabel)}</td>
+      </tr>
+      ${lines.map(renderWorkspaceDiffLine).join("")}
+    </tbody>`;
+}
+
+function renderWorkspaceDiffLine(line) {
+  const kind = line?.kind || "context";
+  const lineClass = kind === "insert" ? "add" : kind === "delete" ? "del" : "context";
+  const marker = kind === "insert" ? "+" : kind === "delete" ? "-" : " ";
+  const markerLabel = kind === "insert" ? "added" : kind === "delete" ? "deleted" : "context";
+  const oldLine = line?.old_lineno ?? "";
+  const newLine = line?.new_lineno ?? "";
+  const noNewline = line?.has_trailing_newline === false
+    ? `<span class="diff-no-newline"> No newline at end of file</span>`
+    : "";
+
+  return `
+    <tr class="diff-line ${lineClass}">
+      <td class="diff-gutter old">${escapeHtml(oldLine)}</td>
+      <td class="diff-gutter new">${escapeHtml(newLine)}</td>
+      <td class="diff-marker" aria-label="${escapeAttr(markerLabel)}">${marker === " " ? "&nbsp;" : escapeHtml(marker)}</td>
+      <td class="diff-code">${escapeHtml(line?.content ?? "")}${noNewline}</td>
+    </tr>`;
+}
+
+function renderDiffState(message, tone) {
+  return `<div class="diff-state ${tone === "error" ? "error" : ""}">${escapeHtml(message)}</div>`;
 }
 
 function renderTabs() {

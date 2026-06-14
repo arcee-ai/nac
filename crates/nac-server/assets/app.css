@@ -1197,6 +1197,210 @@ button.session-card {
   margin-top: var(--space-xs);
 }
 
+.workspace-file-block {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.workspace-file {
+  width: 100%;
+  display: block;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+}
+
+.workspace-file:hover,
+.workspace-file:focus-visible {
+  box-shadow: var(--neu-pressed), 0 0 0 1px var(--highlight);
+}
+
+.workspace-file.selected {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)), var(--panel-2);
+  box-shadow: var(--neu-selected);
+}
+
+.workspace-limit {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.diff-viewer {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  padding: var(--space-sm);
+  box-shadow: var(--neu-sunken-soft);
+}
+
+.diff-viewer-title,
+.diff-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-md);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+}
+
+.diff-viewer-title {
+  color: var(--text);
+  font-weight: var(--type-weight-strong);
+}
+
+.diff-viewer-title > span:first-child,
+.diff-section-head > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-viewer-title > span:last-child,
+.diff-section-head > div:last-child {
+  color: var(--faint);
+}
+
+.diff-section {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.diff-section + .diff-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  padding-top: var(--space-sm);
+}
+
+.diff-section-head > div {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.diff-section-stage {
+  color: var(--teal);
+  font-weight: var(--type-weight-strong);
+  text-transform: uppercase;
+}
+
+.diff-table-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.diff-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+  line-height: var(--type-line-body);
+}
+
+.diff-table caption {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--faint);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.diff-table th {
+  color: var(--faint);
+  font-weight: var(--type-weight-strong);
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.diff-table th,
+.diff-table td {
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+  padding: var(--space-2xs) var(--space-sm);
+  vertical-align: top;
+}
+
+.diff-gutter {
+  width: 1%;
+  min-width: 44px;
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.diff-marker {
+  width: 28px;
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+  white-space: pre;
+}
+
+.diff-code {
+  min-width: 360px;
+  color: var(--text);
+  white-space: pre;
+}
+
+.diff-line.add > td {
+  background: rgba(79, 210, 168, 0.08);
+}
+
+.diff-line.add .diff-marker {
+  color: var(--teal);
+}
+
+.diff-line.del > td {
+  background: rgba(220, 118, 126, 0.1);
+}
+
+.diff-line.del .diff-marker {
+  color: var(--danger-text);
+}
+
+.diff-line.hunk > td {
+  color: var(--blue);
+  background: rgba(110, 168, 255, 0.11);
+  font-weight: var(--type-weight-strong);
+}
+
+.diff-warning,
+.diff-state {
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+}
+
+.diff-warning {
+  color: var(--text);
+  border: 1px solid rgba(189, 189, 194, 0.18);
+}
+
+.diff-state.error {
+  color: var(--danger-text);
+  background: var(--danger-panel);
+  border: 1px solid var(--danger-ring);
+}
+
+.diff-no-newline {
+  color: var(--faint);
+  font-style: italic;
+}
+
 .toast {
   color: var(--text);
 }
