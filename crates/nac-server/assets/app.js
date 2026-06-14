@@ -18,8 +18,7 @@ const state = {
   scrollChatToBottom: false,
   waitingLife: null,
   workspaceSelectedPathBySession: new Map(),
-  workspaceDiffCache: new Map(),
-  workspaceSignatureBySession: new Map(),
+  workspaceDiffEntries: new Map(),
   workspaceDiffRequestSeq: 0,
 };
 
@@ -204,7 +203,6 @@ async function loadSnapshot(sessionId, openStream = false) {
       state.activeRunsBySession.set(sessionId, true);
     }
     state.snapshots.set(sessionId, snapshot);
-    syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
     reconcilePendingMessages(sessionId, snapshot);
     syncActiveThreadsFromSnapshot(sessionId, snapshot);
     if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
@@ -287,7 +285,6 @@ async function createSession(event) {
     const snapshot = await apiPost("/sessions", body);
     const sessionId = snapshot.metadata.session_id;
     state.snapshots.set(sessionId, snapshot);
-    syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
     state.selectedId = sessionId;
     await loadSessions();
     hideLaunchOverlay();
@@ -1474,7 +1471,7 @@ function formatDetailValue(value) {
 
 function handleWorkspaceFileClick(event) {
   const button = event.target.closest("button[data-workspace-path]");
-  if (!button || !el.workspaceView.contains(button)) return;
+  if (!button || !el.workspaceView.contains(button) || button.disabled) return;
 
   const sessionId = state.selectedId;
   const path = button.dataset.workspacePath;
@@ -1483,56 +1480,33 @@ function handleWorkspaceFileClick(event) {
   const selectedPath = state.workspaceSelectedPathBySession.get(sessionId);
   if (selectedPath === path) {
     state.workspaceSelectedPathBySession.delete(sessionId);
+    clearResolvedWorkspaceDiff(sessionId, path);
     renderInspector();
     return;
   }
 
+  if (selectedPath) clearResolvedWorkspaceDiff(sessionId, selectedPath);
   state.workspaceSelectedPathBySession.set(sessionId, path);
-  requestWorkspaceDiff(sessionId, path, { retryError: true });
+  requestWorkspaceDiff(sessionId, path);
   renderInspector();
 }
 
-function requestWorkspaceDiff(sessionId, path, options = {}) {
+function requestWorkspaceDiff(sessionId, path) {
   if (!sessionId || !path) return null;
 
-  const cacheKey = workspaceDiffCacheKey(sessionId, path);
-  const signature = currentWorkspaceSignature(sessionId);
-  const entry = state.workspaceDiffCache.get(cacheKey);
-  const entryIsCurrent = entry?.signature === signature;
-
-  if (entryIsCurrent && entry.status === "loading") return entry;
-  if (entryIsCurrent && entry.status === "ready") return entry;
-  if (entryIsCurrent && entry.status === "error" && !options.retryError) return entry;
+  const entryKey = workspaceDiffEntryKey(sessionId, path);
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  if (entry?.status === "loading") return entry;
 
   const requestId = ++state.workspaceDiffRequestSeq;
-  const loadingEntry = {
-    status: "loading",
-    signature,
-    requestId,
-    renderRetryAttempted: Boolean(options.renderRetryAttempted),
-  };
-  state.workspaceDiffCache.set(cacheKey, loadingEntry);
-  loadWorkspaceDiff(sessionId, path, cacheKey, {
-    requestId,
-    signature,
-    renderRetryAttempted: loadingEntry.renderRetryAttempted,
-  });
+  const loadingEntry = { status: "loading", requestId };
+  state.workspaceDiffEntries.set(entryKey, loadingEntry);
+  loadWorkspaceDiff(sessionId, path, entryKey, requestId);
   return loadingEntry;
 }
 
-async function loadWorkspaceDiff(sessionId, path, cacheKey = workspaceDiffCacheKey(sessionId, path), request = {}) {
-  const requestId = request.requestId || ++state.workspaceDiffRequestSeq;
-  const signature = request.signature ?? currentWorkspaceSignature(sessionId);
-  const renderRetryAttempted = Boolean(request.renderRetryAttempted);
-
-  if (!request.requestId) {
-    state.workspaceDiffCache.set(cacheKey, {
-      status: "loading",
-      signature,
-      requestId,
-      renderRetryAttempted,
-    });
-  }
+async function loadWorkspaceDiff(sessionId, path, entryKey = workspaceDiffEntryKey(sessionId, path), requestId = ++state.workspaceDiffRequestSeq) {
+  state.workspaceDiffEntries.set(entryKey, { status: "loading", requestId });
 
   try {
     const params = new URLSearchParams({
@@ -1541,96 +1515,44 @@ async function loadWorkspaceDiff(sessionId, path, cacheKey = workspaceDiffCacheK
       context: String(WORKSPACE_DIFF_CONTEXT),
     });
     const payload = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/workspace/diff?${params.toString()}`);
-    if (!workspaceDiffRequestIsCurrent(cacheKey, requestId, signature)) return;
-    state.workspaceDiffCache.set(cacheKey, { status: "ready", signature, payload });
+    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
+    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
+      state.workspaceDiffEntries.delete(entryKey);
+      return;
+    }
+    state.workspaceDiffEntries.set(entryKey, { status: "ready", payload });
   } catch (error) {
-    if (!workspaceDiffRequestIsCurrent(cacheKey, requestId, signature)) return;
-    state.workspaceDiffCache.set(cacheKey, {
+    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
+    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
+      state.workspaceDiffEntries.delete(entryKey);
+      return;
+    }
+    state.workspaceDiffEntries.set(entryKey, {
       status: "error",
-      signature,
       error: error.message || String(error),
-      renderRetryAttempted,
     });
   }
 
   if (state.selectedId === sessionId) renderInspector();
 }
 
-function workspaceDiffRequestIsCurrent(cacheKey, requestId, signature) {
-  const entry = state.workspaceDiffCache.get(cacheKey);
-  return entry?.status === "loading" && entry.requestId === requestId && entry.signature === signature;
+function workspaceDiffRequestIsCurrent(entryKey, requestId) {
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  return entry?.status === "loading" && entry.requestId === requestId;
 }
 
-function currentWorkspaceSignature(sessionId) {
-  const signature = state.workspaceSignatureBySession.get(sessionId);
-  if (signature !== undefined) return signature;
-
-  const snapshot = state.snapshots.get(sessionId);
-  if (!snapshot) return "";
-  return syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
+function clearResolvedWorkspaceDiff(sessionId, path) {
+  const entryKey = workspaceDiffEntryKey(sessionId, path);
+  const entry = state.workspaceDiffEntries.get(entryKey);
+  if (entry?.status !== "loading") state.workspaceDiffEntries.delete(entryKey);
 }
 
-function syncWorkspaceSignatureForSnapshot(sessionId, snapshot) {
-  if (!sessionId) return "";
-
-  const signature = workspaceSnapshotSignature(snapshot?.workspace);
-  const previousSignature = state.workspaceSignatureBySession.get(sessionId);
-  state.workspaceSignatureBySession.set(sessionId, signature);
-  if (previousSignature !== undefined && previousSignature !== signature) {
-    invalidateWorkspaceDiffCacheForSession(sessionId);
-  }
-  return signature;
-}
-
-function workspaceSnapshotSignature(workspace) {
-  if (!workspace) return JSON.stringify(["missing"]);
-
-  const files = Array.isArray(workspace.changed_files)
-    ? workspace.changed_files.map((file) => ({
-      path: file?.path || "",
-      status: file?.status || "",
-      additions: file?.additions ?? null,
-      deletions: file?.deletions ?? null,
-    })).sort((left, right) => {
-      const leftKey = `${left.path}\0${left.status}`;
-      const rightKey = `${right.path}\0${right.status}`;
-      return leftKey.localeCompare(rightKey);
-    })
-    : [];
-
-  return JSON.stringify({
-    branch: workspace.branch || "",
-    error: workspace.error || "",
-    total_additions: workspace.total_additions ?? 0,
-    total_deletions: workspace.total_deletions ?? 0,
-    files,
-  });
-}
-
-function invalidateWorkspaceDiffCacheForSession(sessionId) {
-  for (const cacheKey of state.workspaceDiffCache.keys()) {
-    if (workspaceDiffCacheSessionId(cacheKey) === sessionId) {
-      state.workspaceDiffCache.delete(cacheKey);
-    }
-  }
-}
-
-function workspaceDiffCacheSessionId(cacheKey) {
-  try {
-    const parts = JSON.parse(cacheKey);
-    return Array.isArray(parts) ? parts[0] : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function workspaceDiffCacheKey(sessionId, path) {
+function workspaceDiffEntryKey(sessionId, path) {
   return JSON.stringify([sessionId, path, WORKSPACE_DIFF_STAGE, WORKSPACE_DIFF_CONTEXT]);
 }
 
 function renderWorkspace(snapshot) {
   const sessionId = snapshot.metadata?.session_id || state.selectedId;
-  syncWorkspaceSignatureForSnapshot(sessionId, snapshot);
 
   const workspace = snapshot.workspace;
   if (!workspace) {
@@ -1645,7 +1567,8 @@ function renderWorkspace(snapshot) {
   const files = workspace.changed_files || [];
   const visibleFiles = files.slice(0, WORKSPACE_FILE_LIMIT);
   let selectedPath = sessionId ? state.workspaceSelectedPathBySession.get(sessionId) : null;
-  if (selectedPath && !visibleFiles.some((file) => file.path === selectedPath)) {
+  if (selectedPath && !visibleFiles.some((file) => file.path === selectedPath && workspaceFileIsExpandable(file))) {
+    clearResolvedWorkspaceDiff(sessionId, selectedPath);
     state.workspaceSelectedPathBySession.delete(sessionId);
     selectedPath = null;
   }
@@ -1665,30 +1588,74 @@ function renderWorkspace(snapshot) {
 }
 
 function renderWorkspaceFile(sessionId, file, selectedPath, index) {
-  const isSelected = file.path === selectedPath;
+  const path = file?.path || "";
+  const status = file?.status || "";
+  const additions = file?.additions ?? 0;
+  const deletions = file?.deletions ?? 0;
+  const unsupportedReason = workspaceFileUnsupportedReason(file);
   const regionId = `workspace-diff-${index}`;
+
+  if (unsupportedReason) {
+    return `
+      <div class="workspace-file-block">
+        <button type="button" class="dense-item workspace-file unsupported" disabled aria-disabled="true" title="${escapeAttr(unsupportedReason)}">
+          <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
+          <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span><span class="workspace-file-affordance">${escapeHtml(workspaceFileUnsupportedLabel(file))}</span></span>
+        </button>
+      </div>`;
+  }
+
+  const isSelected = path === selectedPath;
   return `
     <div class="workspace-file-block">
-      <button type="button" class="dense-item workspace-file ${isSelected ? "selected" : ""}" data-workspace-path="${escapeAttr(file.path)}" aria-expanded="${isSelected ? "true" : "false"}"${isSelected ? ` aria-controls="${escapeAttr(regionId)}"` : ""}>
-        <span class="dense-title"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></span>
-        <span class="dense-meta"><span>+${file.additions ?? 0}</span><span>-${file.deletions ?? 0}</span></span>
+      <button type="button" class="dense-item workspace-file ${isSelected ? "selected" : ""}" data-workspace-path="${escapeAttr(path)}" aria-expanded="${isSelected ? "true" : "false"}"${isSelected ? ` aria-controls="${escapeAttr(regionId)}"` : ""}>
+        <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
+        <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span></span>
       </button>
-      ${isSelected ? renderWorkspaceDiff(sessionId, file.path, regionId) : ""}
+      ${isSelected ? renderWorkspaceDiff(sessionId, path, regionId) : ""}
     </div>`;
 }
 
+function workspaceFileIsExpandable(file) {
+  return !workspaceFileUnsupportedReason(file);
+}
+
+function workspaceFileUnsupportedReason(file) {
+  if (workspaceFileHasPathPair(file)) return null;
+
+  const kind = workspaceFileUnsupportedKind(file);
+  if (!kind) return null;
+
+  return `${kind} diff unavailable: workspace data does not include separate old/new paths.`;
+}
+
+function workspaceFileUnsupportedLabel(file) {
+  const kind = workspaceFileUnsupportedKind(file);
+  return kind ? `${kind.toLowerCase()} unsupported` : "unsupported";
+}
+
+function workspaceFileUnsupportedKind(file) {
+  const status = String(file?.status || "").toUpperCase();
+  if (status.includes("C")) return "Copy";
+  if (status.includes("R")) return "Rename";
+  if (/\s(?:->|=>)\s/.test(String(file?.path || ""))) return "Rename/copy";
+  return null;
+}
+
+function workspaceFileHasPathPair(file) {
+  return Boolean(file?.old_path && file?.path && file.old_path !== file.path);
+}
+
 function renderWorkspaceDiff(sessionId, path, regionId) {
-  const cacheKey = workspaceDiffCacheKey(sessionId, path);
-  const signature = currentWorkspaceSignature(sessionId);
-  let entry = state.workspaceDiffCache.get(cacheKey);
+  const entry = state.workspaceDiffEntries.get(workspaceDiffEntryKey(sessionId, path));
 
-  if (!entry || entry.signature !== signature) {
-    entry = requestWorkspaceDiff(sessionId, path);
-  } else if (entry.status === "error" && !entry.renderRetryAttempted) {
-    entry = requestWorkspaceDiff(sessionId, path, { retryError: true, renderRetryAttempted: true });
+  if (!entry) {
+    return `
+      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
+        <div class="diff-state">Diff is not loaded. Close and reopen this row to fetch it.</div>
+      </section>`;
   }
-
-  if (!entry || entry.status === "loading") {
+  if (entry.status === "loading") {
     return `
       <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-live="polite" aria-label="Diff for ${escapeAttr(path)}">
         <div class="diff-state">Loading diff...</div>
@@ -1697,7 +1664,7 @@ function renderWorkspaceDiff(sessionId, path, regionId) {
   if (entry.status === "error") {
     return `
       <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
-        <div class="diff-state error">Failed to load diff: ${escapeHtml(entry.error)}</div>
+        <div class="diff-state error">Failed to load diff: ${escapeHtml(entry.error)}. Close and reopen this row to retry.</div>
       </section>`;
   }
   return renderWorkspaceDiffPayload(entry.payload, path, regionId);

@@ -1221,6 +1221,18 @@ button.session-card {
   box-shadow: var(--neu-selected);
 }
 
+.workspace-file.unsupported,
+.workspace-file.unsupported:hover,
+.workspace-file.unsupported:focus-visible {
+  cursor: not-allowed;
+  opacity: 0.68;
+  box-shadow: var(--neu-sunken-soft);
+}
+
+.workspace-file-affordance {
+  color: var(--muted);
+}
+
 .workspace-limit {
   color: var(--faint);
   font-family: var(--mono);
