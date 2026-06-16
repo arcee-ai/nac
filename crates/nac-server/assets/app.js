@@ -19,6 +19,21 @@ const state = {
   workspaceSelectedPathBySession: new Map(),
   workspaceDiffEntries: new Map(),
   workspaceDiffRequestSeq: 0,
+  renderRafId: null,
+  renderMetricsPending: false,
+  renderSessionsPending: false,
+  renderMobilePending: false,
+  renderInspectorPending: false,
+  sessionsPollTimer: null,
+  sessionsLoadPromise: null,
+  sessionsLoadIncludesWorkspaceStats: false,
+  sessionsLoadQueuedOptions: null,
+  sessionsLoadQueuedPromise: null,
+  lastSessionsDigest: "",
+  lastSelectedSessionDigest: "",
+  lastWorkspaceStatsRefresh: 0,
+  transcriptRenderedSessionId: null,
+  transcriptRenderedSignature: "",
 };
 
 const el = {};
@@ -26,6 +41,8 @@ const el = {};
 const WORKSPACE_DIFF_STAGE = "all";
 const WORKSPACE_DIFF_CONTEXT = 3;
 const WORKSPACE_FILE_LIMIT = 80;
+const SESSION_POLL_INTERVAL_MS = 5000;
+const SESSION_WORKSPACE_STATS_INTERVAL_MS = 30000;
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -112,7 +129,8 @@ function bindEvents() {
     const button = event.target.closest("button[data-tab]");
     if (!button) return;
     state.activeTab = button.dataset.tab;
-    renderInspector();
+    if (state.activeTab === "workspace") requestWorkspaceStatsRefresh();
+    requestInspectorRender();
   });
 
   el.workspaceView.addEventListener("click", handleWorkspaceFileClick);
@@ -129,8 +147,8 @@ async function boot() {
   }
 
   renderLaunchHostFields();
-  await loadSessions();
-  setInterval(loadSessions, 5000);
+  await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
+  scheduleSessionPoll();
 }
 
 async function apiGet(path) {
@@ -160,21 +178,204 @@ async function readJson(response) {
   return payload;
 }
 
-async function loadSessions() {
+async function loadSessions(options = {}) {
+  const loadOptions = normalizeSessionLoadOptions(options);
+  if (state.sessionsLoadPromise) {
+    const currentIncludesRequestedStats = !loadOptions.workspaceStats || state.sessionsLoadIncludesWorkspaceStats;
+    if (!loadOptions.forceFetch && currentIncludesRequestedStats) return joinCurrentSessionLoad(loadOptions);
+    state.sessionsLoadQueuedOptions = mergeSessionLoadOptions(state.sessionsLoadQueuedOptions, loadOptions);
+    if (!state.sessionsLoadQueuedPromise) {
+      state.sessionsLoadQueuedPromise = state.sessionsLoadPromise.then(() => {
+        const queuedOptions = state.sessionsLoadQueuedOptions;
+        state.sessionsLoadQueuedOptions = null;
+        state.sessionsLoadQueuedPromise = null;
+        return queuedOptions ? loadSessions(queuedOptions) : null;
+      });
+    }
+    return state.sessionsLoadQueuedPromise;
+  }
+
+  state.sessionsLoadIncludesWorkspaceStats = loadOptions.workspaceStats;
+  state.sessionsLoadPromise = loadSessionsOnce(loadOptions);
   try {
-    const sessions = sortSessionsByCreation(await apiGet("/sessions?workspace_stats=true"));
+    return await state.sessionsLoadPromise;
+  } finally {
+    state.sessionsLoadPromise = null;
+    state.sessionsLoadIncludesWorkspaceStats = false;
+  }
+}
+
+function normalizeSessionLoadOptions(options = {}) {
+  return {
+    workspaceStats: Boolean(options.workspaceStats),
+    forceRender: Boolean(options.forceRender),
+    forceFetch: Boolean(options.forceFetch),
+    inspector: Boolean(options.inspector),
+  };
+}
+
+function mergeSessionLoadOptions(left, right) {
+  if (!left) return { ...right };
+  return {
+    workspaceStats: Boolean(left.workspaceStats || right.workspaceStats),
+    forceRender: Boolean(left.forceRender || right.forceRender),
+    forceFetch: Boolean(left.forceFetch || right.forceFetch),
+    inspector: Boolean(left.inspector || right.inspector),
+  };
+}
+
+function joinCurrentSessionLoad(loadOptions) {
+  if (!loadOptions.forceRender && !loadOptions.inspector) return state.sessionsLoadPromise;
+  return state.sessionsLoadPromise.then((sessions) => {
+    const shell = loadOptions.forceRender;
+    requestRender({
+      shell: false,
+      metrics: shell,
+      sessions: shell,
+      mobile: shell,
+      inspector: loadOptions.inspector || shell,
+    });
+    return sessions;
+  });
+}
+
+async function loadSessionsOnce(options) {
+  try {
+    const path = options.workspaceStats ? "/sessions?workspace_stats=true" : "/sessions";
+    const sessions = sortSessionsByCreation(await apiGet(path));
+    preserveSessionWorkspaceStats(sessions);
     sanitizeSessionListActiveRuns(sessions);
     updateSessionActivity(sessions);
+
+    if (options.workspaceStats) state.lastWorkspaceStatsRefresh = Date.now();
+    if (!state.selectedId && sessions.length > 0) state.selectedId = sessions[0].summary.session_id;
+
+    const nextSessionsDigest = sessionListRenderDigest(sessions);
+    const selectedEntry = sessions.find((entry) => entry.summary.session_id === state.selectedId) || null;
+    const nextSelectedDigest = sessionEntryRenderDigest(selectedEntry);
+    const sessionsChanged = nextSessionsDigest !== state.lastSessionsDigest;
+    const selectedChanged = nextSelectedDigest !== state.lastSelectedSessionDigest;
     state.sessions = sessions;
-    if (!state.selectedId && state.sessions.length > 0) {
-      state.selectedId = state.sessions[0].summary.session_id;
-      renderAll();
-      loadSnapshot(state.selectedId, true);
+    state.lastSessionsDigest = nextSessionsDigest;
+    state.lastSelectedSessionDigest = nextSelectedDigest;
+
+    const needsSelectedSnapshot = Boolean(state.selectedId && !state.snapshots.has(state.selectedId));
+    const shellChanged = options.forceRender || sessionsChanged;
+    const inspectorChanged = options.inspector || selectedChanged || options.forceRender || needsSelectedSnapshot;
+    if (shellChanged || inspectorChanged) {
+      requestRender({
+        shell: false,
+        metrics: shellChanged,
+        sessions: shellChanged,
+        mobile: shellChanged,
+        inspector: inspectorChanged,
+      });
     }
-    renderAll();
+    if (needsSelectedSnapshot) loadSnapshot(state.selectedId, true);
+    return sessions;
   } catch (error) {
     setLaunchStatus(error.message, true);
+    return null;
   }
+}
+
+function preserveSessionWorkspaceStats(sessions) {
+  const previousById = new Map(state.sessions.map((entry) => [entry.summary.session_id, entry]));
+  for (const entry of sessions) {
+    const previous = previousById.get(entry.summary.session_id);
+    if (entry.workspace_diff === undefined && previous?.workspace_diff !== undefined) {
+      entry.workspace_diff = previous.workspace_diff;
+    }
+  }
+}
+
+function scheduleSessionPoll(delay = SESSION_POLL_INTERVAL_MS) {
+  if (state.sessionsPollTimer || typeof setTimeout !== "function") return;
+  state.sessionsPollTimer = setTimeout(runSessionPoll, delay);
+}
+
+async function runSessionPoll() {
+  state.sessionsPollTimer = null;
+  try {
+    await loadSessions({ workspaceStats: shouldRefreshWorkspaceStats() });
+  } finally {
+    scheduleSessionPoll();
+  }
+}
+
+function shouldRefreshWorkspaceStats(now = Date.now()) {
+  return !state.lastWorkspaceStatsRefresh || now - state.lastWorkspaceStatsRefresh >= SESSION_WORKSPACE_STATS_INTERVAL_MS;
+}
+
+function requestWorkspaceStatsRefresh() {
+  loadSessions({ workspaceStats: true, forceRender: true });
+}
+
+function sessionListRenderDigest(sessions) {
+  return sessionCardListRenderDigest(sessions.map(sessionCardViewModel));
+}
+
+function sessionCardListRenderDigest(cards) {
+  return cards.map(sessionCardRenderDigest).join("\n");
+}
+
+function sessionEntryRenderDigest(entry) {
+  return sessionCardRenderDigest(sessionCardViewModel(entry));
+}
+
+function sessionCardViewModel(entry) {
+  if (!entry) return null;
+  const summary = entry.summary || {};
+  const sessionId = summary.session_id || "";
+  const snapshot = state.snapshots.get(sessionId);
+  const workspaceError = snapshot?.workspace?.error || "";
+  const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
+  const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
+  const cardSnapshot = {
+    ...(snapshot || {}),
+    active_run: snapshot?.active_run || entry.active_run,
+    messages: snapshot?.messages || [],
+  };
+  const pendingCount = effectivePendingMessages(sessionId, cardSnapshot).length;
+  const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot)
+    || displayPromptFromMessageText(summary.last_user_prompt)
+    || "no prompt yet";
+  return {
+    sessionId,
+    shortId: shortId(sessionId),
+    cwd: summary.cwd || "",
+    backend: summary.backend || "",
+    sshHost: summary.ssh_host || "",
+    sandboxed: Boolean(summary.sandboxed),
+    selected: sessionId === state.selectedId,
+    tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
+    errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
+    statusClass: sessionStatusClass(entry),
+    messageCount: summary.visible_message_count + pendingCount,
+    additions: diffStats.additions,
+    deletions: diffStats.deletions,
+    promptPreview,
+  };
+}
+
+function sessionCardRenderDigest(card) {
+  if (!card) return "";
+  return [
+    card.sessionId,
+    card.shortId,
+    card.cwd,
+    card.backend,
+    card.sshHost,
+    card.sandboxed ? "1" : "0",
+    card.selected ? "1" : "0",
+    card.tone,
+    card.errorish,
+    card.statusClass,
+    card.messageCount,
+    card.additions,
+    card.deletions,
+    card.promptPreview,
+  ].join("\\x1f");
 }
 
 function renderLaunchHostFields() {
@@ -201,17 +402,21 @@ async function loadSnapshot(sessionId, openStream = false) {
       clearRunSubmitting(sessionId);
       state.activeRunsBySession.set(sessionId, true);
     }
+    const previousCardDigest = sessionEntryRenderDigest(sessionEntryById(sessionId));
     state.snapshots.set(sessionId, snapshot);
     syncActiveThreadsFromSnapshot(sessionId, snapshot);
+    const cardChanged = previousCardDigest !== sessionEntryRenderDigest(sessionEntryById(sessionId));
     if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
       requestChatScrollToBottom();
     }
     if (openStream) openEventStream(sessionId);
-    if (state.selectedId === sessionId) renderAll();
+    if (state.selectedId === sessionId) {
+      requestRender({ shell: false, sessions: cardChanged, inspector: true });
+    }
     return snapshot;
   } catch (error) {
     pushLocalEvent("snapshot_error", error.message, sessionId);
-    if (state.selectedId === sessionId) renderAll();
+    if (state.selectedId === sessionId) requestInspectorRender();
     return null;
   }
 }
@@ -227,7 +432,7 @@ function selectSession(sessionId) {
   state.mobileDetailOpen = true;
   state.scrollChatToBottom = true;
   el.selectedId.textContent = shortId(sessionId);
-  renderAll();
+  requestRender({ inspector: true });
   openEventStream(sessionId);
   loadSnapshot(sessionId, false);
 }
@@ -284,15 +489,16 @@ async function createSession(event) {
     const sessionId = snapshot.metadata.session_id;
     state.snapshots.set(sessionId, snapshot);
     state.selectedId = sessionId;
-    await loadSessions();
+    await loadSessions({ forceFetch: true, workspaceStats: true });
     hideLaunchOverlay();
     selectSession(sessionId);
     setLaunchStatus(`launched ${shortId(sessionId)}`, false);
     if (initialPrompt) {
+      const hadAttention = state.attentionSessions.has(sessionId);
       markRunSubmitting(sessionId);
       clearSessionAttention(sessionId);
       requestChatScrollToBottom();
-      renderAll();
+      requestRender({ shell: false, sessions: hadAttention, inspector: true });
       try {
         await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
         scheduleRunSubmittingGrace(sessionId);
@@ -302,7 +508,7 @@ async function createSession(event) {
       } catch (error) {
         clearRunSubmitting(sessionId);
         state.activeRunsBySession.set(sessionId, false);
-        renderAll();
+        requestInspectorRender();
         throw error;
       }
     }
@@ -321,25 +527,26 @@ async function submitPrompt(event) {
     return;
   }
 
+  const hadAttention = state.attentionSessions.has(sessionId);
   markRunSubmitting(sessionId);
   clearSessionAttention(sessionId);
   el.promptInput.value = "";
   requestChatScrollToBottom();
-  renderAll();
+  requestRender({ shell: false, sessions: hadAttention, inspector: true });
 
   try {
     const result = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt });
     scheduleRunSubmittingGrace(sessionId);
     pushLocalEvent("submit", `${result.display_prompt} -> ${shortId(result.run_id)}`, sessionId);
-    await loadSessions();
+    await loadSessions({ forceFetch: true });
     await loadSnapshot(sessionId, false);
-    renderAll();
+    requestInspectorRender();
   } catch (error) {
     clearRunSubmitting(sessionId);
     state.activeRunsBySession.set(sessionId, false);
     stopWaitingLife();
     pushLocalEvent("submit_error", error.message, sessionId);
-    renderAll();
+    requestInspectorRender();
   }
 }
 
@@ -355,12 +562,11 @@ async function cancelActiveRun() {
   try {
     await apiPost(`/sessions/${encodeURIComponent(sessionId)}/cancel-active-run`, {});
     pushLocalEvent("cancel", "requested", sessionId);
-    await loadSessions();
+    await loadSessions({ forceFetch: true });
     await loadSnapshot(sessionId, false);
   } catch (error) {
     pushLocalEvent("cancel_error", error.message, sessionId);
   }
-  renderEvents();
 }
 
 function openEventStream(sessionId) {
@@ -380,34 +586,36 @@ function openEventStream(sessionId) {
     const terminalRun = isTerminalSessionEvent(envelope);
     if (runStarted) {
       handleRunStarted(sessionId, envelope);
-      loadSessions();
+      loadSessions({ forceFetch: true });
     }
     if (terminalRun) {
       handleTerminalRun(sessionId, envelope);
-      loadSessions();
+      loadSessions({ forceFetch: true });
     }
     if (shouldRefreshSnapshot(envelope)) {
       loadSnapshot(sessionId, false);
     }
-    renderAll();
+    requestRender({
+      shell: false,
+      metrics: true,
+      sessions: runStarted || terminalRun,
+      inspector: true,
+    });
   });
 
   source.addEventListener("replay_gap", (event) => {
     if (state.eventSource !== source) return;
     pushLocalEvent("replay_gap", event.data, sessionId);
-    renderEvents();
   });
 
   source.addEventListener("lagged", (event) => {
     if (state.eventSource !== source) return;
     pushLocalEvent("lagged", event.data, sessionId);
-    renderEvents();
   });
 
   source.onerror = () => {
     if (state.eventSource !== source) return;
     pushLocalEvent("stream", "connection interrupted", sessionId);
-    renderEvents();
   };
 }
 
@@ -533,12 +741,7 @@ function expireRunSubmitting(sessionId) {
   const stillActive = cachedActiveRunCountsForSession(sessionId);
   state.activeRunsBySession.set(sessionId, stillActive);
   if (!stillActive && state.selectedId === sessionId) stopWaitingLife();
-  if (state.selectedId === sessionId) {
-    renderAll();
-  } else {
-    renderMetrics();
-    renderSessions();
-  }
+  if (state.selectedId === sessionId) requestInspectorRender();
 }
 
 function cachedActiveRunCountsForSession(sessionId, snapshot = state.snapshots.get(sessionId)) {
@@ -576,11 +779,66 @@ function handleTerminalRun(sessionId, envelope) {
   if (state.selectedId === sessionId) stopWaitingLife();
 }
 
-function renderAll() {
+function requestRender(options = {}) {
+  const hasShellBits = "shell" in options
+    || "metrics" in options
+    || "sessions" in options
+    || "mobile" in options;
+  const shell = options.shell === true || (!hasShellBits && options.shell !== false);
+  if (shell || options.metrics) state.renderMetricsPending = true;
+  if (shell || options.sessions) state.renderSessionsPending = true;
+  if (shell || options.mobile) state.renderMobilePending = true;
+  if (options.inspector !== false) state.renderInspectorPending = true;
+
+  const hasPendingRender = state.renderMetricsPending
+    || state.renderSessionsPending
+    || state.renderMobilePending
+    || state.renderInspectorPending;
+  if (!hasPendingRender || state.renderRafId) return;
+
+  const schedule = typeof requestAnimationFrame === "function"
+    ? requestAnimationFrame
+    : (callback) => setTimeout(callback, 0);
+  state.renderRafId = schedule(flushRender);
+}
+
+function requestInspectorRender() {
+  requestRender({ shell: false, inspector: true });
+}
+
+function requestEventsRender() {
+  requestRender({
+    shell: false,
+    metrics: true,
+    inspector: state.activeTab === "events",
+  });
+}
+
+function flushRender() {
+  state.renderRafId = null;
+  const renderMetricsPending = state.renderMetricsPending;
+  const renderSessionsPending = state.renderSessionsPending;
+  const renderMobilePending = state.renderMobilePending;
+  const renderInspectorPending = state.renderInspectorPending;
+  state.renderMetricsPending = false;
+  state.renderSessionsPending = false;
+  state.renderMobilePending = false;
+  state.renderInspectorPending = false;
+
+  if (renderMetricsPending && renderSessionsPending && renderMobilePending) {
+    renderShell();
+  } else {
+    if (renderMetricsPending) renderMetrics();
+    if (renderSessionsPending) renderSessions();
+    if (renderMobilePending) renderMobileMode();
+  }
+  if (renderInspectorPending) renderInspector();
+}
+
+function renderShell() {
   renderMetrics();
   renderSessions();
   renderMobileMode();
-  renderInspector();
 }
 
 function renderMobileMode() {
@@ -598,15 +856,17 @@ function renderMetrics() {
 }
 
 function renderSessions() {
-  const items = filteredSessions();
-  const sessionCards = items.length === 0
+  const cards = filteredSessions().map(sessionCardViewModel);
+  const sessionCards = cards.length === 0
     ? `<div class="empty-state matrix-empty">No sessions yet.</div>`
-    : items.map((entry) => renderSessionCard(entry)).join("");
+    : cards.map(renderSessionCard).join("");
   el.sessionGrid.innerHTML = renderNewSessionCard() + sessionCards;
   el.sessionGrid.querySelector("[data-action='new-session']")?.addEventListener("click", showLaunchOverlay);
   el.sessionGrid.querySelectorAll("[data-session-id]").forEach((card) => {
     card.addEventListener("click", () => selectSession(card.dataset.sessionId));
   });
+  state.lastSessionsDigest = sessionCardListRenderDigest(cards);
+  state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card?.sessionId === state.selectedId));
 }
 
 function renderNewSessionCard() {
@@ -625,42 +885,28 @@ function renderNewSessionCard() {
     </button>`;
 }
 
-function renderSessionCard(entry) {
-  const summary = entry.summary;
-  const sessionId = summary.session_id;
-  const snapshot = state.snapshots.get(sessionId);
-  const workspaceError = snapshot?.workspace?.error || "";
-  const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
-  const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
-  const tone = cardActive ? "" : summary.sandboxed ? "warn" : "";
-  const errorish = workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "";
-  const cardSnapshot = {
-    ...(snapshot || {}),
-    active_run: snapshot?.active_run || entry.active_run,
-    messages: snapshot?.messages || [],
-  };
-  const pendingCount = effectivePendingMessages(sessionId, cardSnapshot).length;
-  const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot) || displayPromptFromMessageText(summary.last_user_prompt) || "no prompt yet";
+function renderSessionCard(card) {
+  if (!card) return "";
   return `
-    <article class="session-card ${tone} ${errorish} ${sessionId === state.selectedId ? "selected" : ""}" data-session-id="${escapeAttr(sessionId)}">
+    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""}" data-session-id="${escapeAttr(card.sessionId)}">
       <div class="session-card-head">
         <div>
-          <h2>${escapeHtml(shortId(sessionId))}</h2>
-          <div class="cwd">${escapeHtml(summary.cwd)}</div>
+          <h2>${escapeHtml(card.shortId)}</h2>
+          <div class="cwd">${escapeHtml(card.cwd)}</div>
         </div>
-        <span class="status-dot ${sessionStatusClass(entry)}"></span>
+        <span class="status-dot ${card.statusClass}"></span>
       </div>
       <div class="badge-row">
-        <span class="badge">${escapeHtml(summary.backend)}</span>
-        ${summary.ssh_host ? `<span class="badge host">${escapeHtml(summary.ssh_host)}</span>` : ""}
-        ${summary.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
+        <span class="badge">${escapeHtml(card.backend)}</span>
+        ${card.sshHost ? `<span class="badge host">${escapeHtml(card.sshHost)}</span>` : ""}
+        ${card.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
       </div>
       <div class="telemetry-grid">
-        <div><span>msgs</span><strong>${summary.visible_message_count + pendingCount}</strong></div>
-        <div><span>add</span><strong>${escapeHtml(diffStats.additions)}</strong></div>
-        <div><span>del</span><strong>${escapeHtml(diffStats.deletions)}</strong></div>
+        <div><span>msgs</span><strong>${card.messageCount}</strong></div>
+        <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
+        <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
       </div>
-      <div class="last-prompt">${escapeHtml(promptPreview)}</div>
+      <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
     </article>`;
 }
 
@@ -676,6 +922,7 @@ function renderInspector() {
     el.snapRun.textContent = "idle";
     el.cancelRun.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
+    state.transcriptRenderedSessionId = null;
     el.threadsView.innerHTML = "";
     el.worksetsView.innerHTML = "";
     el.workspaceView.innerHTML = "";
@@ -694,12 +941,29 @@ function renderInspector() {
   el.snapRun.textContent = runActive ? "active" : "idle";
   el.cancelRun.disabled = !runActive;
   renderTabs();
-  renderTranscript(metadata.session_id, snapshot.messages, snapshot);
   syncPromptBusy(metadata.session_id, snapshot);
-  renderThreads(snapshot);
-  renderWorksets(snapshot);
-  renderWorkspace(snapshot);
-  renderEvents();
+  renderActiveInspectorPanel(snapshot);
+}
+
+function renderActiveInspectorPanel(snapshot) {
+  switch (state.activeTab) {
+    case "events":
+      renderEvents();
+      break;
+    case "threads":
+      renderThreads(snapshot);
+      break;
+    case "worksets":
+      renderWorksets(snapshot);
+      break;
+    case "workspace":
+      renderWorkspace(snapshot);
+      break;
+    case "chat":
+    default:
+      renderTranscript(snapshot.metadata.session_id, snapshot.messages, snapshot);
+      break;
+  }
 }
 
 function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(sessionId)) {
@@ -707,16 +971,27 @@ function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(se
     ...(messages || []),
     ...effectivePendingMessages(sessionId, snapshot),
   ];
-  if (transcriptMessages.length === 0) {
+  const visibleMessages = transcriptMessages.slice(-80);
+  const signature = transcriptMessagesSignature(visibleMessages);
+  if (state.transcriptRenderedSessionId === sessionId
+    && state.transcriptRenderedSignature === signature) {
+    scrollTranscriptToBottomIfRequested();
+    return;
+  }
+
+  state.transcriptRenderedSessionId = sessionId;
+  state.transcriptRenderedSignature = signature;
+  if (visibleMessages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = "No messages yet.";
     el.transcript.replaceChildren(empty);
+    scrollTranscriptToBottomIfRequested();
     return;
   }
 
   const fragment = document.createDocumentFragment();
-  transcriptMessages.slice(-80).forEach((message, index) => {
+  visibleMessages.forEach((message, index) => {
     const role = message.role || "unknown";
     const body = messageDisplayText(message);
     const row = document.createElement("div");
@@ -747,12 +1022,26 @@ function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(se
   });
 
   el.transcript.replaceChildren(fragment);
-  if (state.scrollChatToBottom) {
-    state.scrollChatToBottom = false;
-    requestAnimationFrame(() => {
-      el.transcript.scrollTop = el.transcript.scrollHeight;
-    });
-  }
+  scrollTranscriptToBottomIfRequested();
+}
+
+function transcriptMessagesSignature(messages) {
+  return JSON.stringify((messages || []).map((message) => [
+    message.id || "",
+    message.role || "",
+    message.pending ? 1 : 0,
+    message.run_id || "",
+    message.client_id || "",
+    messageDisplayText(message),
+  ]));
+}
+
+function scrollTranscriptToBottomIfRequested() {
+  if (!state.scrollChatToBottom) return;
+  state.scrollChatToBottom = false;
+  requestAnimationFrame(() => {
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  });
 }
 
 const SUBMITTING_RUN_GRACE_MS = 15000;
@@ -760,6 +1049,11 @@ const WAITING_LIFE_TICK_MS = 75;
 const WAITING_LIFE_MAX_CATCHUP_STEPS = 2;
 const WAITING_LIFE_SIZE_CHECK_MS = 500;
 const WAITING_LIFE_SQUARE_SCALE = 0.29;
+const WAITING_LIFE_LED_BLOOM_SCALE = 2.6;
+const WAITING_LIFE_LED_AFTERIMAGE_SCALE = 1.7;
+const WAITING_LIFE_LED_BLOOM_FILL = "rgba(145, 205, 255, 0.08)";
+const WAITING_LIFE_LED_BORN_BLOOM_FILL = "rgba(215, 240, 255, 0.12)";
+const WAITING_LIFE_LED_AFTERIMAGE_FILL = "rgba(80, 155, 230, 0.045)";
 const WAITING_LIFE_MOBILE_QUERY = "(max-width: 1179px)";
 const WAITING_LIFE_PATTERNS = [
   {
@@ -854,9 +1148,12 @@ function syncWaitingLife(canvas, sessionId, seedKey, runActive) {
   }
 
   const life = state.waitingLife;
-  const resized = ensureWaitingLifeSize(life);
-  if (resized || created) drawLifeField(life);
-  if (resized || created) scheduleWaitingLifePostLayoutDraw(life);
+  const shouldCheckSize = created || !life.field || life.sizeDirty;
+  const resized = shouldCheckSize ? ensureWaitingLifeSize(life) : false;
+  if (resized || created) {
+    drawLifeField(life);
+    scheduleWaitingLifePostLayoutDraw(life);
+  }
   if (life.rafId) return;
 
   life.lastTime = performanceNow();
@@ -874,8 +1171,6 @@ function createWaitingLife(canvas, sessionId, seedKey) {
     accumulator: 0,
     pixelWidth: 0,
     pixelHeight: 0,
-    cssWidth: 0,
-    cssHeight: 0,
     dpr: 1,
     cols: 0,
     rows: 0,
@@ -939,9 +1234,12 @@ function tickWaitingLife(time) {
   const now = Number.isFinite(time) ? time : performanceNow();
   const lastTime = Number.isFinite(life.lastTime) ? life.lastTime : now;
   const lastSizeCheck = Number.isFinite(life.lastSizeCheck) ? life.lastSizeCheck : 0;
+  const hasResizeObserver = Boolean(life.resizeObserver);
+  const dprChanged = waitingLifeDevicePixelRatioChanged(life);
   const shouldCheckSize = !life.field
     || life.sizeDirty
-    || now - lastSizeCheck >= WAITING_LIFE_SIZE_CHECK_MS;
+    || dprChanged
+    || (!hasResizeObserver && now - lastSizeCheck >= WAITING_LIFE_SIZE_CHECK_MS);
   const resized = shouldCheckSize ? ensureWaitingLifeSize(life, now) : false;
   const elapsed = Math.min(Math.max(0, now - lastTime), 500);
   life.lastTime = now;
@@ -967,7 +1265,7 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   const rect = life.canvas.getBoundingClientRect();
   const cssWidth = Math.max(1, Math.round(rect.width || life.canvas.clientWidth || life.canvas.width || 320));
   const cssHeight = Math.max(1, Math.round(rect.height || life.canvas.clientHeight || life.canvas.height || 96));
-  const dpr = Math.max(1, Math.min(2, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1));
+  const dpr = waitingLifeDevicePixelRatio();
   const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
   const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
   const cols = clampInt(Math.floor(cssWidth / 6), 24, 96);
@@ -978,6 +1276,7 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
     && life.cols === cols
     && life.rows === rows
     && life.field) {
+    life.dpr = dpr;
     life.sizeDirty = false;
     return false;
   }
@@ -986,8 +1285,6 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   life.canvas.height = pixelHeight;
   life.pixelWidth = pixelWidth;
   life.pixelHeight = pixelHeight;
-  life.cssWidth = cssWidth;
-  life.cssHeight = cssHeight;
   life.dpr = dpr;
   life.cols = cols;
   life.rows = rows;
@@ -995,6 +1292,14 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   life.accumulator = 0;
   life.sizeDirty = false;
   return true;
+}
+
+function waitingLifeDevicePixelRatio() {
+  return Math.max(1, Math.min(2, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1));
+}
+
+function waitingLifeDevicePixelRatioChanged(life) {
+  return Math.abs(waitingLifeDevicePixelRatio() - (Number.isFinite(life?.dpr) ? life.dpr : 1)) > 0.001;
 }
 
 function performanceNow() {
@@ -1136,6 +1441,16 @@ function drawLifeField(life) {
   const cellSize = Math.max(1, Math.min(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
   const squareSize = Math.max(0.5, cellSize * WAITING_LIFE_SQUARE_SCALE);
   const inset = (cellSize - squareSize) / 2;
+  const bloomSquareSize = Math.max(
+    squareSize,
+    Math.min(cellSize, squareSize * WAITING_LIFE_LED_BLOOM_SCALE),
+  );
+  const bloomInset = (cellSize - bloomSquareSize) / 2;
+  const afterimageSquareSize = Math.max(
+    squareSize,
+    Math.min(cellSize, squareSize * WAITING_LIFE_LED_AFTERIMAGE_SCALE),
+  );
+  const afterimageInset = (cellSize - afterimageSquareSize) / 2;
   const offsetX = (life.pixelWidth - cellSize * field.cols) / 2;
   const offsetY = (life.pixelHeight - cellSize * field.rows) / 2;
 
@@ -1146,7 +1461,12 @@ function drawLifeField(life) {
   context.globalCompositeOperation = "source-over";
   context.imageSmoothingEnabled = false;
 
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", "rgba(255, 255, 255, 0.10)");
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, afterimageSquareSize, afterimageInset, "dead", WAITING_LIFE_LED_AFTERIMAGE_FILL);
+  context.globalCompositeOperation = "lighter";
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "alive", WAITING_LIFE_LED_BLOOM_FILL);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "born", WAITING_LIFE_LED_BORN_BLOOM_FILL);
+  context.globalCompositeOperation = "source-over";
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", "rgba(80, 150, 215, 0.055)");
   drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", "rgba(255, 255, 255, 0.68)");
   context.globalCompositeOperation = "lighter";
   drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", "rgba(255, 255, 255, 0.34)");
@@ -1489,14 +1809,14 @@ function handleWorkspaceFileClick(event) {
   if (selectedPath === path) {
     state.workspaceSelectedPathBySession.delete(sessionId);
     clearResolvedWorkspaceDiff(sessionId, path);
-    renderInspector();
+    requestInspectorRender();
     return;
   }
 
   if (selectedPath) clearResolvedWorkspaceDiff(sessionId, selectedPath);
   state.workspaceSelectedPathBySession.set(sessionId, path);
   requestWorkspaceDiff(sessionId, path);
-  renderInspector();
+  requestInspectorRender();
 }
 
 function requestWorkspaceDiff(sessionId, path) {
@@ -1541,7 +1861,7 @@ async function loadWorkspaceDiff(sessionId, path, entryKey = workspaceDiffEntryK
     });
   }
 
-  if (state.selectedId === sessionId) renderInspector();
+  if (state.selectedId === sessionId && state.activeTab === "workspace") requestInspectorRender();
 }
 
 function workspaceDiffRequestIsCurrent(entryKey, requestId) {
@@ -1973,7 +2293,7 @@ function pushLocalEvent(kind, detail, sessionId = state.selectedId) {
     session_id: sessionId,
     event: { type: kind, detail },
   });
-  renderMetrics();
+  requestEventsRender();
 }
 
 function eventKind(envelope) {
