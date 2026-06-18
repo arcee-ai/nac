@@ -1268,8 +1268,8 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   const dpr = waitingLifeDevicePixelRatio();
   const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
   const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
-  const cols = clampInt(Math.floor(cssWidth / 6), 24, 96);
-  const rows = clampInt(Math.floor(cssHeight / 6), 10, 44);
+  const cols = clampInt(Math.ceil(cssWidth / 6), 24, 192);
+  const rows = clampInt(Math.ceil(cssHeight / 6), 10, 44);
 
   if (life.pixelWidth === pixelWidth
     && life.pixelHeight === pixelHeight
@@ -1438,7 +1438,7 @@ function countLifeNeighbors(field, x, y) {
 function drawLifeField(life) {
   if (!life?.context || !life.field) return;
   const { context, field } = life;
-  const cellSize = Math.max(1, Math.min(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
+  const cellSize = Math.max(1, Math.max(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
   const squareSize = Math.max(0.5, cellSize * WAITING_LIFE_SQUARE_SCALE);
   const inset = (cellSize - squareSize) / 2;
   const bloomSquareSize = Math.max(
@@ -1451,8 +1451,8 @@ function drawLifeField(life) {
     Math.min(cellSize, squareSize * WAITING_LIFE_LED_AFTERIMAGE_SCALE),
   );
   const afterimageInset = (cellSize - afterimageSquareSize) / 2;
-  const offsetX = (life.pixelWidth - cellSize * field.cols) / 2;
-  const offsetY = (life.pixelHeight - cellSize * field.rows) / 2;
+  const offsetX = Math.min(0, (life.pixelWidth - cellSize * field.cols) / 2);
+  const offsetY = Math.min(0, (life.pixelHeight - cellSize * field.rows) / 2);
 
   context.save();
   context.clearRect(0, 0, life.pixelWidth, life.pixelHeight);

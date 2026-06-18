@@ -957,7 +957,8 @@ button.session-card {
 
 .prompt-form {
   --prompt-life-height: 92px;
-  --prompt-life-padding: var(--space-lg);
+  --prompt-life-padding-block: var(--space-sm);
+  --prompt-life-padding-inline: var(--space-xs);
   display: grid;
   border-radius: var(--radius-xl);
   background: var(--panel);
@@ -1007,6 +1008,8 @@ button.session-card {
   overflow: hidden;
   contain: layout paint;
   isolation: isolate;
+  width: 100%;
+  justify-self: stretch;
   height: var(--prompt-life-height);
   min-height: var(--prompt-life-height);
   max-height: var(--prompt-life-height);
@@ -1014,13 +1017,14 @@ button.session-card {
   border-radius: var(--radius-md);
   background: transparent;
   box-shadow: none;
-  padding: var(--prompt-life-padding);
+  padding: var(--prompt-life-padding-block) var(--prompt-life-padding-inline);
 }
 
 .prompt-life-canvas.life-waiting-canvas {
-  height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
-  min-height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
-  max-height: calc(var(--prompt-life-height) - var(--prompt-life-padding) - var(--prompt-life-padding));
+  width: 100%;
+  height: calc(var(--prompt-life-height) - var(--prompt-life-padding-block) - var(--prompt-life-padding-block));
+  min-height: calc(var(--prompt-life-height) - var(--prompt-life-padding-block) - var(--prompt-life-padding-block));
+  max-height: calc(var(--prompt-life-height) - var(--prompt-life-padding-block) - var(--prompt-life-padding-block));
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -1045,6 +1049,7 @@ button.session-card {
 }
 
 .prompt-form.busy {
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-sm);
   box-shadow: var(--neu-pressed);
 }
@@ -1061,6 +1066,9 @@ button.session-card {
 
 .prompt-form.busy .prompt-life:not([hidden]) {
   display: grid;
+  grid-column: 1 / -1;
+  width: 100%;
+  justify-self: stretch;
 }
 
 .prompt-form textarea:disabled {
@@ -1075,6 +1083,7 @@ button.session-card {
 }
 
 .prompt-form.busy .prompt-submit {
+  display: none;
   pointer-events: none;
 }
 
