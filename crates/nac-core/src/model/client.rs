@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 #[derive(Clone)]
 pub struct ModelClient {
@@ -8,6 +9,7 @@ pub struct ModelClient {
     pub model: String,
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
+    extra_headers: std::collections::BTreeMap<String, String>,
 }
 
 impl ModelClient {
@@ -45,6 +47,7 @@ impl ModelClient {
             model,
             backend,
             reasoning_effort,
+            extra_headers: overrides.extra_headers,
         })
     }
 
@@ -208,15 +211,16 @@ impl ModelClient {
                 sleep(Duration::from_secs(delay_secs)).await;
             }
 
-            let response = apply_headers(
-                self.client
-                    .post(url)
-                    .header("Content-Type", "application/json"),
-            )
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
+            let mut request = self.client.post(url);
+            if !self.extra_headers_override_content_type() {
+                request = request.header("Content-Type", "application/json");
+            }
+            let response = self
+                .apply_extra_headers(apply_headers(request))?
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
 
             let status = response.status();
             let body = response
@@ -255,6 +259,26 @@ impl ModelClient {
 
         Err(last_error)
     }
+
+    fn extra_headers_override_content_type(&self) -> bool {
+        self.extra_headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("content-type"))
+    }
+
+    fn apply_extra_headers(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::RequestBuilder> {
+        for (name, value) in &self.extra_headers {
+            let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .with_context(|| format!("invalid model extra_headers name '{name}'"))?;
+            let header_value = reqwest::header::HeaderValue::from_str(value)
+                .with_context(|| format!("invalid model extra_headers value for '{name}'"))?;
+            request = request.header(header_name, header_value);
+        }
+        Ok(request)
+    }
 }
 
 #[cfg(test)]
@@ -267,6 +291,7 @@ impl ModelClient {
             model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),
+            extra_headers: std::collections::BTreeMap::new(),
         }
     }
 }

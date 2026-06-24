@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use uuid::Uuid;
@@ -43,6 +46,8 @@ pub struct ModelConfig {
     pub base_url: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub extra_headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -327,6 +332,7 @@ pub(crate) fn model_overrides(model: &ModelOptions, config: &NacConfig) -> Resul
         backend: model.backend.or(config.model.backend),
         reasoning_effort: model.reasoning_effort.or(config.model.reasoning_effort),
         api_key_env: configured_api_key_env(config),
+        extra_headers: config.model.extra_headers.clone(),
     })
 }
 
@@ -731,6 +737,7 @@ async fn build_resume_config_from_snapshot(
         backend: Some(snapshot.backend),
         reasoning_effort: snapshot.reasoning_effort,
         api_key_env: configured_api_key_env(config),
+        extra_headers: config.model.extra_headers.clone(),
     })?;
     let sandbox = if ssh_host.is_some() {
         None

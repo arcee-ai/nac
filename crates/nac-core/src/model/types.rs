@@ -59,6 +59,7 @@ pub struct ClientOverrides {
     pub backend: Option<BackendKind>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub api_key_env: Option<String>,
+    pub extra_headers: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
