@@ -404,6 +404,7 @@ mod tests {
     };
     use nac_core::test_support::{sessions, store};
     use ratatui::backend::TestBackend;
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1465,6 +1466,8 @@ mod tests {
             None,
             None,
             messages,
+        None,
+        BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(3_333);
         snapshot.previous_response_duration_ms = Some(2_222);

@@ -375,7 +375,8 @@ pub async fn build_run_config(
         .config_cwd
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
-    let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
+    let overrides = model_overrides(&options.model, config)?;
+    let client = ModelClient::from_env_with_overrides(overrides.clone())?;
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -422,6 +423,8 @@ pub async fn build_run_config(
             None,
             Some(ssh_host),
             agent.messages.clone(),
+            overrides.api_key_env.clone(),
+            overrides.extra_headers.clone(),
         );
         sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -496,6 +499,8 @@ pub async fn build_run_config(
         sandbox.as_ref().map(|session| session.spec().clone()),
         None, // fresh local/sandbox sessions carry no ssh_host
         agent.messages.clone(),
+        overrides.api_key_env.clone(),
+        overrides.extra_headers.clone(),
     );
     sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -736,8 +741,8 @@ async fn build_resume_config_from_snapshot(
         model: Some(snapshot.model.clone()),
         backend: Some(snapshot.backend),
         reasoning_effort: snapshot.reasoning_effort,
-        api_key_env: configured_api_key_env(config),
-        extra_headers: config.model.extra_headers.clone(),
+        api_key_env: snapshot.api_key_env.clone(),
+        extra_headers: snapshot.extra_headers.clone(),
     })?;
     let sandbox = if ssh_host.is_some() {
         None
@@ -1457,6 +1462,8 @@ url = "https://mcp.context7.com/mcp"
                     tool_calls: None,
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
@@ -1528,6 +1535,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let normalized =
@@ -1547,6 +1556,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
         let normalized =
             normalize_snapshot_paths(relative, Path::new("/local/resume/base")).unwrap();
@@ -1571,6 +1582,8 @@ url = "https://mcp.context7.com/mcp"
             }),
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let error = match build_resume_config_from_snapshot(
@@ -1611,6 +1624,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             None,
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let error = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap_err();
@@ -1656,6 +1671,8 @@ url = "https://mcp.context7.com/mcp"
                     content: "hello".to_string(),
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 

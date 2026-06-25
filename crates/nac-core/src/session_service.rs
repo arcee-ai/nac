@@ -955,6 +955,7 @@ mod tests {
     use super::*;
     use crate::agent::{AgentConfig, AgentMode};
     use crate::model::ModelClient;
+    use std::collections::BTreeMap;
 
     fn test_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
@@ -1045,6 +1046,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(200);
         snapshot.previous_response_duration_ms = Some(100);
@@ -1096,6 +1099,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -1201,6 +1206,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
@@ -1277,6 +1284,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
@@ -1384,6 +1393,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -1583,6 +1594,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(123);
         snapshot.response_durations_ms = Some(vec![Some(123)]);
@@ -1658,6 +1671,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
