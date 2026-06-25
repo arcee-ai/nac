@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
 
-const DEFAULT_REPO: &str = "sapiosaturn/nac";
+const DEFAULT_REPO: &str = "arcee-ai/nac";
 const DEFAULT_BRANCH: &str = "main";
 const RAW_GITHUB_BASE: &str = "https://raw.githubusercontent.com";
 
@@ -173,7 +173,7 @@ mod tests {
 
         assert_eq!(
             script_url("install.sh"),
-            "https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/install.sh"
+            "https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.sh"
         );
 
         unsafe {

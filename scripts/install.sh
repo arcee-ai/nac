@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="${NAC_REPO:-sapiosaturn/nac}"
+REPO="${NAC_REPO:-arcee-ai/nac}"
 CHANNEL="${NAC_CHANNEL:-edge}"
 BASE_URL="${NAC_BASE_URL:-https://github.com/${REPO}/releases/download}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"

@@ -6,7 +6,7 @@ Heavily inspired by [slate](https://randomlabs.ai/blog/slate). Also takes inspir
 Install the latest `edge` build:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.sh | sh
 ```
 
 Pinned version installs are not supported yet.
@@ -57,7 +57,7 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 Uninstall:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sapiosaturn/nac/main/scripts/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall.sh | sh
 ```
 
 `nac` can run tools inside a Podman sandbox (requires Podman to be installed):

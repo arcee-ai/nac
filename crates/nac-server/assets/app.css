@@ -12,7 +12,7 @@
   --faint: #76767e;
   --highlight: rgba(255, 255, 255, 0.84);
   --teal: #4fd2a8;
-  --amber: #bdbdc2;
+  --amber: #e8a838;
   --rose: #d0d0d4;
   --blue: #6ea8ff;
   --green: #8a8a90;
@@ -513,26 +513,59 @@ button.session-card {
   white-space: nowrap;
 }
 
-.badge-row {
-  display: flex;
-  flex-wrap: wrap;
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-sm);
   margin-top: var(--space-sm);
 }
 
-.badge {
-  border-radius: var(--radius-pill);
-  color: #c6c6ca;
-  font-family: var(--mono);
-  font-size: var(--type-meta);
-  padding: var(--space-2xs) var(--space-sm);
+.meta-grid div {
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
   background: var(--bg-sunken);
   box-shadow: var(--neu-sunken-soft);
 }
 
-.badge.sandbox {
-  border-color: rgba(255, 255, 255, 0.34);
-  color: var(--amber);
+.meta-grid span {
+  display: block;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--type-label);
+  text-transform: uppercase;
+}
+
+.meta-grid strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -0.1em;
+  color: var(--text);
+  stroke-width: 1.5;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 3px var(--text));
+}
+
+.ssh-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -0.1em;
+  color: var(--text);
+  stroke-width: 1.5;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 3px var(--text));
 }
 
 .telemetry-grid {
@@ -876,7 +909,7 @@ button.session-card {
   border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.055);
-  color: var(--amber);
+  color: var(--code-amber);
   padding: 0 3px;
   white-space: break-spaces;
   word-break: break-word;
@@ -1674,4 +1707,15 @@ button.session-card {
   .session-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* --- Tool call event styling --- */
+
+.event-item.event-tool-error .event-body {
+  color: #dc767e;
+}
+
+.event-item.event-tool-start .event-body,
+.event-item.event-tool-finish .event-body {
+  font-family: var(--mono);
 }

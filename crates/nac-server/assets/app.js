@@ -365,6 +365,7 @@ function sessionCardRenderDigest(card) {
     card.shortId,
     card.cwd,
     card.backend,
+    card.model,
     card.sshHost,
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
@@ -891,15 +892,14 @@ function renderSessionCard(card) {
     <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""}" data-session-id="${escapeAttr(card.sessionId)}">
       <div class="session-card-head">
         <div>
-          <h2>${escapeHtml(card.shortId)}</h2>
+          <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
           <div class="cwd">${escapeHtml(card.cwd)}</div>
         </div>
         <span class="status-dot ${card.statusClass}"></span>
       </div>
-      <div class="badge-row">
-        <span class="badge">${escapeHtml(card.backend)}</span>
-        ${card.sshHost ? `<span class="badge host">${escapeHtml(card.sshHost)}</span>` : ""}
-        ${card.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
+      <div class="meta-grid">
+        <div><span>model</span><strong>${escapeHtml(card.model)}</strong></div>
+        <div><span>backend</span><strong>${escapeHtml(card.backend)}</strong></div>
       </div>
       <div class="telemetry-grid">
         <div><span>msgs</span><strong>${card.messageCount}</strong></div>
@@ -1655,15 +1655,26 @@ function renderEvents() {
     return;
   }
 
-  el.eventLog.innerHTML = events.slice(0, 160).map((envelope) => `
-    <div class="event-item">
+  el.eventLog.innerHTML = events.slice(0, 160).map((envelope) => {
+    const kind = eventKind(envelope);
+    const detail = eventDetail(envelope);
+    const classes = ["event-item"];
+    if (kind === "tool_call_started") classes.push("event-tool-start");
+    if (kind === "tool_call_finished") {
+      classes.push("event-tool-finish");
+      const inner = envelope.event?.event || {};
+      if (inner.is_error) classes.push("event-tool-error");
+    }
+    return `
+    <div class="${classes.join(" ")}">
       <div class="event-meta">
-        <span class="event-kind">${escapeHtml(eventKind(envelope))}</span>
+        <span class="event-kind">${escapeHtml(kind)}</span>
         <span>${envelope.sequence_id ? `#${envelope.sequence_id}` : "local"}</span>
       </div>
-      <div class="event-body">${escapeHtml(eventDetail(envelope))}</div>
+      <div class="event-body">${escapeHtml(detail)}</div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderThreads(snapshot) {
@@ -2377,6 +2388,14 @@ function eventDetail(envelope) {
   if (envelope.local) return event.detail || "";
   if (event.type === "agent") {
     const inner = event.event || {};
+    if (inner.type === "tool_call_started") {
+      const args = inner.args_preview || (inner.args_detail ? inner.args_detail.slice(0, 200) : "");
+      return `${inner.name || "tool"}(${args})`;
+    }
+    if (inner.type === "tool_call_finished") {
+      const prefix = inner.is_error ? "ERROR " : "";
+      return `${prefix}${inner.name || "tool"}: ${inner.content_preview || ""}`;
+    }
     return inner.message || inner.line || inner.content || inner.name || inner.prompt_preview || JSON.stringify(inner);
   }
   return event.response || event.message || event.prompt_preview || event.session_id || JSON.stringify(event);
@@ -2465,7 +2484,12 @@ function formatWorkspaceDiffTotals(totals) {
 
 function formatToolCalls(toolCalls) {
   if (!toolCalls || toolCalls.length === 0) return "";
-  return toolCalls.map((call) => `${call.function?.name || "tool"} ${call.id}`).join("\n");
+  return toolCalls.map((call) => {
+    const name = call.function?.name || "tool";
+    const args = call.function?.arguments || "";
+    const preview = args.length > 100 ? args.slice(0, 97) + "..." : args;
+    return `${name}(${preview}) [${call.id}]`;
+  }).join("\n");
 }
 
 function messageText(message) {
