@@ -390,6 +390,10 @@ textarea {
   white-space: nowrap;
 }
 
+#snapRun {
+  font-variant-numeric: tabular-nums;
+}
+
 .matrix-toolbar {
   display: flex;
   align-items: center;
@@ -601,6 +605,14 @@ button.session-card {
   white-space: nowrap;
 }
 
+.run-tile {
+  font-variant-numeric: tabular-nums;
+}
+
+.run-tile-active {
+  color: #4fd2a8;
+}
+
 .last-prompt {
   display: -webkit-box;
   height: 30px;
@@ -743,6 +755,22 @@ button.session-card {
 
 .message-role.tool {
   color: #dc767e;
+}
+
+.message-duration {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.message-meta-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.message-meta-sep {
+  color: var(--faint);
 }
 
 .message-body,

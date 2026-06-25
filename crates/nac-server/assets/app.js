@@ -10,6 +10,8 @@ const state = {
   terminalRunsBySession: new Map(),
   submittingRunsBySession: new Set(),
   submittingRunTimersBySession: new Map(),
+  runStartedAtBySession: new Map(),
+  liveTimerInterval: null,
   eventSource: null,
   lastSequence: new Map(),
   activeTab: "chat",
@@ -246,6 +248,11 @@ async function loadSessionsOnce(options) {
     preserveSessionWorkspaceStats(sessions);
     sanitizeSessionListActiveRuns(sessions);
     updateSessionActivity(sessions);
+    if (state.runStartedAtBySession.size > 0) {
+      startLiveTimer();
+    } else {
+      stopLiveTimer();
+    }
 
     if (options.workspaceStats) state.lastWorkspaceStatsRefresh = Date.now();
     if (!state.selectedId && sessions.length > 0) state.selectedId = sessions[0].summary.session_id;
@@ -340,6 +347,15 @@ function sessionCardViewModel(entry) {
   const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot)
     || displayPromptFromMessageText(summary.last_user_prompt)
     || "no prompt yet";
+  const runActive = activeRunCountsForSession(sessionId, entry.active_run);
+  const runStartedAt = runActive
+    ? (state.runStartedAtBySession.get(sessionId) || entry.active_run?.started_at_epoch_ms || null)
+    : null;
+  const snapshotForTiming = state.snapshots.get(sessionId);
+  const lastDur = snapshotForTiming?.response_timing?.last_response_duration_ms;
+  const runDisplay = runActive
+    ? (runStartedAt ? formatRuntime(Date.now() - runStartedAt) : "00:00:00")
+    : (lastDur != null ? formatRuntime(lastDur) : "--:--:--");
   return {
     sessionId,
     shortId: shortId(sessionId),
@@ -352,7 +368,10 @@ function sessionCardViewModel(entry) {
     tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
     errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
     statusClass: sessionStatusClass(entry),
-    messageCount: summary.visible_message_count + pendingCount,
+    runActive,
+    runStartedAt,
+    lastDur: lastDur || null,
+    runDisplay,
     additions: diffStats.additions,
     deletions: diffStats.deletions,
     promptPreview,
@@ -373,7 +392,9 @@ function sessionCardRenderDigest(card) {
     card.tone,
     card.errorish,
     card.statusClass,
-    card.messageCount,
+    card.runActive ? "1" : "0",
+    String(card.runStartedAt || ""),
+    String(card.lastDur || ""),
     card.additions,
     card.deletions,
     card.promptPreview,
@@ -403,6 +424,9 @@ async function loadSnapshot(sessionId, openStream = false) {
     if (activeRunCountsForSession(sessionId, snapshot.active_run)) {
       clearRunSubmitting(sessionId);
       state.activeRunsBySession.set(sessionId, true);
+      if (snapshot.active_run?.started_at_epoch_ms) {
+        state.runStartedAtBySession.set(sessionId, snapshot.active_run.started_at_epoch_ms);
+      }
     }
     const previousCardDigest = sessionEntryRenderDigest(sessionEntryById(sessionId));
     state.snapshots.set(sessionId, snapshot);
@@ -413,6 +437,11 @@ async function loadSnapshot(sessionId, openStream = false) {
     }
     if (openStream) openEventStream(sessionId);
     if (state.selectedId === sessionId) {
+      if (sessionHasActiveRun(sessionId, snapshot)) {
+        startLiveTimer();
+      } else if (state.runStartedAtBySession.size === 0) {
+        stopLiveTimer();
+      }
       requestRender({ shell: false, sessions: cardChanged, inspector: true });
     }
     return snapshot;
@@ -756,6 +785,7 @@ function handleRunStarted(sessionId, envelope) {
   const activeRun = activeRunFromStartedEnvelope(envelope);
   state.terminalRunsBySession.delete(sessionId);
   state.activeRunsBySession.set(sessionId, true);
+  state.runStartedAtBySession.set(sessionId, activeRun.started_at_epoch_ms);
   clearRunSubmitting(sessionId);
   clearSessionAttention(sessionId);
   const snapshot = state.snapshots.get(sessionId);
@@ -764,7 +794,10 @@ function handleRunStarted(sessionId, envelope) {
   }
   const entry = sessionEntryById(sessionId);
   if (entry) entry.active_run = activeRun;
-  if (state.selectedId === sessionId) requestChatScrollToBottom();
+  if (state.selectedId === sessionId) {
+    requestChatScrollToBottom();
+  }
+  startLiveTimer();
 }
 
 function handleTerminalRun(sessionId, envelope) {
@@ -775,10 +808,16 @@ function handleTerminalRun(sessionId, envelope) {
     sequenceId: envelope.sequence_id || 0,
   });
   state.activeRunsBySession.set(sessionId, false);
+  state.runStartedAtBySession.delete(sessionId);
   clearRunSubmitting(sessionId);
   clearCachedActiveRun(sessionId, runId);
   if (wasActive) state.attentionSessions.add(sessionId);
-  if (state.selectedId === sessionId) stopWaitingLife();
+  if (state.selectedId === sessionId) {
+    stopWaitingLife();
+  }
+  if (state.runStartedAtBySession.size === 0) {
+    stopLiveTimer();
+  }
 }
 
 function requestRender(options = {}) {
@@ -903,7 +942,7 @@ function renderSessionCard(card) {
         <div><span>backend</span><strong>${escapeHtml(card.backend)}</strong></div>
       </div>
       <div class="telemetry-grid">
-        <div><span>msgs</span><strong>${card.messageCount}</strong></div>
+        <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
         <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
         <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
       </div>
@@ -939,7 +978,16 @@ function renderInspector() {
   el.snapModel.textContent = metadata.model;
   el.snapBackend.textContent = metadata.backend;
   el.snapMessages.textContent = effectiveMessageCount(metadata.session_id, snapshot);
-  el.snapRun.textContent = runActive ? "active" : "idle";
+  if (runActive) {
+    const startedAt = state.runStartedAtBySession.get(metadata.session_id)
+      || snapshot.active_run?.started_at_epoch_ms;
+    el.snapRun.textContent = startedAt
+      ? formatRuntime(Date.now() - startedAt)
+      : "active";
+  } else {
+    const lastDur = snapshot.response_timing?.last_response_duration_ms;
+    el.snapRun.textContent = lastDur != null ? formatDuration(lastDur) : "idle";
+  }
   el.cancelRun.disabled = !runActive;
   renderTabs();
   syncPromptBusy(metadata.session_id, snapshot);
@@ -973,7 +1021,23 @@ function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(se
     ...effectivePendingMessages(sessionId, snapshot),
   ];
   const visibleMessages = transcriptMessages.slice(-80);
-  const signature = transcriptMessagesSignature(visibleMessages);
+
+  const durationArr = snapshot?.response_timing?.response_durations_ms;
+  const durations = Array.isArray(durationArr) ? durationArr : [];
+  const offset = transcriptMessages.length - visibleMessages.length;
+  const durationByTranscriptIdx = new Map();
+  let responseIdx = 0;
+  transcriptMessages.forEach((message, idx) => {
+    if (message.role === "assistant" && !(message.tool_calls?.length > 0) && !message.pending) {
+      const dur = durations[responseIdx];
+      if (dur != null) durationByTranscriptIdx.set(idx, dur);
+      responseIdx++;
+    }
+  });
+
+  const messageSig = transcriptMessagesSignature(visibleMessages);
+  const durationSig = JSON.stringify(durations);
+  const signature = `${messageSig}|${durationSig}`;
   if (state.transcriptRenderedSessionId === sessionId
     && state.transcriptRenderedSignature === signature) {
     scrollTranscriptToBottomIfRequested();
@@ -1002,16 +1066,32 @@ function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(se
     const meta = document.createElement("div");
     meta.className = "message-meta";
 
+    const metaLeft = document.createElement("span");
+    metaLeft.className = "message-meta-left";
+
     const roleElement = document.createElement("span");
     roleElement.className = "message-role";
     const roleClass = safeClassToken(role);
     if (roleClass) roleElement.classList.add(roleClass);
     roleElement.textContent = role;
+    metaLeft.append(roleElement);
+
+    const transcriptIdx = offset + index;
+    const durationMs = durationByTranscriptIdx.get(transcriptIdx);
+    if (durationMs != null) {
+      const sep = document.createElement("span");
+      sep.className = "message-meta-sep";
+      sep.textContent = "•";
+      const durationElement = document.createElement("span");
+      durationElement.className = "message-duration";
+      durationElement.textContent = formatDuration(durationMs);
+      metaLeft.append(sep, durationElement);
+    }
 
     const markerElement = document.createElement("span");
     markerElement.textContent = message.pending ? "submitted" : `#${index + 1}`;
 
-    meta.append(roleElement, markerElement);
+    meta.append(metaLeft, markerElement);
 
     const bodyElement = document.createElement("div");
     bodyElement.className = "message-body markdown";
@@ -2407,7 +2487,12 @@ function updateSessionActivity(sessions) {
   for (const entry of sessions) {
     const sessionId = entry.summary.session_id;
     const remoteActive = activeRunCountsForSession(sessionId, entry.active_run);
-    if (remoteActive) clearRunSubmitting(sessionId);
+    if (remoteActive) {
+      clearRunSubmitting(sessionId);
+      if (entry.active_run?.started_at_epoch_ms) {
+        state.runStartedAtBySession.set(sessionId, entry.active_run.started_at_epoch_ms);
+      }
+    }
     const isSubmitting = state.submittingRunsBySession.has(sessionId);
     const isActive = remoteActive || isSubmitting;
     const wasActive = state.activeRunsBySession.get(sessionId) === true;
@@ -2415,6 +2500,9 @@ function updateSessionActivity(sessions) {
       clearSessionAttention(sessionId);
     } else if (wasActive) {
       state.attentionSessions.add(sessionId);
+    }
+    if (!isActive) {
+      state.runStartedAtBySession.delete(sessionId);
     }
     state.activeRunsBySession.set(sessionId, isActive);
     seen.add(sessionId);
@@ -2424,6 +2512,7 @@ function updateSessionActivity(sessions) {
     if (!seen.has(sessionId)) {
       state.activeRunsBySession.delete(sessionId);
       state.terminalRunsBySession.delete(sessionId);
+      state.runStartedAtBySession.delete(sessionId);
       clearRunSubmitting(sessionId);
       state.attentionSessions.delete(sessionId);
     }
@@ -2575,4 +2664,52 @@ function escapeAttr(value) {
 function safeClassToken(value) {
   const token = String(value || "");
   return /^[A-Za-z0-9_-]+$/.test(token) ? token : null;
+}
+
+function formatRuntime(ms) {
+  if (ms == null || ms < 0) return "00:00:00";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function formatDuration(ms) {
+  if (ms == null) return null;
+  return formatRuntime(ms);
+}
+
+function startLiveTimer() {
+  if (state.liveTimerInterval) return;
+  state.liveTimerInterval = setInterval(() => {
+    if (state.runStartedAtBySession.size === 0) {
+      stopLiveTimer();
+      return;
+    }
+    const now = Date.now();
+    const selectedId = state.selectedId;
+    if (selectedId) {
+      const startedAt = state.runStartedAtBySession.get(selectedId);
+      if (startedAt) {
+        el.snapRun.textContent = formatRuntime(now - startedAt);
+      }
+    }
+    document.querySelectorAll("[data-run-timer]").forEach((tile) => {
+      const sid = tile.dataset.runTimer;
+      if (!sid) return;
+      const startedAt = state.runStartedAtBySession.get(sid);
+      if (startedAt) {
+        tile.textContent = formatRuntime(now - startedAt);
+      }
+    });
+  }, 200);
+}
+
+function stopLiveTimer() {
+  if (state.liveTimerInterval) {
+    clearInterval(state.liveTimerInterval);
+    state.liveTimerInterval = null;
+  }
 }
