@@ -365,6 +365,7 @@ function sessionCardRenderDigest(card) {
     card.shortId,
     card.cwd,
     card.backend,
+    card.model,
     card.sshHost,
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
@@ -891,15 +892,14 @@ function renderSessionCard(card) {
     <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""}" data-session-id="${escapeAttr(card.sessionId)}">
       <div class="session-card-head">
         <div>
-          <h2>${escapeHtml(card.shortId)}</h2>
+          <h2>${card.sandboxed ? `<span class="sandbox-icon" title="sandbox active"></span>` : ""}${escapeHtml(card.shortId)}</h2>
           <div class="cwd">${escapeHtml(card.cwd)}</div>
         </div>
         <span class="status-dot ${card.statusClass}"></span>
       </div>
-      <div class="badge-row">
-        <span class="badge">${escapeHtml(card.backend)}</span>
-        ${card.sshHost ? `<span class="badge host">${escapeHtml(card.sshHost)}</span>` : ""}
-        ${card.sandboxed ? `<span class="badge sandbox">sandbox</span>` : ""}
+      <div class="meta-grid">
+        <div><span>model</span><strong>${escapeHtml(card.model)}</strong></div>
+        <div><span>backend</span><strong>${escapeHtml(card.backend)}</strong></div>
       </div>
       <div class="telemetry-grid">
         <div><span>msgs</span><strong>${card.messageCount}</strong></div>
