@@ -521,39 +521,6 @@ button.session-card {
   white-space: nowrap;
 }
 
-.meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-sm);
-  margin-top: var(--space-sm);
-}
-
-.meta-grid div {
-  min-width: 0;
-  border-radius: var(--radius-sm);
-  padding: var(--space-sm);
-  background: var(--bg-sunken);
-  box-shadow: var(--neu-sunken-soft);
-}
-
-.meta-grid span {
-  display: block;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: var(--type-label);
-  text-transform: uppercase;
-}
-
-.meta-grid strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: var(--type-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .sandbox-icon {
   display: inline-block;
   width: 12px;

@@ -381,8 +381,6 @@ function sessionCardViewModel(entry) {
     sessionId,
     shortId: shortId(sessionId),
     cwd: summary.cwd || "",
-    backend: summary.backend || "",
-    model: summary.model || "",
     sshHost: summary.ssh_host || "",
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
@@ -405,8 +403,6 @@ function sessionCardRenderDigest(card) {
     card.sessionId,
     card.shortId,
     card.cwd,
-    card.backend,
-    card.model,
     card.sshHost,
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
@@ -1026,10 +1022,6 @@ function renderSessionCard(card) {
           <div class="cwd">${escapeHtml(card.cwd)}</div>
         </div>
         <span class="status-dot ${card.statusClass}"></span>
-      </div>
-      <div class="meta-grid">
-        <div><span>model</span><strong>${escapeHtml(card.model)}</strong></div>
-        <div><span>backend</span><strong>${escapeHtml(card.backend)}</strong></div>
       </div>
       <div class="telemetry-grid">
         <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
