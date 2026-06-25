@@ -225,6 +225,10 @@ pub fn list_sessions(store_path: &Path) -> Result<Vec<SessionSummarySnapshot>> {
         .map(|sessions| sessions.into_iter().map(Into::into).collect())
 }
 
+pub fn delete_session(store_path: &Path, session_id: &str) -> Result<bool> {
+    sessions::delete_session(store_path, session_id)
+}
+
 pub fn list_threads(store_path: &Path, session_id: Option<&str>) -> Result<Vec<ThreadSnapshot>> {
     let Some(session_id) = session_id else {
         return Ok(Vec::new());

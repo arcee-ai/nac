@@ -485,6 +485,10 @@ button.session-card {
   box-shadow: var(--neu-selected);
 }
 
+.session-card {
+  position: relative;
+}
+
 .session-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -652,6 +656,11 @@ button.session-card {
   align-items: start;
   gap: var(--space-lg);
   min-width: 0;
+}
+
+.inspector-actions {
+  display: flex;
+  gap: var(--space-sm);
 }
 
 .inspector-head h1 {
@@ -1511,6 +1520,19 @@ button.session-card {
   background: var(--panel);
   box-shadow: var(--neu-dialog);
   padding: var(--space-lg);
+}
+
+.launch-dialog--compact {
+  width: min(420px, 100%);
+  max-height: min(320px, calc(100vh - 28px));
+}
+
+.confirm-text {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--type-body);
+  line-height: 1.5;
 }
 
 .launch-dialog-head {

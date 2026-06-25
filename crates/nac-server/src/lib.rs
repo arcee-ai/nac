@@ -477,6 +477,36 @@ impl SessionManager {
             .map_err(|error| anyhow!(error.to_string()))
     }
 
+    /// Deletes a session and all related data (threads, episodes, worksets,
+    /// workset_items) from the store. If the session is currently active in
+    /// memory, any running task is gracefully cancelled before removal.
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        // Cancel any active run and remove from the in-memory map.
+        {
+            let active = self.inner.active_sessions.read().await;
+            if let Some(service) = active.get(session_id) {
+                if let Some(active_run) = service.active_run() {
+                    let _ = service
+                        .connect_client()
+                        .request_cancel(&active_run.run_id)
+                        .await;
+                }
+            }
+        }
+        self.inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
+
+        // Cascade-delete all DB rows for this session.
+        let deleted = view::delete_session(&self.inner.store_path, session_id)?;
+        if !deleted {
+            return Err(anyhow!("session '{}' was not found", session_id));
+        }
+        Ok(())
+    }
+
     async fn resume_session(&self, session_id: &str) -> Result<SessionService> {
         let summary = self
             .list_sessions(false)
@@ -518,7 +548,7 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route("/sessions/{session_id}", get(session_snapshot))
+        .route("/sessions/{session_id}", get(session_snapshot).delete(delete_session_handler))
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
@@ -697,6 +727,14 @@ async fn cancel_active_run(
 ) -> std::result::Result<StatusCode, ApiError> {
     manager.cancel_active_run(&session_id).await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn delete_session_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager.delete_session(&session_id).await?;
+    Ok(StatusCode::OK)
 }
 
 fn model_options(

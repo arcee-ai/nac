@@ -14,7 +14,7 @@ mod db;
 mod snapshot;
 mod summary;
 
-pub use db::{create_session, list_sessions, load_last_session, load_session, save_session};
+pub use db::{create_session, delete_session, list_sessions, load_last_session, load_session, save_session};
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
@@ -535,6 +535,87 @@ mod tests {
             loaded.extra_headers.is_empty(),
             "legacy rows without extra_headers_json column load as empty map"
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn delete_session_cascades_to_threads_episodes_and_worksets() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("delete_cascade");
+
+        // Create a session
+        let snapshot = new_snapshot(
+            "session-del".to_string(),
+            PathBuf::from("/repo"),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            vec![Message::User {
+                content: "hello".to_string(),
+            }],
+            None,
+            BTreeMap::new(),
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        // Add threads with episodes
+        crate::store::append_episode(
+            &store_path,
+            "session-del",
+            "auth",
+            "inspect",
+            "auth episode",
+        )
+        .unwrap();
+        crate::store::append_episode(
+            &store_path,
+            "session-del",
+            "tests",
+            "scan",
+            "test episode",
+        )
+        .unwrap();
+
+        // Add a workset with items
+        let workset = crate::store::WorksetDefinition {
+            id: "ws-1".to_string(),
+            goal: "refresh".to_string(),
+            status: "planned".to_string(),
+            summary: "summary".to_string(),
+            verification_recipe: None,
+            items: vec![crate::store::WorksetItemDefinition {
+                title: "item-1".to_string(),
+                scope: "src/main.rs".to_string(),
+                description: "do thing".to_string(),
+                role: "implement".to_string(),
+                depends_on: Vec::new(),
+                acceptance: "done".to_string(),
+                notes: None,
+            }],
+        };
+        crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
+
+        // Verify data exists
+        assert!(!crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
+        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().len() == 1);
+        assert!(list_sessions(&store_path).unwrap().len() == 1);
+
+        // Delete the session
+        let deleted = delete_session(&store_path, "session-del").unwrap();
+        assert!(deleted, "delete_session should return true for existing session");
+
+        // Verify all related rows are gone
+        assert!(crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
+        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().is_empty());
+        assert!(list_sessions(&store_path).unwrap().is_empty());
+
+        // Deleting a non-existent session returns false
+        let deleted_again = delete_session(&store_path, "session-del").unwrap();
+        assert!(!deleted_again, "delete_session should return false for missing session");
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

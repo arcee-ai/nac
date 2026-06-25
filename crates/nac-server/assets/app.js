@@ -36,6 +36,7 @@ const state = {
   lastWorkspaceStatsRefresh: 0,
   transcriptRenderedSessionId: null,
   transcriptRenderedSignature: "",
+  pendingDeleteSessionId: null,
 };
 
 const el = {};
@@ -106,6 +107,12 @@ function bindElements() {
     "threadsView",
     "worksetsView",
     "workspaceView",
+    "deleteOverlay",
+    "closeDelete",
+    "confirmDelete",
+    "deleteConfirmText",
+    "deleteStatus",
+    "deleteSessionBtn",
   ]) {
     el[id] = document.getElementById(id);
   }
@@ -117,14 +124,23 @@ function bindEvents() {
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
   el.cancelRun.addEventListener("click", cancelActiveRun);
+  el.deleteSessionBtn.addEventListener("click", () => {
+    if (state.selectedId) deleteSession(state.selectedId);
+  });
   el.mobileBack.addEventListener("click", showMobileSessions);
   el.closeLaunch.addEventListener("click", hideLaunchOverlay);
   el.launchOverlay.addEventListener("click", (event) => {
     if (event.target === el.launchOverlay) hideLaunchOverlay();
   });
+  el.closeDelete.addEventListener("click", hideDeleteOverlay);
+  el.deleteOverlay.addEventListener("click", (event) => {
+    if (event.target === el.deleteOverlay) hideDeleteOverlay();
+  });
+  el.confirmDelete.addEventListener("click", confirmDeleteSession);
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!el.launchOverlay.hidden) hideLaunchOverlay();
+    if (!el.deleteOverlay.hidden) hideDeleteOverlay();
   });
 
   el.tabs.addEventListener("click", (event) => {
@@ -164,6 +180,11 @@ async function apiPost(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  return readJson(response);
+}
+
+async function apiDelete(path) {
+  const response = await fetch(path, { method: "DELETE" });
   return readJson(response);
 }
 
@@ -483,6 +504,25 @@ function hideLaunchOverlay() {
   el.launchOverlay.hidden = true;
 }
 
+function showDeleteOverlay(sessionId) {
+  if (!sessionId) return;
+  state.pendingDeleteSessionId = sessionId;
+  el.deleteConfirmText.textContent = `Delete session ${shortId(sessionId)}? This permanently removes all threads, episodes, and worksets.`;
+  el.deleteStatus.textContent = "";
+  el.deleteStatus.classList.remove("error");
+  el.deleteOverlay.hidden = false;
+}
+
+function hideDeleteOverlay() {
+  el.deleteOverlay.hidden = true;
+  state.pendingDeleteSessionId = null;
+}
+
+function setDeleteStatus(message, error) {
+  el.deleteStatus.textContent = message || "";
+  el.deleteStatus.classList.toggle("error", Boolean(error));
+}
+
 function showMobileSessions() {
   state.mobileDetailOpen = false;
   renderMobileMode();
@@ -597,6 +637,56 @@ async function cancelActiveRun() {
     await loadSnapshot(sessionId, false);
   } catch (error) {
     pushLocalEvent("cancel_error", error.message, sessionId);
+  }
+}
+
+async function deleteSession(sessionId) {
+  if (!sessionId) return;
+  showDeleteOverlay(sessionId);
+}
+
+async function confirmDeleteSession() {
+  const sessionId = state.pendingDeleteSessionId;
+  if (!sessionId) return;
+  setDeleteStatus("deleting", false);
+  el.confirmDelete.disabled = true;
+  try {
+    await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
+    // Clean up all client-side state for this session
+    state.snapshots.delete(sessionId);
+    state.eventsBySession.delete(sessionId);
+    state.activeThreadsBySession.delete(sessionId);
+    state.attentionSessions.delete(sessionId);
+    state.activeRunsBySession.delete(sessionId);
+    state.terminalRunsBySession.delete(sessionId);
+    state.submittingRunsBySession.delete(sessionId);
+    state.submittingRunTimersBySession.delete(sessionId);
+    state.runStartedAtBySession.delete(sessionId);
+    state.lastSequence.delete(sessionId);
+    state.workspaceSelectedPathBySession.delete(sessionId);
+    state.workspaceDiffEntries.delete(sessionId);
+    // If the deleted session was selected, pick a new one or clear
+    if (state.selectedId === sessionId) {
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+      state.selectedId = null;
+      state.transcriptRenderedSessionId = null;
+      state.transcriptRenderedSignature = "";
+    }
+    hideDeleteOverlay();
+    await loadSessions({ forceFetch: true, forceRender: true });
+    if (state.selectedId) {
+      selectSession(state.selectedId);
+    } else {
+      requestRender({ inspector: true });
+    }
+  } catch (error) {
+    pushLocalEvent("delete_error", error.message, sessionId);
+    setDeleteStatus(error.message, true);
+  } finally {
+    el.confirmDelete.disabled = false;
   }
 }
 
@@ -961,6 +1051,7 @@ function renderInspector() {
     el.snapMessages.textContent = "0";
     el.snapRun.textContent = "idle";
     el.cancelRun.disabled = true;
+    el.deleteSessionBtn.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
     state.transcriptRenderedSessionId = null;
     el.threadsView.innerHTML = "";
@@ -989,6 +1080,7 @@ function renderInspector() {
     el.snapRun.textContent = lastDur != null ? formatDuration(lastDur) : "idle";
   }
   el.cancelRun.disabled = !runActive;
+  el.deleteSessionBtn.disabled = false;
   renderTabs();
   syncPromptBusy(metadata.session_id, snapshot);
   renderActiveInspectorPanel(snapshot);

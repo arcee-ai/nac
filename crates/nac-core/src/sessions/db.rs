@@ -71,6 +71,35 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
+pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
+    let mut conn = crate::store::open_connection(path)?;
+    let tx = conn.transaction()?;
+    // Delete child tables before parent tables to respect FK constraints:
+    // episodes → threads, workset_items → worksets.
+    tx.execute(
+        "DELETE FROM episodes WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM workset_items WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM threads WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM worksets WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    let deleted = tx.execute(
+        "DELETE FROM sessions WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.commit()?;
+    Ok(deleted > 0)
+}
+
 fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
         session_id: row.get(0)?,

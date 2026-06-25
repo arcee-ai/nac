@@ -51,11 +51,20 @@
             <h1 id="inspectorTitle">No session selected</h1>
             <p id="inspectorMeta">Launch or select a session.</p>
           </div>
-          <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
-            </svg>
-          </button>
+          <div class="inspector-actions">
+            <button id="deleteSessionBtn" class="icon-button" type="button" aria-label="Delete session" title="Delete session">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
+              </svg>
+            </button>
+          </div>
         </header>
 
         <nav class="tabs" id="tabs">
@@ -211,6 +220,35 @@
             <div class="form-status" id="launchStatus"></div>
           </div>
         </form>
+      </section>
+    </div>
+
+    <div class="launch-overlay" id="deleteOverlay" hidden>
+      <section class="launch-dialog launch-dialog--compact" role="dialog" aria-modal="true" aria-label="Delete session">
+        <header class="launch-dialog-head">
+          <div>
+            <div class="eyebrow">Delete</div>
+          </div>
+          <button id="closeDelete" class="icon-button" type="button" aria-label="Close delete dialog" title="Close">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+        <div class="launch-form">
+          <p id="deleteConfirmText" class="confirm-text">Delete this session? This permanently removes all threads, episodes, and worksets.</p>
+          <div class="launch-actions">
+            <button class="primary-action icon-button icon-button-destructive launch-submit" id="confirmDelete" type="button" aria-label="Confirm delete" title="Confirm delete">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="form-status" id="deleteStatus"></div>
+          </div>
+        </div>
       </section>
     </div>
 
