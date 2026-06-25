@@ -892,7 +892,7 @@ function renderSessionCard(card) {
     <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""}" data-session-id="${escapeAttr(card.sessionId)}">
       <div class="session-card-head">
         <div>
-          <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>` : ""}</h2>
+          <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}</h2>
           <div class="cwd">${escapeHtml(card.cwd)}</div>
         </div>
         <span class="status-dot ${card.statusClass}"></span>

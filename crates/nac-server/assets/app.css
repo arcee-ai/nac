@@ -548,10 +548,12 @@ button.session-card {
 
 .sandbox-icon {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  vertical-align: middle;
+  width: 12px;
+  height: 12px;
+  vertical-align: -0.1em;
   color: var(--amber);
+  stroke-width: 1.5;
+  opacity: 0.7;
 }
 
 .telemetry-grid {
