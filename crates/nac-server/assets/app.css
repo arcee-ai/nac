@@ -1678,18 +1678,6 @@ button.session-card {
 
 /* --- Tool call event styling --- */
 
-.event-item.event-tool-start {
-  border-left: 3px solid var(--blue);
-}
-
-.event-item.event-tool-finish {
-  border-left: 3px solid #4fd2a8;
-}
-
-.event-item.event-tool-error {
-  border-left: 3px solid #dc767e;
-}
-
 .event-item.event-tool-error .event-body {
   color: #dc767e;
 }
