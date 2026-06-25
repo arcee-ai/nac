@@ -1655,15 +1655,26 @@ function renderEvents() {
     return;
   }
 
-  el.eventLog.innerHTML = events.slice(0, 160).map((envelope) => `
-    <div class="event-item">
+  el.eventLog.innerHTML = events.slice(0, 160).map((envelope) => {
+    const kind = eventKind(envelope);
+    const detail = eventDetail(envelope);
+    const classes = ["event-item"];
+    if (kind === "tool_call_started") classes.push("event-tool-start");
+    if (kind === "tool_call_finished") {
+      classes.push("event-tool-finish");
+      const inner = envelope.event?.event || {};
+      if (inner.is_error) classes.push("event-tool-error");
+    }
+    return `
+    <div class="${classes.join(" ")}">
       <div class="event-meta">
-        <span class="event-kind">${escapeHtml(eventKind(envelope))}</span>
+        <span class="event-kind">${escapeHtml(kind)}</span>
         <span>${envelope.sequence_id ? `#${envelope.sequence_id}` : "local"}</span>
       </div>
-      <div class="event-body">${escapeHtml(eventDetail(envelope))}</div>
+      <div class="event-body">${escapeHtml(detail)}</div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderThreads(snapshot) {
@@ -2377,6 +2388,14 @@ function eventDetail(envelope) {
   if (envelope.local) return event.detail || "";
   if (event.type === "agent") {
     const inner = event.event || {};
+    if (inner.type === "tool_call_started") {
+      const args = inner.args_preview || (inner.args_detail ? inner.args_detail.slice(0, 200) : "");
+      return `${inner.name || "tool"}(${args})`;
+    }
+    if (inner.type === "tool_call_finished") {
+      const prefix = inner.is_error ? "ERROR " : "";
+      return `${prefix}${inner.name || "tool"}: ${inner.content_preview || ""}`;
+    }
     return inner.message || inner.line || inner.content || inner.name || inner.prompt_preview || JSON.stringify(inner);
   }
   return event.response || event.message || event.prompt_preview || event.session_id || JSON.stringify(event);
@@ -2465,7 +2484,12 @@ function formatWorkspaceDiffTotals(totals) {
 
 function formatToolCalls(toolCalls) {
   if (!toolCalls || toolCalls.length === 0) return "";
-  return toolCalls.map((call) => `${call.function?.name || "tool"} ${call.id}`).join("\n");
+  return toolCalls.map((call) => {
+    const name = call.function?.name || "tool";
+    const args = call.function?.arguments || "";
+    const preview = args.length > 100 ? args.slice(0, 97) + "..." : args;
+    return `${name}(${preview}) [${call.id}]`;
+  }).join("\n");
 }
 
 function messageText(message) {
