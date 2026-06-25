@@ -345,6 +345,7 @@ function sessionCardViewModel(entry) {
     shortId: shortId(sessionId),
     cwd: summary.cwd || "",
     backend: summary.backend || "",
+    model: summary.model || "",
     sshHost: summary.ssh_host || "",
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
