@@ -598,8 +598,8 @@ mod tests {
     #[test]
     fn parse_remote_label_handles_ssh() {
         assert_eq!(
-            parse_remote_label("git@github.com:sapiosaturn/nac.git").as_deref(),
-            Some("sapiosaturn/nac")
+            parse_remote_label("git@github.com:arcee-ai/nac.git").as_deref(),
+            Some("arcee-ai/nac")
         );
     }
 
