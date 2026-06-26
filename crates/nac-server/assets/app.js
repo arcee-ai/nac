@@ -1098,19 +1098,18 @@ function renderSessions() {
 
   let sessionCards;
   if (cards.length === 0) {
-    sessionCards = `<div class="empty-state matrix-empty">No sessions yet.</div>`;
+    sessionCards = renderNewSessionCard() + `<div class="empty-state matrix-empty">No sessions yet.</div>`;
   } else if (hasPinned) {
     sessionCards = `<div class="pinned-section-label">Pinned</div>`;
     sessionCards += pinnedCards.map(renderSessionCard).join("");
-    if (unpinnedCards.length > 0) {
-      sessionCards += `<div class="pinned-separator"></div>`;
-      sessionCards += unpinnedCards.map(renderSessionCard).join("");
-    }
+    sessionCards += `<div class="pinned-separator"></div>`;
+    sessionCards += renderNewSessionCard();
+    sessionCards += unpinnedCards.map(renderSessionCard).join("");
   } else {
-    sessionCards = cards.map(renderSessionCard).join("");
+    sessionCards = renderNewSessionCard() + cards.map(renderSessionCard).join("");
   }
 
-  el.sessionGrid.innerHTML = renderNewSessionCard() + sessionCards;
+  el.sessionGrid.innerHTML = sessionCards;
   el.sessionGrid.querySelector("[data-action='new-session']")?.addEventListener("click", showLaunchOverlay);
   el.sessionGrid.querySelectorAll("[data-session-id]").forEach((card) => {
     card.addEventListener("click", (event) => {
