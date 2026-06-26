@@ -1226,6 +1226,32 @@ button.session-card {
   box-shadow: var(--neu-sunken-soft);
 }
 
+/* Nested episode panels inside thread-detail — raised from the sunken background */
+.thread-detail .dense-section-title {
+  margin-top: var(--space-md);
+}
+
+.thread-detail .dense-sublist {
+  gap: var(--space-sm);
+}
+
+.thread-detail .dense-subitem {
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.thread-detail .dense-subitem .dense-detail-grid {
+  margin-top: 0;
+}
+
+.thread-detail .dense-subitem .dense-body {
+  margin-top: var(--space-xs);
+  color: var(--text);
+}
+
 .thread-row .dense-title > span:first-child {
   display: inline-flex;
   align-items: center;
