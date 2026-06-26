@@ -1184,6 +1184,48 @@ button.session-card {
   box-shadow: var(--neu-selected);
 }
 
+.thread-block {
+  display: grid;
+  gap: 0;
+}
+
+.thread-row {
+  width: 100%;
+  display: block;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.thread-row:hover,
+.thread-row:focus-visible {
+  box-shadow: var(--neu-pressed), 0 0 0 1px var(--highlight);
+}
+
+.thread-row.expanded {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)), var(--panel-2);
+  box-shadow: var(--neu-selected);
+}
+
+.thread-row.thread-active.expanded {
+  box-shadow: var(--neu-selected);
+}
+
+.thread-detail {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-sunken);
+  padding: var(--space-sm);
+  box-shadow: var(--neu-sunken-soft);
+}
+
 .thread-row .dense-title > span:first-child {
   display: inline-flex;
   align-items: center;

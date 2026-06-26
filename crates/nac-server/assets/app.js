@@ -21,6 +21,7 @@ const state = {
   workspaceSelectedPathBySession: new Map(),
   workspaceDiffEntries: new Map(),
   workspaceDiffRequestSeq: 0,
+  expandedThreadNamesBySession: new Map(),
   renderRafId: null,
   renderMetricsPending: false,
   renderSessionsPending: false,
@@ -154,6 +155,7 @@ function bindEvents() {
   });
 
   el.workspaceView.addEventListener("click", handleWorkspaceFileClick);
+  el.threadsView.addEventListener("click", handleThreadClick);
 }
 
 async function boot() {
@@ -663,6 +665,7 @@ async function confirmDeleteSession() {
     state.lastSequence.delete(sessionId);
     state.workspaceSelectedPathBySession.delete(sessionId);
     state.workspaceDiffEntries.delete(sessionId);
+    state.expandedThreadNamesBySession.delete(sessionId);
     // If the deleted session was selected, pick a new one or clear
     if (state.selectedId === sessionId) {
       if (state.eventSource) {
@@ -1857,6 +1860,29 @@ function renderEvents() {
   }).join("");
 }
 
+function handleThreadClick(event) {
+  const button = event.target.closest("button[data-thread-name]");
+  if (!button || !el.threadsView.contains(button)) return;
+
+  const sessionId = state.selectedId;
+  const name = button.dataset.threadName;
+  if (!sessionId || !name) return;
+
+  let expanded = state.expandedThreadNamesBySession.get(sessionId);
+  if (!expanded) {
+    expanded = new Set();
+    state.expandedThreadNamesBySession.set(sessionId, expanded);
+  }
+
+  if (expanded.has(name)) {
+    expanded.delete(name);
+  } else {
+    expanded.add(name);
+  }
+
+  requestInspectorRender();
+}
+
 function renderThreads(snapshot) {
   const sessionId = snapshot.metadata.session_id;
   const persisted = new Map((snapshot.threads || []).map((thread) => [thread.name, thread]));
@@ -1871,6 +1897,8 @@ function renderThreads(snapshot) {
     return;
   }
 
+  const expanded = state.expandedThreadNamesBySession.get(sessionId) || new Set();
+
   el.threadsView.innerHTML = names.map((name) => {
     const thread = persisted.get(name);
     const liveThread = live.get(name);
@@ -1878,30 +1906,48 @@ function renderThreads(snapshot) {
     const episodes = snapshot.thread_episodes?.[name] || [];
     const action = liveThread?.action || thread?.latest_action || "no action";
     const episodeCount = thread?.episode_count ?? episodes.length;
-    return `
-      <div class="dense-item thread-row ${status === "active" ? "thread-active" : ""}">
-        <div class="dense-title">
+    const isExpanded = expanded.has(name);
+    const classes = [
+      "dense-item",
+      "thread-row",
+      status === "active" ? "thread-active" : "",
+      isExpanded ? "expanded" : "",
+    ].filter(Boolean).join(" ");
+
+    const header = `
+        <span class="dense-title">
           <span><span class="status-dot ${status === "active" ? "active" : "idle"}"></span>${escapeHtml(name)}</span>
           <span>${escapeHtml(status)} / ${episodeCount} eps</span>
-        </div>
-        <div class="dense-meta"><span>${escapeHtml(action)}</span><span>${episodes.length} retained</span></div>
-        ${renderDetailRows([
-          ["session", thread?.session_id || sessionId],
-          ["created", thread?.created_at],
-          ["updated", thread?.updated_at],
-          ["latest action", thread?.latest_action],
-          ["live action", liveThread?.action],
-          ["sources", liveThread?.source_threads],
-          ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence],
-          ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence],
-          ["exit code", liveThread?.exit_code],
-          ["timed out", liveThread?.timed_out],
-          ["last log", liveThread?.last_log],
-        ])}
-        <div class="dense-section-title">retained episodes</div>
-        ${episodes.length === 0
-          ? `<div class="dense-body muted">No retained episodes.</div>`
-          : `<div class="dense-sublist">${episodes.map(renderThreadEpisode).join("")}</div>`}
+        </span>
+        <span class="dense-meta"><span>${escapeHtml(action)}</span><span>${episodes.length} retained</span></span>`;
+
+    const detail = isExpanded ? `
+        <div class="thread-detail">
+          ${renderDetailRows([
+            ["session", thread?.session_id || sessionId],
+            ["created", thread?.created_at],
+            ["updated", thread?.updated_at],
+            ["latest action", thread?.latest_action],
+            ["live action", liveThread?.action],
+            ["sources", liveThread?.source_threads],
+            ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence],
+            ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence],
+            ["exit code", liveThread?.exit_code],
+            ["timed out", liveThread?.timed_out],
+            ["last log", liveThread?.last_log],
+          ])}
+          <div class="dense-section-title">retained episodes</div>
+          ${episodes.length === 0
+            ? `<div class="dense-body muted">No retained episodes.</div>`
+            : `<div class="dense-sublist">${episodes.map(renderThreadEpisode).join("")}</div>`}
+        </div>` : "";
+
+    return `
+      <div class="thread-block">
+        <button type="button" class="${classes}" data-thread-name="${escapeAttr(name)}" aria-expanded="${isExpanded ? "true" : "false"}">
+          ${header}
+        </button>
+        ${detail}
       </div>`;
   }).join("");
 }
