@@ -135,6 +135,14 @@ pub(super) struct ModelArgs {
     /// Internal model override used by managed workers and resume
     #[arg(long, hide = true)]
     pub(super) api_model: Option<String>,
+
+    /// Internal api_key_env override used by managed workers to inherit session config
+    #[arg(long = "api-key-env", hide = true)]
+    pub(super) api_key_env: Option<String>,
+
+    /// Internal extra headers override (JSON object) used by managed workers to inherit session config
+    #[arg(long = "extra-headers", hide = true)]
+    pub(super) extra_headers: Option<String>,
 }
 
 #[derive(clap::Args)]

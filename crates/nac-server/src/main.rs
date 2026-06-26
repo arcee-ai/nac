@@ -150,6 +150,14 @@ struct ModelArgs {
     /// Internal model override used by managed workers.
     #[arg(long, hide = true)]
     api_model: Option<String>,
+
+    /// Internal api_key_env override used by managed workers to inherit session config.
+    #[arg(long = "api-key-env", hide = true)]
+    api_key_env: Option<String>,
+
+    /// Internal extra headers override (JSON object) used by managed workers to inherit session config.
+    #[arg(long = "extra-headers", hide = true)]
+    extra_headers: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -300,6 +308,12 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             reasoning_effort: cli.model.reasoning_effort.map(Into::into),
             api_base_url: cli.model.api_base_url,
             api_model: cli.model.api_model,
+            api_key_env: cli.model.api_key_env,
+            extra_headers: cli
+                .model
+                .extra_headers
+                .as_deref()
+                .and_then(runtime::parse_extra_headers_json),
         },
         sandbox: SandboxOptions {
             sandbox: cli.sandbox.sandbox,

@@ -637,6 +637,17 @@ async fn run_worker(
         command.arg("--effort").arg(reasoning_effort.as_str());
     }
 
+    if let Some(api_key_env) = client.api_key_env() {
+        command.arg("--api-key-env").arg(api_key_env);
+    }
+
+    let extra_headers = client.extra_headers();
+    if !extra_headers.is_empty() {
+        if let Ok(json) = serde_json::to_string(extra_headers) {
+            command.arg("--extra-headers").arg(json);
+        }
+    }
+
     for source_thread in invocation.source_threads {
         command.arg("--source-thread").arg(source_thread);
     }

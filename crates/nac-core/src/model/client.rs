@@ -9,6 +9,7 @@ pub struct ModelClient {
     pub model: String,
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
+    api_key_env: Option<String>,
     extra_headers: std::collections::BTreeMap<String, String>,
 }
 
@@ -47,6 +48,7 @@ impl ModelClient {
             model,
             backend,
             reasoning_effort,
+            api_key_env: overrides.api_key_env.clone(),
             extra_headers: overrides.extra_headers,
         })
     }
@@ -86,6 +88,14 @@ impl ModelClient {
 
     pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
         self.reasoning_effort
+    }
+
+    pub fn api_key_env(&self) -> Option<&str> {
+        self.api_key_env.as_deref()
+    }
+
+    pub fn extra_headers(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.extra_headers
     }
 
     async fn send_fireworks_chat(
@@ -291,6 +301,7 @@ impl ModelClient {
             model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),
+            api_key_env: None,
             extra_headers: std::collections::BTreeMap::new(),
         }
     }

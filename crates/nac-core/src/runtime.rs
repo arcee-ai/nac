@@ -102,6 +102,8 @@ pub struct ModelOptions {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
+    pub api_key_env: Option<String>,
+    pub extra_headers: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -331,9 +333,24 @@ pub(crate) fn model_overrides(model: &ModelOptions, config: &NacConfig) -> Resul
             .or_else(|| config.model.model.clone()),
         backend: model.backend.or(config.model.backend),
         reasoning_effort: model.reasoning_effort.or(config.model.reasoning_effort),
-        api_key_env: configured_api_key_env(config),
-        extra_headers: config.model.extra_headers.clone(),
+        api_key_env: model
+            .api_key_env
+            .clone()
+            .or_else(|| configured_api_key_env(config)),
+        extra_headers: model
+            .extra_headers
+            .clone()
+            .unwrap_or_else(|| config.model.extra_headers.clone()),
     })
+}
+
+/// Parse a JSON object string into a `BTreeMap<String, String>`.
+/// Returns `None` for empty or invalid input.
+pub fn parse_extra_headers_json(json: &str) -> Option<BTreeMap<String, String>> {
+    if json.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<BTreeMap<String, String>>(json).ok()
 }
 
 pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
@@ -1032,6 +1049,8 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Low),
                 api_base_url: Some("https://cli.example/v1".to_string()),
                 api_model: Some("cli-model".to_string()),
+                api_key_env: None,
+                extra_headers: None,
             },
             &config,
         )
@@ -1043,6 +1062,27 @@ mod tests {
         assert_eq!(cli_overrides.model.as_deref(), Some("cli-model"));
         assert_eq!(cli_overrides.backend, Some(BackendKind::DeepSeekChat));
         assert_eq!(cli_overrides.reasoning_effort, Some(ReasoningEffort::Low));
+
+        // CLI-provided api_key_env and extra_headers should override config values.
+        let mut cli_extra = std::collections::BTreeMap::new();
+        cli_extra.insert("X-Custom".to_string(), "cli-value".to_string());
+        let cli_full_overrides = model_overrides(
+            &ModelOptions {
+                backend: Some(BackendKind::DeepSeekChat),
+                reasoning_effort: Some(ReasoningEffort::Low),
+                api_base_url: Some("https://cli.example/v1".to_string()),
+                api_model: Some("cli-model".to_string()),
+                api_key_env: Some("CLI_KEY_ENV".to_string()),
+                extra_headers: Some(cli_extra.clone()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            cli_full_overrides.api_key_env.as_deref(),
+            Some("CLI_KEY_ENV")
+        );
+        assert_eq!(cli_full_overrides.extra_headers, cli_extra);
 
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);

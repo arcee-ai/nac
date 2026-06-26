@@ -227,11 +227,17 @@ fn store_options(cli: StoreArgs) -> StoreOptions {
 }
 
 fn model_options(cli: ModelArgs) -> ModelOptions {
+    let extra_headers = cli
+        .extra_headers
+        .as_deref()
+        .and_then(runtime::parse_extra_headers_json);
     ModelOptions {
         backend: cli.backend.map(Into::into),
         reasoning_effort: cli.reasoning_effort.map(Into::into),
         api_base_url: cli.api_base_url,
         api_model: cli.api_model,
+        api_key_env: cli.api_key_env,
+        extra_headers,
     }
 }
 

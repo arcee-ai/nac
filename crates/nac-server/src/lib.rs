@@ -752,6 +752,8 @@ fn model_options(
             .transpose()?,
         api_base_url: base_url,
         api_model: model,
+        api_key_env: None,
+        extra_headers: None,
     })
 }
 
