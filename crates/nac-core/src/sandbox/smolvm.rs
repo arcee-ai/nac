@@ -335,6 +335,19 @@ impl SmolVmSession {
         )));
         args
     }
+
+    /// Explicitly destroy the sandbox VM, regardless of remaining `Arc`
+    /// references.  Best-effort and idempotent: `smolvm machine delete -f`
+    /// already handles non-existent VMs gracefully.
+    pub(crate) async fn destroy(&self) -> Result<()> {
+        if !self.owner {
+            return Ok(());
+        }
+        let mut cmd = Command::new("smolvm");
+        cmd.args(["machine", "delete", "--name", &self.vm_name, "-f"]);
+        let _ = cmd.output().await; // best-effort, ignore errors
+        Ok(())
+    }
 }
 
 impl Drop for SmolVmSession {

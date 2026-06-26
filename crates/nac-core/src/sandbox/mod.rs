@@ -225,6 +225,16 @@ impl SandboxSession {
         }
     }
 
+    /// Explicitly destroy the sandbox (container or VM), regardless of
+    /// remaining `Arc` references.  Best-effort and idempotent.  Only
+    /// acts if this session is the owner.
+    pub async fn destroy(&self) -> Result<()> {
+        match self {
+            Self::Podman(inner) => inner.destroy().await,
+            Self::SmolVm(inner) => inner.destroy().await,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn new_for_test(spec: SandboxSpec) -> Self {
         match spec.backend {

@@ -295,6 +295,16 @@ impl Agent {
         self.tool_runtime.backend.ensure_ready().await
     }
 
+    /// Returns a clone of the sandbox session if the execution backend is
+    /// a sandbox, or `None` for local/SSH backends.  The clone is cheap
+    /// (inner data is behind `Arc`).
+    pub fn sandbox_session(&self) -> Option<SandboxSession> {
+        match self.tool_runtime.backend.as_ref() {
+            crate::sandbox::ExecutionBackend::Sandbox(session) => Some(session.clone()),
+            _ => None,
+        }
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),

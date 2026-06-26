@@ -496,7 +496,8 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Cancel any active run and remove from the in-memory map.
+        // Cancel any active run, destroy the sandbox, and remove from the
+        // in-memory map.
         {
             let active = self.inner.active_sessions.read().await;
             if let Some(service) = active.get(session_id) {
@@ -506,6 +507,9 @@ impl SessionManager {
                         .request_cancel(&active_run.run_id)
                         .await;
                 }
+                // Explicitly destroy the sandbox so it is torn down even
+                // if SSE handlers or other clones keep the Arc alive.
+                service.destroy_sandbox().await;
             }
         }
         self.inner

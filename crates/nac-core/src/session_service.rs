@@ -395,6 +395,23 @@ impl SessionService {
             .map(|active_run| active_run.snapshot.clone())
     }
 
+    /// Explicitly destroy the sandbox (if any) associated with this session.
+    /// Best-effort: errors are logged but not propagated.  This is used
+    /// during session deletion to ensure the container/VM is torn down
+    /// even if other `Arc` references (e.g. from SSE handlers) keep the
+    /// `SessionService` alive.
+    pub async fn destroy_sandbox(&self) {
+        let sandbox = {
+            let agent = self.agent.lock().await;
+            agent.sandbox_session()
+        };
+        if let Some(sandbox) = sandbox {
+            if let Err(error) = sandbox.destroy().await {
+                eprintln!("nac: failed to destroy sandbox during deletion: {error:#}");
+            }
+        }
+    }
+
     pub async fn active_thread_names(&self) -> Vec<String> {
         let mut names = self
             .active_threads

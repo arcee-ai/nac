@@ -395,6 +395,19 @@ impl PodmanSession {
         )));
         args
     }
+
+    /// Explicitly destroy the sandbox container, regardless of remaining
+    /// `Arc` references.  Best-effort and idempotent: `podman rm -f` already
+    /// handles non-existent containers gracefully.
+    pub(crate) async fn destroy(&self) -> Result<()> {
+        if !self.owner {
+            return Ok(());
+        }
+        let mut cmd = Command::new("podman");
+        cmd.args(["rm", "-f", &self.container_name]);
+        let _ = cmd.output().await; // best-effort, ignore errors
+        Ok(())
+    }
 }
 
 impl Drop for PodmanSession {
