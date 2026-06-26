@@ -545,10 +545,23 @@ body {
 
 /* ───────────────────────── Responsive ───────────────────────── */
 
+/*
+   Tablet / mobile (≤ 900 px)
+   • Queue columns stack vertically (already handled).
+   • Within each queue, task cards switch from a vertical stack
+     to a responsive grid of compact tiles.
+   • The page itself scrolls instead of each column scrolling
+     independently, so all tiles are visible without nested scroll.
+ */
 @media (max-width: 900px) {
-  .queue-columns {
-    grid-template-columns: 1fr;
-    grid-template-rows: repeat(3, minmax(200px, 1fr));
+  body {
+    overflow: auto;
+  }
+
+  .dashboard {
+    height: auto;
+    min-height: 100vh;
+    grid-template-rows: auto auto auto;
   }
 
   .dash-header {
@@ -558,5 +571,108 @@ body {
   .dash-goal {
     order: 3;
     flex-basis: 100%;
+  }
+
+  /* Stack the three queue sections vertically */
+  .queue-columns {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    overflow: visible;
+  }
+
+  .queue-column {
+    overflow: visible;
+    grid-template-rows: auto auto;
+  }
+
+  /* Grid of tiles within each queue */
+  .queue-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 8px;
+    overflow-y: visible;
+    padding: 10px;
+    align-content: start;
+  }
+
+  /* Empty state spans the full grid width */
+  .empty-state {
+    grid-column: 1 / -1;
+  }
+
+  /* Compact tile styling */
+  .task-card {
+    padding: 10px;
+  }
+
+  .task-title {
+    font-size: 12px;
+  }
+
+  .task-desc {
+    -webkit-line-clamp: 1;
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+
+  .task-meta {
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .task-meta-item {
+    font-size: 9px;
+    max-width: 140px;
+  }
+
+  .task-result,
+  .task-failure {
+    margin-top: 6px;
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+}
+
+/*
+   Very small screens (≤ 500 px)
+   • Tighter grid with smaller minmax so we get 2 columns on phones.
+   • Even more compact tiles.
+ */
+@media (max-width: 500px) {
+  .queue-list {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .task-card {
+    padding: 8px;
+  }
+
+  .task-title {
+    font-size: 11px;
+  }
+
+  .task-desc {
+    font-size: 9px;
+    margin-bottom: 3px;
+  }
+
+  .task-meta-item {
+    max-width: 100px;
+    font-size: 8px;
+    padding: 1px 5px;
+  }
+
+  .retry-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+
+  .task-result,
+  .task-failure {
+    font-size: 9px;
+    padding: 5px 7px;
+    margin-top: 5px;
   }
 }
