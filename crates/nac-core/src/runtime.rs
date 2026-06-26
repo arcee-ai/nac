@@ -13,8 +13,8 @@ use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{BackendKind, ClientOverrides, ModelClient, ReasoningEffort};
 use crate::paths::PathContext;
 use crate::sandbox::{
-    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxSession, DEFAULT_SANDBOX_IMAGE,
-    DEFAULT_SANDBOX_WORKDIR,
+    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType, SandboxSession,
+    DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillRegistry};
@@ -53,6 +53,7 @@ pub struct ModelConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct SandboxConfig {
     pub image: Option<String>,
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -117,6 +118,7 @@ pub struct SandboxOptions {
     pub sandbox_shm_size: Option<String>,
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
+    pub sandbox_backend: Option<String>,
 }
 
 impl SandboxOptions {
@@ -129,6 +131,7 @@ impl SandboxOptions {
             || self.sandbox_image.is_some()
             || !self.sandbox_gpus.is_empty()
             || self.sandbox_shm_size.is_some()
+            || self.sandbox_backend.is_some()
     }
 }
 
@@ -187,6 +190,7 @@ pub struct EffectiveSandboxOptions {
     pub sandbox_shm_size: Option<String>,
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
+    pub sandbox_backend: crate::sandbox::SandboxBackendType,
     pub explicit_sandbox_config_flags_present: bool,
 }
 
@@ -268,6 +272,12 @@ pub(crate) fn effective_sandbox_options(
     config: &NacConfig,
 ) -> EffectiveSandboxOptions {
     let explicit_sandbox_config_flags_present = options.explicit_sandbox_config_flags_present();
+    let sandbox_backend = options
+        .sandbox_backend
+        .as_deref()
+        .or(config.sandbox.backend.as_deref())
+        .map(|s| SandboxBackendType::from_str(s).unwrap_or_default())
+        .unwrap_or_default();
     EffectiveSandboxOptions {
         sandbox: options.sandbox,
         no_mount_cwd: options.no_mount_cwd,
@@ -280,6 +290,7 @@ pub(crate) fn effective_sandbox_options(
         sandbox_shm_size: options.sandbox_shm_size,
         sandbox_session_key: options.sandbox_session_key,
         sandbox_workdir: options.sandbox_workdir,
+        sandbox_backend,
         explicit_sandbox_config_flags_present,
     }
 }
@@ -293,7 +304,7 @@ fn validate_target_sandbox_options(
         && (options.sandbox_enabled() || options.explicit_sandbox_config_flags_present())
     {
         anyhow::bail!(
-            "invalid remote {remote_label}: ssh_host and podman sandbox options cannot both be set"
+            "invalid remote {remote_label}: ssh_host and sandbox options cannot both be set"
         );
     }
     validate_sandbox_options(options)
@@ -913,6 +924,7 @@ pub async fn build_sandbox_session(
     )?);
 
     let spec = build_sandbox_spec(
+        options.sandbox_backend,
         options
             .sandbox_image
             .as_deref()
@@ -1657,6 +1669,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             Some(SandboxSpec {
+                backend: crate::sandbox::SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),

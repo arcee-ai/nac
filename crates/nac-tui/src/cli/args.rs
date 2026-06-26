@@ -170,7 +170,7 @@ pub(super) struct WorkerDispatchArgs {
 
 #[derive(clap::Args)]
 pub(super) struct SandboxArgs {
-    /// Run tool execution inside a session-scoped Podman sandbox
+    /// Run tool execution inside a session-scoped sandbox
     #[arg(long)]
     pub(super) sandbox: bool,
 
@@ -197,6 +197,10 @@ pub(super) struct SandboxArgs {
     /// Sandbox /dev/shm size (default: 0, meaning uncapped by Podman)
     #[arg(long = "sandbox-shm-size")]
     pub(super) sandbox_shm_size: Option<String>,
+
+    /// Sandbox backend to use (podman or smolvm)
+    #[arg(long = "sandbox-backend")]
+    pub(super) sandbox_backend: Option<String>,
 
     /// Internal sandbox session key used to attach worker subprocesses
     #[arg(long, hide = true)]

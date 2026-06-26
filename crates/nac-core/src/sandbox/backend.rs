@@ -61,7 +61,7 @@ impl ExecutionBackend {
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Local { .. } => Ok(()),
-            Self::Sandbox(session) => session.inner.ensure_ready().await,
+            Self::Sandbox(session) => session.ensure_ready().await,
             Self::Ssh(ssh) => ssh.ensure_ready().await,
         }
     }
@@ -231,7 +231,7 @@ pub fn select_execution_backend(
 ) -> Result<Arc<ExecutionBackend>> {
     match (ssh_host, sandbox) {
         (Some(ssh_host), Some(_)) => anyhow::bail!(
-            "invalid session configuration: ssh_host '{}' and podman sandbox cannot both be set",
+            "invalid session configuration: ssh_host '{}' and sandbox cannot both be set",
             ssh_host
         ),
         (Some(ssh_host), None) => Ok(Arc::new(ExecutionBackend::Ssh(
@@ -255,6 +255,7 @@ mod tests {
 
     fn sandbox() -> SandboxSession {
         SandboxSession::new_for_test(SandboxSpec {
+            backend: crate::sandbox::SandboxBackendType::Podman,
             image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: Vec::new(),
             workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),

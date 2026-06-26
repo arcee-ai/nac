@@ -109,6 +109,8 @@ impl PodmanSession {
         let mut args = vec![
             OsString::from("--sandbox"),
             OsString::from("--no-mount-cwd"),
+            OsString::from("--sandbox-backend"),
+            OsString::from("podman"),
             OsString::from("--sandbox-image"),
             OsString::from(self.spec.image.clone()),
             OsString::from("--sandbox-workdir"),
@@ -419,7 +421,7 @@ fn volume_arg(mount: &MountSpec) -> String {
     )
 }
 
-fn sanitize_name(input: &str) -> String {
+pub(crate) fn sanitize_name(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
         if ch.is_ascii_alphanumeric() {
@@ -431,7 +433,7 @@ fn sanitize_name(input: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn shell_escape_path(path: &Path) -> String {
+pub(crate) fn shell_escape_path(path: &Path) -> String {
     path.display().to_string().replace('\'', "'\"'\"'")
 }
 
@@ -458,12 +460,13 @@ fn should_enable_gpu_access_options() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::sandbox::{SandboxBackendType, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
     use std::path::PathBuf;
 
     fn sample_session() -> PodmanSession {
         PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: vec![MountSpec {
                     host: PathBuf::from("/tmp/project"),
@@ -523,6 +526,7 @@ mod tests {
     fn create_container_args_skip_user_without_rw_mounts() {
         let session = PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
@@ -544,6 +548,7 @@ mod tests {
     fn create_container_args_include_gpu_devices() {
         let session = PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),

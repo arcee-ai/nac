@@ -6,7 +6,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{detect_backend, BackendKind, ReasoningEffort};
-use crate::sandbox::SandboxSpec;
+use crate::sandbox::{SandboxBackendType, SandboxSpec};
 use crate::types::Message;
 
 mod codec;
@@ -410,6 +410,7 @@ mod tests {
             BackendKind::FireworksChat,
             None,
             Some(SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: "python:3.13".to_string(),
                 workdir: PathBuf::from("/workspace"),
                 mounts: Vec::new(),

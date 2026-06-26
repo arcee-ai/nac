@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
+use serde::{Deserialize, Serialize};
 
 mod backend;
 mod podman;
+mod smolvm;
 mod ssh;
 
 #[cfg(test)]
@@ -17,6 +19,40 @@ pub use ssh::SshBackend;
 pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
 
+/// Identifies which sandbox backend implementation to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxBackendType {
+    Podman,
+    SmolVm,
+}
+
+impl Default for SandboxBackendType {
+    fn default() -> Self {
+        SandboxBackendType::Podman
+    }
+}
+
+impl SandboxBackendType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SandboxBackendType::Podman => "podman",
+            SandboxBackendType::SmolVm => "smolvm",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "podman" => Ok(Self::Podman),
+            "smolvm" => Ok(Self::SmolVm),
+            other => Err(anyhow!(
+                "invalid sandbox backend '{}': expected 'podman' or 'smolvm'",
+                other
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountSpec {
     pub host: PathBuf,
@@ -26,6 +62,7 @@ pub struct MountSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxSpec {
+    pub backend: SandboxBackendType,
     pub image: String,
     pub mounts: Vec<MountSpec>,
     pub workdir: PathBuf,
@@ -34,44 +71,70 @@ pub struct SandboxSpec {
 }
 
 #[derive(Clone)]
-pub struct SandboxSession {
-    inner: Arc<podman::PodmanSession>,
+#[allow(private_interfaces)]
+pub enum SandboxSession {
+    Podman(Arc<podman::PodmanSession>),
+    SmolVm(Arc<smolvm::SmolVmSession>),
 }
 
 impl SandboxSession {
     pub async fn create(spec: SandboxSpec, session_key: String, owner: bool) -> Result<Self> {
-        let inner = Arc::new(podman::PodmanSession::new(spec, session_key, owner));
-        inner.ensure_ready().await?;
-        Ok(Self { inner })
+        let session = match spec.backend {
+            SandboxBackendType::Podman => {
+                let inner = Arc::new(podman::PodmanSession::new(spec, session_key, owner));
+                inner.ensure_ready().await?;
+                Self::Podman(inner)
+            }
+            SandboxBackendType::SmolVm => {
+                let inner = Arc::new(smolvm::SmolVmSession::new(spec, session_key, owner));
+                inner.ensure_ready().await?;
+                Self::SmolVm(inner)
+            }
+        };
+        Ok(session)
     }
 
     pub fn workdir_display(&self) -> String {
-        self.inner.spec().workdir.display().to_string()
+        self.spec().workdir.display().to_string()
     }
 
     pub fn host_workdir(&self) -> Option<PathBuf> {
-        host_workdir_from_spec(self.inner.spec())
+        host_workdir_from_spec(self.spec())
     }
 
     pub fn image(&self) -> &str {
-        &self.inner.spec().image
+        &self.spec().image
     }
 
     pub fn spec(&self) -> &SandboxSpec {
-        self.inner.spec()
+        match self {
+            Self::Podman(inner) => inner.spec(),
+            Self::SmolVm(inner) => inner.spec(),
+        }
     }
 
     pub fn status_text(&self) -> String {
-        format!("on (podman, image={})", self.image())
+        let backend = self.spec().backend.as_str();
+        format!("on ({backend}, image={})", self.image())
+    }
+
+    pub async fn ensure_ready(&self) -> Result<()> {
+        match self {
+            Self::Podman(inner) => inner.ensure_ready().await,
+            Self::SmolVm(inner) => inner.ensure_ready().await,
+        }
     }
 
     pub fn worker_cli_args(&self) -> Vec<OsString> {
-        self.inner.worker_cli_args()
+        match self {
+            Self::Podman(inner) => inner.worker_cli_args(),
+            Self::SmolVm(inner) => inner.worker_cli_args(),
+        }
     }
 
     pub fn resolve_path(&self, path: &str) -> Result<PathBuf> {
         let requested = PathBuf::from(path);
-        let spec = self.inner.spec();
+        let spec = self.spec();
 
         if requested.is_relative() {
             return Ok(spec.workdir.join(requested));
@@ -112,7 +175,10 @@ impl SandboxSession {
         args: &[String],
         stdin: Option<Vec<u8>>,
     ) -> Result<std::process::Output> {
-        self.inner.exec(program, args, stdin).await
+        match self {
+            Self::Podman(inner) => inner.exec(program, args, stdin).await,
+            Self::SmolVm(inner) => inner.exec(program, args, stdin).await,
+        }
     }
 
     pub fn child_process_command(
@@ -121,7 +187,10 @@ impl SandboxSession {
         args: &[String],
         envs: &[(String, String)],
     ) -> tokio::process::Command {
-        self.inner.child_process_command(program, args, envs)
+        match self {
+            Self::Podman(inner) => inner.child_process_command(program, args, envs),
+            Self::SmolVm(inner) => inner.child_process_command(program, args, envs),
+        }
     }
 
     pub fn terminal_pty_command(
@@ -129,7 +198,10 @@ impl SandboxSession {
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
-        self.inner.terminal_pty_command(cwd, envs)
+        match self {
+            Self::Podman(inner) => inner.terminal_pty_command(cwd, envs),
+            Self::SmolVm(inner) => inner.terminal_pty_command(cwd, envs),
+        }
     }
 
     pub fn terminal_pipe_command(
@@ -138,21 +210,32 @@ impl SandboxSession {
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (tokio::process::Command, String) {
-        self.inner.terminal_pipe_command(cmd, cwd, envs)
+        match self {
+            Self::Podman(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
+            Self::SmolVm(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
+        }
     }
 
     pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
-        self.inner.terminal_pipe_kill(pidfile).await
+        match self {
+            Self::Podman(inner) => inner.terminal_pipe_kill(pidfile).await,
+            Self::SmolVm(inner) => inner.terminal_pipe_kill(pidfile).await,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn new_for_test(spec: SandboxSpec) -> Self {
-        Self {
-            inner: Arc::new(podman::PodmanSession::new(
+        match spec.backend {
+            SandboxBackendType::Podman => Self::Podman(Arc::new(podman::PodmanSession::new(
                 spec,
                 "test-session".to_string(),
                 false,
-            )),
+            ))),
+            SandboxBackendType::SmolVm => Self::SmolVm(Arc::new(smolvm::SmolVmSession::new(
+                spec,
+                "test-session".to_string(),
+                false,
+            ))),
         }
     }
 }
@@ -201,6 +284,7 @@ pub(crate) fn host_workdir_from_spec(spec: &SandboxSpec) -> Option<PathBuf> {
 }
 
 pub fn build_sandbox_spec(
+    backend: SandboxBackendType,
     image: String,
     workdir: String,
     mounts: Vec<MountSpec>,
@@ -216,6 +300,7 @@ pub fn build_sandbox_spec(
     }
 
     Ok(SandboxSpec {
+        backend,
         image,
         mounts,
         workdir,
@@ -278,19 +363,14 @@ mod tests {
             guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
             read_only: false,
         };
-        let session = SandboxSession {
-            inner: Arc::new(podman::PodmanSession::new(
-                SandboxSpec {
-                    image: DEFAULT_SANDBOX_IMAGE.to_string(),
-                    mounts: vec![mount],
-                    workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                    gpu_devices: Vec::new(),
-                    shm_size: Some("0".to_string()),
-                },
-                "test-session".to_string(),
-                false,
-            )),
-        };
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![mount],
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+        });
 
         assert_eq!(session.host_workdir().unwrap(), cwd);
 

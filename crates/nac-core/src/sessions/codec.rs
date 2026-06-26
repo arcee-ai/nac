@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedSandboxSpec {
+    #[serde(default)]
+    backend: SandboxBackendType,
     image: String,
     workdir: String,
     mounts: Vec<PersistedMountSpec>,
@@ -24,6 +26,7 @@ fn default_sandbox_shm_size() -> Option<String> {
 
 pub(super) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
     let persisted = PersistedSandboxSpec {
+        backend: spec.backend,
         image: spec.image.clone(),
         workdir: spec.workdir.display().to_string(),
         mounts: spec
@@ -48,6 +51,7 @@ pub(super) fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxS
     let persisted: PersistedSandboxSpec =
         serde_json::from_str(&raw).context("failed to parse sandbox spec")?;
     Ok(Some(SandboxSpec {
+        backend: persisted.backend,
         image: persisted.image,
         workdir: PathBuf::from(persisted.workdir),
         mounts: persisted

@@ -176,6 +176,7 @@ mod tests {
         let skill_dir = write_skill(&project_skills, "lint", "lint code", "body");
 
         let sandbox = SandboxSession::new_for_test(SandboxSpec {
+            backend: crate::sandbox::SandboxBackendType::Podman,
             image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![
                 MountSpec {

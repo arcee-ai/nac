@@ -185,7 +185,7 @@ struct WorkerDispatchArgs {
 
 #[derive(clap::Args)]
 struct SandboxArgs {
-    /// Run tool execution inside a session-scoped Podman sandbox.
+    /// Run tool execution inside a session-scoped sandbox.
     #[arg(long)]
     sandbox: bool,
 
@@ -212,6 +212,10 @@ struct SandboxArgs {
     /// Sandbox /dev/shm size.
     #[arg(long = "sandbox-shm-size")]
     sandbox_shm_size: Option<String>,
+
+    /// Sandbox backend to use (podman or smolvm).
+    #[arg(long = "sandbox-backend")]
+    sandbox_backend: Option<String>,
 
     /// Internal sandbox session key used to attach worker subprocesses.
     #[arg(long, hide = true)]
@@ -325,6 +329,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_shm_size: cli.sandbox.sandbox_shm_size,
             sandbox_session_key: cli.sandbox.sandbox_session_key,
             sandbox_workdir: cli.sandbox.sandbox_workdir,
+            sandbox_backend: cli.sandbox.sandbox_backend,
         },
         ssh_host: cli.ssh_host,
     };

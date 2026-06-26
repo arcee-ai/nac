@@ -116,6 +116,7 @@ pub struct SandboxRequest {
     pub shm_size: Option<String>,
     pub session_key: Option<String>,
     pub workdir: Option<String>,
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -876,6 +877,7 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
         sandbox_shm_size: request.shm_size,
         sandbox_session_key: request.session_key,
         sandbox_workdir: request.workdir,
+        sandbox_backend: request.backend,
     }
 }
 
