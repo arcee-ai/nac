@@ -38,6 +38,7 @@ const state = {
   transcriptRenderedSessionId: null,
   transcriptRenderedSignature: "",
   pendingDeleteSessionId: null,
+  pinnedSessionIds: new Set(),
 };
 
 const el = {};
@@ -177,6 +178,7 @@ function bindEvents() {
 }
 
 async function boot() {
+  state.pinnedSessionIds = new Set(JSON.parse(localStorage.getItem("nac:pinnedSessions") || "[]"));
   try {
     state.store = await apiGet("/store");
     el.storePath.textContent = basename(state.store.store_path);
@@ -406,6 +408,7 @@ function sessionCardViewModel(entry) {
     sshHost: summary.ssh_host || "",
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
+    pinned: state.pinnedSessionIds.has(sessionId),
     tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
     errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
     statusClass: sessionStatusClass(entry),
@@ -428,6 +431,7 @@ function sessionCardRenderDigest(card) {
     card.sshHost,
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
+    card.pinned ? "1" : "0",
     card.tone,
     card.errorish,
     card.statusClass,
@@ -763,6 +767,8 @@ async function confirmDeleteSession() {
     state.workspaceSelectedPathBySession.delete(sessionId);
     state.workspaceDiffEntries.delete(sessionId);
     state.expandedThreadNamesBySession.delete(sessionId);
+    state.pinnedSessionIds.delete(sessionId);
+    savePinnedSessions();
     // If the deleted session was selected, pick a new one or clear
     if (state.selectedId === sessionId) {
       if (state.eventSource) {
@@ -1086,16 +1092,53 @@ function renderMetrics() {
 
 function renderSessions() {
   const cards = filteredSessions().map(sessionCardViewModel);
-  const sessionCards = cards.length === 0
-    ? `<div class="empty-state matrix-empty">No sessions yet.</div>`
-    : cards.map(renderSessionCard).join("");
+  const pinnedCards = cards.filter((card) => card && state.pinnedSessionIds.has(card.sessionId));
+  const unpinnedCards = cards.filter((card) => card && !state.pinnedSessionIds.has(card.sessionId));
+  const hasPinned = pinnedCards.length > 0;
+
+  let sessionCards;
+  if (cards.length === 0) {
+    sessionCards = `<div class="empty-state matrix-empty">No sessions yet.</div>`;
+  } else if (hasPinned) {
+    sessionCards = `<div class="pinned-section-label">Pinned</div>`;
+    sessionCards += pinnedCards.map(renderSessionCard).join("");
+    if (unpinnedCards.length > 0) {
+      sessionCards += `<div class="pinned-separator"></div>`;
+      sessionCards += unpinnedCards.map(renderSessionCard).join("");
+    }
+  } else {
+    sessionCards = cards.map(renderSessionCard).join("");
+  }
+
   el.sessionGrid.innerHTML = renderNewSessionCard() + sessionCards;
   el.sessionGrid.querySelector("[data-action='new-session']")?.addEventListener("click", showLaunchOverlay);
   el.sessionGrid.querySelectorAll("[data-session-id]").forEach((card) => {
-    card.addEventListener("click", () => selectSession(card.dataset.sessionId));
+    card.addEventListener("click", (event) => {
+      if (event.shiftKey) {
+        event.preventDefault();
+        toggleSessionPin(card.dataset.sessionId);
+        return;
+      }
+      selectSession(card.dataset.sessionId);
+    });
   });
   state.lastSessionsDigest = sessionCardListRenderDigest(cards);
   state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card?.sessionId === state.selectedId));
+}
+
+function toggleSessionPin(sessionId) {
+  if (!sessionId) return;
+  if (state.pinnedSessionIds.has(sessionId)) {
+    state.pinnedSessionIds.delete(sessionId);
+  } else {
+    state.pinnedSessionIds.add(sessionId);
+  }
+  savePinnedSessions();
+  renderSessions();
+}
+
+function savePinnedSessions() {
+  localStorage.setItem("nac:pinnedSessions", JSON.stringify([...state.pinnedSessionIds]));
 }
 
 function renderNewSessionCard() {
@@ -1117,7 +1160,7 @@ function renderNewSessionCard() {
 function renderSessionCard(card) {
   if (!card) return "";
   return `
-    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""}" data-session-id="${escapeAttr(card.sessionId)}">
+    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
       <div class="session-card-head">
         <div>
           <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>

@@ -490,6 +490,38 @@ button.session-card {
   box-shadow: var(--neu-selected);
 }
 
+.session-card.pinned {
+  border-color: rgba(110, 168, 255, 0.22);
+}
+
+.session-card.pinned::after {
+  content: "";
+  position: absolute;
+  bottom: var(--space-xs);
+  right: var(--space-xs);
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--blue);
+  box-shadow: 0 0 6px rgba(110, 168, 255, 0.5);
+}
+
+.pinned-section-label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--type-meta);
+  font-weight: var(--type-weight-strong);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.pinned-separator {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--line-soft);
+}
+
 .session-card {
   position: relative;
 }
