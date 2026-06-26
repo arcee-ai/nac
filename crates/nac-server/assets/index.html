@@ -51,11 +51,26 @@
             <h1 id="inspectorTitle">No session selected</h1>
             <p id="inspectorMeta">Launch or select a session.</p>
           </div>
-          <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
-            </svg>
-          </button>
+          <div class="inspector-actions">
+            <button id="deleteSessionBtn" class="icon-button" type="button" aria-label="Delete session" title="Delete session">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="settingsBtn" class="icon-button" type="button" aria-label="Session settings" title="Session settings">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
+              </svg>
+            </button>
+          </div>
         </header>
 
         <nav class="tabs" id="tabs">
@@ -71,6 +86,8 @@
           <div><span>Backend</span><strong id="snapBackend">--</strong></div>
           <div><span>Msgs</span><strong id="snapMessages">0</strong></div>
           <div><span>Run</span><strong id="snapRun">idle</strong></div>
+          <div><span>Tokens</span><strong id="snapTokens">--</strong></div>
+          <div><span>Orch Context</span><strong id="snapContext">--</strong></div>
         </section>
 
         <div class="tab-panel active" id="tab-chat">
@@ -132,11 +149,11 @@
               <span>Backend</span>
               <select id="launchBackend" name="backend">
                 <option value="">config</option>
-                <option value="openai-responses">openai</option>
-                <option value="chatgpt-codex-responses">codex</option>
-                <option value="anthropic-messages">anthropic</option>
-                <option value="deepseek-chat">deepseek</option>
-                <option value="fireworks-chat">fireworks</option>
+                <option value="openai-responses">openai-responses</option>
+                <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
+                <option value="anthropic-messages">anthropic-messages</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="fireworks-chat">fireworks-chat</option>
               </select>
             </label>
             <label>
@@ -209,6 +226,105 @@
               </svg>
             </button>
             <div class="form-status" id="launchStatus"></div>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div class="launch-overlay" id="deleteOverlay" hidden>
+      <section class="launch-dialog launch-dialog--compact" role="dialog" aria-modal="true" aria-label="Delete session">
+        <header class="launch-dialog-head">
+          <div>
+            <div class="eyebrow">Delete</div>
+          </div>
+          <button id="closeDelete" class="icon-button" type="button" aria-label="Close delete dialog" title="Close">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+        <div class="launch-form">
+          <p id="deleteConfirmText" class="confirm-text">Delete this session? This permanently removes all threads, episodes, and worksets.</p>
+          <div class="launch-actions">
+            <button class="primary-action icon-button icon-button-destructive launch-submit" id="confirmDelete" type="button" aria-label="Confirm delete" title="Confirm delete">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="form-status" id="deleteStatus"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="launch-overlay" id="settingsOverlay" hidden>
+      <section class="launch-dialog" role="dialog" aria-modal="true" aria-label="Session settings">
+        <header class="launch-dialog-head">
+          <div>
+            <div class="eyebrow">Settings</div>
+          </div>
+          <button id="closeSettings" class="icon-button" type="button" aria-label="Close settings dialog" title="Close">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+        <form id="settingsForm" class="launch-form">
+          <div class="form-grid two">
+            <label>
+              <span>Backend</span>
+              <select id="settingsBackend">
+                <option value="">config</option>
+                <option value="openai-responses">openai-responses</option>
+                <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
+                <option value="anthropic-messages">anthropic-messages</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="fireworks-chat">fireworks-chat</option>
+              </select>
+            </label>
+            <label>
+              <span>Effort</span>
+              <select id="settingsEffort">
+                <option value="">config</option>
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Model</span>
+              <input id="settingsModel" autocomplete="off" placeholder="config" />
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input id="settingsBaseUrl" autocomplete="off" placeholder="config" />
+            </label>
+          </div>
+          <label>
+            <span>API Key Env</span>
+            <input id="settingsApiKeyEnv" autocomplete="off" placeholder="config" />
+          </label>
+          <label>
+            <span>Extra Headers (JSON)</span>
+            <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
+          </label>
+          <div class="launch-actions">
+            <button class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h12"></path>
+                <path d="m13 6 6 6-6 6"></path>
+              </svg>
+            </button>
+            <div class="form-status" id="settingsStatus"></div>
           </div>
         </form>
       </section>

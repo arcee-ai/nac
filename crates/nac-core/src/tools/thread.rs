@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::events::{decode_stderr_event, AgentEvent};
-use crate::model::ModelClient;
+use crate::model::{ModelClient, TokenUsage};
 use crate::process::{isolate_process_group, terminate_child_tree};
 use crate::skills::SkillRegistry;
 use crate::store;
@@ -169,6 +169,18 @@ pub async fn execute_dispatch(
     .await;
     unmark_thread_active(runtime, &thread_name).await;
 
+    // Fold worker token usage into the shared runtime accumulator so the
+    // orchestrator's agent loop can include it in session totals.
+    if let Ok(run) = &result {
+        if let Some(usage) = &run.usage {
+            let mut wu = runtime.worker_usage.lock().await;
+            wu.input_tokens += usage.input_tokens;
+            wu.output_tokens += usage.output_tokens;
+            wu.cache_read_tokens += usage.cache_read_tokens;
+            wu.cache_write_tokens += usage.cache_write_tokens;
+        }
+    }
+
     match result {
         Err(e) => {
             runtime.event_sink.emit(AgentEvent::Error {
@@ -187,6 +199,7 @@ pub async fn execute_dispatch(
                 exit_code: run.exit_code,
                 timed_out: true,
                 timeout_reason: timeout_reason.clone(),
+                usage: run.usage.clone(),
             });
             ToolResult {
                 content: match timeout_reason {
@@ -207,6 +220,7 @@ pub async fn execute_dispatch(
                 exit_code: run.exit_code,
                 timed_out: false,
                 timeout_reason: None,
+                usage: run.usage.clone(),
             });
             let details = if !run.stderr.trim().is_empty() {
                 run.stderr.trim().to_string()
@@ -229,6 +243,7 @@ pub async fn execute_dispatch(
                 exit_code: run.exit_code,
                 timed_out: false,
                 timeout_reason: None,
+                usage: run.usage.clone(),
             });
             ToolResult {
                 content: run.stdout.trim().to_string(),
@@ -451,6 +466,7 @@ struct WorkerRun {
     exit_code: i32,
     timed_out: bool,
     timeout_reason: Option<String>,
+    usage: Option<TokenUsage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -621,6 +637,16 @@ async fn run_worker(
         command.arg("--effort").arg(reasoning_effort.as_str());
     }
 
+    if let Some(api_key_env) = client.api_key_env() {
+        command.arg("--api-key-env").arg(api_key_env);
+    }
+
+    // Always pass --extra-headers, even when empty, so the worker uses the
+    // session's headers (possibly {}) instead of falling back to config.toml.
+    if let Ok(json) = serde_json::to_string(client.extra_headers()) {
+        command.arg("--extra-headers").arg(json);
+    }
+
     for source_thread in invocation.source_threads {
         command.arg("--source-thread").arg(source_thread);
     }
@@ -642,9 +668,16 @@ async fn run_worker(
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         let mut output = String::new();
+        let mut worker_usage = TokenUsage::default();
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(event) = decode_stderr_event(&line) {
                 timeout_trace_for_logs.lock().await.observe(&event);
+                if let AgentEvent::AssistantMessage {
+                    usage: Some(usage), ..
+                } = &event
+                {
+                    worker_usage += usage.clone();
+                }
                 event_sink.emit(event);
             } else {
                 event_sink.emit(AgentEvent::ThreadLog {
@@ -657,7 +690,16 @@ async fn run_worker(
                 output.push_str(&line);
             }
         }
-        output
+        let usage = if worker_usage.input_tokens == 0
+            && worker_usage.output_tokens == 0
+            && worker_usage.cache_read_tokens == 0
+            && worker_usage.cache_write_tokens == 0
+        {
+            None
+        } else {
+            Some(worker_usage)
+        };
+        (output, usage)
     });
 
     let stdout = child.stdout.take().unwrap();
@@ -680,7 +722,7 @@ async fn run_worker(
         terminate_child_tree(&mut child).await;
     }
 
-    let stderr = stderr_handle.await.unwrap_or_default();
+    let (stderr, worker_usage) = stderr_handle.await.unwrap_or_default();
     let stdout = stdout_handle.await.unwrap_or_default();
     let timeout_reason = if timed_out {
         Some(timeout_trace.lock().await.timeout_reason())
@@ -698,6 +740,7 @@ async fn run_worker(
         exit_code,
         timed_out,
         timeout_reason,
+        usage: worker_usage,
     })
 }
 

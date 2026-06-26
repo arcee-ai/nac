@@ -1083,6 +1083,7 @@ impl App {
                 exit_code,
                 timed_out,
                 timeout_reason,
+                ..
             } => {
                 let entry = self
                     .threads
@@ -1133,6 +1134,7 @@ impl App {
             AgentEvent::AssistantMessage {
                 thread_name,
                 content,
+                ..
             } => match thread_name {
                 Some(thread_name) => {
                     if let Some(thread) = self.threads.get_mut(&thread_name) {

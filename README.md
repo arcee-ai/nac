@@ -81,6 +81,16 @@ podman machine init
 podman machine start
 ```
 
+`nac` also supports a smolvm sandbox backend — a lightweight microVM that provides hardware-level VM isolation instead of container namespace isolation. It requires `smolvm` to be installed.
+
+Select it with `--sandbox-backend smolvm`, or set `backend = "smolvm"` under `[sandbox]` in config:
+
+```sh
+nac --sandbox --sandbox-backend smolvm
+```
+
+smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mount flags as Podman. Network is always enabled for smolvm VMs. On macOS, smolvm runs natively via the Hypervisor.framework — no separate machine init step is needed.
+
 ## Recommended config
 
 Optional config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit CLI args and environment variables override TOML defaults. Resumed sessions continue using the model and sandbox settings stored in their session snapshot.

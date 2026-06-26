@@ -135,6 +135,14 @@ pub(super) struct ModelArgs {
     /// Internal model override used by managed workers and resume
     #[arg(long, hide = true)]
     pub(super) api_model: Option<String>,
+
+    /// Internal api_key_env override used by managed workers to inherit session config
+    #[arg(long = "api-key-env", hide = true)]
+    pub(super) api_key_env: Option<String>,
+
+    /// Internal extra headers override (JSON object) used by managed workers to inherit session config
+    #[arg(long = "extra-headers", hide = true)]
+    pub(super) extra_headers: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -162,7 +170,7 @@ pub(super) struct WorkerDispatchArgs {
 
 #[derive(clap::Args)]
 pub(super) struct SandboxArgs {
-    /// Run tool execution inside a session-scoped Podman sandbox
+    /// Run tool execution inside a session-scoped sandbox
     #[arg(long)]
     pub(super) sandbox: bool,
 
@@ -189,6 +197,18 @@ pub(super) struct SandboxArgs {
     /// Sandbox /dev/shm size (default: 0, meaning uncapped by Podman)
     #[arg(long = "sandbox-shm-size")]
     pub(super) sandbox_shm_size: Option<String>,
+
+    /// Sandbox backend to use (podman or smolvm)
+    #[arg(long = "sandbox-backend")]
+    pub(super) sandbox_backend: Option<String>,
+
+    /// Number of CPUs to allocate for the sandbox (default: 2)
+    #[arg(long = "sandbox-cpus")]
+    pub(super) sandbox_cpus: Option<u8>,
+
+    /// Memory in MiB to allocate for the sandbox (default: 2048)
+    #[arg(long = "sandbox-mem")]
+    pub(super) sandbox_mem: Option<u32>,
 
     /// Internal sandbox session key used to attach worker subprocesses
     #[arg(long, hide = true)]

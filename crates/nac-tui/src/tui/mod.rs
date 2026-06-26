@@ -404,6 +404,7 @@ mod tests {
     };
     use nac_core::test_support::{sessions, store};
     use ratatui::backend::TestBackend;
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -427,6 +428,10 @@ mod tests {
             session_id: None,
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
+            base_url: String::new(),
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: std::collections::BTreeMap::new(),
         }
     }
 
@@ -1277,6 +1282,7 @@ mod tests {
             exit_code: 0,
             timed_out: false,
             timeout_reason: None,
+            usage: None,
         });
         let thread = app.threads.get("auth").unwrap();
         assert_eq!(thread.state, ThreadState::Idle);
@@ -1386,6 +1392,7 @@ mod tests {
         app.apply_agent_event(AgentEvent::AssistantMessage {
             thread_name: None,
             content: "ignored".to_string(),
+            usage: None,
         });
         assert!(app.responses.is_empty());
 
@@ -1465,6 +1472,8 @@ mod tests {
             None,
             None,
             messages,
+        None,
+        BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(3_333);
         snapshot.previous_response_duration_ms = Some(2_222);

@@ -13,8 +13,8 @@ use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{BackendKind, ClientOverrides, ModelClient, ReasoningEffort};
 use crate::paths::PathContext;
 use crate::sandbox::{
-    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxSession, DEFAULT_SANDBOX_IMAGE,
-    DEFAULT_SANDBOX_WORKDIR,
+    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType, SandboxSession,
+    DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillRegistry};
@@ -53,6 +53,9 @@ pub struct ModelConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct SandboxConfig {
     pub image: Option<String>,
+    pub backend: Option<String>,
+    pub cpus: Option<u8>,
+    pub memory_mib: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -102,6 +105,8 @@ pub struct ModelOptions {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
+    pub api_key_env: Option<String>,
+    pub extra_headers: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -115,6 +120,9 @@ pub struct SandboxOptions {
     pub sandbox_shm_size: Option<String>,
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
+    pub sandbox_backend: Option<String>,
+    pub sandbox_cpus: Option<u8>,
+    pub sandbox_mem: Option<u32>,
 }
 
 impl SandboxOptions {
@@ -127,6 +135,9 @@ impl SandboxOptions {
             || self.sandbox_image.is_some()
             || !self.sandbox_gpus.is_empty()
             || self.sandbox_shm_size.is_some()
+            || self.sandbox_backend.is_some()
+            || self.sandbox_cpus.is_some()
+            || self.sandbox_mem.is_some()
     }
 }
 
@@ -185,6 +196,9 @@ pub struct EffectiveSandboxOptions {
     pub sandbox_shm_size: Option<String>,
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
+    pub sandbox_backend: crate::sandbox::SandboxBackendType,
+    pub sandbox_cpus: u8,
+    pub sandbox_mem: u32,
     pub explicit_sandbox_config_flags_present: bool,
 }
 
@@ -266,6 +280,20 @@ pub(crate) fn effective_sandbox_options(
     config: &NacConfig,
 ) -> EffectiveSandboxOptions {
     let explicit_sandbox_config_flags_present = options.explicit_sandbox_config_flags_present();
+    let sandbox_backend = options
+        .sandbox_backend
+        .as_deref()
+        .or(config.sandbox.backend.as_deref())
+        .map(|s| SandboxBackendType::from_str(s).unwrap_or_default())
+        .unwrap_or_default();
+    let sandbox_cpus = options
+        .sandbox_cpus
+        .or(config.sandbox.cpus)
+        .unwrap_or(2);
+    let sandbox_mem = options
+        .sandbox_mem
+        .or(config.sandbox.memory_mib)
+        .unwrap_or(2048);
     EffectiveSandboxOptions {
         sandbox: options.sandbox,
         no_mount_cwd: options.no_mount_cwd,
@@ -278,6 +306,9 @@ pub(crate) fn effective_sandbox_options(
         sandbox_shm_size: options.sandbox_shm_size,
         sandbox_session_key: options.sandbox_session_key,
         sandbox_workdir: options.sandbox_workdir,
+        sandbox_backend,
+        sandbox_cpus,
+        sandbox_mem,
         explicit_sandbox_config_flags_present,
     }
 }
@@ -291,7 +322,7 @@ fn validate_target_sandbox_options(
         && (options.sandbox_enabled() || options.explicit_sandbox_config_flags_present())
     {
         anyhow::bail!(
-            "invalid remote {remote_label}: ssh_host and podman sandbox options cannot both be set"
+            "invalid remote {remote_label}: ssh_host and sandbox options cannot both be set"
         );
     }
     validate_sandbox_options(options)
@@ -331,9 +362,24 @@ pub(crate) fn model_overrides(model: &ModelOptions, config: &NacConfig) -> Resul
             .or_else(|| config.model.model.clone()),
         backend: model.backend.or(config.model.backend),
         reasoning_effort: model.reasoning_effort.or(config.model.reasoning_effort),
-        api_key_env: configured_api_key_env(config),
-        extra_headers: config.model.extra_headers.clone(),
+        api_key_env: model
+            .api_key_env
+            .clone()
+            .or_else(|| configured_api_key_env(config)),
+        extra_headers: model
+            .extra_headers
+            .clone()
+            .unwrap_or_else(|| config.model.extra_headers.clone()),
     })
+}
+
+/// Parse a JSON object string into a `BTreeMap<String, String>`.
+/// Returns `None` for empty or invalid input.
+pub fn parse_extra_headers_json(json: &str) -> Option<BTreeMap<String, String>> {
+    if json.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<BTreeMap<String, String>>(json).ok()
 }
 
 pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
@@ -375,7 +421,8 @@ pub async fn build_run_config(
         .config_cwd
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
-    let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
+    let overrides = model_overrides(&options.model, config)?;
+    let client = ModelClient::from_env_with_overrides(overrides.clone())?.with_cache_ttl(Some("1h"));
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -422,6 +469,8 @@ pub async fn build_run_config(
             None,
             Some(ssh_host),
             agent.messages.clone(),
+            overrides.api_key_env.clone(),
+            overrides.extra_headers.clone(),
         );
         sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -496,6 +545,8 @@ pub async fn build_run_config(
         sandbox.as_ref().map(|session| session.spec().clone()),
         None, // fresh local/sandbox sessions carry no ssh_host
         agent.messages.clone(),
+        overrides.api_key_env.clone(),
+        overrides.extra_headers.clone(),
     );
     sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -618,7 +669,8 @@ pub async fn build_resume_picker_config(
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
     let client =
-        ModelClient::from_env_with_overrides(model_overrides(&ModelOptions::default(), config)?)?;
+        ModelClient::from_env_with_overrides(model_overrides(&ModelOptions::default(), config)?)?
+            .with_cache_ttl(Some("1h"));
     let lookup_cwd = options.lookup_cwd;
     let paths = PathContext::new(&lookup_cwd);
     let agents_md = AgentsMdBundle::load(Some(&lookup_cwd), &paths)?;
@@ -736,9 +788,10 @@ async fn build_resume_config_from_snapshot(
         model: Some(snapshot.model.clone()),
         backend: Some(snapshot.backend),
         reasoning_effort: snapshot.reasoning_effort,
-        api_key_env: configured_api_key_env(config),
-        extra_headers: config.model.extra_headers.clone(),
-    })?;
+        api_key_env: snapshot.api_key_env.clone(),
+        extra_headers: snapshot.extra_headers.clone(),
+    })?
+    .with_cache_ttl(Some("1h"));
     let sandbox = if ssh_host.is_some() {
         None
     } else {
@@ -889,6 +942,7 @@ pub async fn build_sandbox_session(
     )?);
 
     let spec = build_sandbox_spec(
+        options.sandbox_backend,
         options
             .sandbox_image
             .as_deref()
@@ -907,6 +961,8 @@ pub async fn build_sandbox_session(
                 .clone()
                 .unwrap_or_else(|| "0".to_string()),
         ),
+        options.sandbox_cpus,
+        options.sandbox_mem,
     )?;
     let owner = options.sandbox_session_key.is_none();
     let session_key = options
@@ -1027,6 +1083,8 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Low),
                 api_base_url: Some("https://cli.example/v1".to_string()),
                 api_model: Some("cli-model".to_string()),
+                api_key_env: None,
+                extra_headers: None,
             },
             &config,
         )
@@ -1039,8 +1097,70 @@ mod tests {
         assert_eq!(cli_overrides.backend, Some(BackendKind::DeepSeekChat));
         assert_eq!(cli_overrides.reasoning_effort, Some(ReasoningEffort::Low));
 
+        // CLI-provided api_key_env and extra_headers should override config values.
+        let mut cli_extra = std::collections::BTreeMap::new();
+        cli_extra.insert("X-Custom".to_string(), "cli-value".to_string());
+        let cli_full_overrides = model_overrides(
+            &ModelOptions {
+                backend: Some(BackendKind::DeepSeekChat),
+                reasoning_effort: Some(ReasoningEffort::Low),
+                api_base_url: Some("https://cli.example/v1".to_string()),
+                api_model: Some("cli-model".to_string()),
+                api_key_env: Some("CLI_KEY_ENV".to_string()),
+                extra_headers: Some(cli_extra.clone()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            cli_full_overrides.api_key_env.as_deref(),
+            Some("CLI_KEY_ENV")
+        );
+        assert_eq!(cli_full_overrides.extra_headers, cli_extra);
+
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);
+    }
+
+    #[test]
+    fn parse_extra_headers_json_handles_empty_object() {
+        // Empty string → None (no override)
+        assert_eq!(parse_extra_headers_json(""), None);
+        // "{}" → Some(empty map) so the worker uses empty headers, not config fallback
+        assert_eq!(parse_extra_headers_json("{}"), Some(BTreeMap::new()));
+        // Valid headers → Some(map)
+        let mut headers = BTreeMap::new();
+        headers.insert("X-Custom".to_string(), "val".to_string());
+        assert_eq!(
+            parse_extra_headers_json(r#"{"X-Custom":"val"}"#),
+            Some(headers)
+        );
+        // Invalid JSON → None
+        assert_eq!(parse_extra_headers_json("not json"), None);
+    }
+
+    #[test]
+    fn model_overrides_empty_extra_headers_does_not_leak_config() {
+        // When the CLI passes Some(empty map), config's extra_headers must NOT leak.
+        let mut config = NacConfig::default();
+        config
+            .model
+            .extra_headers
+            .insert("X-Config-Leak".to_string(), "should-not-appear".to_string());
+
+        let overrides = model_overrides(
+            &ModelOptions {
+                backend: None,
+                reasoning_effort: None,
+                api_base_url: None,
+                api_model: None,
+                api_key_env: None,
+                extra_headers: Some(BTreeMap::new()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert!(overrides.extra_headers.is_empty());
     }
 
     #[test]
@@ -1457,6 +1577,8 @@ url = "https://mcp.context7.com/mcp"
                     tool_calls: None,
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
@@ -1528,6 +1650,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let normalized =
@@ -1547,6 +1671,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
         let normalized =
             normalize_snapshot_paths(relative, Path::new("/local/resume/base")).unwrap();
@@ -1563,14 +1689,19 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             Some(SandboxSpec {
+                backend: crate::sandbox::SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: None,
+                cpus: 2,
+                memory_mib: 2048,
             }),
             Some("build-box".to_string()),
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let error = match build_resume_config_from_snapshot(
@@ -1611,6 +1742,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             None,
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
 
         let error = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap_err();
@@ -1656,6 +1789,8 @@ url = "https://mcp.context7.com/mcp"
                     content: "hello".to_string(),
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 

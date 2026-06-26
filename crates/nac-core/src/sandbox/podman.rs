@@ -109,12 +109,18 @@ impl PodmanSession {
         let mut args = vec![
             OsString::from("--sandbox"),
             OsString::from("--no-mount-cwd"),
+            OsString::from("--sandbox-backend"),
+            OsString::from("podman"),
             OsString::from("--sandbox-image"),
             OsString::from(self.spec.image.clone()),
             OsString::from("--sandbox-workdir"),
             OsString::from(self.spec.workdir.display().to_string()),
             OsString::from("--sandbox-session-key"),
             OsString::from(self.session_key.clone()),
+            OsString::from("--sandbox-cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--sandbox-mem"),
+            OsString::from(self.spec.memory_mib.to_string()),
         ];
 
         for mount in &self.spec.mounts {
@@ -347,6 +353,10 @@ impl PodmanSession {
             OsString::from("--rm"),
             OsString::from("--name"),
             OsString::from(self.container_name.clone()),
+            OsString::from("--cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--memory"),
+            OsString::from(format!("{}m", self.spec.memory_mib)),
         ];
 
         if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
@@ -385,6 +395,19 @@ impl PodmanSession {
         )));
         args
     }
+
+    /// Explicitly destroy the sandbox container, regardless of remaining
+    /// `Arc` references.  Best-effort and idempotent: `podman rm -f` already
+    /// handles non-existent containers gracefully.
+    pub(crate) async fn destroy(&self) -> Result<()> {
+        if !self.owner {
+            return Ok(());
+        }
+        let mut cmd = Command::new("podman");
+        cmd.args(["rm", "-f", &self.container_name]);
+        let _ = cmd.output().await; // best-effort, ignore errors
+        Ok(())
+    }
 }
 
 impl Drop for PodmanSession {
@@ -419,7 +442,7 @@ fn volume_arg(mount: &MountSpec) -> String {
     )
 }
 
-fn sanitize_name(input: &str) -> String {
+pub(crate) fn sanitize_name(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
         if ch.is_ascii_alphanumeric() {
@@ -431,7 +454,7 @@ fn sanitize_name(input: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn shell_escape_path(path: &Path) -> String {
+pub(crate) fn shell_escape_path(path: &Path) -> String {
     path.display().to_string().replace('\'', "'\"'\"'")
 }
 
@@ -458,12 +481,13 @@ fn should_enable_gpu_access_options() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::sandbox::{SandboxBackendType, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
     use std::path::PathBuf;
 
     fn sample_session() -> PodmanSession {
         PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: vec![MountSpec {
                     host: PathBuf::from("/tmp/project"),
@@ -473,6 +497,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "abc123".to_string(),
             false,
@@ -523,11 +549,14 @@ mod tests {
     fn create_container_args_skip_user_without_rw_mounts() {
         let session = PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "empty".to_string(),
             false,
@@ -544,6 +573,7 @@ mod tests {
     fn create_container_args_include_gpu_devices() {
         let session = PodmanSession::new(
             SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: Vec::new(),
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
@@ -552,6 +582,8 @@ mod tests {
                     "nvidia.com/gpu=mig1:0".to_string(),
                 ],
                 shm_size: Some("8g".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "gpu".to_string(),
             false,

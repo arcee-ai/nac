@@ -62,6 +62,8 @@ pub fn new_snapshot(
     sandbox_spec: Option<SandboxSpec>,
     ssh_host: Option<String>,
     messages: Vec<Message>,
+    api_key_env: Option<String>,
+    extra_headers: BTreeMap<String, String>,
 ) -> SessionSnapshot {
     let now = now_utc();
     SessionSnapshot {
@@ -73,10 +75,13 @@ pub fn new_snapshot(
         reasoning_effort,
         sandbox_spec,
         ssh_host,
+        api_key_env,
+        extra_headers,
         messages,
         last_response_duration_ms: None,
         previous_response_duration_ms: None,
         response_durations_ms: None,
+        token_usages: Vec::new(),
         created_at: now.clone(),
         updated_at: now,
     }
@@ -88,6 +93,7 @@ pub fn refresh_snapshot(
     last_response_duration_ms: Option<u64>,
     previous_response_duration_ms: Option<u64>,
     response_durations_ms: Option<Vec<Option<u64>>>,
+    token_usages: Vec<Option<crate::model::TokenUsage>>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
@@ -98,10 +104,13 @@ pub fn refresh_snapshot(
         reasoning_effort: snapshot.reasoning_effort,
         sandbox_spec: snapshot.sandbox_spec.clone(),
         ssh_host: snapshot.ssh_host.clone(),
+        api_key_env: snapshot.api_key_env.clone(),
+        extra_headers: snapshot.extra_headers.clone(),
         messages,
         last_response_duration_ms,
         previous_response_duration_ms,
         response_durations_ms,
+        token_usages,
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }

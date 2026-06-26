@@ -176,6 +176,7 @@ mod tests {
         let skill_dir = write_skill(&project_skills, "lint", "lint code", "body");
 
         let sandbox = SandboxSession::new_for_test(SandboxSpec {
+            backend: crate::sandbox::SandboxBackendType::Podman,
             image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![
                 MountSpec {
@@ -192,6 +193,8 @@ mod tests {
             workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
             gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
         });
 
         let registry = SkillRegistry::load(Some(&repo), Some(&sandbox), &PathContext::new(&repo))
@@ -283,6 +286,28 @@ mod tests {
         }
         let _ = fs::remove_dir_all(ambient_home);
         let _ = fs::remove_dir_all(ambient_nac_home);
+    }
+
+    #[test]
+    fn cwd_equals_home_produces_no_duplicate_sources() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let root = temp_dir("cwd_eq_home");
+        let _env = isolate_user_skill_env(&root);
+        // Use the isolated home directory as both workspace and home.
+        // No .git inside, so find_project_root falls back to workspace_dir == home.
+        let home = root.join("home");
+        fs::create_dir_all(home.join(".agents/skills")).unwrap();
+        write_skill(&home.join(".agents/skills"), "demo", "demo skill", "body");
+
+        let sources = discover_skill_sources(Some(&home), &PathContext::new(&home)).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for source in &sources {
+            assert!(
+                seen.insert(source.host_root.clone()),
+                "duplicate host_root: {}",
+                source.host_root.display()
+            );
+        }
     }
 
     #[test]

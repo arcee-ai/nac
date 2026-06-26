@@ -81,6 +81,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
              last_response_duration_ms INTEGER,
              previous_response_duration_ms INTEGER,
              response_durations_ms_json TEXT,
+             api_key_env TEXT,
+             extra_headers_json TEXT,
+             token_usages_json TEXT,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
@@ -105,6 +108,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     )?;
     ensure_column(&conn, "sessions", "response_durations_ms_json", "TEXT")?;
     ensure_column(&conn, "sessions", "host_id", "TEXT")?;
+    ensure_column(&conn, "sessions", "api_key_env", "TEXT")?;
+    ensure_column(&conn, "sessions", "extra_headers_json", "TEXT")?;
+    ensure_column(&conn, "sessions", "token_usages_json", "TEXT")?;
     Ok(conn)
 }
 

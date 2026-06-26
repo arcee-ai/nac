@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -5,7 +6,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{detect_backend, BackendKind, ReasoningEffort};
-use crate::sandbox::SandboxSpec;
+use crate::sandbox::{SandboxBackendType, SandboxSpec};
 use crate::types::Message;
 
 mod codec;
@@ -13,7 +14,7 @@ mod db;
 mod snapshot;
 mod summary;
 
-pub use db::{create_session, list_sessions, load_last_session, load_session, save_session};
+pub use db::{create_session, delete_session, list_sessions, load_last_session, load_session, save_session};
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
@@ -31,10 +32,18 @@ pub struct SessionSnapshot {
     pub sandbox_spec: Option<SandboxSpec>,
     /// OpenSSH target for remote sessions; `None` for local sessions.
     pub ssh_host: Option<String>,
+    /// Env var name used to resolve the API key at session creation time.
+    /// Stored per-session so resume uses the same key source, not current config.
+    pub api_key_env: Option<String>,
+    /// Custom HTTP headers captured at session creation time.
+    /// Stored per-session so resume uses the same headers, not current config.
+    pub extra_headers: BTreeMap<String, String>,
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
     pub response_durations_ms: Option<Vec<Option<u64>>>,
+    /// Per-response token usage, one entry per assistant response (in order).
+    pub token_usages: Vec<Option<crate::model::TokenUsage>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -88,10 +97,29 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
+        None,
+        BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
         snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
+        snapshot.token_usages = vec![
+            Some(crate::model::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_tokens: 20,
+                cache_write_tokens: 0,
+                total_tokens: 150,
+            }),
+            None,
+            Some(crate::model::TokenUsage {
+                input_tokens: 200,
+                output_tokens: 80,
+                cache_read_tokens: 40,
+                cache_write_tokens: 10,
+                total_tokens: 330,
+            }),
+        ];
         create_session(&store_path, &snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
@@ -103,6 +131,11 @@ mod tests {
             loaded.response_durations_ms,
             Some(vec![Some(1_000), None, Some(12_345)])
         );
+        assert_eq!(loaded.token_usages.len(), 3);
+        assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 100);
+        assert_eq!(loaded.token_usages[0].as_ref().unwrap().output_tokens, 50);
+        assert!(loaded.token_usages[1].is_none());
+        assert_eq!(loaded.token_usages[2].as_ref().unwrap().total_tokens, 330);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -167,6 +200,10 @@ mod tests {
         assert_eq!(loaded.last_response_duration_ms, Some(12_345));
         assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
         assert_eq!(loaded.response_durations_ms, None);
+        assert!(
+            loaded.token_usages.is_empty(),
+            "legacy rows without token_usages_json column load as empty Vec"
+        );
         assert_eq!(
             loaded.ssh_host, None,
             "legacy rows without a host_id column load as local sessions"
@@ -220,6 +257,7 @@ mod tests {
             None,
             None,
             None,
+            loaded.token_usages.clone(),
         );
         save_session(&store_path, &refreshed).unwrap();
 
@@ -264,13 +302,15 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
+        None,
+        BTreeMap::new(),
         );
         create_session(&store_path, &snapshot).unwrap();
 
         let loaded = load_session(&store_path, "session-remote").unwrap();
         assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
 
-        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None);
+        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
         assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
         save_session(&store_path, &refreshed).unwrap();
         assert_eq!(
@@ -307,6 +347,8 @@ mod tests {
             None,
             None,
             Vec::new(),
+        None,
+        BTreeMap::new(),
         );
         create_session(&store_path, &first).unwrap();
 
@@ -322,6 +364,8 @@ mod tests {
             vec![Message::User {
                 content: "latest".to_string(),
             }],
+        None,
+        BTreeMap::new(),
         );
         save_session(&store_path, &second).unwrap();
 
@@ -353,6 +397,8 @@ mod tests {
                     content: "first prompt".to_string(),
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         create_session(&store_path, &first).unwrap();
 
@@ -364,11 +410,14 @@ mod tests {
             BackendKind::FireworksChat,
             None,
             Some(SandboxSpec {
+                backend: SandboxBackendType::Podman,
                 image: "python:3.13".to_string(),
                 workdir: PathBuf::from("/workspace"),
                 mounts: Vec::new(),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             }),
             None,
             vec![
@@ -385,6 +434,8 @@ mod tests {
                     tool_calls: None,
                 },
             ],
+        None,
+        BTreeMap::new(),
         );
         save_session(&store_path, &second).unwrap();
 
@@ -397,6 +448,206 @@ mod tests {
             Some("latest prompt")
         );
         assert!(sessions[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn api_key_env_and_extra_headers_round_trip_through_store() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("api_key_env_headers");
+
+        let mut headers = BTreeMap::new();
+        headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
+        headers.insert("X-Org".to_string(), "my-org".to_string());
+
+        let snapshot = new_snapshot(
+            "session-config".to_string(),
+            PathBuf::from("/repo"),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            vec![Message::User {
+                content: "hello".to_string(),
+            }],
+            Some("MY_CUSTOM_API_KEY".to_string()),
+            headers.clone(),
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "session-config").unwrap();
+        assert_eq!(
+            loaded.api_key_env.as_deref(),
+            Some("MY_CUSTOM_API_KEY"),
+            "api_key_env must round-trip through the DB"
+        );
+        assert_eq!(
+            loaded.extra_headers, headers,
+            "extra_headers must round-trip through the DB"
+        );
+
+        // refresh_snapshot must preserve api_key_env and extra_headers
+        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
+        assert_eq!(refreshed.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(refreshed.extra_headers, headers);
+        save_session(&store_path, &refreshed).unwrap();
+
+        let reloaded = load_session(&store_path, "session-config").unwrap();
+        assert_eq!(reloaded.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(reloaded.extra_headers, headers);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_session_without_api_key_env_loads_with_defaults() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("legacy_no_api_key_env");
+        std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
+        let messages_json = serde_json::to_string(&vec![Message::User {
+            content: "hello".to_string(),
+        }])
+        .unwrap();
+
+        {
+            let conn = rusqlite::Connection::open(&store_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                    session_id TEXT PRIMARY KEY,
+                    cwd TEXT NOT NULL,
+                    store_path TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    backend TEXT,
+                    reasoning_effort TEXT,
+                    sandbox_json TEXT,
+                    messages_json TEXT NOT NULL,
+                    last_response_duration_ms INTEGER,
+                    previous_response_duration_ms INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (
+                    session_id, cwd, store_path, model, base_url, backend, reasoning_effort,
+                    sandbox_json, messages_json, last_response_duration_ms,
+                    previous_response_duration_ms, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                rusqlite::params![
+                    "legacy-session",
+                    "/repo",
+                    store_path.display().to_string(),
+                    "model-a",
+                    "https://api.openai.com/v1",
+                    "openai-responses",
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    messages_json,
+                    12_345_u64,
+                    6_789_u64,
+                    "2026-01-01 00:00:00.000000000",
+                    "2026-01-01 00:00:01.000000000",
+                ],
+            )
+            .unwrap();
+        }
+
+        // load_session goes through open_connection which runs migrations
+        let loaded = load_session(&store_path, "legacy-session").unwrap();
+        assert_eq!(
+            loaded.api_key_env, None,
+            "legacy rows without api_key_env column load as None"
+        );
+        assert!(
+            loaded.extra_headers.is_empty(),
+            "legacy rows without extra_headers_json column load as empty map"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn delete_session_cascades_to_threads_episodes_and_worksets() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("delete_cascade");
+
+        // Create a session
+        let snapshot = new_snapshot(
+            "session-del".to_string(),
+            PathBuf::from("/repo"),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            vec![Message::User {
+                content: "hello".to_string(),
+            }],
+            None,
+            BTreeMap::new(),
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        // Add threads with episodes
+        crate::store::append_episode(
+            &store_path,
+            "session-del",
+            "auth",
+            "inspect",
+            "auth episode",
+        )
+        .unwrap();
+        crate::store::append_episode(
+            &store_path,
+            "session-del",
+            "tests",
+            "scan",
+            "test episode",
+        )
+        .unwrap();
+
+        // Add a workset with items
+        let workset = crate::store::WorksetDefinition {
+            id: "ws-1".to_string(),
+            goal: "refresh".to_string(),
+            status: "planned".to_string(),
+            summary: "summary".to_string(),
+            verification_recipe: None,
+            items: vec![crate::store::WorksetItemDefinition {
+                title: "item-1".to_string(),
+                scope: "src/main.rs".to_string(),
+                description: "do thing".to_string(),
+                role: "implement".to_string(),
+                depends_on: Vec::new(),
+                acceptance: "done".to_string(),
+                notes: None,
+            }],
+        };
+        crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
+
+        // Verify data exists
+        assert!(!crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
+        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().len() == 1);
+        assert!(list_sessions(&store_path).unwrap().len() == 1);
+
+        // Delete the session
+        let deleted = delete_session(&store_path, "session-del").unwrap();
+        assert!(deleted, "delete_session should return true for existing session");
+
+        // Verify all related rows are gone
+        assert!(crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
+        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().is_empty());
+        assert!(list_sessions(&store_path).unwrap().is_empty());
+
+        // Deleting a non-existent session returns false
+        let deleted_again = delete_session(&store_path, "session-del").unwrap();
+        assert!(!deleted_again, "delete_session should return false for missing session");
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

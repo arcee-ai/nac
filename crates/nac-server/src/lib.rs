@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     net::SocketAddr,
     path::PathBuf,
@@ -16,7 +16,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
     },
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use nac_core::{
@@ -28,6 +28,7 @@ use nac_core::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
         SessionService, SessionSubmitError,
     },
+    sessions,
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
@@ -115,6 +116,20 @@ pub struct SandboxRequest {
     pub shm_size: Option<String>,
     pub session_key: Option<String>,
     pub workdir: Option<String>,
+    pub backend: Option<String>,
+    pub cpus: Option<u8>,
+    pub memory_mib: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateConfigRequest {
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub backend: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub api_key_env: Option<String>,
+    /// JSON string of `BTreeMap<String, String>`. An empty string clears the map.
+    pub extra_headers: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -477,6 +492,126 @@ impl SessionManager {
             .map_err(|error| anyhow!(error.to_string()))
     }
 
+    /// Deletes a session and all related data (threads, episodes, worksets,
+    /// workset_items) from the store. If the session is currently active in
+    /// memory, any running task is gracefully cancelled before removal.
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        // Cancel any active run, destroy the sandbox, and remove from the
+        // in-memory map.
+        {
+            let active = self.inner.active_sessions.read().await;
+            if let Some(service) = active.get(session_id) {
+                if let Some(active_run) = service.active_run() {
+                    let _ = service
+                        .connect_client()
+                        .request_cancel(&active_run.run_id)
+                        .await;
+                }
+                // Explicitly destroy the sandbox so it is torn down even
+                // if SSE handlers or other clones keep the Arc alive.
+                service.destroy_sandbox().await;
+            }
+        }
+        self.inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
+
+        // Cascade-delete all DB rows for this session.
+        let deleted = view::delete_session(&self.inner.store_path, session_id)?;
+        if !deleted {
+            return Err(anyhow!("session '{}' was not found", session_id));
+        }
+        Ok(())
+    }
+
+    /// Updates the model configuration of an existing session in the DB,
+    /// then removes it from the in-memory `active_sessions` map so that the
+    /// next `attach_session` call re-resumes it with the new config.
+    /// Returns an error if a run is currently active.
+    pub async fn update_session_config(
+        &self,
+        session_id: &str,
+        request: UpdateConfigRequest,
+    ) -> Result<()> {
+        // 1. Check that no run is active.
+        {
+            let active = self.inner.active_sessions.read().await;
+            if let Some(service) = active.get(session_id) {
+                if service.active_run().is_some() {
+                    return Err(anyhow!(
+                        "session is busy with an active run; cancel it before updating config"
+                    ));
+                }
+            }
+        }
+
+        // 2. Load the current snapshot from DB.
+        let mut snapshot = sessions::load_session(&self.inner.store_path, session_id)?;
+
+        // 3. Apply overrides.
+        if let Some(model) = request.model {
+            let trimmed = model.trim().to_string();
+            snapshot.model = if trimmed.is_empty() {
+                // Fall back to a sensible default — keep current if empty.
+                snapshot.model
+            } else {
+                trimmed
+            };
+        }
+        if let Some(base_url) = request.base_url {
+            let trimmed = base_url.trim().to_string();
+            if !trimmed.is_empty() {
+                snapshot.base_url = trimmed;
+            }
+        }
+        if let Some(backend) = request.backend {
+            let trimmed = backend.trim();
+            if !trimmed.is_empty() {
+                snapshot.backend = parse_json_string_enum::<BackendKind>(trimmed)?;
+            }
+        }
+        if let Some(effort) = request.reasoning_effort {
+            let trimmed = effort.trim();
+            if trimmed.is_empty() {
+                snapshot.reasoning_effort = None;
+            } else {
+                snapshot.reasoning_effort =
+                    Some(parse_json_string_enum::<ReasoningEffort>(trimmed)?);
+            }
+        }
+        if let Some(api_key_env) = request.api_key_env {
+            let trimmed = api_key_env.trim();
+            snapshot.api_key_env = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
+        if let Some(extra_headers_json) = request.extra_headers {
+            let trimmed = extra_headers_json.trim();
+            if trimmed.is_empty() {
+                snapshot.extra_headers = BTreeMap::new();
+            } else {
+                snapshot.extra_headers = serde_json::from_str::<BTreeMap<String, String>>(trimmed)
+                    .context("failed to parse extra_headers as JSON object")?;
+            }
+        }
+
+        // 4. Save the updated snapshot to DB.
+        sessions::save_session(&self.inner.store_path, &snapshot)?;
+
+        // 5. Remove from active_sessions so the next attach re-resumes.
+        self.inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
+
+        Ok(())
+    }
+
     async fn resume_session(&self, session_id: &str) -> Result<SessionService> {
         let summary = self
             .list_sessions(false)
@@ -518,7 +653,8 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route("/sessions/{session_id}", get(session_snapshot))
+        .route("/sessions/{session_id}", get(session_snapshot).delete(delete_session_handler))
+        .route("/sessions/{session_id}/config", patch(update_config_handler))
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
@@ -699,6 +835,23 @@ async fn cancel_active_run(
     Ok(StatusCode::ACCEPTED)
 }
 
+async fn delete_session_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager.delete_session(&session_id).await?;
+    Ok(StatusCode::OK)
+}
+
+async fn update_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(request): Json<UpdateConfigRequest>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager.update_session_config(&session_id, request).await?;
+    Ok(StatusCode::OK)
+}
+
 fn model_options(
     model: Option<String>,
     base_url: Option<String>,
@@ -714,6 +867,8 @@ fn model_options(
             .transpose()?,
         api_base_url: base_url,
         api_model: model,
+        api_key_env: None,
+        extra_headers: None,
     })
 }
 
@@ -728,6 +883,9 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
         sandbox_shm_size: request.shm_size,
         sandbox_session_key: request.session_key,
         sandbox_workdir: request.workdir,
+        sandbox_backend: request.backend,
+        sandbox_cpus: request.cpus,
+        sandbox_mem: request.memory_mib,
     }
 }
 

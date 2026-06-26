@@ -44,7 +44,8 @@ pub(super) fn discover_skill_sources(
     }
 
     sources.sort_by_key(|source| source.precedence);
-    sources.dedup_by(|a, b| a.host_root == b.host_root);
+    let mut seen = std::collections::HashSet::new();
+    sources.retain(|source| seen.insert(source.host_root.clone()));
     Ok(sources)
 }
 
