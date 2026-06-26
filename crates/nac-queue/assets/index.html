@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nac-queue</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+
+  <!-- ───────────────────────── Launch Modal ───────────────────────── -->
+  <div id="launchModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h1>nac-queue</h1>
+        <p class="modal-subtitle">Autonomous Coding Pipeline</p>
+      </div>
+      <form id="launchForm" class="launch-form">
+        <label>
+          <span>Working Directory</span>
+          <input type="text" id="cwdInput" placeholder="/path/to/project" autocomplete="off" />
+        </label>
+        <label>
+          <span>Concurrent Agents</span>
+          <input type="number" id="agentsInput" value="2" min="1" max="10" />
+        </label>
+        <label>
+          <span>Goal</span>
+          <textarea id="goalInput" rows="4" placeholder="Describe the goal you want the agents to achieve..."></textarea>
+        </label>
+        <div id="launchError" class="form-error"></div>
+        <button type="submit" id="launchBtn" class="primary-action" disabled>Launch Pipeline</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── Dashboard ───────────────────────── -->
+  <div id="dashboard" class="dashboard hidden">
+
+    <!-- Header bar -->
+    <header class="dash-header">
+      <div class="dash-brand">
+        <span class="brand-mark">nac-queue</span>
+      </div>
+      <div class="dash-goal" id="dashGoal" title=""></div>
+      <div class="dash-meta">
+        <span class="iteration-badge" id="iterationBadge">Iteration: 0/10</span>
+        <span class="status-badge" id="statusBadge">idle</span>
+        <button id="stopBtn" class="stop-btn hidden">Stop</button>
+      </div>
+    </header>
+
+    <!-- Planner indicator banner -->
+    <div id="plannerBanner" class="planner-banner hidden">
+      <div class="spinner"></div>
+      <span>Planner is analyzing the repository…</span>
+    </div>
+
+    <!-- Three queue columns -->
+    <div class="queue-columns">
+      <section class="queue-column" data-queue="implementation">
+        <div class="queue-header">
+          <h2>Implementation</h2>
+          <span class="queue-count" id="implCount">0</span>
+        </div>
+        <div class="queue-list" id="implList"></div>
+      </section>
+
+      <section class="queue-column" data-queue="verification">
+        <div class="queue-header">
+          <h2>Verification</h2>
+          <span class="queue-count" id="verifyCount">0</span>
+        </div>
+        <div class="queue-list" id="verifyList"></div>
+      </section>
+
+      <section class="queue-column" data-queue="merge">
+        <div class="queue-header">
+          <h2>Merge</h2>
+          <span class="queue-count" id="mergeCount">0</span>
+        </div>
+        <div class="queue-list" id="mergeList"></div>
+      </section>
+    </div>
+
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
