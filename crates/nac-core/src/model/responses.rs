@@ -91,6 +91,22 @@ pub(super) fn parse_openai_responses_response(
         None
     };
 
+    let usage = value.get("usage").map(|u| {
+        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let cached = u
+            .get("input_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        TokenUsage {
+            input_tokens: input_tokens.saturating_sub(cached),
+            output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            cache_read_tokens: cached,
+            cache_write_tokens: 0,
+            total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+        }
+    });
+
     Ok(ModelTurnResponse {
         assistant: AssistantTurn {
             content,
@@ -103,6 +119,7 @@ pub(super) fn parse_openai_responses_response(
             },
         },
         finish_reason,
+        usage,
     })
 }
 

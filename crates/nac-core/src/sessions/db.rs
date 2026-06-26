@@ -36,7 +36,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -55,7 +55,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -118,6 +118,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         ssh_host: row.get(13)?,
         api_key_env: row.get(14)?,
         extra_headers_json: row.get(15)?,
+        token_usages_json: row.get(16)?,
     })
 }
 
@@ -215,14 +216,20 @@ fn insert_or_replace_session(
         Some(serde_json::to_string(&snapshot.extra_headers)
             .context("failed to serialize session extra_headers")?)
     };
+    let token_usages_json = if snapshot.token_usages.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&snapshot.token_usages)
+            .context("failed to serialize session token usages")?)
+    };
 
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
     // actually opened for this write and is never read back.
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
@@ -238,7 +245,8 @@ fn insert_or_replace_session(
              updated_at = excluded.updated_at,
              host_id = excluded.host_id,
              api_key_env = excluded.api_key_env,
-             extra_headers_json = excluded.extra_headers_json",
+             extra_headers_json = excluded.extra_headers_json,
+             token_usages_json = excluded.token_usages_json",
         params![
             snapshot.session_id,
             snapshot.cwd.display().to_string(),
@@ -257,6 +265,7 @@ fn insert_or_replace_session(
             snapshot.ssh_host,
             snapshot.api_key_env,
             extra_headers_json,
+            token_usages_json,
         ],
     )?;
     Ok(())
@@ -279,6 +288,7 @@ struct SessionRow {
     ssh_host: Option<String>,
     api_key_env: Option<String>,
     extra_headers_json: Option<String>,
+    token_usages_json: Option<String>,
 }
 
 impl SessionRow {
@@ -304,6 +314,16 @@ impl SessionRow {
             })
             .transpose()?
             .unwrap_or_default();
+        let token_usages = self
+            .token_usages_json
+            .as_deref()
+            .filter(|json| !json.is_empty())
+            .map(|json| {
+                serde_json::from_str::<Vec<Option<crate::model::TokenUsage>>>(json)
+                    .context("failed to parse stored session token usages")
+            })
+            .transpose()?
+            .unwrap_or_default();
         Ok(SessionSnapshot {
             session_id: self.session_id,
             cwd: PathBuf::from(self.cwd),
@@ -319,6 +339,7 @@ impl SessionRow {
             last_response_duration_ms: self.last_response_duration_ms,
             previous_response_duration_ms: self.previous_response_duration_ms,
             response_durations_ms,
+            token_usages,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })

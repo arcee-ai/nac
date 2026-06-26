@@ -192,6 +192,7 @@ mod tests {
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         }
     }
 

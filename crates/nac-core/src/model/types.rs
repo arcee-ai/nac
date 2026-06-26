@@ -70,8 +70,28 @@ pub struct AssistantTurn {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub total_tokens: u64,
+}
+
+impl std::ops::AddAssign for TokenUsage {
+    fn add_assign(&mut self, other: Self) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
+        self.cache_write_tokens += other.cache_write_tokens;
+        self.total_tokens += other.total_tokens;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelTurnResponse {
     pub assistant: AssistantTurn,
     pub finish_reason: Option<String>,
+    pub usage: Option<TokenUsage>,
 }

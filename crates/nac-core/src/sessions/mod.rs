@@ -42,6 +42,8 @@ pub struct SessionSnapshot {
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
     pub response_durations_ms: Option<Vec<Option<u64>>>,
+    /// Per-response token usage, one entry per assistant response (in order).
+    pub token_usages: Vec<Option<crate::model::TokenUsage>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -101,6 +103,23 @@ mod tests {
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
         snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
+        snapshot.token_usages = vec![
+            Some(crate::model::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_tokens: 20,
+                cache_write_tokens: 0,
+                total_tokens: 150,
+            }),
+            None,
+            Some(crate::model::TokenUsage {
+                input_tokens: 200,
+                output_tokens: 80,
+                cache_read_tokens: 40,
+                cache_write_tokens: 10,
+                total_tokens: 330,
+            }),
+        ];
         create_session(&store_path, &snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
@@ -112,6 +131,11 @@ mod tests {
             loaded.response_durations_ms,
             Some(vec![Some(1_000), None, Some(12_345)])
         );
+        assert_eq!(loaded.token_usages.len(), 3);
+        assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 100);
+        assert_eq!(loaded.token_usages[0].as_ref().unwrap().output_tokens, 50);
+        assert!(loaded.token_usages[1].is_none());
+        assert_eq!(loaded.token_usages[2].as_ref().unwrap().total_tokens, 330);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -176,6 +200,10 @@ mod tests {
         assert_eq!(loaded.last_response_duration_ms, Some(12_345));
         assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
         assert_eq!(loaded.response_durations_ms, None);
+        assert!(
+            loaded.token_usages.is_empty(),
+            "legacy rows without token_usages_json column load as empty Vec"
+        );
         assert_eq!(
             loaded.ssh_host, None,
             "legacy rows without a host_id column load as local sessions"
@@ -229,6 +257,7 @@ mod tests {
             None,
             None,
             None,
+            loaded.token_usages.clone(),
         );
         save_session(&store_path, &refreshed).unwrap();
 
@@ -281,7 +310,7 @@ mod tests {
         let loaded = load_session(&store_path, "session-remote").unwrap();
         assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
 
-        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None);
+        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
         assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
         save_session(&store_path, &refreshed).unwrap();
         assert_eq!(
@@ -458,7 +487,7 @@ mod tests {
         );
 
         // refresh_snapshot must preserve api_key_env and extra_headers
-        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None);
+        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
         assert_eq!(refreshed.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
         assert_eq!(refreshed.extra_headers, headers);
         save_session(&store_path, &refreshed).unwrap();

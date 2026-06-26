@@ -394,6 +394,11 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+#snapTokens,
+#snapContext {
+  font-variant-numeric: tabular-nums;
+}
+
 .matrix-toolbar {
   display: flex;
   align-items: center;
@@ -659,7 +664,7 @@ button.session-card {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-sm);
 }
 

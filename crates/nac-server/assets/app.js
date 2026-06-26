@@ -100,6 +100,8 @@ function bindElements() {
     "snapBackend",
     "snapMessages",
     "snapRun",
+    "snapTokens",
+    "snapContext",
     "transcript",
     "promptForm",
     "promptInput",
@@ -1042,6 +1044,8 @@ function renderInspector() {
     el.snapBackend.textContent = "--";
     el.snapMessages.textContent = "0";
     el.snapRun.textContent = "idle";
+    el.snapTokens.textContent = "--";
+    el.snapContext.textContent = "--";
     el.cancelRun.disabled = true;
     el.deleteSessionBtn.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
@@ -1073,6 +1077,17 @@ function renderInspector() {
   }
   el.cancelRun.disabled = !runActive;
   el.deleteSessionBtn.disabled = false;
+
+  const lastUsage = snapshot.response_timing?.last_token_usage;
+  if (lastUsage) {
+    const cacheRead = lastUsage.cache_read_tokens > 0 ? ` R${formatTokens(lastUsage.cache_read_tokens)}` : "";
+    el.snapTokens.textContent = `↑${formatTokens(lastUsage.input_tokens)}${cacheRead} ↓${formatTokens(lastUsage.output_tokens)}`;
+    el.snapContext.textContent = formatTokens(lastUsage.total_tokens);
+  } else {
+    el.snapTokens.textContent = "--";
+    el.snapContext.textContent = "--";
+  }
+
   renderTabs();
   syncPromptBusy(metadata.session_id, snapshot);
   renderActiveInspectorPanel(snapshot);
@@ -2763,6 +2778,14 @@ function formatRuntime(ms) {
 function formatDuration(ms) {
   if (ms == null) return null;
   return formatRuntime(ms);
+}
+
+function formatTokens(n) {
+  if (n == null || !Number.isFinite(n)) return "--";
+  if (n < 1000) return String(n);
+  if (n < 10000) return (n / 1000).toFixed(1) + "k";
+  if (n < 1000000) return Math.round(n / 1000) + "k";
+  return (n / 1000000).toFixed(1) + "M";
 }
 
 function startLiveTimer() {

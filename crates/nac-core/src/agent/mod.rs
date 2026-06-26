@@ -8,7 +8,7 @@ use tokio::task::JoinSet;
 
 use crate::events::{AgentEvent, EventSink};
 use crate::mcp::McpRegistry;
-use crate::model::ModelClient;
+use crate::model::{ModelClient, TokenUsage};
 use crate::sandbox::SandboxSession;
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
@@ -60,6 +60,9 @@ pub struct Agent {
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
+    /// Token usage from the most recent `send()` call; `None` until the
+    /// final `AssistantMessage` is emitted or if the provider omitted usage.
+    pub last_usage: Option<crate::model::TokenUsage>,
 }
 
 fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
@@ -249,9 +252,11 @@ impl Agent {
                 skills: config.skills,
                 terminal_manager: crate::terminal::TerminalManager::new(),
                 thread_timeout_secs: config.thread_timeout_secs,
+                worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
+            last_usage: None,
         })
     }
 
@@ -309,6 +314,7 @@ impl Agent {
         }
 
         let mut iteration = 0usize;
+        let mut accumulated_usage = TokenUsage::default();
         loop {
             iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
@@ -331,6 +337,13 @@ impl Agent {
                     return Err(error);
                 }
             };
+            if let Some(usage) = &response.usage {
+                accumulated_usage += usage.clone();
+                // total_tokens is the current context length, not a sum.
+                // Overwrite with the last call's total so it reflects the
+                // live context window size after the most recent model call.
+                accumulated_usage.total_tokens = usage.total_tokens;
+            }
             if response.finish_reason.as_deref() == Some("length") {
                 let error = anyhow!(
                     "Context window full (finish_reason=length). nac does not auto-compact thread history right now; retry with a narrower prompt, a fresh thread, or less carried context."
@@ -365,7 +378,9 @@ impl Agent {
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
+                    usage: Some(accumulated_usage.clone()),
                 });
+                self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::RunFinished {
                     thread_name: self.thread_name.clone(),
                 });
@@ -382,6 +397,19 @@ impl Agent {
                 self.thread_name.clone(),
             )
             .await;
+
+            // Fold worker token usage (from thread dispatches) into the
+            // orchestrator's accumulated usage.  Only cost fields are summed;
+            // total_tokens (context length) stays orchestrator-only.
+            {
+                let mut wu = self.tool_runtime.worker_usage.lock().await;
+                accumulated_usage.input_tokens += wu.input_tokens;
+                accumulated_usage.output_tokens += wu.output_tokens;
+                accumulated_usage.cache_read_tokens += wu.cache_read_tokens;
+                accumulated_usage.cache_write_tokens += wu.cache_write_tokens;
+                *wu = TokenUsage::default();
+            }
+
             for (tool_call_id, _tool_name, result) in results {
                 self.messages.push(Message::Tool {
                     tool_call_id,

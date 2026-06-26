@@ -44,6 +44,10 @@ pub struct ResponseTimingSnapshot {
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
     pub response_durations_ms: Option<Vec<Option<u64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_usages: Option<Vec<Option<crate::model::TokenUsage>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_token_usage: Option<crate::model::TokenUsage>,
 }
 
 impl ResponseTimingSnapshot {
@@ -54,10 +58,13 @@ impl ResponseTimingSnapshot {
 
 impl From<&SessionSnapshot> for ResponseTimingSnapshot {
     fn from(snapshot: &SessionSnapshot) -> Self {
+        let last_token_usage = snapshot.token_usages.last().cloned().flatten();
         Self {
             last_response_duration_ms: snapshot.last_response_duration_ms,
             previous_response_duration_ms: snapshot.previous_response_duration_ms,
             response_durations_ms: snapshot.response_durations_ms.clone(),
+            token_usages: Some(snapshot.token_usages.clone()),
+            last_token_usage,
         }
     }
 }
@@ -244,7 +251,7 @@ struct CancellingRun {
 }
 
 enum RunOutcome {
-    Completed(String),
+    Completed(String, Option<crate::model::TokenUsage>),
     Failed(String),
 }
 
@@ -514,7 +521,7 @@ impl SessionService {
         self.append_cancellation_message().await;
         let message = "run cancelled by user".to_string();
         let persistence_error = match self
-            .persist_run_snapshot(&cancelling_run.snapshot, None)
+            .persist_run_snapshot(&cancelling_run.snapshot, None, None)
             .await
         {
             Ok(()) => None,
@@ -556,7 +563,7 @@ impl SessionService {
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
-            let result = {
+            let (result, usage) = {
                 let mut agent = service.agent.lock().await;
                 agent.set_event_sink(EventSink::bus_with_context(
                     event_bus.clone(),
@@ -568,12 +575,13 @@ impl SessionService {
                     .await
                     .map_err(|error| error.to_string());
                 agent.set_event_sink(EventSink::bus(event_bus));
-                result
+                let usage = result.as_ref().ok().and_then(|_| agent.last_usage.clone());
+                (result, usage)
             };
             match result {
                 Ok(response) => {
                     service
-                        .finish_run_once(&task_run_id, RunOutcome::Completed(response))
+                        .finish_run_once(&task_run_id, RunOutcome::Completed(response, usage))
                         .await;
                 }
                 Err(message) => {
@@ -644,12 +652,16 @@ impl SessionService {
         let Some(finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
-        let completed_duration_ms = match outcome {
-            RunOutcome::Completed(_) => Some(finishing_run.duration_ms),
-            RunOutcome::Failed(_) => None,
+        let (completed_duration_ms, completed_usage) = match &outcome {
+            RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
+            RunOutcome::Failed(_) => (None, None),
         };
         let persistence_error = match self
-            .persist_run_snapshot(&finishing_run.snapshot, completed_duration_ms)
+            .persist_run_snapshot(
+                &finishing_run.snapshot,
+                completed_duration_ms,
+                completed_usage,
+            )
             .await
         {
             Ok(()) => None,
@@ -665,10 +677,10 @@ impl SessionService {
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
-            (RunOutcome::Completed(_), Some(error)) => SessionEvent::RunFailed {
+            (RunOutcome::Completed(_, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!("run completed, but failed to persist session snapshot: {error}"),
             },
-            (RunOutcome::Completed(response), None) => SessionEvent::RunCompleted {
+            (RunOutcome::Completed(response, _), None) => SessionEvent::RunCompleted {
                 response,
                 duration_ms: completed_duration_ms,
             },
@@ -761,6 +773,7 @@ impl SessionService {
         &self,
         active_run: &ActiveRunSnapshot,
         completed_duration_ms: Option<u64>,
+        completed_usage: Option<crate::model::TokenUsage>,
     ) -> Result<()> {
         let messages = {
             let agent = self.agent.lock().await;
@@ -774,12 +787,19 @@ impl SessionService {
             };
             let response_timing =
                 response_timing_after_run(snapshot, &messages, completed_duration_ms);
+            let token_usages = token_usages_after_run(
+                &snapshot.token_usages,
+                &snapshot.messages,
+                &messages,
+                completed_usage,
+            );
             sessions::refresh_snapshot(
                 snapshot,
                 messages,
                 response_timing.last_response_duration_ms,
                 response_timing.previous_response_duration_ms,
                 response_timing.response_durations_ms,
+                token_usages,
             )
         };
 
@@ -918,6 +938,8 @@ fn response_timing_after_run(
         last_response_duration_ms,
         previous_response_duration_ms,
         response_durations_ms: Some(durations),
+        token_usages: None,
+        last_token_usage: None,
     }
 }
 
@@ -948,6 +970,36 @@ fn visible_response_count(messages: &[Message]) -> usize {
             )
         })
         .count()
+}
+
+/// Build the per-response token-usage vector after a run, mirroring the
+/// logic in `response_timing_after_run` for durations.  The existing
+/// vector is preserved and padded to match the new response count; the
+/// most recent response's usage is set from `completed_usage` when the
+/// run completed successfully.
+fn token_usages_after_run(
+    existing: &[Option<crate::model::TokenUsage>],
+    old_messages: &[Message],
+    new_messages: &[Message],
+    completed_usage: Option<crate::model::TokenUsage>,
+) -> Vec<Option<crate::model::TokenUsage>> {
+    let mut usages = existing.to_vec();
+    let previous_response_count = visible_response_count(old_messages);
+    if usages.len() < previous_response_count {
+        usages.resize(previous_response_count, None);
+    }
+
+    let current_response_count = visible_response_count(new_messages);
+    if usages.len() < current_response_count {
+        usages.resize(current_response_count, None);
+    }
+    if let (Some(usage), Some(last_index)) =
+        (completed_usage, current_response_count.checked_sub(1))
+    {
+        usages[last_index] = Some(usage);
+    }
+
+    usages
 }
 
 #[cfg(test)]
@@ -1140,7 +1192,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string()))
+                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
                 .await
         );
 
@@ -1184,6 +1236,110 @@ mod tests {
             parts.init.restored_messages.len() + 2
         );
         assert!(parts.service.active_run().is_none());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn finish_run_persists_token_usage() {
+        let store_path = test_store_path("active_finish_token_usage");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-finish-token-usage".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+
+        let active = parts
+            .service
+            .try_begin_run(None, "prompt")
+            .unwrap();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages.push(Message::User {
+                content: "prompt".to_string(),
+            });
+            agent.messages.push(Message::Assistant {
+                content: Some("done".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            });
+        }
+
+        let test_usage = crate::model::TokenUsage {
+            input_tokens: 500,
+            output_tokens: 120,
+            cache_read_tokens: 80,
+            cache_write_tokens: 15,
+            total_tokens: 715,
+        };
+        assert!(
+            parts
+                .service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), Some(test_usage.clone())),
+                )
+                .await
+        );
+
+        let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(loaded.token_usages.len(), 1);
+        let persisted = loaded.token_usages[0]
+            .as_ref()
+            .expect("token usage should be persisted");
+        assert_eq!(persisted.input_tokens, 500);
+        assert_eq!(persisted.output_tokens, 120);
+        assert_eq!(persisted.cache_read_tokens, 80);
+        assert_eq!(persisted.cache_write_tokens, 15);
+        assert_eq!(persisted.total_tokens, 715);
+
+        // Frontend snapshot should expose the usage
+        let frontend = parts.service.frontend_snapshot().await.unwrap();
+        assert_eq!(
+            frontend
+                .response_timing
+                .last_token_usage
+                .as_ref()
+                .unwrap()
+                .total_tokens,
+            715
+        );
+        assert_eq!(
+            frontend
+                .response_timing
+                .token_usages
+                .as_ref()
+                .unwrap()
+                .len(),
+            1
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -1242,7 +1398,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string()))
+                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
                 .await
         );
         let started = events.recv().await.unwrap();
@@ -1449,7 +1605,7 @@ mod tests {
 
         parts
             .service
-            .persist_run_snapshot(&finishing.snapshot, Some(42))
+            .persist_run_snapshot(&finishing.snapshot, Some(42), None)
             .await
             .unwrap();
 
@@ -1518,7 +1674,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&first.run_id, RunOutcome::Completed("done".to_string()))
+                .finish_run_once(&first.run_id, RunOutcome::Completed("done".to_string(), None))
                 .await
         );
         let completion = events.recv().await.unwrap();
@@ -1539,7 +1695,7 @@ mod tests {
                 .service
                 .finish_run_once(
                     &first.run_id,
-                    RunOutcome::Completed("duplicate".to_string())
+                    RunOutcome::Completed("duplicate".to_string(), None)
                 )
                 .await
         );
@@ -1750,7 +1906,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string()))
+                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
                 .await
         );
         let started = events.recv().await.unwrap();

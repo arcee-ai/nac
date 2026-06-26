@@ -131,10 +131,14 @@ pub enum AgentEvent {
         timed_out: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<crate::model::TokenUsage>,
     },
     AssistantMessage {
         thread_name: Option<String>,
         content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<crate::model::TokenUsage>,
     },
     Error {
         thread_name: Option<String>,

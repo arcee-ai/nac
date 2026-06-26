@@ -20,7 +20,7 @@ mod types;
 pub(crate) use backend::detect_backend;
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub(crate) use client::ModelClient;
-pub(crate) use types::{AssistantTurn, ClientOverrides, ModelTurnResponse};
+pub(crate) use types::{AssistantTurn, ClientOverrides, ModelTurnResponse, TokenUsage};
 pub use types::{BackendKind, ReasoningEffort};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +235,12 @@ mod tests {
             serde_json::from_str::<Value>(&tool_call.function.arguments).unwrap(),
             json!({"path": "src/main.rs"})
         );
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens, 30);
 
         let request = anthropic_messages_request(
             "claude-opus-4-6",
@@ -386,6 +392,12 @@ mod tests {
             Some("worked through it")
         );
         assert!(parsed.assistant.tool_calls.is_none());
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens, 30);
     }
 
     #[test]
@@ -439,5 +451,108 @@ mod tests {
                 .len(),
             1
         );
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens, 30);
+    }
+
+    #[test]
+    fn parses_openai_responses_usage_with_cached_tokens() {
+        let parsed = parse_openai_responses_response(
+            &json!({
+                "status": "completed",
+                "output": [
+                    {"type": "message", "content": [{"type": "output_text", "text": "hi"}]}
+                ],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "total_tokens": 150,
+                    "input_tokens_details": {"cached_tokens": 80},
+                    "output_tokens_details": {"reasoning_tokens": 10}
+                }
+            }),
+            "https://api.openai.com/v1/responses",
+        )
+        .unwrap();
+
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 20);   // 100 - 80 cached
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 80);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens, 150);
+    }
+
+    #[test]
+    fn parses_anthropic_usage_with_cache_fields() {
+        let parsed = parse_anthropic_messages_response(
+            &json!({
+                "content": [{"type": "text", "text": "done"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_input_tokens": 200,
+                    "cache_creation_input_tokens": 30
+                }
+            }),
+            "https://api.anthropic.com/v1/messages",
+        )
+        .unwrap();
+
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 200);
+        assert_eq!(usage.cache_write_tokens, 30);
+        assert_eq!(usage.total_tokens, 380);  // 100 + 50 + 200 + 30
+    }
+
+    #[test]
+    fn parses_chat_completions_usage_with_cached_tokens() {
+        let parsed = parse_chat_completions_response(
+            &json!({
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {"content": "done", "tool_calls": null}
+                }],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                    "prompt_tokens_details": {"cached_tokens": 60},
+                    "completion_tokens_details": {"reasoning_tokens": 5}
+                }
+            }),
+            "https://api.deepseek.com/chat/completions",
+        )
+        .unwrap();
+
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 40);   // 100 - 60 cached
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 60);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens, 150);
+    }
+
+    #[test]
+    fn response_without_usage_yields_none() {
+        let parsed = parse_openai_responses_response(
+            &json!({
+                "status": "completed",
+                "output": [
+                    {"type": "message", "content": [{"type": "output_text", "text": "hi"}]}
+                ]
+            }),
+            "https://api.openai.com/v1/responses",
+        )
+        .unwrap();
+
+        assert!(parsed.usage.is_none());
     }
 }

@@ -39,6 +39,11 @@ pub struct ToolRuntime {
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub thread_timeout_secs: u64,
+    /// Accumulated worker token usage from thread dispatches.  The agent
+    /// loop reads and resets this after each tool-execution round so worker
+    /// API costs are included in the session totals.  `total_tokens` is
+    /// intentionally NOT accumulated here — it stays orchestrator-only.
+    pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::const_new(());

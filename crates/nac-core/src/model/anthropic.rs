@@ -252,6 +252,26 @@ pub(super) fn parse_anthropic_messages_response(
             }
         });
 
+    let usage = value.get("usage").map(|u| {
+        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let cache_read = u
+            .get("cache_read_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write = u
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        TokenUsage {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
+            total_tokens: input_tokens + output_tokens + cache_read + cache_write,
+        }
+    });
+
     Ok(ModelTurnResponse {
         assistant: AssistantTurn {
             content,
@@ -264,5 +284,6 @@ pub(super) fn parse_anthropic_messages_response(
             },
         },
         finish_reason,
+        usage,
     })
 }

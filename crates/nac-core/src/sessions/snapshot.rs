@@ -81,6 +81,7 @@ pub fn new_snapshot(
         last_response_duration_ms: None,
         previous_response_duration_ms: None,
         response_durations_ms: None,
+        token_usages: Vec::new(),
         created_at: now.clone(),
         updated_at: now,
     }
@@ -92,6 +93,7 @@ pub fn refresh_snapshot(
     last_response_duration_ms: Option<u64>,
     previous_response_duration_ms: Option<u64>,
     response_durations_ms: Option<Vec<Option<u64>>>,
+    token_usages: Vec<Option<crate::model::TokenUsage>>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
@@ -108,6 +110,7 @@ pub fn refresh_snapshot(
         last_response_duration_ms,
         previous_response_duration_ms,
         response_durations_ms,
+        token_usages,
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }

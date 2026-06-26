@@ -1278,6 +1278,7 @@ mod tests {
             exit_code: 0,
             timed_out: false,
             timeout_reason: None,
+            usage: None,
         });
         let thread = app.threads.get("auth").unwrap();
         assert_eq!(thread.state, ThreadState::Idle);
@@ -1387,6 +1388,7 @@ mod tests {
         app.apply_agent_event(AgentEvent::AssistantMessage {
             thread_name: None,
             content: "ignored".to_string(),
+            usage: None,
         });
         assert!(app.responses.is_empty());
 
