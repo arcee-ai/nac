@@ -11,6 +11,9 @@ pub struct ModelClient {
     reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<String>,
     extra_headers: std::collections::BTreeMap<String, String>,
+    /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
+    /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
+    cache_ttl: Option<&'static str>,
 }
 
 impl ModelClient {
@@ -50,7 +53,15 @@ impl ModelClient {
             reasoning_effort,
             api_key_env: overrides.api_key_env.clone(),
             extra_headers: overrides.extra_headers,
+            cache_ttl: None,
         })
+    }
+
+    /// Set the Anthropic prompt-cache TTL. `Some("1h")` enables 1-hour cache
+    /// TTL (requires beta header); `None` uses the default 5-minute TTL.
+    pub fn with_cache_ttl(mut self, ttl: Option<&'static str>) -> Self {
+        self.cache_ttl = ttl;
+        self
     }
 
     pub async fn send_turn(
@@ -180,7 +191,7 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-        let request = anthropic_messages_request(&self.model, &messages, &tools)?;
+        let request = anthropic_messages_request(&self.model, &messages, &tools, self.cache_ttl)?;
 
         let value = self.post_anthropic_json_with_retry(&url, &request).await?;
         parse_anthropic_messages_response(&value, &url)
@@ -196,10 +207,15 @@ impl ModelClient {
 
     async fn post_anthropic_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
         let api_key = self.api_key.as_str();
+        let cache_ttl = self.cache_ttl;
         self.post_json_with_retry_headers(url, body, |request| {
-            request
+            let mut request = request
                 .header("x-api-key", api_key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("anthropic-version", ANTHROPIC_VERSION);
+            if cache_ttl == Some("1h") {
+                request = request.header("anthropic-beta", "extended-cache-ttl-2025-04-11");
+            }
+            request
         })
         .await
     }
@@ -303,6 +319,7 @@ impl ModelClient {
             reasoning_effort: Some(ReasoningEffort::Xhigh),
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::new(),
+            cache_ttl: None,
         }
     }
 }

@@ -166,6 +166,7 @@ mod tests {
                     }),
                 },
             }],
+            None,
         )
         .unwrap();
 
@@ -174,11 +175,80 @@ mod tests {
         assert_eq!(request["thinking"]["type"], "adaptive");
         assert_eq!(request["thinking"]["display"], "omitted");
         assert_eq!(request["output_config"]["effort"], "max");
-        assert_eq!(request["system"], "system instructions");
-        assert_eq!(request["messages"][0]["role"], "user");
-        assert_eq!(request["messages"][0]["content"], "read a file");
+        // System prompt is now a content-block array with cache_control.
+        assert_eq!(request["system"][0]["type"], "text");
+        assert_eq!(request["system"][0]["text"], "system instructions");
+        assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
+        assert!(request["system"][0]["cache_control"].get("ttl").is_none());
+        // Last tool has cache_control.
         assert_eq!(request["tools"][0]["name"], "read");
         assert_eq!(request["tools"][0]["input_schema"]["type"], "object");
+        assert_eq!(request["tools"][0]["cache_control"]["type"], "ephemeral");
+        // Last message (user) content is converted to array with cache_control.
+        assert_eq!(request["messages"][0]["role"], "user");
+        assert_eq!(request["messages"][0]["content"][0]["type"], "text");
+        assert_eq!(request["messages"][0]["content"][0]["text"], "read a file");
+        assert_eq!(
+            request["messages"][0]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+    }
+
+    #[test]
+    fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
+        let request = anthropic_messages_request(
+            "claude-sonnet-4-6",
+            &[
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "hello".to_string(),
+                },
+            ],
+            &[ToolDefinition {
+                def_type: "function".to_string(),
+                function: crate::types::FunctionDef {
+                    name: "read".to_string(),
+                    description: "Read".to_string(),
+                    parameters: json!({"type": "object"}),
+                },
+            }],
+            Some("1h"),
+        )
+        .unwrap();
+
+        // System breakpoint has 1h TTL.
+        assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(request["system"][0]["cache_control"]["ttl"], "1h");
+        // Tool breakpoint has 1h TTL.
+        assert_eq!(request["tools"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(request["tools"][0]["cache_control"]["ttl"], "1h");
+        // Last message breakpoint has 1h TTL.
+        assert_eq!(
+            request["messages"][0]["content"][0]["cache_control"]["ttl"],
+            "1h"
+        );
+    }
+
+    #[test]
+    fn anthropic_request_with_no_messages_skips_message_breakpoint() {
+        let request = anthropic_messages_request(
+            "claude-sonnet-4-6",
+            &[Message::System {
+                content: "system only".to_string(),
+            }],
+            &[],
+            None,
+        )
+        .unwrap();
+
+        // System breakpoint still set.
+        assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
+        // No tools → no tools key.
+        assert!(request.get("tools").is_none());
+        // No messages → empty array, no crash.
+        assert_eq!(request["messages"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -260,6 +330,7 @@ mod tests {
                 },
             ],
             &[],
+            None,
         )
         .unwrap();
 

@@ -393,7 +393,7 @@ pub async fn build_run_config(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let overrides = model_overrides(&options.model, config)?;
-    let client = ModelClient::from_env_with_overrides(overrides.clone())?;
+    let client = ModelClient::from_env_with_overrides(overrides.clone())?.with_cache_ttl(Some("1h"));
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -640,7 +640,8 @@ pub async fn build_resume_picker_config(
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
     let client =
-        ModelClient::from_env_with_overrides(model_overrides(&ModelOptions::default(), config)?)?;
+        ModelClient::from_env_with_overrides(model_overrides(&ModelOptions::default(), config)?)?
+            .with_cache_ttl(Some("1h"));
     let lookup_cwd = options.lookup_cwd;
     let paths = PathContext::new(&lookup_cwd);
     let agents_md = AgentsMdBundle::load(Some(&lookup_cwd), &paths)?;
@@ -760,7 +761,8 @@ async fn build_resume_config_from_snapshot(
         reasoning_effort: snapshot.reasoning_effort,
         api_key_env: snapshot.api_key_env.clone(),
         extra_headers: snapshot.extra_headers.clone(),
-    })?;
+    })?
+    .with_cache_ttl(Some("1h"));
     let sandbox = if ssh_host.is_some() {
         None
     } else {
