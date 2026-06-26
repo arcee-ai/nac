@@ -117,6 +117,10 @@ impl PodmanSession {
             OsString::from(self.spec.workdir.display().to_string()),
             OsString::from("--sandbox-session-key"),
             OsString::from(self.session_key.clone()),
+            OsString::from("--sandbox-cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--sandbox-mem"),
+            OsString::from(self.spec.memory_mib.to_string()),
         ];
 
         for mount in &self.spec.mounts {
@@ -349,6 +353,10 @@ impl PodmanSession {
             OsString::from("--rm"),
             OsString::from("--name"),
             OsString::from(self.container_name.clone()),
+            OsString::from("--cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--memory"),
+            OsString::from(format!("{}m", self.spec.memory_mib)),
         ];
 
         if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
@@ -476,6 +484,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "abc123".to_string(),
             false,
@@ -532,6 +542,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "empty".to_string(),
             false,
@@ -557,6 +569,8 @@ mod tests {
                     "nvidia.com/gpu=mig1:0".to_string(),
                 ],
                 shm_size: Some("8g".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "gpu".to_string(),
             false,

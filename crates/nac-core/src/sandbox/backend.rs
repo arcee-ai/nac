@@ -261,6 +261,8 @@ mod tests {
             workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
             gpu_devices: Vec::new(),
             shm_size: None,
+            cpus: 2,
+            memory_mib: 2048,
         })
     }
 

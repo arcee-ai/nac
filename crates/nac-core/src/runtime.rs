@@ -54,6 +54,8 @@ pub struct ModelConfig {
 pub struct SandboxConfig {
     pub image: Option<String>,
     pub backend: Option<String>,
+    pub cpus: Option<u8>,
+    pub memory_mib: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -119,6 +121,8 @@ pub struct SandboxOptions {
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
     pub sandbox_backend: Option<String>,
+    pub sandbox_cpus: Option<u8>,
+    pub sandbox_mem: Option<u32>,
 }
 
 impl SandboxOptions {
@@ -132,6 +136,8 @@ impl SandboxOptions {
             || !self.sandbox_gpus.is_empty()
             || self.sandbox_shm_size.is_some()
             || self.sandbox_backend.is_some()
+            || self.sandbox_cpus.is_some()
+            || self.sandbox_mem.is_some()
     }
 }
 
@@ -191,6 +197,8 @@ pub struct EffectiveSandboxOptions {
     pub sandbox_session_key: Option<String>,
     pub sandbox_workdir: Option<String>,
     pub sandbox_backend: crate::sandbox::SandboxBackendType,
+    pub sandbox_cpus: u8,
+    pub sandbox_mem: u32,
     pub explicit_sandbox_config_flags_present: bool,
 }
 
@@ -278,6 +286,14 @@ pub(crate) fn effective_sandbox_options(
         .or(config.sandbox.backend.as_deref())
         .map(|s| SandboxBackendType::from_str(s).unwrap_or_default())
         .unwrap_or_default();
+    let sandbox_cpus = options
+        .sandbox_cpus
+        .or(config.sandbox.cpus)
+        .unwrap_or(2);
+    let sandbox_mem = options
+        .sandbox_mem
+        .or(config.sandbox.memory_mib)
+        .unwrap_or(2048);
     EffectiveSandboxOptions {
         sandbox: options.sandbox,
         no_mount_cwd: options.no_mount_cwd,
@@ -291,6 +307,8 @@ pub(crate) fn effective_sandbox_options(
         sandbox_session_key: options.sandbox_session_key,
         sandbox_workdir: options.sandbox_workdir,
         sandbox_backend,
+        sandbox_cpus,
+        sandbox_mem,
         explicit_sandbox_config_flags_present,
     }
 }
@@ -943,6 +961,8 @@ pub async fn build_sandbox_session(
                 .clone()
                 .unwrap_or_else(|| "0".to_string()),
         ),
+        options.sandbox_cpus,
+        options.sandbox_mem,
     )?;
     let owner = options.sandbox_session_key.is_none();
     let session_key = options
@@ -1675,6 +1695,8 @@ url = "https://mcp.context7.com/mcp"
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: None,
+                cpus: 2,
+                memory_mib: 2048,
             }),
             Some("build-box".to_string()),
             Vec::new(),

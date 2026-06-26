@@ -376,6 +376,8 @@ mod tests {
             workdir: DEFAULT_SANDBOX_WORKDIR.into(),
             gpu_devices: Vec::new(),
             shm_size: None,
+            cpus: 2,
+            memory_mib: 2048,
         });
 
         let envs = terminal_env_owned();

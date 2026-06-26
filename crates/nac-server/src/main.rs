@@ -217,6 +217,14 @@ struct SandboxArgs {
     #[arg(long = "sandbox-backend")]
     sandbox_backend: Option<String>,
 
+    /// Number of CPUs to allocate for the sandbox (default: 2).
+    #[arg(long = "sandbox-cpus")]
+    sandbox_cpus: Option<u8>,
+
+    /// Memory in MiB to allocate for the sandbox (default: 2048).
+    #[arg(long = "sandbox-mem")]
+    sandbox_mem: Option<u32>,
+
     /// Internal sandbox session key used to attach worker subprocesses.
     #[arg(long, hide = true)]
     sandbox_session_key: Option<String>,
@@ -330,6 +338,8 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_session_key: cli.sandbox.sandbox_session_key,
             sandbox_workdir: cli.sandbox.sandbox_workdir,
             sandbox_backend: cli.sandbox.sandbox_backend,
+            sandbox_cpus: cli.sandbox.sandbox_cpus,
+            sandbox_mem: cli.sandbox.sandbox_mem,
         },
         ssh_host: cli.ssh_host,
     };

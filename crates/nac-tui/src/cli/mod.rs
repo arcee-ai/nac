@@ -253,6 +253,8 @@ fn sandbox_options(cli: SandboxArgs) -> SandboxOptions {
         sandbox_session_key: cli.sandbox_session_key,
         sandbox_workdir: cli.sandbox_workdir,
         sandbox_backend: cli.sandbox_backend,
+        sandbox_cpus: cli.sandbox_cpus,
+        sandbox_mem: cli.sandbox_mem,
     }
 }
 

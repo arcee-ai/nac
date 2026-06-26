@@ -71,6 +71,10 @@ impl SmolVmSession {
             OsString::from(self.spec.workdir.display().to_string()),
             OsString::from("--sandbox-session-key"),
             OsString::from(self.session_key.clone()),
+            OsString::from("--sandbox-cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--sandbox-mem"),
+            OsString::from(self.spec.memory_mib.to_string()),
         ];
 
         for mount in &self.spec.mounts {
@@ -302,6 +306,10 @@ impl SmolVmSession {
             OsString::from(self.vm_name.clone()),
             OsString::from("--image"),
             OsString::from(self.spec.image.clone()),
+            OsString::from("--cpus"),
+            OsString::from(self.spec.cpus.to_string()),
+            OsString::from("--mem"),
+            OsString::from(self.spec.memory_mib.to_string()),
         ];
 
         for mount in &self.spec.mounts {
@@ -378,6 +386,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             },
             "abc123".to_string(),
             false,
@@ -437,6 +447,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: vec!["all".to_string()],
                 shm_size: None,
+                cpus: 2,
+                memory_mib: 2048,
             },
             "gpu".to_string(),
             false,
@@ -529,6 +541,8 @@ mod tests {
                 workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: Vec::new(),
                 shm_size: None,
+                cpus: 2,
+                memory_mib: 2048,
             },
             "abc-123_DEF".to_string(),
             false,

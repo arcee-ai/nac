@@ -68,6 +68,8 @@ pub struct SandboxSpec {
     pub workdir: PathBuf,
     pub gpu_devices: Vec<String>,
     pub shm_size: Option<String>,
+    pub cpus: u8,
+    pub memory_mib: u32,
 }
 
 #[derive(Clone)]
@@ -290,6 +292,8 @@ pub fn build_sandbox_spec(
     mounts: Vec<MountSpec>,
     gpu_devices: Vec<String>,
     shm_size: Option<String>,
+    cpus: u8,
+    memory_mib: u32,
 ) -> Result<SandboxSpec> {
     let workdir = PathBuf::from(workdir);
     if !workdir.is_absolute() {
@@ -306,6 +310,8 @@ pub fn build_sandbox_spec(
         workdir,
         gpu_devices,
         shm_size,
+        cpus,
+        memory_mib,
     })
 }
 
@@ -370,6 +376,8 @@ mod tests {
             workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
             gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
         });
 
         assert_eq!(session.host_workdir().unwrap(), cwd);

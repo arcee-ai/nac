@@ -416,6 +416,8 @@ mod tests {
                 mounts: Vec::new(),
                 gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
+                cpus: 2,
+                memory_mib: 2048,
             }),
             None,
             vec![

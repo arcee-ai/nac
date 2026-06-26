@@ -117,6 +117,8 @@ pub struct SandboxRequest {
     pub session_key: Option<String>,
     pub workdir: Option<String>,
     pub backend: Option<String>,
+    pub cpus: Option<u8>,
+    pub memory_mib: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -878,6 +880,8 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
         sandbox_session_key: request.session_key,
         sandbox_workdir: request.workdir,
         sandbox_backend: request.backend,
+        sandbox_cpus: request.cpus,
+        sandbox_mem: request.memory_mib,
     }
 }
 
