@@ -641,11 +641,10 @@ async fn run_worker(
         command.arg("--api-key-env").arg(api_key_env);
     }
 
-    let extra_headers = client.extra_headers();
-    if !extra_headers.is_empty() {
-        if let Ok(json) = serde_json::to_string(extra_headers) {
-            command.arg("--extra-headers").arg(json);
-        }
+    // Always pass --extra-headers, even when empty, so the worker uses the
+    // session's headers (possibly {}) instead of falling back to config.toml.
+    if let Ok(json) = serde_json::to_string(client.extra_headers()) {
+        command.arg("--extra-headers").arg(json);
     }
 
     for source_thread in invocation.source_threads {

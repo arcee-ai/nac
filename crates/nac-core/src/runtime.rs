@@ -1089,6 +1089,47 @@ mod tests {
     }
 
     #[test]
+    fn parse_extra_headers_json_handles_empty_object() {
+        // Empty string → None (no override)
+        assert_eq!(parse_extra_headers_json(""), None);
+        // "{}" → Some(empty map) so the worker uses empty headers, not config fallback
+        assert_eq!(parse_extra_headers_json("{}"), Some(BTreeMap::new()));
+        // Valid headers → Some(map)
+        let mut headers = BTreeMap::new();
+        headers.insert("X-Custom".to_string(), "val".to_string());
+        assert_eq!(
+            parse_extra_headers_json(r#"{"X-Custom":"val"}"#),
+            Some(headers)
+        );
+        // Invalid JSON → None
+        assert_eq!(parse_extra_headers_json("not json"), None);
+    }
+
+    #[test]
+    fn model_overrides_empty_extra_headers_does_not_leak_config() {
+        // When the CLI passes Some(empty map), config's extra_headers must NOT leak.
+        let mut config = NacConfig::default();
+        config
+            .model
+            .extra_headers
+            .insert("X-Config-Leak".to_string(), "should-not-appear".to_string());
+
+        let overrides = model_overrides(
+            &ModelOptions {
+                backend: None,
+                reasoning_effort: None,
+                api_base_url: None,
+                api_model: None,
+                api_key_env: None,
+                extra_headers: Some(BTreeMap::new()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert!(overrides.extra_headers.is_empty());
+    }
+
+    #[test]
     fn sandbox_image_config_is_default_not_enablement() {
         let mut config = NacConfig::default();
         config.sandbox.image = Some("custom-image".to_string());
