@@ -116,6 +116,17 @@ function bindElements() {
     "deleteConfirmText",
     "deleteStatus",
     "deleteSessionBtn",
+    "settingsBtn",
+    "settingsOverlay",
+    "closeSettings",
+    "settingsForm",
+    "settingsStatus",
+    "settingsBackend",
+    "settingsEffort",
+    "settingsModel",
+    "settingsBaseUrl",
+    "settingsApiKeyEnv",
+    "settingsExtraHeaders",
   ]) {
     el[id] = document.getElementById(id);
   }
@@ -130,6 +141,12 @@ function bindEvents() {
   el.deleteSessionBtn.addEventListener("click", () => {
     if (state.selectedId) deleteSession(state.selectedId);
   });
+  el.settingsBtn.addEventListener("click", showSettingsOverlay);
+  el.closeSettings.addEventListener("click", hideSettingsOverlay);
+  el.settingsOverlay.addEventListener("click", (event) => {
+    if (event.target === el.settingsOverlay) hideSettingsOverlay();
+  });
+  el.settingsForm.addEventListener("submit", updateSessionConfig);
   el.mobileBack.addEventListener("click", showMobileSessions);
   el.closeLaunch.addEventListener("click", hideLaunchOverlay);
   el.launchOverlay.addEventListener("click", (event) => {
@@ -144,6 +161,7 @@ function bindEvents() {
     if (event.key !== "Escape") return;
     if (!el.launchOverlay.hidden) hideLaunchOverlay();
     if (!el.deleteOverlay.hidden) hideDeleteOverlay();
+    if (!el.settingsOverlay.hidden) hideSettingsOverlay();
   });
 
   el.tabs.addEventListener("click", (event) => {
@@ -521,6 +539,85 @@ function hideDeleteOverlay() {
 function setDeleteStatus(message, error) {
   el.deleteStatus.textContent = message || "";
   el.deleteStatus.classList.toggle("error", Boolean(error));
+}
+
+function showSettingsOverlay() {
+  const sessionId = state.selectedId;
+  if (!sessionId) return;
+  const snapshot = state.snapshots.get(sessionId);
+  const metadata = snapshot?.metadata;
+  if (metadata) {
+    el.settingsModel.value = metadata.model || "";
+    el.settingsBaseUrl.value = metadata.base_url || "";
+    el.settingsBackend.value = metadata.backend || "";
+    el.settingsEffort.value = metadata.reasoning_effort || "";
+    el.settingsApiKeyEnv.value = metadata.api_key_env || "";
+    el.settingsExtraHeaders.value = metadata.extra_headers
+      && Object.keys(metadata.extra_headers).length > 0
+      ? JSON.stringify(metadata.extra_headers, null, 2)
+      : "";
+  }
+  setSettingsStatus("", false);
+  el.settingsOverlay.hidden = false;
+}
+
+function hideSettingsOverlay() {
+  el.settingsOverlay.hidden = true;
+}
+
+function setSettingsStatus(message, error) {
+  el.settingsStatus.textContent = message || "";
+  el.settingsStatus.classList.toggle("error", Boolean(error));
+}
+
+async function updateSessionConfig(event) {
+  event.preventDefault();
+  const sessionId = state.selectedId;
+  if (!sessionId) return;
+  setSettingsStatus("saving", false);
+
+  const extraHeadersRaw = el.settingsExtraHeaders.value.trim();
+  let extraHeaders = null;
+  if (extraHeadersRaw) {
+    try {
+      extraHeaders = JSON.stringify(JSON.parse(extraHeadersRaw));
+    } catch (parseError) {
+      setSettingsStatus("Extra Headers must be valid JSON", true);
+      return;
+    }
+  }
+
+  const body = {
+    model: nullable(el.settingsModel.value),
+    base_url: nullable(el.settingsBaseUrl.value),
+    backend: nullable(el.settingsBackend.value),
+    reasoning_effort: nullable(el.settingsEffort.value),
+    api_key_env: nullable(el.settingsApiKeyEnv.value),
+    extra_headers: extraHeaders,
+  };
+
+  try {
+    const response = await fetch(
+      `/sessions/${encodeURIComponent(sessionId)}/config`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) {
+      let payload = {};
+      try { payload = await response.json(); } catch (_) {}
+      throw new Error(payload.error || `${response.status} ${response.statusText}`);
+    }
+    hideSettingsOverlay();
+    // Reconnect SSE and reload snapshot to pick up the new config.
+    openEventStream(sessionId);
+    await loadSnapshot(sessionId, false);
+    await loadSessions({ forceFetch: true });
+  } catch (error) {
+    setSettingsStatus(error.message, true);
+  }
 }
 
 function showMobileSessions() {
@@ -1051,6 +1148,7 @@ function renderInspector() {
     el.snapContext.textContent = "--";
     el.cancelRun.disabled = true;
     el.deleteSessionBtn.disabled = true;
+    el.settingsBtn.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
     state.transcriptRenderedSessionId = null;
     el.threadsView.innerHTML = "";
@@ -1080,6 +1178,7 @@ function renderInspector() {
   }
   el.cancelRun.disabled = !runActive;
   el.deleteSessionBtn.disabled = false;
+  el.settingsBtn.disabled = false;
 
   const lastUsage = snapshot.response_timing?.last_token_usage;
   if (lastUsage) {

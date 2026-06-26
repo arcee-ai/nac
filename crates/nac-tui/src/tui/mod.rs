@@ -428,6 +428,10 @@ mod tests {
             session_id: None,
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
+            base_url: String::new(),
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: std::collections::BTreeMap::new(),
         }
     }
 

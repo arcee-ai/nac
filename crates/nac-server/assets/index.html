@@ -59,6 +59,12 @@
                 <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
+            <button id="settingsBtn" class="icon-button" type="button" aria-label="Session settings" title="Session settings">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
             <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
@@ -251,6 +257,76 @@
             <div class="form-status" id="deleteStatus"></div>
           </div>
         </div>
+      </section>
+    </div>
+
+    <div class="launch-overlay" id="settingsOverlay" hidden>
+      <section class="launch-dialog" role="dialog" aria-modal="true" aria-label="Session settings">
+        <header class="launch-dialog-head">
+          <div>
+            <div class="eyebrow">Settings</div>
+          </div>
+          <button id="closeSettings" class="icon-button" type="button" aria-label="Close settings dialog" title="Close">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+        <form id="settingsForm" class="launch-form">
+          <div class="form-grid two">
+            <label>
+              <span>Backend</span>
+              <select id="settingsBackend">
+                <option value="">config</option>
+                <option value="openai-responses">openai</option>
+                <option value="chatgpt-codex-responses">codex</option>
+                <option value="anthropic-messages">anthropic</option>
+                <option value="deepseek-chat">deepseek</option>
+                <option value="fireworks-chat">fireworks</option>
+              </select>
+            </label>
+            <label>
+              <span>Effort</span>
+              <select id="settingsEffort">
+                <option value="">config</option>
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Model</span>
+              <input id="settingsModel" autocomplete="off" placeholder="config" />
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input id="settingsBaseUrl" autocomplete="off" placeholder="config" />
+            </label>
+          </div>
+          <label>
+            <span>API Key Env</span>
+            <input id="settingsApiKeyEnv" autocomplete="off" placeholder="config" />
+          </label>
+          <label>
+            <span>Extra Headers (JSON)</span>
+            <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
+          </label>
+          <div class="launch-actions">
+            <button class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h12"></path>
+                <path d="m13 6 6 6-6 6"></path>
+              </svg>
+            </button>
+            <div class="form-status" id="settingsStatus"></div>
+          </div>
+        </form>
       </section>
     </div>
 

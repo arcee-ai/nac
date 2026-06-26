@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -37,6 +37,14 @@ pub struct SessionMetadata {
     pub session_id: Option<String>,
     pub sandbox_status: String,
     pub agents_md_status: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra_headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,6 +291,13 @@ impl SessionService {
             session_id,
             sandbox_status: run_config.sandbox_status,
             agents_md_status: run_config.agents_md_status,
+            base_url: run_config.client.base_url().to_string(),
+            reasoning_effort: run_config
+                .client
+                .reasoning_effort()
+                .map(|effort| effort.as_str().to_string()),
+            api_key_env: run_config.client.api_key_env().map(str::to_string),
+            extra_headers: run_config.client.extra_headers().clone(),
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();

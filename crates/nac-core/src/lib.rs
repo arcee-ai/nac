@@ -12,7 +12,7 @@ mod process;
 pub mod runtime;
 mod sandbox;
 pub mod session_service;
-mod sessions;
+pub mod sessions;
 mod skills;
 mod store;
 mod terminal;
