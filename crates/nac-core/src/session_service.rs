@@ -56,6 +56,8 @@ pub struct ResponseTimingSnapshot {
     pub token_usages: Option<Vec<Option<crate::model::TokenUsage>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_token_usage: Option<crate::model::TokenUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cumulative_token_usage: Option<crate::model::TokenUsage>,
 }
 
 impl ResponseTimingSnapshot {
@@ -67,12 +69,39 @@ impl ResponseTimingSnapshot {
 impl From<&SessionSnapshot> for ResponseTimingSnapshot {
     fn from(snapshot: &SessionSnapshot) -> Self {
         let last_token_usage = snapshot.token_usages.last().cloned().flatten();
+
+        // Sum input/output/cache tokens across all non-None per-response
+        // entries.  `orchestrator_context_tokens` is a context-window size,
+        // not a cumulative metric, so it is set to the last non-None entry's
+        // value rather than summed.
+        let cumulative_token_usage = {
+            let non_none: Vec<&crate::model::TokenUsage> = snapshot
+                .token_usages
+                .iter()
+                .filter_map(|tu| tu.as_ref())
+                .collect();
+            if non_none.is_empty() {
+                None
+            } else {
+                let mut cumulative = crate::model::TokenUsage::default();
+                for u in &non_none {
+                    cumulative += (*u).clone();
+                }
+                cumulative.orchestrator_context_tokens = non_none
+                    .last()
+                    .map(|u| u.orchestrator_context_tokens)
+                    .unwrap_or(0);
+                Some(cumulative)
+            }
+        };
+
         Self {
             last_response_duration_ms: snapshot.last_response_duration_ms,
             previous_response_duration_ms: snapshot.previous_response_duration_ms,
             response_durations_ms: snapshot.response_durations_ms.clone(),
             token_usages: Some(snapshot.token_usages.clone()),
             last_token_usage,
+            cumulative_token_usage,
         }
     }
 }
@@ -550,10 +579,34 @@ impl SessionService {
             let _ = task.await;
         }
 
-        self.append_cancellation_message().await;
+        // Capture partial token usage from the cancelled run.  Because
+        // `send()` now updates `last_usage` mid-loop, this includes all
+        // model-call usage accumulated before the cancel.
+        let mut cancel_usage = self.append_cancellation_message().await;
+
+        // Preserve the previous orchestrator_context_tokens — the cancel
+        // path should not overwrite the context window size from the last
+        // completed response.  Only input/output/cache token counts are
+        // captured from the partial run.
+        if let Some(ref mut u) = cancel_usage {
+            let prev_ctx = {
+                let snapshot = self.session_snapshot.lock().await;
+                snapshot
+                    .as_ref()
+                    .and_then(|s| {
+                        s.token_usages
+                            .iter()
+                            .rev()
+                            .find_map(|tu| tu.as_ref().map(|tu| tu.orchestrator_context_tokens))
+                    })
+                    .unwrap_or(0)
+            };
+            u.orchestrator_context_tokens = prev_ctx;
+        }
+
         let message = "run cancelled by user".to_string();
         let persistence_error = match self
-            .persist_run_snapshot(&cancelling_run.snapshot, None, None)
+            .persist_run_snapshot(&cancelling_run.snapshot, None, cancel_usage)
             .await
         {
             Ok(()) => None,
@@ -859,7 +912,7 @@ impl SessionService {
         Ok(())
     }
 
-    async fn append_cancellation_message(&self) {
+    async fn append_cancellation_message(&self) -> Option<crate::model::TokenUsage> {
         let mut agent = self.agent.lock().await;
         truncate_incomplete_tool_turn(&mut agent.messages);
         agent.messages.push(Message::Assistant {
@@ -868,6 +921,10 @@ impl SessionService {
             reasoning_details: None,
             tool_calls: None,
         });
+        // Return partial usage so the caller can persist it.  Because
+        // `send()` now updates `last_usage` mid-loop, this captures all
+        // token usage from model calls made before the cancel.
+        agent.last_usage.clone()
     }
 }
 
@@ -975,6 +1032,7 @@ fn response_timing_after_run(
         response_durations_ms: Some(durations),
         token_usages: None,
         last_token_usage: None,
+        cumulative_token_usage: None,
     }
 }
 

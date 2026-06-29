@@ -1222,11 +1222,12 @@ function renderInspector() {
   el.deleteSessionBtn.disabled = false;
   el.settingsBtn.disabled = false;
 
-  const lastUsage = snapshot.response_timing?.last_token_usage;
-  if (lastUsage) {
-    const cacheRead = lastUsage.cache_read_tokens > 0 ? ` R${formatTokens(lastUsage.cache_read_tokens)}` : "";
-    el.snapTokens.textContent = `↑${formatTokens(lastUsage.input_tokens)}${cacheRead} ↓${formatTokens(lastUsage.output_tokens)}`;
-    el.snapContext.textContent = formatTokens(lastUsage.total_tokens);
+  const tokenUsage = snapshot.response_timing?.cumulative_token_usage
+    ?? snapshot.response_timing?.last_token_usage;
+  if (tokenUsage) {
+    const cacheRead = tokenUsage.cache_read_tokens > 0 ? ` R${formatTokens(tokenUsage.cache_read_tokens)}` : "";
+    el.snapTokens.textContent = `↑${formatTokens(tokenUsage.input_tokens)}${cacheRead} ↓${formatTokens(tokenUsage.output_tokens)}`;
+    el.snapContext.textContent = formatTokens(tokenUsage.total_tokens);
   } else {
     el.snapTokens.textContent = "--";
     el.snapContext.textContent = "--";

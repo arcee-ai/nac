@@ -1682,14 +1682,6 @@ button.session-card {
     min-height: auto;
   }
 
-  .telemetry-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .telemetry-grid div:last-child {
-    grid-column: 1 / -1;
-  }
-
   .mobile-back {
     display: inline-flex;
     grid-column: 1 / -1;
@@ -1737,10 +1729,6 @@ button.session-card {
     flex: 0 0 auto;
     min-width: 76px;
     padding: var(--space-sm) var(--space-md);
-  }
-
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #tab-chat.active {

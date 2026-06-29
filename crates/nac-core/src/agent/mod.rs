@@ -357,6 +357,11 @@ impl Agent {
                 // Overwrite with the last call's total so it reflects the
                 // live context window size after the most recent model call.
                 accumulated_usage.orchestrator_context_tokens = usage.orchestrator_context_tokens;
+                // Update last_usage mid-loop so partial usage survives if the
+                // task is aborted (e.g. user cancels mid-run).  Without this,
+                // last_usage retains the previous run's value and all token
+                // usage from the current run is lost on cancel.
+                self.last_usage = Some(accumulated_usage.clone());
             }
             if response.finish_reason.as_deref() == Some("length") {
                 let error = anyhow!(
@@ -427,6 +432,10 @@ impl Agent {
                 accumulated_usage.cache_write_tokens += wu.cache_write_tokens;
                 *wu = TokenUsage::default();
             }
+
+            // Update last_usage after folding in worker tokens so the
+            // partial usage reflects all token consumption up to this point.
+            self.last_usage = Some(accumulated_usage.clone());
 
             for (tool_call_id, _tool_name, result) in results {
                 self.messages.push(Message::Tool {
