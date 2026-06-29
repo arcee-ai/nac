@@ -339,6 +339,10 @@ impl Agent {
             {
                 Ok(response) => response,
                 Err(error) => {
+                    // Preserve accumulated usage (including worker thread tokens
+                    // from prior tool rounds) so it survives the error return
+                    // and can be persisted by the session service.
+                    self.last_usage = Some(accumulated_usage.clone());
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
@@ -349,15 +353,19 @@ impl Agent {
             };
             if let Some(usage) = &response.usage {
                 accumulated_usage += usage.clone();
-                // total_tokens is the current context length, not a sum.
+                // orchestrator_context_tokens is the current context length, not a sum.
                 // Overwrite with the last call's total so it reflects the
                 // live context window size after the most recent model call.
-                accumulated_usage.total_tokens = usage.total_tokens;
+                accumulated_usage.orchestrator_context_tokens = usage.orchestrator_context_tokens;
             }
             if response.finish_reason.as_deref() == Some("length") {
                 let error = anyhow!(
                     "Context window full (finish_reason=length). nac does not auto-compact thread history right now; retry with a narrower prompt, a fresh thread, or less carried context."
                 );
+                // Preserve accumulated usage (including worker thread tokens
+                // from prior tool rounds) so it survives the error return
+                // and can be persisted by the session service.
+                self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
@@ -410,7 +418,7 @@ impl Agent {
 
             // Fold worker token usage (from thread dispatches) into the
             // orchestrator's accumulated usage.  Only cost fields are summed;
-            // total_tokens (context length) stays orchestrator-only.
+            // orchestrator_context_tokens (context length) stays orchestrator-only.
             {
                 let mut wu = self.tool_runtime.worker_usage.lock().await;
                 accumulated_usage.input_tokens += wu.input_tokens;

@@ -41,7 +41,7 @@ pub struct ToolRuntime {
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
     /// loop reads and resets this after each tool-execution round so worker
-    /// API costs are included in the session totals.  `total_tokens` is
+    /// API costs are included in the session totals.  `orchestrator_context_tokens` is
     /// intentionally NOT accumulated here — it stays orchestrator-only.
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
 }

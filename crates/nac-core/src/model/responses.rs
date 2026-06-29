@@ -103,7 +103,7 @@ pub(super) fn parse_openai_responses_response(
             output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
             cache_read_tokens: cached,
             cache_write_tokens: 0,
-            total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
         }
     });
 

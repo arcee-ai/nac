@@ -260,7 +260,7 @@ struct CancellingRun {
 
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
-    Failed(String),
+    Failed(String, Option<crate::model::TokenUsage>),
 }
 
 impl SessionService {
@@ -607,7 +607,10 @@ impl SessionService {
                     .await
                     .map_err(|error| error.to_string());
                 agent.set_event_sink(EventSink::bus(event_bus));
-                let usage = result.as_ref().ok().and_then(|_| agent.last_usage.clone());
+                // Capture usage regardless of success or failure. On error
+                // paths, `last_usage` is now set in `send()` before returning
+                // Err, so worker thread tokens from prior tool rounds survive.
+                let usage = agent.last_usage.clone();
                 (result, usage)
             };
             match result {
@@ -618,7 +621,7 @@ impl SessionService {
                 }
                 Err(message) => {
                     service
-                        .finish_run_once(&task_run_id, RunOutcome::Failed(message))
+                        .finish_run_once(&task_run_id, RunOutcome::Failed(message, usage))
                         .await;
                 }
             }
@@ -686,7 +689,7 @@ impl SessionService {
         };
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
-            RunOutcome::Failed(_) => (None, None),
+            RunOutcome::Failed(_, usage) => (None, usage.clone()),
         };
         let persistence_error = match self
             .persist_run_snapshot(
@@ -716,12 +719,12 @@ impl SessionService {
                 response,
                 duration_ms: completed_duration_ms,
             },
-            (RunOutcome::Failed(message), Some(error)) => SessionEvent::RunFailed {
+            (RunOutcome::Failed(message, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!(
                     "{message}\nAdditionally, failed to persist session snapshot: {error}"
                 ),
             },
-            (RunOutcome::Failed(message), None) => SessionEvent::RunFailed { message },
+            (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed { message },
         };
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
@@ -1329,7 +1332,7 @@ mod tests {
             output_tokens: 120,
             cache_read_tokens: 80,
             cache_write_tokens: 15,
-            total_tokens: 715,
+            orchestrator_context_tokens: 715,
         };
         assert!(
             parts
@@ -1350,7 +1353,7 @@ mod tests {
         assert_eq!(persisted.output_tokens, 120);
         assert_eq!(persisted.cache_read_tokens, 80);
         assert_eq!(persisted.cache_write_tokens, 15);
-        assert_eq!(persisted.total_tokens, 715);
+        assert_eq!(persisted.orchestrator_context_tokens, 715);
 
         // Frontend snapshot should expose the usage
         let frontend = parts.service.frontend_snapshot().await.unwrap();
@@ -1360,7 +1363,7 @@ mod tests {
                 .last_token_usage
                 .as_ref()
                 .unwrap()
-                .total_tokens,
+                .orchestrator_context_tokens,
             715
         );
         assert_eq!(
@@ -1372,6 +1375,96 @@ mod tests {
                 .len(),
             1
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn failed_run_persists_token_usage() {
+        // Regression test: when a run fails (e.g. model API error after a tool
+        // round that dispatched workers), the accumulated token usage —
+        // including worker thread tokens — must still be persisted so it is
+        // not permanently lost.
+        let store_path = test_store_path("active_failed_token_usage");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-failed-token-usage".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+
+        let active = parts
+            .service
+            .try_begin_run(None, "prompt")
+            .unwrap();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages.push(Message::User {
+                content: "prompt".to_string(),
+            });
+            agent.messages.push(Message::Assistant {
+                content: Some("partial response".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            });
+        }
+
+        // Simulate usage that was accumulated during the run (including
+        // worker thread tokens from a prior tool round) before the run failed.
+        let test_usage = crate::model::TokenUsage {
+            input_tokens: 500,
+            output_tokens: 120,
+            cache_read_tokens: 80,
+            cache_write_tokens: 15,
+            orchestrator_context_tokens: 715,
+        };
+        assert!(
+            parts
+                .service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Failed("model API error".to_string(), Some(test_usage.clone())),
+                )
+                .await
+        );
+
+        // The failed run should still persist the token usage.
+        let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(loaded.token_usages.len(), 1);
+        let persisted = loaded.token_usages[0]
+            .as_ref()
+            .expect("token usage should be persisted even on failed run");
+        assert_eq!(persisted.input_tokens, 500);
+        assert_eq!(persisted.output_tokens, 120);
+        assert_eq!(persisted.cache_read_tokens, 80);
+        assert_eq!(persisted.cache_write_tokens, 15);
+        assert_eq!(persisted.orchestrator_context_tokens, 715);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -1559,7 +1652,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Failed("cleanup".to_string()))
+                .finish_run_once(&active.run_id, RunOutcome::Failed("cleanup".to_string(), None))
                 .await
         );
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
@@ -1742,7 +1835,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&second.run_id, RunOutcome::Failed("boom".to_string()))
+                .finish_run_once(&second.run_id, RunOutcome::Failed("boom".to_string(), None))
                 .await
         );
         let failed = events.recv().await.unwrap();
@@ -1814,7 +1907,7 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Failed("boom".to_string()))
+                .finish_run_once(&active.run_id, RunOutcome::Failed("boom".to_string(), None))
                 .await
         );
         let started = events.recv().await.unwrap();

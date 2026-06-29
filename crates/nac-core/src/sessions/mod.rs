@@ -109,7 +109,7 @@ mod tests {
                 output_tokens: 50,
                 cache_read_tokens: 20,
                 cache_write_tokens: 0,
-                total_tokens: 150,
+                orchestrator_context_tokens: 150,
             }),
             None,
             Some(crate::model::TokenUsage {
@@ -117,7 +117,7 @@ mod tests {
                 output_tokens: 80,
                 cache_read_tokens: 40,
                 cache_write_tokens: 10,
-                total_tokens: 330,
+                orchestrator_context_tokens: 330,
             }),
         ];
         create_session(&store_path, &snapshot).unwrap();
@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 100);
         assert_eq!(loaded.token_usages[0].as_ref().unwrap().output_tokens, 50);
         assert!(loaded.token_usages[1].is_none());
-        assert_eq!(loaded.token_usages[2].as_ref().unwrap().total_tokens, 330);
+        assert_eq!(loaded.token_usages[2].as_ref().unwrap().orchestrator_context_tokens, 330);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

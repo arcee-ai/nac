@@ -76,7 +76,12 @@ pub struct TokenUsage {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
-    pub total_tokens: u64,
+    /// Current context window size (last model call's total token count).
+    /// Despite the `AddAssign` impl summing this field, the agent loop
+    /// overwrites it with the most recent call's value so it reflects the
+    /// live context length rather than a cumulative total.
+    #[serde(rename = "total_tokens")]
+    pub orchestrator_context_tokens: u64,
 }
 
 impl std::ops::AddAssign for TokenUsage {
@@ -85,7 +90,7 @@ impl std::ops::AddAssign for TokenUsage {
         self.output_tokens += other.output_tokens;
         self.cache_read_tokens += other.cache_read_tokens;
         self.cache_write_tokens += other.cache_write_tokens;
-        self.total_tokens += other.total_tokens;
+        self.orchestrator_context_tokens += other.orchestrator_context_tokens;
     }
 }
 

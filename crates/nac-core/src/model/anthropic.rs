@@ -313,7 +313,7 @@ pub(super) fn parse_anthropic_messages_response(
             output_tokens,
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
-            total_tokens: input_tokens + output_tokens + cache_read + cache_write,
+            orchestrator_context_tokens: input_tokens + output_tokens + cache_read + cache_write,
         }
     });
 

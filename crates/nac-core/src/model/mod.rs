@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.cache_read_tokens, 0);
         assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 30);
+        assert_eq!(usage.orchestrator_context_tokens, 30);
 
         let request = anthropic_messages_request(
             "claude-opus-4-6",
@@ -468,7 +468,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.cache_read_tokens, 0);
         assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 30);
+        assert_eq!(usage.orchestrator_context_tokens, 30);
     }
 
     #[test]
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.cache_read_tokens, 0);
         assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 30);
+        assert_eq!(usage.orchestrator_context_tokens, 30);
     }
 
     #[test]
@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 80);
         assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 150);
+        assert_eq!(usage.orchestrator_context_tokens, 150);
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 200);
         assert_eq!(usage.cache_write_tokens, 30);
-        assert_eq!(usage.total_tokens, 380);  // 100 + 50 + 200 + 30
+        assert_eq!(usage.orchestrator_context_tokens, 380);  // 100 + 50 + 200 + 30
     }
 
     #[test]
@@ -608,7 +608,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 60);
         assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 150);
+        assert_eq!(usage.orchestrator_context_tokens, 150);
     }
 
     #[test]
