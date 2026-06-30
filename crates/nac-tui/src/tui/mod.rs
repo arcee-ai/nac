@@ -1173,6 +1173,34 @@ mod tests {
     }
 
     #[test]
+    fn test_help_slash_command_opens_overlay() {
+        let dir = temp_dir("help-command-opens-overlay");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/help");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(action, AppAction::None));
+        assert!(app.help_visible);
+        assert!(app.prompt().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_help_slash_command_with_args_is_invalid() {
+        let dir = temp_dir("help-command-args-invalid");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("/help extra");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(action, AppAction::None));
+        assert!(!app.help_visible);
+        assert!(app.composer_notice.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn ctrl_e_toggles_events_focus() {
         let dir = temp_dir("events-focus");
         let mut app = App::new(metadata_for(&dir), &[], false);

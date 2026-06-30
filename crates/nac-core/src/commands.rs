@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum SlashCommand {
     Exit,
     Sessions,
+    Help,
     Plan { instruction: String },
     Run { workset_id: String },
 }
@@ -16,6 +17,7 @@ pub enum SlashCommand {
 pub enum FrontendCommand {
     Exit,
     Sessions,
+    Help,
 }
 
 /// A prompt ready to send to the agent while preserving frontend display text.
@@ -49,6 +51,9 @@ pub fn prepare_user_input(input: &str) -> PreparedUserInput {
         Some(Ok(SlashCommand::Exit)) => PreparedUserInput::FrontendCommand(FrontendCommand::Exit),
         Some(Ok(SlashCommand::Sessions)) => {
             PreparedUserInput::FrontendCommand(FrontendCommand::Sessions)
+        }
+        Some(Ok(SlashCommand::Help)) => {
+            PreparedUserInput::FrontendCommand(FrontendCommand::Help)
         }
         Some(Ok(SlashCommand::Plan { instruction })) => {
             PreparedUserInput::SubmitPrompt(PreparedPrompt {
@@ -87,6 +92,8 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
     Some(match name {
         "exit" if args.is_empty() => Ok(SlashCommand::Exit),
         "sessions" if args.is_empty() => Ok(SlashCommand::Sessions),
+        "help" if args.is_empty() => Ok(SlashCommand::Help),
+        "help" => Err("usage: /help".to_string()),
         "plan" => parse_required_arg_command("plan", "instruction", args, |instruction| {
             SlashCommand::Plan { instruction }
         }),
@@ -254,6 +261,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_help_command() {
+        assert_eq!(parse_slash_command("/help"), Some(Ok(SlashCommand::Help)));
+        assert_eq!(
+            parse_slash_command("/help args"),
+            Some(Err("usage: /help".to_string()))
+        );
+    }
+
+    #[test]
     fn prepare_user_input_classifies_frontend_and_submit_actions() {
         assert_eq!(
             prepare_user_input("/sessions"),
@@ -263,6 +279,10 @@ mod tests {
             prepare_user_input("/exit"),
             PreparedUserInput::FrontendCommand(FrontendCommand::Exit)
         );
+        assert_eq!(
+            prepare_user_input("/help"),
+            PreparedUserInput::FrontendCommand(FrontendCommand::Help)
+        );
 
         let PreparedUserInput::SubmitPrompt(prepared) = prepare_user_input("/run auth-refresh")
         else {
@@ -271,5 +291,10 @@ mod tests {
         assert_eq!(prepared.raw_prompt, "/run auth-refresh");
         assert_eq!(prepared.display_prompt, "/run auth-refresh");
         assert!(prepared.agent_prompt.contains("# /run: Workset Execution"));
+    }
+
+    #[test]
+    fn expand_user_prompt_does_not_expand_help() {
+        assert_eq!(expand_user_prompt("/help"), "/help");
     }
 }
