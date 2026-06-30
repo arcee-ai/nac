@@ -51,19 +51,16 @@ pub(super) fn discover_skill_sources(
 
 pub(super) fn visible_root_for_source(
     source: &SkillSource,
-    sandbox: Option<&SandboxSession>,
+    visibility: SkillPathVisibility,
 ) -> Option<PathBuf> {
     if !source.host_root.exists() {
         return None;
     }
 
-    if let Some(sandbox) = sandbox {
-        return sandbox
-            .resolve_path(&source.host_root.display().to_string())
-            .ok();
+    match visibility {
+        SkillPathVisibility::Visible => Some(source.host_root.clone()),
+        SkillPathVisibility::Hidden => Some(PathBuf::from("[filepath-not-visible]")),
     }
-
-    Some(source.host_root.clone())
 }
 
 pub(super) fn discover_skill_dirs(root: &Path) -> Result<Vec<PathBuf>> {

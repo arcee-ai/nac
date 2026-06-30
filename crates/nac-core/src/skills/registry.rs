@@ -8,7 +8,7 @@ pub struct SkillRegistry {
 impl SkillRegistry {
     pub fn load(
         workspace_dir: Option<&Path>,
-        sandbox: Option<&SandboxSession>,
+        visibility: SkillPathVisibility,
         paths: &PathContext,
     ) -> Result<Option<Arc<Self>>> {
         let sources = discover_skill_sources(workspace_dir, paths)?;
@@ -20,7 +20,7 @@ impl SkillRegistry {
         let mut shadowed = HashSet::new();
 
         for source in sources {
-            let visible_root = match visible_root_for_source(&source, sandbox) {
+            let visible_root = match visible_root_for_source(&source, visibility) {
                 Some(path) => path,
                 None => continue,
             };
@@ -33,7 +33,11 @@ impl SkillRegistry {
                 let relative = skill_dir
                     .strip_prefix(&source.host_root)
                     .unwrap_or_else(|_| Path::new(""));
-                let skill_root_visible = join_path(&visible_root, relative);
+                let skill_root_visible = if visibility == SkillPathVisibility::Hidden {
+                    PathBuf::from("[filepath-not-visible]")
+                } else {
+                    join_path(&visible_root, relative)
+                };
                 let record = SkillRecord {
                     name: parsed.name.clone(),
                     description: parsed.description,
