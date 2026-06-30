@@ -122,7 +122,8 @@ impl ModelClient {
                 .map(fireworks_message_to_value)
                 .collect::<Vec<_>>(),
             "tools": tools,
-            "temperature": 0.0
+            "temperature": 0.0,
+            "reasoning_history": "preserved"
         });
 
         if let Some(effort) = self.reasoning_effort {
