@@ -631,7 +631,10 @@ async fn run_worker(
             .arg(runtime.config_cwd.as_os_str());
     }
 
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     if let Some(reasoning_effort) = client.reasoning_effort() {
         command.arg("--effort").arg(reasoning_effort.as_str());

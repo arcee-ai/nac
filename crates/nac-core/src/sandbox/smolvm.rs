@@ -105,10 +105,12 @@ impl SmolVmSession {
         stdin: Option<Vec<u8>>,
     ) -> Result<std::process::Output> {
         let mut command = Command::new("smolvm");
-        command.args(self.exec_args(program, args, stdin.is_some(), false, None, &[]));
+        command.args(self.exec_args(program, args, true, false, None, &[]));
 
         if stdin.is_some() {
             command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -174,7 +176,7 @@ impl SmolVmSession {
             pidfile.clone(),
         ];
         let mut command = Command::new("smolvm");
-        command.args(self.exec_args("bash", &pipe_args, false, false, cwd, envs));
+        command.args(self.exec_args("bash", &pipe_args, true, false, cwd, envs));
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());

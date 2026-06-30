@@ -106,6 +106,8 @@ impl ExecutionBackend {
                 command.args(args).current_dir(workspace_cwd);
                 if stdin.is_some() {
                     command.stdin(Stdio::piped());
+                } else {
+                    command.stdin(Stdio::null());
                 }
                 command.stdout(Stdio::piped()).stderr(Stdio::piped());
 

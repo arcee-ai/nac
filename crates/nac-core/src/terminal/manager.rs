@@ -280,7 +280,10 @@ async fn run_pipe_command(
     let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
     isolate_process_group(&mut command);
 
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = command.spawn().context("failed to spawn command")?;
     let stdout = child
         .stdout
