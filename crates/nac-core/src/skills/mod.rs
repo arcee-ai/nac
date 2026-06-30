@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
 use crate::paths::PathContext;
-use crate::sandbox::{MountSpec, SandboxSession};
+use crate::sandbox::MountSpec;
 use crate::tools::ToolResult;
 
 const SKILL_FILENAME: &str = "SKILL.md";
@@ -49,10 +49,22 @@ pub struct SkillCatalogEntry {
     pub compatibility: Option<String>,
 }
 
+/// Controls whether the `skill_root_visible` path in activated skill content
+/// is a real host path or a placeholder.
+///
+/// - `Visible`: the real host path is used (local, no sandbox, no SSH).
+/// - `Hidden`: the placeholder `"[filepath-not-visible]"` is used (sandbox or SSH),
+///   since the model cannot directly access host paths in those backends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkillPathVisibility {
+    Visible,
+    Hidden,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::sandbox::{MountSpec, DEFAULT_SANDBOX_WORKDIR};
     use crate::TEST_ENV_LOCK;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -134,9 +146,13 @@ mod tests {
         );
         write_skill(&project_skills, "build", "project nac", "project nac body");
 
-        let registry = SkillRegistry::load(Some(&repo), None, &PathContext::new(&repo))
-            .unwrap()
-            .unwrap();
+        let registry = SkillRegistry::load(
+            Some(&repo),
+            SkillPathVisibility::Visible,
+            &PathContext::new(&repo),
+        )
+        .unwrap()
+        .unwrap();
         let entry = registry
             .catalog_entries()
             .into_iter()
@@ -162,51 +178,30 @@ mod tests {
         .unwrap();
 
         let repo = root.join("repo");
-        let registry = SkillRegistry::load(Some(&repo), None, &PathContext::new(&repo)).unwrap();
+        let registry =
+            SkillRegistry::load(Some(&repo), SkillPathVisibility::Visible, &PathContext::new(&repo))
+                .unwrap();
         assert!(registry.is_none());
     }
 
     #[test]
-    fn activation_uses_guest_path_when_sandboxed() {
-        let root = temp_dir("sandboxed_path");
+    fn activation_uses_placeholder_when_hidden() {
+        let root = temp_dir("hidden_path");
         let repo = root.join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
         let project_skills = repo.join(".agents/skills");
         fs::create_dir_all(&project_skills).unwrap();
         let skill_dir = write_skill(&project_skills, "lint", "lint code", "body");
 
-        let sandbox = SandboxSession::new_for_test(SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
-            mounts: vec![
-                MountSpec {
-                    host: repo.clone(),
-                    guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                    read_only: false,
-                },
-                MountSpec {
-                    host: project_skills.clone(),
-                    guest: PathBuf::from(PROJECT_AGENTS_SKILLS_GUEST_ROOT),
-                    read_only: true,
-                },
-            ],
-            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
-            shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
-        });
-
-        let registry = SkillRegistry::load(Some(&repo), Some(&sandbox), &PathContext::new(&repo))
-            .unwrap()
-            .unwrap();
+        let registry = SkillRegistry::load(
+            Some(&repo),
+            SkillPathVisibility::Hidden,
+            &PathContext::new(&repo),
+        )
+        .unwrap()
+        .unwrap();
         let activated = registry.activate("lint");
-        assert!(
-            activated.content.contains("/workspace/.agents/skills/lint")
-                || activated
-                    .content
-                    .contains(&format!("{}/lint", PROJECT_AGENTS_SKILLS_GUEST_ROOT))
-        );
+        assert!(activated.content.contains("[filepath-not-visible]"));
         assert!(activated.content.contains("body"));
         assert_eq!(skill_dir, project_skills.join("lint"));
     }
@@ -266,9 +261,10 @@ mod tests {
             std::env::set_var("NAC_HOME", &nac_home_rel);
         }
 
-        let registry = SkillRegistry::load(None, None, &PathContext::new(&root))
-            .unwrap()
-            .unwrap();
+        let registry =
+            SkillRegistry::load(None, SkillPathVisibility::Visible, &PathContext::new(&root))
+                .unwrap()
+                .unwrap();
         let names: Vec<String> = registry
             .catalog_entries()
             .into_iter()

@@ -17,7 +17,7 @@ use crate::sandbox::{
     DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 use crate::sessions::{self, SessionSnapshot};
-use crate::skills::{self, SkillRegistry};
+use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
@@ -437,6 +437,8 @@ pub async fn build_run_config(
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
         let session_id = Uuid::new_v4().to_string();
+        let config_paths = PathContext::new(&config_cwd);
+        let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
@@ -453,7 +455,7 @@ pub async fn build_run_config(
                 sandbox: None,
                 ssh_host: Some(ssh_host.clone()),
                 mcp: None,
-                skills: None,
+                skills,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
@@ -495,7 +497,12 @@ pub async fn build_run_config(
     let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
     let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
-    let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &paths)?;
+    let (skill_workspace, visibility) = if sandbox.is_some() {
+        (None, SkillPathVisibility::Hidden)
+    } else {
+        (workspace_dir.as_deref(), SkillPathVisibility::Visible)
+    };
+    let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
@@ -602,13 +609,19 @@ pub async fn build_managed_worker_config(
             McpRootPolicy::None,
         )
         .await?;
-        (None, mcp, None)
+        let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
+        (None, mcp, skills)
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
         let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &workspace_paths).await?;
+        let (skill_workspace, visibility) = if sandbox.is_some() {
+            (None, SkillPathVisibility::Hidden)
+        } else {
+            (workspace_dir.as_deref(), SkillPathVisibility::Visible)
+        };
         let skills =
-            SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &workspace_paths)?;
+            SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
         (agents_md.system_message(), mcp, skills)
     };
     let working_directory = sandbox
@@ -674,7 +687,7 @@ pub async fn build_resume_picker_config(
     let lookup_cwd = options.lookup_cwd;
     let paths = PathContext::new(&lookup_cwd);
     let agents_md = AgentsMdBundle::load(Some(&lookup_cwd), &paths)?;
-    let skills = SkillRegistry::load(Some(&lookup_cwd), None, &paths)?;
+    let skills = SkillRegistry::load(Some(&lookup_cwd), SkillPathVisibility::Visible, &paths)?;
     let working_directory = directory_display(&lookup_cwd);
     let workspace_host_path = Some(lookup_cwd.clone());
     let sandbox_status = "off".to_string();
@@ -806,11 +819,18 @@ async fn build_resume_config_from_snapshot(
     store::initialize(&store_path)?;
 
     let (skills, agents_md_status) = if ssh_host.is_some() {
-        (None, "off".to_string())
+        let config_paths = PathContext::new(&config_cwd);
+        let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
+        (skills, "off".to_string())
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
-        let skills = SkillRegistry::load(workspace_dir.as_deref(), sandbox.as_ref(), &paths)?;
+        let (skill_workspace, visibility) = if sandbox.is_some() {
+            (None, SkillPathVisibility::Hidden)
+        } else {
+            (workspace_dir.as_deref(), SkillPathVisibility::Visible)
+        };
+        let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
         (skills, agents_md.status_text())
     };
     let working_directory = sandbox
