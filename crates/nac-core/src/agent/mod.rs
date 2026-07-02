@@ -115,6 +115,7 @@ impl Agent {
                      - Use exec_command with tty=true to create a persistent shell session. You'll get a session_name back.\n\
                      - For tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.\n\
                      - Use write_stdin to send input to that session and read output.\n\
+                     - yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short polls (write_stdin with empty chars) for interactive flows; use a single long wait for known-long commands like builds and test suites, and keep waits well under your remaining task budget.\n\
                      - Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Use them for multi-step workflows.\n\
                      - Always prefer write_stdin with empty chars to poll for output from a running command before sending new input.\n\
                      - Close sessions by sending exit<RET> or <C-d>. Sessions auto-cleanup when the worker finishes.",

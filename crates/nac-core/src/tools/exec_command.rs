@@ -33,7 +33,7 @@ When tty=true, you get a session_name back. Use write_stdin to continue interact
                     "cmd": { "type": "string", "description": "Shell command to execute" },
                     "workdir": { "type": "string", "description": "Working directory for the command (default: project root)" },
                     "tty": { "type": "boolean", "description": "Use false as the bash tool for one-shot shell commands; use true for an interactive/persistent PTY session (default: false)" },
-                    "yield_time_ms": { "type": "number", "description": "For tty=false, command timeout in milliseconds (default: 30000, max: 30000). For tty=true, maximum time to wait for terminal output without killing the session (default: 500, max: 30000)." },
+                    "yield_time_ms": { "type": "number", "description": "For tty=false, command timeout in milliseconds (default: 30000, max: 3600000 = 1 hour). For tty=true, maximum time to wait for terminal output without killing the session (default: 500, max: 3600000)." },
                     "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000, head-tail truncated if exceeded)" }
                 },
                 "required": ["cmd"]
@@ -110,7 +110,7 @@ Supports key notation: <RET> (Enter), <C-c> (Ctrl+C), <C-d> (Ctrl+D), <TAB>, <BS
                 "properties": {
                     "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
                     "chars": { "type": "string", "description": "Input to send to the terminal. Supports key notation: <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, <UP>/<DOWN>/<LEFT>/<RIGHT>. Leave empty to just poll for output." },
-                    "yield_time_ms": { "type": "number", "description": "Maximum time to wait for output in milliseconds (default: 500)" },
+                    "yield_time_ms": { "type": "number", "description": "Maximum time to wait for output in milliseconds (default: 500, max: 3600000 = 1 hour)" },
                     "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000)" }
                 },
                 "required": ["session_id"]
@@ -162,9 +162,11 @@ fn require_str(args: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("missing required argument '{}'", key))
 }
 
+const MAX_YIELD_MS: u64 = 3_600_000; // 1 hour
+
 fn clamp_yield(ms: u64) -> u64 {
-    if ms > 30_000 {
-        30_000
+    if ms > MAX_YIELD_MS {
+        MAX_YIELD_MS
     } else {
         ms
     }
@@ -632,7 +634,9 @@ mod tests {
     async fn clamp_yield_edge() {
         assert_eq!(clamp_yield(0), 0);
         assert_eq!(clamp_yield(15_000), 15_000);
-        assert_eq!(clamp_yield(60_000), 30_000);
+        assert_eq!(clamp_yield(60_000), 60_000);
+        assert_eq!(clamp_yield(3_600_000), 3_600_000);
+        assert_eq!(clamp_yield(7_200_000), 3_600_000);
     }
 
     #[tokio::test]
