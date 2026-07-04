@@ -394,42 +394,9 @@ pub(crate) async fn execute_with_dag(
         &agent_thread_name,
     );
 
-    // Spawn a background task to drain non-thread results concurrently with
-    // wave execution.  This emits `ToolCallFinished` events as each non-thread
-    // tool completes, rather than delaying them until all waves are done.
-    // Panics inside non-thread tools are caught here and do not affect thread
-    // failure tracking.
-    let non_thread_event_sink = event_sink.clone();
-    let non_thread_agent_name = agent_thread_name.clone();
-    let non_thread_drain = tokio::spawn(async move {
-        let mut results: Vec<(usize, String, String, ToolResult)> = Vec::new();
-        while let Some(join_result) = non_thread_join_set.join_next().await {
-            match join_result {
-                Ok((index, _, tool_call_id, tool_name, result)) => {
-                    non_thread_event_sink.emit(AgentEvent::ToolCallFinished {
-                        thread_name: non_thread_agent_name.clone(),
-                        call_id: tool_call_id.clone(),
-                        name: tool_name.clone(),
-                        content_preview: preview_tool_result(&tool_name, &result),
-                        is_error: result.is_error,
-                    });
-                    results.push((index, tool_call_id, tool_name, result));
-                }
-                Err(error) => {
-                    results.push((
-                        usize::MAX,
-                        "unknown".to_string(),
-                        "unknown".to_string(),
-                        ToolResult {
-                            content: format!("Tool task panicked: {}", error),
-                            is_error: true,
-                        },
-                    ));
-                }
-            }
-        }
-        results
-    });
+    // Track whether the non-thread JoinSet has been fully drained.  Once
+    // empty, we skip polling it in the wave loop to avoid a busy-wait spin.
+    let mut non_thread_empty = non_thread_join_set.is_empty();
 
     // 4. Execute waves.
     let Dag {
@@ -530,10 +497,60 @@ pub(crate) async fn execute_with_dag(
             });
         }
 
-        // Await all tasks in the JoinSet.
-        while let Some(join_result) = join_set.join_next().await {
-            match join_result {
-                Ok((index, dispatch_idx_opt, tool_call_id, tool_name, result)) => {
+        // Drain the wave JoinSet, concurrently polling the non-thread
+        // JoinSet so `ToolCallFinished` events for non-thread tools are
+        // emitted promptly.  Using `select!` (instead of a detached
+        // `tokio::spawn`) keeps everything in this async function — when
+        // the outer future is dropped via `task.abort()`, both JoinSets
+        // are dropped, which aborts all spawned tasks.  A detached spawn
+        // would survive the abort and keep running non-thread tools after
+        // the user pressed stop.
+        //
+        // `biased` prioritises the non-thread branch so finish events are
+        // emitted as early as possible.  The non-thread branch never
+        // breaks the loop — only the wave branch returning `None` (JoinSet
+        // drained) advances to the next wave.
+        loop {
+            let wave_res = if non_thread_empty {
+                join_set.join_next().await
+            } else {
+                tokio::select! {
+                    biased;
+                    nt_res = non_thread_join_set.join_next() => {
+                        match nt_res {
+                            Some(Ok((index, _, tool_call_id, tool_name, result))) => {
+                                event_sink.emit(AgentEvent::ToolCallFinished {
+                                    thread_name: agent_thread_name.clone(),
+                                    call_id: tool_call_id.clone(),
+                                    name: tool_name.clone(),
+                                    content_preview: preview_tool_result(&tool_name, &result),
+                                    is_error: result.is_error,
+                                });
+                                all_results.push((index, tool_call_id, tool_name, result));
+                            }
+                            Some(Err(error)) => {
+                                all_results.push((
+                                    usize::MAX,
+                                    "unknown".to_string(),
+                                    "unknown".to_string(),
+                                    ToolResult {
+                                        content: format!("Tool task panicked: {}", error),
+                                        is_error: true,
+                                    },
+                                ));
+                            }
+                            None => {
+                                non_thread_empty = true;
+                            }
+                        }
+                        continue;
+                    }
+                    wave_res = join_set.join_next() => wave_res
+                }
+            };
+
+            match wave_res {
+                Some(Ok((index, dispatch_idx_opt, tool_call_id, tool_name, result))) => {
                     // Remove from in-flight and track failures for thread dispatches.
                     if let Some(dispatch_idx) = dispatch_idx_opt {
                         in_flight.remove(&dispatch_idx);
@@ -557,7 +574,7 @@ pub(crate) async fn execute_with_dag(
 
                     all_results.push((index, tool_call_id, tool_name, result));
                 }
-                Err(error) => {
+                Some(Err(error)) => {
                     // A task panicked.  Mark all remaining in-flight thread
                     // dispatches as failed so dependents are skipped.
                     for &dispatch_idx in in_flight.iter() {
@@ -575,15 +592,39 @@ pub(crate) async fn execute_with_dag(
                         },
                     ));
                 }
+                None => break,
             }
         }
     }
 
-    // 5. Collect non-thread results from the background drain task.  The
-    //    tasks ran concurrently with all waves; `ToolCallFinished` events
-    //    were already emitted as each completed.
-    let non_thread_results = non_thread_drain.await.unwrap_or_default();
-    all_results.extend(non_thread_results);
+    // 5. Drain any remaining non-thread tools that did not finish during
+    //    wave execution.  `ToolCallFinished` events are emitted as each
+    //    completes.
+    while let Some(join_result) = non_thread_join_set.join_next().await {
+        match join_result {
+            Ok((index, _, tool_call_id, tool_name, result)) => {
+                event_sink.emit(AgentEvent::ToolCallFinished {
+                    thread_name: agent_thread_name.clone(),
+                    call_id: tool_call_id.clone(),
+                    name: tool_name.clone(),
+                    content_preview: preview_tool_result(&tool_name, &result),
+                    is_error: result.is_error,
+                });
+                all_results.push((index, tool_call_id, tool_name, result));
+            }
+            Err(error) => {
+                all_results.push((
+                    usize::MAX,
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                    ToolResult {
+                        content: format!("Tool task panicked: {}", error),
+                        is_error: true,
+                    },
+                ));
+            }
+        }
+    }
 
     // 6. Unmark only threads we successfully marked (including skipped ones
     //    that were marked but not spawned).  Threads that were already active
