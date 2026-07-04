@@ -307,14 +307,16 @@ pub(crate) fn spawn_non_thread_into(
 /// Execute a batch of tool calls using the DAG coordinator.
 ///
 /// Thread dispatches are executed in topological waves.  Non-thread tool calls
-/// run concurrently with wave 0.  Parse errors are returned immediately.
+/// run concurrently in a separate `JoinSet` alongside all waves, so they
+/// neither block wave progression nor affect thread failure tracking.  Parse
+/// errors are returned immediately.
 ///
 /// The caller is responsible for calling [`partition_tool_calls`] and
 /// [`build_dag`] first.  This function manages the `active_threads` lifecycle
 /// for all thread dispatches in the batch.
 pub(crate) async fn execute_with_dag(
     thread_dispatches: Vec<ParsedThreadDispatch>,
-    mut other_calls: Vec<(usize, String, String, String)>,
+    other_calls: Vec<(usize, String, String, String)>,
     parse_errors: Vec<(usize, String, String, ToolResult)>,
     dag: Dag,
     ctx: DagExecContext,
@@ -377,32 +379,34 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 3. Execute waves.
+    // 3. Spawn non-thread tools into a separate JoinSet that runs
+    //    concurrently with all waves.  This isolates non-thread tool panics
+    //    from thread failure tracking and prevents long-running non-thread
+    //    tools from blocking wave progression.
+    let mut non_thread_join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> =
+        JoinSet::new();
+    spawn_non_thread_into(
+        &mut non_thread_join_set,
+        other_calls,
+        &runtime,
+        &client,
+        &event_sink,
+        &agent_thread_name,
+    );
+
+    // 4. Execute waves.
     let Dag {
         waves,
         in_batch_deps,
     } = dag;
 
-    for (wave_idx, wave) in waves.iter().enumerate() {
+    for wave in waves.iter() {
         let mut join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> =
             JoinSet::new();
         // Track which thread dispatches are in-flight (spawned but not yet
         // completed).  If a task panics, all remaining in-flight dispatches
         // are marked as failed so their dependents are skipped.
         let mut in_flight: HashSet<usize> = HashSet::new();
-
-        // Wave 0: also spawn all non-thread tool calls.
-        if wave_idx == 0 {
-            let calls = std::mem::take(&mut other_calls);
-            spawn_non_thread_into(
-                &mut join_set,
-                calls,
-                &runtime,
-                &client,
-                &event_sink,
-                &agent_thread_name,
-            );
-        }
 
         // Spawn thread dispatches for this wave.
         for &dispatch_idx in wave {
@@ -533,14 +537,43 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 4. Unmark only threads we successfully marked (including skipped ones
+    // 5. Drain the non-thread JoinSet.  These tasks ran concurrently with all
+    //    waves.  Panics here produce error results but do not affect thread
+    //    failure tracking.
+    while let Some(join_result) = non_thread_join_set.join_next().await {
+        match join_result {
+            Ok((index, _, tool_call_id, tool_name, result)) => {
+                event_sink.emit(AgentEvent::ToolCallFinished {
+                    thread_name: agent_thread_name.clone(),
+                    call_id: tool_call_id.clone(),
+                    name: tool_name.clone(),
+                    content_preview: preview_tool_result(&tool_name, &result),
+                    is_error: result.is_error,
+                });
+                all_results.push((index, tool_call_id, tool_name, result));
+            }
+            Err(error) => {
+                all_results.push((
+                    usize::MAX,
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                    ToolResult {
+                        content: format!("Tool task panicked: {}", error),
+                        is_error: true,
+                    },
+                ));
+            }
+        }
+    }
+
+    // 6. Unmark only threads we successfully marked (including skipped ones
     //    that were marked but not spawned).  Threads that were already active
     //    from a prior turn were NOT marked by us, so we must not unmark them.
     for name in &marked_by_us {
         thread::unmark_thread_active(&runtime, name).await;
     }
 
-    // 5. Sort by original index and return.
+    // 7. Sort by original index and return.
     sort_and_strip_index(all_results)
 }
 
