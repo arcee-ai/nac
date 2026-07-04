@@ -31,10 +31,12 @@ pub(super) async fn execute_tools_parallel(
                 other_calls,
                 parse_errors,
                 dag_err,
-                runtime,
-                client,
-                event_sink,
-                thread_name,
+                dag::DagExecContext {
+                    runtime,
+                    client,
+                    event_sink,
+                    agent_thread_name: thread_name,
+                },
             )
             .await;
         }
@@ -46,10 +48,12 @@ pub(super) async fn execute_tools_parallel(
         other_calls,
         parse_errors,
         dag,
-        runtime,
-        client,
-        event_sink,
-        thread_name,
+        dag::DagExecContext {
+            runtime,
+            client,
+            event_sink,
+            agent_thread_name: thread_name,
+        },
     )
     .await
 }
@@ -64,46 +68,21 @@ async fn spawn_and_collect_non_thread(
     event_sink: &EventSink,
     thread_name: &Option<String>,
 ) -> Vec<(usize, String, String, ToolResult)> {
-    let mut join_set: JoinSet<(usize, String, String, ToolResult)> = JoinSet::new();
+    let mut join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> = JoinSet::new();
 
-    for (index, tool_call_id, tool_name, args_str) in other_calls {
-        let runtime = runtime.clone();
-        let client = client.clone();
-        event_sink.emit(AgentEvent::ToolCallStarted {
-            thread_name: thread_name.clone(),
-            call_id: tool_call_id.clone(),
-            name: tool_name.clone(),
-            args_preview: preview_tool_args(&tool_name, &args_str),
-            args_detail: Some(tool_args_detail(&args_str)),
-        });
-
-        join_set.spawn(async move {
-            let parsed_args = match serde_json::from_str::<serde_json::Value>(&args_str) {
-                Ok(value) => value,
-                Err(error) => {
-                    return (
-                        index,
-                        tool_call_id,
-                        tool_name.clone(),
-                        ToolResult {
-                            content: format!(
-                                "Error: failed to parse tool arguments for '{}': {}",
-                                tool_name, error
-                            ),
-                            is_error: true,
-                        },
-                    );
-                }
-            };
-            let result = tools::execute_tool(&tool_name, parsed_args, &runtime, &client).await;
-            (index, tool_call_id, tool_name, result)
-        });
-    }
+    dag::spawn_non_thread_into(
+        &mut join_set,
+        other_calls,
+        runtime,
+        client,
+        event_sink,
+        thread_name,
+    );
 
     let mut results = Vec::new();
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
-            Ok((index, tool_call_id, tool_name, result)) => {
+            Ok((index, _, tool_call_id, tool_name, result)) => {
                 event_sink.emit(AgentEvent::ToolCallFinished {
                     thread_name: thread_name.clone(),
                     call_id: tool_call_id.clone(),
@@ -134,7 +113,7 @@ async fn spawn_and_collect_non_thread(
 /// common case.
 async fn execute_simple(
     other_calls: Vec<(usize, String, String, String)>,
-    parse_errors: Vec<(usize, String, ToolResult)>,
+    parse_errors: Vec<(usize, String, String, ToolResult)>,
     runtime: ToolRuntime,
     client: ModelClient,
     event_sink: EventSink,
@@ -142,17 +121,12 @@ async fn execute_simple(
 ) -> Vec<(String, String, ToolResult)> {
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
-    // Collect parse errors immediately (emit finish event for each).
-    for (index, tool_call_id, error_result) in parse_errors {
-        event_sink.emit(AgentEvent::ToolCallFinished {
-            thread_name: thread_name.clone(),
-            call_id: tool_call_id.clone(),
-            name: "thread".to_string(),
-            content_preview: preview_tool_result("thread", &error_result),
-            is_error: error_result.is_error,
-        });
-        all_results.push((index, tool_call_id, "thread".to_string(), error_result));
-    }
+    // Collect parse errors immediately (emit start + finish events for each).
+    all_results.extend(dag::collect_parse_errors(
+        parse_errors,
+        &event_sink,
+        &thread_name,
+    ));
 
     // Execute non-thread calls.
     let non_thread_results =
@@ -160,11 +134,7 @@ async fn execute_simple(
             .await;
     all_results.extend(non_thread_results);
 
-    all_results.sort_by_key(|(index, ..)| *index);
-    all_results
-        .into_iter()
-        .map(|(_, tool_call_id, tool_name, result)| (tool_call_id, tool_name, result))
-        .collect()
+    dag::sort_and_strip_index(all_results)
 }
 
 /// Fallback when DAG construction fails (cycle or duplicate thread names).
@@ -172,30 +142,28 @@ async fn execute_simple(
 /// Non-thread tool calls are executed normally.  All thread dispatches receive
 /// an error ToolResult describing the DAG error.  Parse errors are included.
 /// Results are sorted by original index.
-#[allow(clippy::too_many_arguments)]
 async fn execute_with_dag_error(
     thread_dispatches: Vec<dag::ParsedThreadDispatch>,
     other_calls: Vec<(usize, String, String, String)>,
-    parse_errors: Vec<(usize, String, ToolResult)>,
+    parse_errors: Vec<(usize, String, String, ToolResult)>,
     dag_err: dag::DagError,
-    runtime: ToolRuntime,
-    client: ModelClient,
-    event_sink: EventSink,
-    thread_name: Option<String>,
+    ctx: dag::DagExecContext,
 ) -> Vec<(String, String, ToolResult)> {
+    let dag::DagExecContext {
+        runtime,
+        client,
+        event_sink,
+        agent_thread_name: thread_name,
+    } = ctx;
+
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Collect parse errors immediately.
-    for (index, tool_call_id, error_result) in parse_errors {
-        event_sink.emit(AgentEvent::ToolCallFinished {
-            thread_name: thread_name.clone(),
-            call_id: tool_call_id.clone(),
-            name: "thread".to_string(),
-            content_preview: preview_tool_result("thread", &error_result),
-            is_error: error_result.is_error,
-        });
-        all_results.push((index, tool_call_id, "thread".to_string(), error_result));
-    }
+    all_results.extend(dag::collect_parse_errors(
+        parse_errors,
+        &event_sink,
+        &thread_name,
+    ));
 
     // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
@@ -212,6 +180,13 @@ async fn execute_with_dag_error(
             content: error_message.clone(),
             is_error: true,
         };
+        event_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: thread_name.clone(),
+            call_id: dispatch.tool_call_id.clone(),
+            name: "thread".to_string(),
+            args_preview: preview_tool_args("thread", &dispatch.args_str),
+            args_detail: Some(tool_args_detail(&dispatch.args_str)),
+        });
         event_sink.emit(AgentEvent::ToolCallFinished {
             thread_name: thread_name.clone(),
             call_id: dispatch.tool_call_id.clone(),
@@ -233,22 +208,15 @@ async fn execute_with_dag_error(
             .await;
     all_results.extend(non_thread_results);
 
-    all_results.sort_by_key(|(index, ..)| *index);
-    all_results
-        .into_iter()
-        .map(|(_, tool_call_id, tool_name, result)| (tool_call_id, tool_name, result))
-        .collect()
+    dag::sort_and_strip_index(all_results)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::test_runtime;
     use crate::types::FunctionCall;
     use serde_json::json;
-    use std::collections::HashSet;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     // ------------------------------------------------------------------
     // Test helpers
@@ -262,26 +230,6 @@ mod tests {
                 name: name.to_string(),
                 arguments: serde_json::to_string(&args).unwrap(),
             },
-        }
-    }
-
-    fn test_runtime() -> ToolRuntime {
-        let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
-        ToolRuntime {
-            config_cwd: workspace_cwd.clone(),
-            workspace_cwd,
-            store_path: PathBuf::new(),
-            session_id: Some("test-session".to_string()),
-            worker_executable: None,
-            active_threads: Arc::new(Mutex::new(HashSet::new())),
-            event_sink: EventSink::none(),
-            backend,
-            mcp: None,
-            skills: None,
-            terminal_manager: crate::terminal::TerminalManager::new(),
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         }
     }
 
