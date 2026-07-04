@@ -16,6 +16,7 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod preview;
 mod tool_exec;
+mod dag;
 
 #[cfg(test)]
 mod live_tests;
@@ -185,7 +186,17 @@ impl Agent {
                      `notes` for durable context discovered while planning or running.\n\
                      Avoid creating extra Markdown documents or notes files unless the user explicitly \
                      asks for them.\n\
-                     You may dispatch independent threads in parallel when useful.\n\n\
+                     You may dispatch multiple threads in a single response. When you do, the system \
+                     builds a dependency DAG from the threads parameters of each dispatched thread. \
+                     Threads with no in-batch source dependencies launch immediately and run \
+                     concurrently. Threads that reference other threads being dispatched in the same \
+                     response automatically wait for those source threads to complete before \
+                     starting. Source threads that already exist from prior turns are loaded \
+                     normally — only same-batch dependencies are ordered. Do not create circular \
+                     dependencies (thread A depends on B while B depends on A); the system will \
+                     reject them. This enables patterns like best-of-N: dispatch multiple \
+                     independent explorations in one response, then a synthesis thread that takes \
+                     all of them as source threads and waits for them to finish.\n\n\
                      Your tools:\n\
                      - thread(name, action, threads?, skills?, timeout?)\n\
                      - threads()\n\
@@ -307,6 +318,11 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
+        // Clear any stale active_threads from a previous turn that was
+        // cancelled or panicked. At the start of a new turn, no threads
+        // should be running — prior child processes were killed by kill_on_drop.
+        self.tool_runtime.active_threads.lock().await.clear();
+
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),

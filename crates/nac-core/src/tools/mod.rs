@@ -223,3 +223,31 @@ pub async fn execute_tool(
         },
     }
 }
+
+// ------------------------------------------------------------------
+// Test helpers (shared across agent::dag, agent::tool_exec, tools::thread)
+// ------------------------------------------------------------------
+
+/// Create a `ToolRuntime` suitable for unit tests.  Uses the current
+/// directory as the workspace, an empty store path, a dummy session id,
+/// and no MCP / skills / worker executable.
+#[cfg(test)]
+pub(crate) fn test_runtime() -> ToolRuntime {
+    let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
+    ToolRuntime {
+        config_cwd: workspace_cwd.clone(),
+        workspace_cwd,
+        store_path: PathBuf::new(),
+        session_id: Some("test-session".to_string()),
+        worker_executable: None,
+        active_threads: Arc::new(Mutex::new(HashSet::new())),
+        event_sink: EventSink::none(),
+        backend,
+        mcp: None,
+        skills: None,
+        terminal_manager: TerminalManager::new(),
+        thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
+        worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+    }
+}
