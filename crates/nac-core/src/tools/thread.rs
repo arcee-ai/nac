@@ -110,43 +110,55 @@ pub fn thread_delete_definition() -> ToolDefinition {
     )
 }
 
-pub async fn execute_dispatch(
-    args: Value,
+#[derive(Debug, Clone)]
+pub struct ParsedDispatchParams {
+    pub thread_name: String,
+    pub action: String,
+    pub source_threads: Vec<String>,
+    pub scheduled_skills: Vec<String>,
+    pub session_id: String,
+    pub timeout_secs: u64,
+}
+
+/// Parse tool args into [`ParsedDispatchParams`].  Pure — no side effects.
+pub fn parse_dispatch_args(
+    args: &Value,
+    runtime: &ToolRuntime,
+) -> Result<ParsedDispatchParams, ToolResult> {
+    let thread_name = require_str(args, "name")?;
+    let action = require_str(args, "action")?;
+    let source_threads = require_string_array(args, "threads")?;
+    let scheduled_skills = resolve_scheduled_skills(args, runtime.skills.as_deref())?;
+    let session_id = require_session(runtime)?.to_string();
+    let timeout_secs = resolve_thread_timeout_secs(args, runtime.thread_timeout_secs);
+
+    Ok(ParsedDispatchParams {
+        thread_name,
+        action,
+        source_threads,
+        scheduled_skills,
+        session_id,
+        timeout_secs,
+    })
+}
+
+/// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
+/// calls `run_worker`, folds worker usage, and maps the `WorkerRun` to a
+/// `ToolResult`.  Does **not** call `mark_thread_active` / `unmark_thread_active`
+/// — the caller manages the `active_threads` lifecycle.
+pub async fn execute_parsed_dispatch(
+    params: ParsedDispatchParams,
     runtime: &ToolRuntime,
     client: &ModelClient,
 ) -> ToolResult {
-    let thread_name = match require_str(&args, "name") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let action = match require_str(&args, "action") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let source_threads = match require_string_array(&args, "threads") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let scheduled_skills = match resolve_scheduled_skills(&args, runtime.skills.as_deref()) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let session_id = match require_session(runtime) {
-        Ok(s) => s.to_string(),
-        Err(e) => return e,
-    };
-
-    if !mark_thread_active(runtime, &thread_name).await {
-        return ToolResult {
-            content: format!(
-                "Thread '{}' is already running; retry after the current dispatch completes.",
-                thread_name
-            ),
-            is_error: true,
-        };
-    }
-
-    let timeout_secs = resolve_thread_timeout_secs(&args, runtime.thread_timeout_secs);
+    let ParsedDispatchParams {
+        thread_name,
+        action,
+        source_threads,
+        scheduled_skills,
+        session_id,
+        timeout_secs,
+    } = params;
 
     runtime.event_sink.emit(AgentEvent::ThreadStarted {
         name: thread_name.clone(),
@@ -167,7 +179,6 @@ pub async fn execute_dispatch(
         },
     )
     .await;
-    unmark_thread_active(runtime, &thread_name).await;
 
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
@@ -203,12 +214,10 @@ pub async fn execute_dispatch(
             });
             ToolResult {
                 content: match timeout_reason {
-                    Some(reason) => {
-                        format!(
-                            "Thread '{}' timed out after {}s.\n{}",
-                            thread_name, timeout_secs, reason
-                        )
-                    }
+                    Some(reason) => format!(
+                        "Thread '{}' timed out after {}s.\n{}",
+                        thread_name, timeout_secs, reason
+                    ),
                     None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
                 },
                 is_error: true,
@@ -251,6 +260,30 @@ pub async fn execute_dispatch(
             }
         }
     }
+}
+
+pub async fn execute_dispatch(
+    args: Value,
+    runtime: &ToolRuntime,
+    client: &ModelClient,
+) -> ToolResult {
+    let params = match parse_dispatch_args(&args, runtime) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let thread_name = params.thread_name.clone();
+    if !mark_thread_active(runtime, &thread_name).await {
+        return ToolResult {
+            content: format!(
+                "Thread '{}' is already running; retry after the current dispatch completes.",
+                thread_name
+            ),
+            is_error: true,
+        };
+    }
+    let result = execute_parsed_dispatch(params, runtime, client).await;
+    unmark_thread_active(runtime, &thread_name).await;
+    result
 }
 
 pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
@@ -442,7 +475,7 @@ fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
         .max(MIN_THREAD_TIMEOUT_SECS)
 }
 
-async fn mark_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
+pub(crate) async fn mark_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
     let mut active = runtime.active_threads.lock().await;
     if active.contains(thread_name) {
         false
@@ -452,7 +485,7 @@ async fn mark_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
     }
 }
 
-async fn unmark_thread_active(runtime: &ToolRuntime, thread_name: &str) {
+pub(crate) async fn unmark_thread_active(runtime: &ToolRuntime, thread_name: &str) {
     runtime.active_threads.lock().await.remove(thread_name);
 }
 
@@ -750,7 +783,11 @@ async fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::EventSink;
     use serde_json::json;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn skill_record(
         name: &str,
@@ -772,6 +809,32 @@ mod tests {
             skill_record("lint", "Run linting workflows.", None),
             skill_record("review", "Review code quality.", Some("Rust")),
         ])
+    }
+
+    fn test_runtime() -> ToolRuntime {
+        let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
+        ToolRuntime {
+            config_cwd: workspace_cwd.clone(),
+            workspace_cwd,
+            store_path: PathBuf::new(),
+            session_id: Some("test-session".to_string()),
+            worker_executable: None,
+            active_threads: Arc::new(Mutex::new(HashSet::new())),
+            event_sink: EventSink::none(),
+            backend,
+            mcp: None,
+            skills: None,
+            terminal_manager: crate::terminal::TerminalManager::new(),
+            thread_timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
+            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+        }
+    }
+
+    fn test_runtime_with_skills() -> ToolRuntime {
+        let mut rt = test_runtime();
+        rt.skills = Some(Arc::new(test_registry()));
+        rt
     }
 
     #[test]
@@ -871,5 +934,76 @@ mod tests {
             trace.timeout_reason(),
             "The thread timed out at a tool call.\nTool call: exec_command call_123\narguments: {\"cmd\":\"cargo test -p nac-core\",\"tty\":false,\"yield_time_ms\":300000}"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // parse_dispatch_args
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn parse_dispatch_args_extracts_all_fields() {
+        let runtime = test_runtime_with_skills();
+        let args = json!({
+            "name": "impl/auth",
+            "action": "Implement authentication",
+            "threads": ["design", "research"],
+            "skills": ["lint", "review"],
+            "timeout": 7200,
+        });
+
+        let params = parse_dispatch_args(&args, &runtime).unwrap();
+        assert_eq!(params.thread_name, "impl/auth");
+        assert_eq!(params.action, "Implement authentication");
+        assert_eq!(params.source_threads, vec!["design", "research"]);
+        assert_eq!(params.scheduled_skills, vec!["lint", "review"]);
+        assert_eq!(params.session_id, "test-session");
+        assert_eq!(params.timeout_secs, 7200);
+    }
+
+    #[test]
+    fn parse_dispatch_args_errors_when_name_missing() {
+        let runtime = test_runtime();
+        let args = json!({ "action": "Do something" });
+
+        let err = parse_dispatch_args(&args, &runtime).unwrap_err();
+        assert!(err.is_error);
+        assert!(err.content.contains("'name'"));
+    }
+
+    #[test]
+    fn parse_dispatch_args_errors_when_action_missing() {
+        let runtime = test_runtime();
+        let args = json!({ "name": "impl/auth" });
+
+        let err = parse_dispatch_args(&args, &runtime).unwrap_err();
+        assert!(err.is_error);
+        assert!(err.content.contains("'action'"));
+    }
+
+    #[test]
+    fn parse_dispatch_args_defaults_threads_to_empty() {
+        let runtime = test_runtime();
+        let args = json!({ "name": "t1", "action": "work" });
+
+        let params = parse_dispatch_args(&args, &runtime).unwrap();
+        assert!(params.source_threads.is_empty());
+    }
+
+    #[test]
+    fn parse_dispatch_args_defaults_skills_to_empty() {
+        let runtime = test_runtime();
+        let args = json!({ "name": "t1", "action": "work" });
+
+        let params = parse_dispatch_args(&args, &runtime).unwrap();
+        assert!(params.scheduled_skills.is_empty());
+    }
+
+    #[test]
+    fn parse_dispatch_args_applies_default_timeout() {
+        let runtime = test_runtime();
+        let args = json!({ "name": "t1", "action": "work" });
+
+        let params = parse_dispatch_args(&args, &runtime).unwrap();
+        assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
     }
 }
