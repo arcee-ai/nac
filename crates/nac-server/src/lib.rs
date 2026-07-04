@@ -934,6 +934,7 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
     match command {
         FrontendCommand::Exit => "exit",
         FrontendCommand::Sessions => "sessions",
+        FrontendCommand::Help => "help",
     }
 }
 

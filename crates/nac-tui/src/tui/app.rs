@@ -462,6 +462,12 @@ impl App {
                         self.clear_composer();
                         AppAction::None
                     }
+                    PreparedUserInput::FrontendCommand(FrontendCommand::Help) => {
+                        self.selection = None;
+                        self.help_visible = true;
+                        self.clear_composer();
+                        AppAction::None
+                    }
                     PreparedUserInput::SubmitPrompt(prompt) => AppAction::Submit(prompt),
                     PreparedUserInput::InvalidSlashCommand { message } => {
                         self.show_composer_notice(message, Tone::Warning);
@@ -2005,6 +2011,15 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
+                    "/help",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" open this overlay", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
                     "/sessions",
                     Style::default()
                         .fg(Color::Cyan)
@@ -2020,6 +2035,15 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" plan or run a workset", Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "/exit",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" quit nac", Style::default().fg(Color::White)),
             ]),
             Line::from(""),
             Line::from(Span::styled(
