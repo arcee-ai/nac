@@ -246,9 +246,15 @@ pub(crate) async fn execute_with_dag(
     }
 
     // 2. Pre-mark ALL thread names in active_threads.
+    // Track which threads we successfully marked so we only unmark those
+    // at the end — unmarking a thread that was already active from a prior
+    // turn would clobber its mutual-exclusion guarantee.
     let mut failed_indices: HashSet<usize> = HashSet::new();
+    let mut marked_by_us: HashSet<String> = HashSet::new();
     for (i, dispatch) in thread_dispatches.iter().enumerate() {
-        if !thread::mark_thread_active(&runtime, &dispatch.params.thread_name).await {
+        if thread::mark_thread_active(&runtime, &dispatch.params.thread_name).await {
+            marked_by_us.insert(dispatch.params.thread_name.clone());
+        } else {
             let result = ToolResult {
                 content: format!(
                     "Thread '{}' is already running; retry after the current dispatch completes.",
@@ -441,9 +447,11 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 4. Unmark all thread names from active_threads (including skipped ones).
-    for dispatch in &thread_dispatches {
-        thread::unmark_thread_active(&runtime, &dispatch.params.thread_name).await;
+    // 4. Unmark only threads we successfully marked (including skipped ones
+    //    that were marked but not spawned).  Threads that were already active
+    //    from a prior turn were NOT marked by us, so we must not unmark them.
+    for name in &marked_by_us {
+        thread::unmark_thread_active(&runtime, name).await;
     }
 
     // 5. Sort by original index and return.

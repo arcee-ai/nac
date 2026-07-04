@@ -318,6 +318,11 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
+        // Clear any stale active_threads from a previous turn that was
+        // cancelled or panicked. At the start of a new turn, no threads
+        // should be running — prior child processes were killed by kill_on_drop.
+        self.tool_runtime.active_threads.lock().await.clear();
+
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),

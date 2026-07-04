@@ -579,6 +579,11 @@ impl SessionService {
             let _ = task.await;
         }
 
+        // Clear stale active_threads — the aborted task could not run
+        // unmark cleanup.  All child processes have been killed by
+        // kill_on_drop, so no threads are actually running anymore.
+        self.active_threads.lock().await.clear();
+
         // Capture partial token usage from the cancelled run.  Because
         // `send()` now updates `last_usage` mid-loop, this includes all
         // model-call usage accumulated before the cancel.
