@@ -146,7 +146,7 @@ pub fn build_plan_command_prompt(instruction: &str) -> String {
          1. Research the affected files, patterns, and conventions. Use general research `thread` calls at first, followed by bounded focused `thread` calls for additional detailed research when helpful.\n\
          2. Decompose the work into self-contained units. Prefer per-module or per-directory slices, keep scopes explicit, and record dependencies only when a unit really needs another first.\n\
          3. Define the verification recipe. Include the exact test command, manual flow, or reason that unit tests are sufficient.\n\
-         4. Save the workset. Use `id` as the short handle for `/run <workset>`; `goal`, `status`, and `summary` for the overall plan; and ordered `items` with `title`, `scope`, `description`, `role`, `depends_on`, `acceptance`, and optional `notes`.\n\n\
+         4. Save the workset. Use `id` as the short handle for `/run <workset>`; `goal`, `status`, and `summary` for the overall plan; and ordered `workset_items` with `title`, `scope`, `description`, `role`, `depends_on`, `acceptance`, and optional `notes`.\n\n\
          Constraints:\n\
          - Do not do mutating implementation work in this step.\n\
          - Final response: give the workset id, compact plan summary, verification recipe, and next command: `/run <workset>`.\n"
@@ -164,7 +164,7 @@ pub fn build_run_command_prompt(workset_id: &str) -> String {
          2. Execute ready items according to the stored dependencies, scopes, roles, acceptance criteria, and verification recipe.\n\
          3. Use `thread` for implementation and verification work. Each worker prompt must include owned scope and say the worker is not alone in the codebase and must not overwrite unrelated edits.\n\
          4. Run the workset verification recipe when the implementation is complete, or explain why it could not be run.\n\
-         5. If the plan materially changes, replace the same workset id with `workset_define` and updated status, summary, items, and notes.\n\n\
+         5. If the plan materially changes, replace the same workset id with `workset_define` and updated status, summary, workset_items, and notes.\n\n\
          Final response: summarize completed items, verification result, and current workset status.\n"
     )
 }

@@ -202,7 +202,7 @@ impl Agent {
                      - threads()\n\
                      - thread_read(name)\n\
                      - thread_delete(name)\n\
-                     - workset_define(id, goal, status, summary, verification_recipe?, items[])\n\
+                     - workset_define(id, goal, status, summary, verification_recipe?, workset_items[])\n\
                      - workset_read(id)\n\
                      - workset_list()\n\n\
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",

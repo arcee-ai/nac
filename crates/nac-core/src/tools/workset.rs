@@ -32,7 +32,7 @@ pub fn define_definition() -> ToolDefinition {
                     "type": "string",
                     "description": "Optional end-to-end validation recipe for the workset, such as tests or manual checks that prove the goal was met."
                 },
-                "items": {
+                "workset_items": {
                     "type": "array",
                     "description": "Ordered high-level plan items. Order should reflect dependencies and the natural execution sequence.",
                     "items": {
@@ -72,7 +72,7 @@ pub fn define_definition() -> ToolDefinition {
                     }
                 }
             },
-            "required": ["id", "goal", "status", "summary", "items"]
+            "required": ["id", "goal", "status", "summary", "workset_items"]
         }),
     )
 }
@@ -129,7 +129,7 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
         Ok(recipe) => recipe,
         Err(error) => return error,
     };
-    let items = match parse_items(args.get("items")) {
+    let items = match parse_items(args.get("workset_items")) {
         Ok(items) => items,
         Err(error) => return error,
     };
@@ -253,13 +253,13 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
 fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, ToolResult> {
     let Some(value) = value else {
         return Err(ToolResult {
-            content: "Error: 'items' is required".to_string(),
+            content: "Error: 'workset_items' is required".to_string(),
             is_error: true,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: "Error: 'items' must be an array".to_string(),
+            content: "Error: 'workset_items' must be an array".to_string(),
             is_error: true,
         });
     };
