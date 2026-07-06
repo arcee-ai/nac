@@ -447,6 +447,7 @@ impl Agent {
                 accumulated_usage.output_tokens += wu.output_tokens;
                 accumulated_usage.cache_read_tokens += wu.cache_read_tokens;
                 accumulated_usage.cache_write_tokens += wu.cache_write_tokens;
+                accumulated_usage.reasoning_tokens += wu.reasoning_tokens;
                 *wu = TokenUsage::default();
             }
 

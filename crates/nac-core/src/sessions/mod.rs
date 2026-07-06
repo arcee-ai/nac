@@ -109,6 +109,7 @@ mod tests {
                 output_tokens: 50,
                 cache_read_tokens: 20,
                 cache_write_tokens: 0,
+                reasoning_tokens: 0,
                 orchestrator_context_tokens: 150,
             }),
             None,
@@ -117,6 +118,7 @@ mod tests {
                 output_tokens: 80,
                 cache_read_tokens: 40,
                 cache_write_tokens: 10,
+                reasoning_tokens: 0,
                 orchestrator_context_tokens: 330,
             }),
         ];

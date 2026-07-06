@@ -7,6 +7,7 @@ pub enum BackendKind {
     #[serde(rename = "deepseek-chat")]
     DeepSeekChat,
     FireworksChat,
+    TogetherChat,
     #[serde(rename = "openai-responses")]
     OpenAiResponses,
     #[serde(rename = "chatgpt-codex-responses")]
@@ -21,6 +22,7 @@ impl BackendKind {
             Self::Auto => "auto",
             Self::DeepSeekChat => "deepseek-chat",
             Self::FireworksChat => "fireworks-chat",
+            Self::TogetherChat => "together-chat",
             Self::OpenAiResponses => "openai-responses",
             Self::ChatGptCodexResponses => "chatgpt-codex-responses",
             Self::AnthropicMessages => "anthropic-messages",
@@ -76,6 +78,7 @@ pub struct TokenUsage {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    pub reasoning_tokens: u64,
     /// Current context window size (last model call's total token count).
     /// Despite the `AddAssign` impl summing this field, the agent loop
     /// overwrites it with the most recent call's value so it reflects the
@@ -90,6 +93,7 @@ impl std::ops::AddAssign for TokenUsage {
         self.output_tokens += other.output_tokens;
         self.cache_read_tokens += other.cache_read_tokens;
         self.cache_write_tokens += other.cache_write_tokens;
+        self.reasoning_tokens += other.reasoning_tokens;
         self.orchestrator_context_tokens += other.orchestrator_context_tokens;
     }
 }

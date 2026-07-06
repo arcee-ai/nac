@@ -1395,6 +1395,7 @@ mod tests {
             output_tokens: 120,
             cache_read_tokens: 80,
             cache_write_tokens: 15,
+            reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
         };
         assert!(
@@ -1505,6 +1506,7 @@ mod tests {
             output_tokens: 120,
             cache_read_tokens: 80,
             cache_write_tokens: 15,
+            reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
         };
         assert!(

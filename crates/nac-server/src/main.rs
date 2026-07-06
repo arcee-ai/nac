@@ -83,6 +83,8 @@ enum BackendArg {
     DeepSeekChat,
     #[value(name = "fireworks-chat")]
     FireworksChat,
+    #[value(name = "together-chat")]
+    TogetherChat,
     #[value(name = "openai-responses")]
     OpenAiResponses,
     #[value(name = "chatgpt-codex-responses")]
@@ -97,6 +99,7 @@ impl From<BackendArg> for BackendKind {
             BackendArg::Auto => Self::Auto,
             BackendArg::DeepSeekChat => Self::DeepSeekChat,
             BackendArg::FireworksChat => Self::FireworksChat,
+            BackendArg::TogetherChat => Self::TogetherChat,
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,

@@ -182,6 +182,7 @@ pub async fn execute_parsed_dispatch(
             wu.output_tokens += usage.output_tokens;
             wu.cache_read_tokens += usage.cache_read_tokens;
             wu.cache_write_tokens += usage.cache_write_tokens;
+            wu.reasoning_tokens += usage.reasoning_tokens;
         }
     }
 

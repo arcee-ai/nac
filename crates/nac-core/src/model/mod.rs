@@ -137,6 +137,10 @@ mod tests {
             detect_backend("https://api.anthropic.com").unwrap(),
             BackendKind::AnthropicMessages
         );
+        assert_eq!(
+            detect_backend("https://api.together.ai/v1").unwrap(),
+            BackendKind::TogetherChat
+        );
         assert!(detect_backend("https://example.com/v1").is_err());
     }
 
@@ -625,5 +629,85 @@ mod tests {
         .unwrap();
 
         assert!(parsed.usage.is_none());
+    }
+
+    #[test]
+    fn parses_together_chat_response() {
+        let parsed = parse_together_chat_response(
+            &json!({
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "The answer is 42.",
+                            "reasoning": "I need to think about this carefully...",
+                            "tool_calls": null
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                    "cached_tokens": 60,
+                    "reasoning_tokens": 25
+                }
+            }),
+            "https://api.together.ai/v1/chat/completions",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.assistant.content.as_deref(), Some("The answer is 42."));
+        assert_eq!(
+            parsed.assistant.reasoning_text.as_deref(),
+            Some("I need to think about this carefully...")
+        );
+        assert!(parsed.assistant.tool_calls.is_none());
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 40);   // 100 - 60 cached
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 60);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.reasoning_tokens, 25);
+        assert_eq!(usage.orchestrator_context_tokens, 150);
+    }
+
+    #[test]
+    fn parses_together_chat_response_nested_usage() {
+        let parsed = parse_together_chat_response(
+            &json!({
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "The answer is 4.",
+                        "reasoning": "We need to calculate 2+2. That equals 4.",
+                        "tool_calls": null
+                    }
+                }],
+                "usage": {
+                    "prompt_tokens": 2618,
+                    "completion_tokens": 74,
+                    "total_tokens": 2692,
+                    "prompt_tokens_details": {"cached_tokens": 2560},
+                    "completion_tokens_details": {"reasoning_tokens": 71}
+                }
+            }),
+            "https://api.together.ai/v1/chat/completions",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.assistant.content.as_deref(), Some("The answer is 4."));
+        assert_eq!(
+            parsed.assistant.reasoning_text.as_deref(),
+            Some("We need to calculate 2+2. That equals 4.")
+        );
+        assert!(parsed.assistant.tool_calls.is_none());
+        let usage = parsed.usage.expect("usage should be parsed");
+        assert_eq!(usage.input_tokens, 58);      // 2618 - 2560 cached
+        assert_eq!(usage.output_tokens, 74);
+        assert_eq!(usage.cache_read_tokens, 2560);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.reasoning_tokens, 71);
+        assert_eq!(usage.orchestrator_context_tokens, 2692);
     }
 }

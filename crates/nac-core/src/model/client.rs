@@ -73,6 +73,7 @@ impl ModelClient {
             BackendKind::Auto => unreachable!("backend auto should be resolved at client creation"),
             BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
             BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
+            BackendKind::TogetherChat => self.send_together_chat(messages, tools).await,
             BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
             BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
             BackendKind::ChatGptCodexResponses => {
@@ -142,6 +143,42 @@ impl ModelClient {
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_chat_completions_response(&value, &url)
+    }
+
+    async fn send_together_chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut request = json!({
+            "model": self.model,
+            "messages": messages
+                .iter()
+                .map(fireworks_message_to_value)
+                .collect::<Vec<_>>(),
+            "tools": tools,
+            "temperature": 0.0,
+            "reasoning": {"enabled": true},
+            "chat_template_kwargs": {"clear_thinking": false}
+        });
+
+        if let Some(effort) = self.reasoning_effort {
+            match effort {
+                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High => {
+                    request["reasoning_effort"] = Value::String(effort.as_str().to_string());
+                }
+                unsupported => {
+                    return Err(anyhow!(
+                        "reasoning effort '{}' is not supported by together-chat; use low, medium, or high",
+                        unsupported.as_str()
+                    ));
+                }
+            }
+        }
+
+        let value = self.post_json_with_retry(&url, &request).await?;
+        parse_together_chat_response(&value, &url)
     }
 
     async fn send_deepseek_chat(

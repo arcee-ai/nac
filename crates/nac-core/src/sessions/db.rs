@@ -350,6 +350,7 @@ fn parse_backend(raw: Option<String>, base_url: &str) -> Result<BackendKind> {
     match raw.as_deref() {
         Some("deepseek-chat") => Ok(BackendKind::DeepSeekChat),
         Some("fireworks-chat") => Ok(BackendKind::FireworksChat),
+        Some("together-chat") => Ok(BackendKind::TogetherChat),
         Some("openai-responses") => Ok(BackendKind::OpenAiResponses),
         Some("chatgpt-codex-responses") => Ok(BackendKind::ChatGptCodexResponses),
         Some("anthropic-messages") => Ok(BackendKind::AnthropicMessages),

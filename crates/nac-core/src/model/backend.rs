@@ -6,6 +6,7 @@ pub(super) fn default_model_for_backend(backend: BackendKind) -> String {
         BackendKind::OpenAiResponses => "gpt-5.5".to_string(),
         BackendKind::ChatGptCodexResponses => "gpt-5.5".to_string(),
         BackendKind::FireworksChat => "gpt-5.5".to_string(),
+        BackendKind::TogetherChat => "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string(),
         BackendKind::AnthropicMessages => "claude-opus-4-6".to_string(),
         BackendKind::Auto => unreachable!("auto backend does not have a default model"),
     }
@@ -18,6 +19,7 @@ pub(super) fn default_reasoning_effort(backend: BackendKind) -> Option<Reasoning
         }
         BackendKind::DeepSeekChat => None,
         BackendKind::FireworksChat => None,
+        BackendKind::TogetherChat => None,
         BackendKind::AnthropicMessages => None,
         BackendKind::Auto => None,
     }
@@ -28,6 +30,7 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
         BackendKind::DeepSeekChat => "https://api.deepseek.com",
         BackendKind::ChatGptCodexResponses => "https://chatgpt.com/backend-api",
         BackendKind::AnthropicMessages => "https://api.anthropic.com",
+        BackendKind::TogetherChat => "https://api.together.ai/v1",
         BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
             "https://api.openai.com/v1"
         }
@@ -40,6 +43,20 @@ pub(super) fn api_key_for_backend(
 ) -> Result<String> {
     match backend {
         BackendKind::ChatGptCodexResponses => Ok(String::new()),
+        BackendKind::TogetherChat => {
+            if let Ok(api_key) = std::env::var("TOGETHER_API_KEY") {
+                return Ok(api_key);
+            }
+            if let Some(env_name) = configured_env.filter(|name| *name != "TOGETHER_API_KEY") {
+                return std::env::var(env_name).map_err(|_| {
+                    anyhow!(
+                        "TOGETHER_API_KEY environment variable is not set and configured api_key_env '{}' is not set",
+                        env_name
+                    )
+                });
+            }
+            Err(anyhow!("TOGETHER_API_KEY environment variable is not set"))
+        }
         BackendKind::AnthropicMessages => {
             if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
                 return Ok(api_key);
@@ -81,6 +98,9 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
         .host_str()
         .ok_or_else(|| anyhow!("OPENAI_BASE_URL '{}' does not include a host", base_url))?;
 
+    if host.contains("together.ai") {
+        return Ok(BackendKind::TogetherChat);
+    }
     if host.contains("fireworks.ai") {
         return Ok(BackendKind::FireworksChat);
     }
@@ -98,7 +118,7 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
     }
 
     Err(anyhow!(
-        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend openai-responses, --backend chatgpt-codex-responses, or --backend anthropic-messages",
+        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend together-chat, --backend openai-responses, --backend chatgpt-codex-responses, or --backend anthropic-messages",
         base_url
     ))
 }
