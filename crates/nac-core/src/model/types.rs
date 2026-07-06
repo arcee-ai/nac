@@ -78,6 +78,7 @@ pub struct TokenUsage {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    #[serde(default)]
     pub reasoning_tokens: u64,
     /// Current context window size (last model call's total token count).
     /// Despite the `AddAssign` impl summing this field, the agent loop
