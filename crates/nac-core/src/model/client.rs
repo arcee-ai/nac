@@ -155,7 +155,7 @@ impl ModelClient {
             "model": self.model,
             "messages": messages
                 .iter()
-                .map(fireworks_message_to_value)
+                .map(together_message_to_value)
                 .collect::<Vec<_>>(),
             "tools": tools,
             "temperature": 0.0,
