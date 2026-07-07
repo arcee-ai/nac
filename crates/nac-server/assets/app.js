@@ -408,7 +408,6 @@ function sessionCardViewModel(entry) {
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
     pinned: state.pinnedSessionIds.has(sessionId),
-    tone: "",
     modeClass: summary.sandboxed ? "mode-sandbox" : "",
     errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
     statusClass: sessionStatusClass(entry),
@@ -432,7 +431,6 @@ function sessionCardRenderDigest(card) {
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
     card.pinned ? "1" : "0",
-    card.tone,
     card.modeClass,
     card.errorish,
     card.statusClass,
@@ -1172,8 +1170,15 @@ function renderNewSessionCard() {
 
 function renderSessionCard(card) {
   if (!card) return "";
+  const className = [
+    "session-card",
+    card.modeClass,
+    card.errorish,
+    card.selected ? "selected" : "",
+    card.pinned ? "pinned" : "",
+  ].filter(Boolean).join(" ");
   return `
-    <article class="session-card ${card.tone} ${card.modeClass} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" role="button" tabindex="0" aria-current="${card.selected ? "true" : "false"}" aria-label="${escapeAttr(sessionCardAriaLabel(card))}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
+    <article class="${className}" data-session-id="${escapeAttr(card.sessionId)}" role="button" tabindex="0" aria-current="${card.selected ? "true" : "false"}" aria-label="${escapeAttr(sessionCardAriaLabel(card))}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
       <div class="session-card-head">
         <div>
           <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
@@ -1191,15 +1196,35 @@ function renderSessionCard(card) {
 }
 
 function sessionCardAriaLabel(card) {
-  const states = [];
-  if (card?.pinned) states.push("pinned");
-  if (card?.selected) states.push("selected");
-  if (card?.runActive) states.push("run active");
-  if (card?.statusClass === "attention") states.push("needs attention");
-  if (card?.errorish) states.push("workspace error");
-  if (card?.sandboxed) states.push("sandboxed");
-  const stateText = states.length ? `, ${states.join(", ")}` : "";
-  return `Session ${card?.shortId || shortId(card?.sessionId) || "unknown"}${stateText}`;
+  const details = [`Session ${card?.shortId || shortId(card?.sessionId) || "unknown"}`];
+  const status = sessionCardStatusLabel(card);
+  const cwd = compactAriaText(card?.cwd);
+  const prompt = compactAriaText(card?.promptPreview);
+  if (status) details.push(`status ${status}`);
+  if (cwd) details.push(`cwd ${cwd}`);
+  if (card?.sshHost) details.push(`ssh ${compactAriaText(card.sshHost)}`);
+  if (card?.sandboxed && status !== "sandboxed") details.push("sandboxed");
+  if (prompt && prompt !== "no prompt yet") details.push(`prompt ${prompt}`);
+  if (card?.additions && card.additions !== "--") details.push(`additions ${card.additions}`);
+  if (card?.deletions && card.deletions !== "--") details.push(`deletions ${card.deletions}`);
+  if (card?.pinned) details.push("pinned");
+  if (card?.selected) details.push("selected");
+  return details.join(", ");
+}
+
+function sessionCardStatusLabel(card) {
+  if (card?.errorish) return "workspace error";
+  if (card?.runActive || card?.statusClass === "active") return "active";
+  if (card?.statusClass === "attention") return "needs attention";
+  if (card?.statusClass === "sandbox") return "sandboxed";
+  if (card?.statusClass === "idle") return "idle";
+  return "";
+}
+
+function compactAriaText(value, limit = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length <= limit) return text;
+  return `${text.slice(0, limit - 3)}...`;
 }
 
 function runTileAriaLabel(card) {

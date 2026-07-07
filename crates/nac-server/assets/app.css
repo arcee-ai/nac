@@ -569,15 +569,6 @@ button.session-card {
   outline-offset: 2px;
 }
 
-.session-card.warn {
-  border-color: rgba(232, 168, 56, 0.52);
-  background: #1f1a10;
-}
-
-.session-card.warn::before {
-  background: var(--status-warning);
-}
-
 .session-card.mode-sandbox:not(.errorish) {
   border-color: var(--sandbox-border);
 }
@@ -617,10 +608,6 @@ button.session-card {
 .session-card.selected.errorish {
   outline: 1px solid var(--surface-selected-border);
   outline-offset: -2px;
-}
-
-.session-card.selected.warn {
-  border-color: rgba(232, 168, 56, 0.72);
 }
 
 .session-card.selected.mode-sandbox:not(.errorish) {
