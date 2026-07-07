@@ -42,9 +42,12 @@
   --danger-ring-strong: var(--danger-border-strong);
   --status-neutral: var(--faint);
   --status-info: var(--blue);
+  --status-sandbox: var(--status-info);
   --status-success: var(--teal);
   --status-warning: var(--amber);
   --status-danger: var(--danger-text);
+  --sandbox-border: rgba(110, 168, 255, 0.38);
+  --sandbox-border-strong: rgba(110, 168, 255, 0.58);
   --type-label: 9px;
   --type-meta: 10px;
   --type-body: 11px;
@@ -389,8 +392,8 @@ textarea {
 }
 
 .status-dot.sandbox {
-  border-color: var(--status-warning);
-  background: var(--status-warning);
+  border-color: var(--status-sandbox);
+  background: var(--status-sandbox);
 }
 
 .status-dot.idle {
@@ -560,6 +563,12 @@ button.session-card {
   box-shadow: none;
 }
 
+.session-card:focus-visible {
+  border-color: var(--focus-border);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .session-card.warn {
   border-color: rgba(232, 168, 56, 0.52);
   background: #1f1a10;
@@ -567,6 +576,18 @@ button.session-card {
 
 .session-card.warn::before {
   background: var(--status-warning);
+}
+
+.session-card.mode-sandbox:not(.errorish) {
+  border-color: var(--sandbox-border);
+}
+
+.session-card.mode-sandbox:not(.errorish):not(.selected):hover {
+  border-color: var(--sandbox-border-strong);
+}
+
+.session-card.mode-sandbox:not(.errorish)::before {
+  background: var(--status-sandbox);
 }
 
 .session-card.errorish {
@@ -580,7 +601,12 @@ button.session-card {
 }
 
 .session-card.selected,
-.session-card.selected.errorish,
+.session-card.selected.errorish {
+  border-color: var(--surface-selected-border);
+  background: var(--surface-selected);
+  box-shadow: none;
+}
+
 .tabs button.active {
   border-color: var(--surface-selected-border);
   background: var(--surface-selected);
@@ -595,6 +621,10 @@ button.session-card {
 
 .session-card.selected.warn {
   border-color: rgba(232, 168, 56, 0.72);
+}
+
+.session-card.selected.mode-sandbox:not(.errorish) {
+  border-color: var(--surface-selected-border);
 }
 
 .session-card.selected.errorish {
@@ -671,7 +701,7 @@ button.session-card {
   width: 12px;
   height: 12px;
   vertical-align: -0.1em;
-  color: var(--status-warning);
+  color: var(--status-sandbox);
   stroke-width: 1.5;
   opacity: 1;
   filter: none;
@@ -945,9 +975,6 @@ button.session-card {
 }
 
 .life-waiting-canvas {
-  --waiting-life-dead: rgba(110, 168, 255, 0.16);
-  --waiting-life-alive: rgba(238, 238, 239, 0.72);
-  --waiting-life-born: rgba(79, 210, 168, 0.82);
   display: block;
   width: 100%;
   max-width: 100%;

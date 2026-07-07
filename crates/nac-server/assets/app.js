@@ -382,7 +382,6 @@ function sessionCardViewModel(entry) {
   const snapshot = state.snapshots.get(sessionId);
   const workspaceError = snapshot?.workspace?.error || "";
   const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
-  const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
   const cardSnapshot = {
     ...(snapshot || {}),
     active_run: snapshot?.active_run || entry.active_run,
@@ -409,7 +408,8 @@ function sessionCardViewModel(entry) {
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
     pinned: state.pinnedSessionIds.has(sessionId),
-    tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
+    tone: "",
+    modeClass: summary.sandboxed ? "mode-sandbox" : "",
     errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
     statusClass: sessionStatusClass(entry),
     runActive,
@@ -433,6 +433,7 @@ function sessionCardRenderDigest(card) {
     card.selected ? "1" : "0",
     card.pinned ? "1" : "0",
     card.tone,
+    card.modeClass,
     card.errorish,
     card.statusClass,
     card.runActive ? "1" : "0",
@@ -1112,17 +1113,30 @@ function renderSessions() {
   el.sessionGrid.innerHTML = sessionCards;
   el.sessionGrid.querySelector("[data-action='new-session']")?.addEventListener("click", showLaunchOverlay);
   el.sessionGrid.querySelectorAll("[data-session-id]").forEach((card) => {
-    card.addEventListener("click", (event) => {
-      if (event.shiftKey) {
-        event.preventDefault();
-        toggleSessionPin(card.dataset.sessionId);
-        return;
-      }
-      selectSession(card.dataset.sessionId);
+    card.addEventListener("click", (event) => activateSessionCard(card, event));
+    card.addEventListener("keydown", (event) => {
+      if (!sessionCardActivationKey(event)) return;
+      event.preventDefault();
+      activateSessionCard(card, event);
     });
   });
   state.lastSessionsDigest = sessionCardListRenderDigest(cards);
   state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card?.sessionId === state.selectedId));
+}
+
+function sessionCardActivationKey(event) {
+  return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+}
+
+function activateSessionCard(card, event) {
+  const sessionId = card?.dataset?.sessionId;
+  if (!sessionId) return;
+  if (event?.shiftKey) {
+    event.preventDefault();
+    toggleSessionPin(sessionId);
+    return;
+  }
+  selectSession(sessionId);
 }
 
 function toggleSessionPin(sessionId) {
@@ -1159,7 +1173,7 @@ function renderNewSessionCard() {
 function renderSessionCard(card) {
   if (!card) return "";
   return `
-    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" aria-label="${escapeAttr(sessionCardAriaLabel(card))}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
+    <article class="session-card ${card.tone} ${card.modeClass} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" role="button" tabindex="0" aria-current="${card.selected ? "true" : "false"}" aria-label="${escapeAttr(sessionCardAriaLabel(card))}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
       <div class="session-card-head">
         <div>
           <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
@@ -1181,6 +1195,9 @@ function sessionCardAriaLabel(card) {
   if (card?.pinned) states.push("pinned");
   if (card?.selected) states.push("selected");
   if (card?.runActive) states.push("run active");
+  if (card?.statusClass === "attention") states.push("needs attention");
+  if (card?.errorish) states.push("workspace error");
+  if (card?.sandboxed) states.push("sandboxed");
   const stateText = states.length ? `, ${states.join(", ")}` : "";
   return `Session ${card?.shortId || shortId(card?.sessionId) || "unknown"}${stateText}`;
 }
@@ -1392,11 +1409,6 @@ const WAITING_LIFE_SQUARE_SCALE = 0.38;
 const WAITING_LIFE_DEAD_FILL = "rgba(110, 168, 255, 0.16)";
 const WAITING_LIFE_ALIVE_FILL = "rgba(238, 238, 239, 0.72)";
 const WAITING_LIFE_BORN_FILL = "rgba(79, 210, 168, 0.82)";
-const WAITING_LIFE_DEFAULT_FILLS = Object.freeze({
-  dead: WAITING_LIFE_DEAD_FILL,
-  alive: WAITING_LIFE_ALIVE_FILL,
-  born: WAITING_LIFE_BORN_FILL,
-});
 const WAITING_LIFE_MOBILE_QUERY = "(max-width: 1179px)";
 const WAITING_LIFE_PATTERNS = [
   {
@@ -1521,13 +1533,8 @@ function createWaitingLife(canvas, sessionId, seedKey) {
     postLayoutRafId: null,
     sizeDirty: true,
     lastSizeCheck: 0,
-    fills: WAITING_LIFE_DEFAULT_FILLS,
-    fillsDirty: true,
     resizeObserver: null,
-    styleObserver: null,
   };
-
-  refreshWaitingLifeFills(life);
 
   if (typeof ResizeObserver === "function") {
     try {
@@ -1538,28 +1545,12 @@ function createWaitingLife(canvas, sessionId, seedKey) {
     }
   }
 
-  if (typeof MutationObserver === "function") {
-    try {
-      life.styleObserver = new MutationObserver(() => markWaitingLifeFillsDirty(life));
-      life.styleObserver.observe(canvas, { attributes: true, attributeFilter: ["class", "style"] });
-    } catch (_) {
-      life.styleObserver = null;
-    }
-  }
-
   return life;
 }
 
 function markWaitingLifeSizeDirty(life) {
   if (!life || state.waitingLife !== life) return;
   life.sizeDirty = true;
-  life.fillsDirty = true;
-  scheduleWaitingLifePostLayoutDraw(life);
-}
-
-function markWaitingLifeFillsDirty(life) {
-  if (!life || state.waitingLife !== life) return;
-  life.fillsDirty = true;
   scheduleWaitingLifePostLayoutDraw(life);
 }
 
@@ -1568,7 +1559,6 @@ function stopWaitingLife() {
   if (life?.rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.rafId);
   if (life?.postLayoutRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.postLayoutRafId);
   if (life?.resizeObserver) life.resizeObserver.disconnect();
-  if (life?.styleObserver) life.styleObserver.disconnect();
   state.waitingLife = null;
 }
 
@@ -1582,7 +1572,7 @@ function scheduleWaitingLifePostLayoutDraw(life) {
       return;
     }
     const resized = ensureWaitingLifeSize(life);
-    if (resized || life.fillsDirty) drawLifeField(life);
+    if (resized) drawLifeField(life);
   });
 }
 
@@ -1621,7 +1611,7 @@ function tickWaitingLife(time) {
   }
   if (life.accumulator >= tickMs) life.accumulator %= tickMs;
 
-  if (stepped || resized || life.fillsDirty) drawLifeField(life);
+  if (stepped || resized) drawLifeField(life);
   life.rafId = requestAnimationFrame(tickWaitingLife);
 }
 
@@ -1656,7 +1646,6 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   life.field = createLifeField(cols, rows, `${life.seedKey}|${cols}x${rows}`);
   life.accumulator = 0;
   life.sizeDirty = false;
-  life.fillsDirty = true;
   return true;
 }
 
@@ -1809,7 +1798,6 @@ function drawLifeField(life) {
   const inset = (cellSize - squareSize) / 2;
   const offsetX = Math.min(0, (life.pixelWidth - cellSize * field.cols) / 2);
   const offsetY = Math.min(0, (life.pixelHeight - cellSize * field.rows) / 2);
-  const fills = waitingLifeFills(life);
 
   context.save();
   context.clearRect(0, 0, life.pixelWidth, life.pixelHeight);
@@ -1818,39 +1806,11 @@ function drawLifeField(life) {
   context.globalCompositeOperation = "source-over";
   context.imageSmoothingEnabled = false;
 
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", fills.dead);
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", fills.alive);
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", fills.born);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", WAITING_LIFE_DEAD_FILL);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", WAITING_LIFE_ALIVE_FILL);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", WAITING_LIFE_BORN_FILL);
 
   context.restore();
-}
-
-function waitingLifeFills(life) {
-  if (!life) return WAITING_LIFE_DEFAULT_FILLS;
-  if (!life.fills || life.fillsDirty) refreshWaitingLifeFills(life);
-  return life.fills || WAITING_LIFE_DEFAULT_FILLS;
-}
-
-function refreshWaitingLifeFills(life) {
-  if (!life) return;
-  life.fills = life.canvas ? waitingLifeCanvasFills(life.canvas) : WAITING_LIFE_DEFAULT_FILLS;
-  life.fillsDirty = false;
-}
-
-function waitingLifeCanvasFills(canvas) {
-  const styles = typeof getComputedStyle === "function" && canvas
-    ? getComputedStyle(canvas)
-    : null;
-  return {
-    dead: waitingLifeCssValue(styles, "--waiting-life-dead", WAITING_LIFE_DEAD_FILL),
-    alive: waitingLifeCssValue(styles, "--waiting-life-alive", WAITING_LIFE_ALIVE_FILL),
-    born: waitingLifeCssValue(styles, "--waiting-life-born", WAITING_LIFE_BORN_FILL),
-  };
-}
-
-function waitingLifeCssValue(styles, name, fallback) {
-  const value = styles?.getPropertyValue(name).trim();
-  return value || fallback;
 }
 
 function drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, mode, fillStyle) {
