@@ -39,6 +39,7 @@ const state = {
   transcriptRenderedSignature: "",
   pendingDeleteSessionId: null,
   pinnedSessionIds: new Set(),
+  pendingSessionCardFocusId: null,
 };
 
 const el = {};
@@ -387,7 +388,6 @@ function sessionCardViewModel(entry) {
     active_run: snapshot?.active_run || entry.active_run,
     messages: snapshot?.messages || [],
   };
-  const pendingCount = effectivePendingMessages(sessionId, cardSnapshot).length;
   const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot)
     || displayPromptFromMessageText(summary.last_user_prompt)
     || "no prompt yet";
@@ -505,7 +505,7 @@ function selectSession(sessionId) {
   state.mobileDetailOpen = true;
   state.scrollChatToBottom = true;
   el.selectedId.textContent = shortId(sessionId);
-  requestRender({ inspector: true });
+  requestRender({ shell: false, sessions: true, inspector: true });
   openEventStream(sessionId);
   loadSnapshot(sessionId, false);
 }
@@ -1118,6 +1118,7 @@ function renderSessions() {
       activateSessionCard(card, event);
     });
   });
+  restorePendingSessionCardFocus();
   state.lastSessionsDigest = sessionCardListRenderDigest(cards);
   state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card?.sessionId === state.selectedId));
 }
@@ -1129,12 +1130,24 @@ function sessionCardActivationKey(event) {
 function activateSessionCard(card, event) {
   const sessionId = card?.dataset?.sessionId;
   if (!sessionId) return;
+  if (event?.type === "keydown") {
+    state.pendingSessionCardFocusId = sessionId;
+  }
   if (event?.shiftKey) {
     event.preventDefault();
     toggleSessionPin(sessionId);
     return;
   }
   selectSession(sessionId);
+}
+
+function restorePendingSessionCardFocus() {
+  const sessionId = state.pendingSessionCardFocusId;
+  if (!sessionId) return;
+  state.pendingSessionCardFocusId = null;
+  const card = [...el.sessionGrid.querySelectorAll("[data-session-id]")]
+    .find((candidate) => candidate.dataset.sessionId === sessionId);
+  card?.focus({ preventScroll: true });
 }
 
 function toggleSessionPin(sessionId) {

@@ -566,7 +566,7 @@ button.session-card {
 .session-card:focus-visible {
   border-color: var(--focus-border);
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
 
 .session-card.mode-sandbox:not(.errorish) {
@@ -623,7 +623,7 @@ button.session-card {
 .session-card.selected.mode-sandbox:not(.errorish):focus-visible {
   border-color: var(--focus-border);
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
 
 .session-card.pinned {
