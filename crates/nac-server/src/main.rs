@@ -5,9 +5,6 @@ use std::{
     process,
 };
 
-#[cfg(feature = "share-ngrok")]
-use std::io::{self, Write};
-
 use anyhow::{Context, Result};
 use clap::Parser;
 use nac_core::{
@@ -44,159 +41,6 @@ struct ServerCli {
     /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
-}
-
-#[cfg(feature = "share-ngrok")]
-#[derive(clap::Args, Clone)]
-struct ShareServerArgs {
-    /// Address to bind nac-web to. Share mode requires loopback unless --insecure-bind is set.
-    #[arg(long, default_value = "127.0.0.1:3210")]
-    bind: SocketAddr,
-
-    /// Allow share mode to bind a non-loopback address. Unsafe without another network boundary.
-    #[arg(long)]
-    insecure_bind: bool,
-
-    /// Server root directory for default config and relative store paths.
-    #[arg(short = 'C', long)]
-    directory: Option<PathBuf>,
-
-    /// Override the server SQLite store path.
-    #[arg(long)]
-    store_path: Option<PathBuf>,
-
-    /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
-    #[arg(long)]
-    worker_executable: Option<PathBuf>,
-}
-
-#[cfg(feature = "share-ngrok")]
-#[derive(Parser)]
-#[command(
-    name = "nac-web share",
-    about = "Share nac-web through ngrok (run-only; does not persist config or secrets)",
-    after_help = "Commands:
-  configure   Persist ngrok share setup
-  doctor      Check ngrok share setup
-  status      Show saved ngrok share config"
-)]
-struct ShareRunCli {
-    #[command(flatten)]
-    server: ShareServerArgs,
-
-    /// Reserved ngrok domain for paid/custom-domain accounts. Ephemeral for this run.
-    #[arg(long)]
-    domain: Option<String>,
-
-    /// Environment variable that contains the ngrok authtoken. Ephemeral for this run.
-    #[arg(long)]
-    authtoken_env: Option<String>,
-
-    /// Google account email allowed through ngrok OAuth. Can be repeated. Ephemeral for this run.
-    #[arg(long = "allow-email")]
-    allow_emails: Vec<String>,
-
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Ephemeral for this run.
-    #[arg(long = "allow-domain")]
-    allow_domains: Vec<String>,
-
-    /// Disable ngrok OAuth protection for this run only.
-    #[arg(long)]
-    no_auth: bool,
-}
-
-#[cfg(feature = "share-ngrok")]
-#[derive(Parser)]
-#[command(
-    name = "nac-web share configure",
-    about = "Persist ngrok share configuration and optional local secret"
-)]
-struct ShareConfigureCli {
-    #[command(flatten)]
-    server: ShareServerArgs,
-
-    /// Reserved ngrok domain for paid/custom-domain accounts.
-    #[arg(long)]
-    domain: Option<String>,
-
-    /// Environment variable that contains the ngrok authtoken.
-    #[arg(long)]
-    authtoken_env: Option<String>,
-
-    /// OAuth provider to request at the ngrok edge.
-    #[arg(long)]
-    oauth_provider: Option<String>,
-
-    /// Google account email allowed through ngrok OAuth. Can be repeated.
-    #[arg(long = "allow-email")]
-    allow_emails: Vec<String>,
-
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated.
-    #[arg(long = "allow-domain")]
-    allow_domains: Vec<String>,
-
-    /// Persist auth_required = false after explicit confirmation.
-    #[arg(long)]
-    no_auth: bool,
-
-    /// Do not save a prompted ngrok authtoken to NAC_HOME/secrets.toml.
-    #[arg(long)]
-    no_save_token: bool,
-
-    /// Accept dangerous confirmations non-interactively.
-    #[arg(long)]
-    yes: bool,
-}
-
-#[cfg(feature = "share-ngrok")]
-#[derive(Parser)]
-#[command(
-    name = "nac-web share doctor",
-    about = "Check ngrok share configuration and local health"
-)]
-struct ShareDoctorCli {
-    #[command(flatten)]
-    server: ShareServerArgs,
-
-    /// Reserved ngrok domain override.
-    #[arg(long)]
-    domain: Option<String>,
-
-    /// Environment variable that contains the ngrok authtoken.
-    #[arg(long)]
-    authtoken_env: Option<String>,
-
-    /// Google account email allowed through ngrok OAuth. Can be repeated.
-    #[arg(long = "allow-email")]
-    allow_emails: Vec<String>,
-
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated.
-    #[arg(long = "allow-domain")]
-    allow_domains: Vec<String>,
-
-    /// Disable ngrok OAuth protection for this doctor invocation.
-    #[arg(long)]
-    no_auth: bool,
-
-    /// Skip the local /health check.
-    #[arg(long)]
-    skip_health: bool,
-}
-
-#[cfg(feature = "share-ngrok")]
-#[derive(Parser)]
-#[command(name = "nac-web share status", about = "Show saved ngrok share config")]
-struct ShareStatusCli {
-    #[command(flatten)]
-    server: ShareServerArgs,
-
-    /// Reserved ngrok domain override.
-    #[arg(long)]
-    domain: Option<String>,
-
-    /// Environment variable that contains the ngrok authtoken.
-    #[arg(long)]
-    authtoken_env: Option<String>,
 }
 
 #[derive(Parser)]
@@ -403,13 +247,7 @@ struct SandboxArgs {
 enum ParsedCli {
     Serve(ServerCli),
     #[cfg(feature = "share-ngrok")]
-    ShareRun(ShareRunCli),
-    #[cfg(feature = "share-ngrok")]
-    ShareConfigure(ShareConfigureCli),
-    #[cfg(feature = "share-ngrok")]
-    ShareDoctor(ShareDoctorCli),
-    #[cfg(feature = "share-ngrok")]
-    ShareStatus(ShareStatusCli),
+    Share(share::cli::ShareCli),
     #[cfg(not(feature = "share-ngrok"))]
     ShareUnavailable,
     ManagedWorker(ManagedWorkerCli),
@@ -431,21 +269,7 @@ fn parse_cli() -> ParsedCli {
     {
         #[cfg(feature = "share-ngrok")]
         {
-            match args.get(2).and_then(|value| value.to_str()) {
-                Some("configure") => ParsedCli::ShareConfigure(ShareConfigureCli::parse_from(
-                    nested_subcommand_args(args, "nac-web share configure", 3),
-                )),
-                Some("doctor") => ParsedCli::ShareDoctor(ShareDoctorCli::parse_from(
-                    nested_subcommand_args(args, "nac-web share doctor", 3),
-                )),
-                Some("status") => ParsedCli::ShareStatus(ShareStatusCli::parse_from(
-                    nested_subcommand_args(args, "nac-web share status", 3),
-                )),
-                _ => ParsedCli::ShareRun(ShareRunCli::parse_from(subcommand_args(
-                    args,
-                    "nac-web share",
-                ))),
-            }
+            ParsedCli::Share(share::cli::parse_from(args))
         }
         #[cfg(not(feature = "share-ngrok"))]
         {
@@ -479,13 +303,7 @@ async fn run() -> Result<()> {
     match parse_cli() {
         ParsedCli::Serve(cli) => run_server(cli).await,
         #[cfg(feature = "share-ngrok")]
-        ParsedCli::ShareRun(cli) => run_share(cli).await,
-        #[cfg(feature = "share-ngrok")]
-        ParsedCli::ShareConfigure(cli) => run_share_configure(cli).await,
-        #[cfg(feature = "share-ngrok")]
-        ParsedCli::ShareDoctor(cli) => run_share_doctor(cli).await,
-        #[cfg(feature = "share-ngrok")]
-        ParsedCli::ShareStatus(cli) => run_share_status(cli).await,
+        ParsedCli::Share(cli) => share::cli::run(cli).await,
         #[cfg(not(feature = "share-ngrok"))]
         ParsedCli::ShareUnavailable => anyhow::bail!(
             "nac-web was built without ngrok share support; rebuild with --features nac-server/share-ngrok"
@@ -564,200 +382,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }
 
-#[cfg(feature = "share-ngrok")]
-async fn run_share(cli: ShareRunCli) -> Result<()> {
-    let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
-    share::run_share(share::ShareRunOptions {
-        root_cwd,
-        bind: cli.server.bind,
-        store_path: cli.server.store_path,
-        worker_executable: cli.server.worker_executable,
-        overrides: share_overrides(
-            cli.authtoken_env,
-            None,
-            cli.domain,
-            cli.allow_emails,
-            cli.allow_domains,
-            cli.no_auth,
-        ),
-        authtoken: None,
-        insecure_bind: cli.server.insecure_bind,
-    })
-    .await
-}
-
-#[cfg(feature = "share-ngrok")]
-async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
-    let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
-    share::validate_share_bind(cli.server.bind, cli.server.insecure_bind)?;
-
-    let overrides = share_overrides(
-        cli.authtoken_env,
-        cli.oauth_provider,
-        cli.domain,
-        cli.allow_emails,
-        cli.allow_domains,
-        cli.no_auth,
-    );
-    let saved = share::load_saved_share_config(&root_cwd)?;
-    let mut ngrok = share::effective_share_config(&saved, &overrides);
-    if !ngrok.auth_required && !cli.yes {
-        eprintln!(
-            "WARNING: this will persist auth_required = false. Anyone with the public URL may reach nac-web."
-        );
-        let confirmation = prompt_required("Type DISABLE to persist disabled ngrok auth", None)?;
-        if confirmation != "DISABLE" {
-            anyhow::bail!("refusing to persist disabled ngrok auth without confirmation");
-        }
-    }
-    let normalized_for_token = share::normalize_share_config(&ngrok)?;
-    let mut prompted_token = None;
-
-    if share::try_resolve_authtoken(&root_cwd, &normalized_for_token, None)?.is_none() {
-        println!(
-            "Create or copy an ngrok authtoken from https://dashboard.ngrok.com/get-started/your-authtoken"
-        );
-        let token = prompt_required("ngrok authtoken", None)?;
-        if cli.no_save_token {
-            prompted_token = Some(token);
-        } else {
-            let path = share::save_authtoken_secret(&root_cwd, &token)?;
-            println!("saved authtoken: {}", path.display());
-        }
-    }
-
-    if ngrok.auth_required && ngrok.allow_emails.is_empty() && ngrok.allow_domains.is_empty() {
-        let value = prompt_required("Allowed Google email or domain", None)?;
-        share::add_allowlist_entry(&mut ngrok, &value);
-    }
-
-    let ngrok = share::normalize_share_config(&ngrok)?;
-    let config_path = share::save_configured_share_config(&root_cwd, &ngrok)?;
-    println!("saved config: {}", config_path.display());
-
-    let doctor = share::run_doctor(share::DoctorOptions {
-        root_cwd: root_cwd.clone(),
-        bind: cli.server.bind,
-        overrides: share::ShareConfigOverrides::default(),
-        authtoken: prompted_token,
-        check_health: false,
-        insecure_bind: cli.server.insecure_bind,
-    })
-    .await;
-    print!("{}", share::format_doctor_report(&doctor));
-    if !doctor.ok() {
-        anyhow::bail!(
-            "share configure found {} failing check(s)",
-            doctor.failure_count()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(feature = "share-ngrok")]
-async fn run_share_doctor(cli: ShareDoctorCli) -> Result<()> {
-    let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
-    let report = share::run_doctor(share::DoctorOptions {
-        root_cwd,
-        bind: cli.server.bind,
-        overrides: share_overrides(
-            cli.authtoken_env,
-            None,
-            cli.domain,
-            cli.allow_emails,
-            cli.allow_domains,
-            cli.no_auth,
-        ),
-        authtoken: None,
-        check_health: !cli.skip_health,
-        insecure_bind: cli.server.insecure_bind,
-    })
-    .await;
-    print!("{}", share::format_doctor_report(&report));
-    if report.ok() {
-        Ok(())
-    } else {
-        anyhow::bail!(
-            "share doctor found {} failing check(s)",
-            report.failure_count()
-        )
-    }
-}
-
-#[cfg(feature = "share-ngrok")]
-async fn run_share_status(cli: ShareStatusCli) -> Result<()> {
-    let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
-    let saved = share::load_saved_share_config(&root_cwd)?;
-    let ngrok = share::effective_share_config(
-        &saved,
-        &share::ShareConfigOverrides {
-            authtoken_env: cli.authtoken_env,
-            domain: cli.domain,
-            ..share::ShareConfigOverrides::default()
-        },
-    );
-
-    println!("public URL: generated by ngrok at launch");
-    println!(
-        "custom domain: {}",
-        ngrok.domain.as_deref().unwrap_or("<none>")
-    );
-    println!("authtoken env: {}", ngrok.authtoken_env);
-    println!(
-        "authtoken: {}",
-        match share::try_resolve_authtoken(&root_cwd, &ngrok, None)? {
-            Some(token) => format!("resolved from {}", token.source),
-            None => "missing".to_string(),
-        }
-    );
-    println!("oauth provider: {}", ngrok.oauth_provider);
-    println!("allowed emails: {}", display_list(&ngrok.allow_emails));
-    println!("allowed domains: {}", display_list(&ngrok.allow_domains));
-    println!(
-        "auth required: {}",
-        if ngrok.auth_required { "yes" } else { "no" }
-    );
-    println!("local: {}", share::local_service_url(cli.server.bind));
-    println!(
-        "secrets: {}",
-        share::secrets_path_from_cwd(&root_cwd)?.display()
-    );
-    Ok(())
-}
-
-#[cfg(feature = "share-ngrok")]
-fn share_overrides(
-    authtoken_env: Option<String>,
-    oauth_provider: Option<String>,
-    domain: Option<String>,
-    allow_emails: Vec<String>,
-    allow_domains: Vec<String>,
-    no_auth: bool,
-) -> share::ShareConfigOverrides {
-    share::ShareConfigOverrides {
-        authtoken_env,
-        oauth_provider,
-        allow_emails,
-        allow_domains,
-        domain,
-        auth_required: no_auth.then_some(false),
-    }
-}
-
-#[cfg(feature = "share-ngrok")]
-fn display_list(values: &[String]) -> String {
-    if values.is_empty() {
-        "<none>".to_string()
-    } else {
-        values.join(", ")
-    }
-}
-
-fn resolve_cli_cwd(
+pub(crate) fn resolve_cli_cwd(
     launch_cwd: &std::path::Path,
     directory: Option<&std::path::Path>,
 ) -> Result<PathBuf> {
@@ -769,26 +394,4 @@ fn resolve_cli_cwd(
     target
         .canonicalize()
         .with_context(|| format!("failed to resolve working directory {}", target.display()))
-}
-
-#[cfg(feature = "share-ngrok")]
-fn prompt_required(label: &str, default: Option<&str>) -> Result<String> {
-    loop {
-        match default {
-            Some(default) => print!("{label} [{default}]: "),
-            None => print!("{label}: "),
-        }
-        io::stdout().flush()?;
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
-            anyhow::bail!("no input provided for {label}");
-        }
-        let value = input.trim();
-        if !value.is_empty() {
-            return Ok(value.to_string());
-        }
-        if let Some(default) = default {
-            return Ok(default.to_string());
-        }
-    }
 }

@@ -58,7 +58,7 @@ Remote `nac-web` access is built around native ngrok sharing. The default flow d
 nac-web share configure -C /path/to/project
 ```
 
-`share configure` asks for an ngrok authtoken when neither the configured environment variable nor `$NAC_HOME/secrets.toml` has one, and asks for a Google email or domain allowlist when OAuth is enabled. It stores non-secret defaults under `[ngrok]` and can save the authtoken in `$NAC_HOME/secrets.toml` with user-only file permissions. You can also set the token through an environment variable and provide the allowlist non-interactively:
+`share configure` asks for an ngrok authtoken with terminal echo disabled when neither the configured environment variable nor `$NAC_HOME/secrets.toml` has one, and asks for a Google email or domain allowlist when OAuth is enabled. It stores non-secret defaults under `[ngrok]` and can save the authtoken in `$NAC_HOME/secrets.toml` with user-only file permissions. If any `--allow-email` or `--allow-domain` value is provided, that CLI allowlist replaces the saved allowlist instead of being merged, so stale principals are removed. You can also set the token through an environment variable and provide the allowlist non-interactively:
 
 ```sh
 export NGROK_AUTHTOKEN=...

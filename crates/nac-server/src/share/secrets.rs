@@ -1,5 +1,5 @@
 use std::{
-    fmt,
+    fmt, fs,
     path::{Path, PathBuf},
 };
 
@@ -120,8 +120,51 @@ pub fn save_authtoken_secret(cwd: &Path, authtoken: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+fn validate_secret_file_permissions(path: &Path) -> Result<()> {
+    validate_secret_file_permissions_impl(path)
+}
+
+#[cfg(unix)]
+fn validate_secret_file_permissions_impl(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to stat {}", path.display()))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "refusing to read ngrok secrets from symlink {}; use a regular 0600 file",
+            path.display()
+        );
+    }
+    if !metadata.file_type().is_file() {
+        bail!(
+            "refusing to read ngrok secrets from non-file {}; use a regular 0600 file",
+            path.display()
+        );
+    }
+    let mode = metadata.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        bail!(
+            "insecure permissions on {}; expected user-only access (0600 or stricter)",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_secret_file_permissions_impl(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 fn read_saved_authtoken_at(path: &Path) -> Result<Option<String>> {
-    let raw = match std::fs::read_to_string(path) {
+    validate_secret_file_permissions(path)?;
+    let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -265,6 +308,34 @@ mod tests {
 
         assert_eq!(mode, 0o600);
 
+        restore_env("NAC_HOME", original_nac_home);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn group_readable_secret_file_is_rejected_when_reading() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::share::test_env_lock();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_token = std::env::var_os("NAC_TEST_NGROK_TOKEN");
+        let root = temp_root("secret_insecure_permissions");
+        let nac_home = root.join("nac-home");
+        fs::create_dir_all(&nac_home).unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+            std::env::remove_var("NAC_TEST_NGROK_TOKEN");
+        }
+        let path = secrets_path_from_cwd(&root).unwrap();
+        fs::write(&path, "[ngrok]\nauthtoken = \"secret-token\"\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let error = resolve_authtoken(&root, &sample_config(), None).unwrap_err();
+
+        assert!(error.to_string().contains("insecure permissions"));
+
+        restore_env("NAC_TEST_NGROK_TOKEN", original_token);
         restore_env("NAC_HOME", original_nac_home);
         let _ = fs::remove_dir_all(root);
     }

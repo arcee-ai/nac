@@ -38,12 +38,17 @@ impl Default for NgrokConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShareAllowlistOverride {
+    pub emails: Vec<String>,
+    pub domains: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ShareConfigOverrides {
     pub authtoken_env: Option<String>,
     pub oauth_provider: Option<String>,
-    pub allow_emails: Vec<String>,
-    pub allow_domains: Vec<String>,
+    pub allowlist: Option<ShareAllowlistOverride>,
     pub domain: Option<String>,
     pub auth_required: Option<bool>,
 }
@@ -89,11 +94,9 @@ pub fn effective_share_config(
     if let Some(domain) = non_empty_clone(&overrides.domain) {
         ngrok.domain = Some(domain);
     }
-    if !overrides.allow_emails.is_empty() {
-        ngrok.allow_emails.extend(overrides.allow_emails.clone());
-    }
-    if !overrides.allow_domains.is_empty() {
-        ngrok.allow_domains.extend(overrides.allow_domains.clone());
+    if let Some(allowlist) = &overrides.allowlist {
+        ngrok.allow_emails = allowlist.emails.clone();
+        ngrok.allow_domains = allowlist.domains.clone();
     }
     if let Some(auth_required) = overrides.auth_required {
         ngrok.auth_required = auth_required;
@@ -457,7 +460,10 @@ allow_domains = ["Example.Org"]
     fn effective_config_applies_ephemeral_overrides_without_mutating_saved() {
         let saved = NgrokConfig::default();
         let overrides = ShareConfigOverrides {
-            allow_emails: vec!["user@example.com".to_string()],
+            allowlist: Some(ShareAllowlistOverride {
+                emails: vec!["user@example.com".to_string()],
+                domains: Vec::new(),
+            }),
             domain: Some("nac.example.com".to_string()),
             auth_required: Some(false),
             ..ShareConfigOverrides::default()
@@ -469,5 +475,26 @@ allow_domains = ["Example.Org"]
         assert_eq!(effective.allow_emails, vec!["user@example.com"]);
         assert_eq!(effective.domain.as_deref(), Some("nac.example.com"));
         assert!(!effective.auth_required);
+    }
+
+    #[test]
+    fn effective_config_replaces_saved_allowlist_when_cli_allowlist_is_provided() {
+        let saved = NgrokConfig {
+            allow_emails: Vec::new(),
+            allow_domains: vec!["example.org".to_string()],
+            ..NgrokConfig::default()
+        };
+        let overrides = ShareConfigOverrides {
+            allowlist: Some(ShareAllowlistOverride {
+                emails: vec!["admin@example.com".to_string()],
+                domains: Vec::new(),
+            }),
+            ..ShareConfigOverrides::default()
+        };
+
+        let effective = effective_share_config(&saved, &overrides);
+
+        assert_eq!(effective.allow_emails, vec!["admin@example.com"]);
+        assert!(effective.allow_domains.is_empty());
     }
 }

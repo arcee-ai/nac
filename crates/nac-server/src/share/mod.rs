@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod config;
 pub mod doctor;
 pub mod health;
@@ -25,7 +26,6 @@ pub use config::{
     save_configured_share_config, ShareConfigOverrides,
 };
 pub use doctor::{format_doctor_report, run_doctor, DoctorOptions};
-pub use health::local_service_url;
 pub use secrets::{save_authtoken_secret, secrets_path_from_cwd, try_resolve_authtoken};
 pub use security::validate_share_bind;
 pub use supervisor::{run_share, ShareRunOptions};

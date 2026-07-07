@@ -1765,6 +1765,7 @@ dependencies = [
  "axum",
  "clap",
  "futures-core",
+ "libc",
  "nac-core",
  "ngrok",
  "reqwest",
@@ -1773,6 +1774,7 @@ dependencies = [
  "tokio",
  "toml",
  "toml_edit",
+ "tower",
  "tower-http",
  "url",
 ]
