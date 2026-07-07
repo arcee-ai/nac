@@ -1159,7 +1159,7 @@ function renderNewSessionCard() {
 function renderSessionCard(card) {
   if (!card) return "";
   return `
-    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
+    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" aria-label="${escapeAttr(sessionCardAriaLabel(card))}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
       <div class="session-card-head">
         <div>
           <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
@@ -1168,12 +1168,27 @@ function renderSessionCard(card) {
         <span class="status-dot ${card.statusClass}"></span>
       </div>
       <div class="telemetry-grid">
-        <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
+        <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}" aria-label="${escapeAttr(runTileAriaLabel(card))}">${card.runDisplay}</strong></div>
         <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
         <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
       </div>
       <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
     </article>`;
+}
+
+function sessionCardAriaLabel(card) {
+  const states = [];
+  if (card?.pinned) states.push("pinned");
+  if (card?.selected) states.push("selected");
+  if (card?.runActive) states.push("run active");
+  const stateText = states.length ? `, ${states.join(", ")}` : "";
+  return `Session ${card?.shortId || shortId(card?.sessionId) || "unknown"}${stateText}`;
+}
+
+function runTileAriaLabel(card) {
+  if (card?.runActive) return `Run active, elapsed ${card.runDisplay}`;
+  if (card?.runDisplay && card.runDisplay !== "--:--:--") return `Last run duration ${card.runDisplay}`;
+  return "No run duration";
 }
 
 function renderInspector() {
@@ -1373,12 +1388,15 @@ const SUBMITTING_RUN_GRACE_MS = 15000;
 const WAITING_LIFE_TICK_MS = 75;
 const WAITING_LIFE_MAX_CATCHUP_STEPS = 2;
 const WAITING_LIFE_SIZE_CHECK_MS = 500;
-const WAITING_LIFE_SQUARE_SCALE = 0.29;
-const WAITING_LIFE_LED_BLOOM_SCALE = 2.6;
-const WAITING_LIFE_LED_AFTERIMAGE_SCALE = 1.7;
-const WAITING_LIFE_LED_BLOOM_FILL = "rgba(145, 205, 255, 0.08)";
-const WAITING_LIFE_LED_BORN_BLOOM_FILL = "rgba(215, 240, 255, 0.12)";
-const WAITING_LIFE_LED_AFTERIMAGE_FILL = "rgba(80, 155, 230, 0.045)";
+const WAITING_LIFE_SQUARE_SCALE = 0.38;
+const WAITING_LIFE_DEAD_FILL = "rgba(110, 168, 255, 0.16)";
+const WAITING_LIFE_ALIVE_FILL = "rgba(238, 238, 239, 0.72)";
+const WAITING_LIFE_BORN_FILL = "rgba(79, 210, 168, 0.82)";
+const WAITING_LIFE_DEFAULT_FILLS = Object.freeze({
+  dead: WAITING_LIFE_DEAD_FILL,
+  alive: WAITING_LIFE_ALIVE_FILL,
+  born: WAITING_LIFE_BORN_FILL,
+});
 const WAITING_LIFE_MOBILE_QUERY = "(max-width: 1179px)";
 const WAITING_LIFE_PATTERNS = [
   {
@@ -1503,8 +1521,13 @@ function createWaitingLife(canvas, sessionId, seedKey) {
     postLayoutRafId: null,
     sizeDirty: true,
     lastSizeCheck: 0,
+    fills: WAITING_LIFE_DEFAULT_FILLS,
+    fillsDirty: true,
     resizeObserver: null,
+    styleObserver: null,
   };
+
+  refreshWaitingLifeFills(life);
 
   if (typeof ResizeObserver === "function") {
     try {
@@ -1515,12 +1538,28 @@ function createWaitingLife(canvas, sessionId, seedKey) {
     }
   }
 
+  if (typeof MutationObserver === "function") {
+    try {
+      life.styleObserver = new MutationObserver(() => markWaitingLifeFillsDirty(life));
+      life.styleObserver.observe(canvas, { attributes: true, attributeFilter: ["class", "style"] });
+    } catch (_) {
+      life.styleObserver = null;
+    }
+  }
+
   return life;
 }
 
 function markWaitingLifeSizeDirty(life) {
   if (!life || state.waitingLife !== life) return;
   life.sizeDirty = true;
+  life.fillsDirty = true;
+  scheduleWaitingLifePostLayoutDraw(life);
+}
+
+function markWaitingLifeFillsDirty(life) {
+  if (!life || state.waitingLife !== life) return;
+  life.fillsDirty = true;
   scheduleWaitingLifePostLayoutDraw(life);
 }
 
@@ -1529,6 +1568,7 @@ function stopWaitingLife() {
   if (life?.rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.rafId);
   if (life?.postLayoutRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.postLayoutRafId);
   if (life?.resizeObserver) life.resizeObserver.disconnect();
+  if (life?.styleObserver) life.styleObserver.disconnect();
   state.waitingLife = null;
 }
 
@@ -1542,7 +1582,7 @@ function scheduleWaitingLifePostLayoutDraw(life) {
       return;
     }
     const resized = ensureWaitingLifeSize(life);
-    if (resized) drawLifeField(life);
+    if (resized || life.fillsDirty) drawLifeField(life);
   });
 }
 
@@ -1581,7 +1621,7 @@ function tickWaitingLife(time) {
   }
   if (life.accumulator >= tickMs) life.accumulator %= tickMs;
 
-  if (stepped || resized) drawLifeField(life);
+  if (stepped || resized || life.fillsDirty) drawLifeField(life);
   life.rafId = requestAnimationFrame(tickWaitingLife);
 }
 
@@ -1616,6 +1656,7 @@ function ensureWaitingLifeSize(life, now = performanceNow()) {
   life.field = createLifeField(cols, rows, `${life.seedKey}|${cols}x${rows}`);
   life.accumulator = 0;
   life.sizeDirty = false;
+  life.fillsDirty = true;
   return true;
 }
 
@@ -1766,18 +1807,9 @@ function drawLifeField(life) {
   const cellSize = Math.max(1, Math.max(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
   const squareSize = Math.max(0.5, cellSize * WAITING_LIFE_SQUARE_SCALE);
   const inset = (cellSize - squareSize) / 2;
-  const bloomSquareSize = Math.max(
-    squareSize,
-    Math.min(cellSize, squareSize * WAITING_LIFE_LED_BLOOM_SCALE),
-  );
-  const bloomInset = (cellSize - bloomSquareSize) / 2;
-  const afterimageSquareSize = Math.max(
-    squareSize,
-    Math.min(cellSize, squareSize * WAITING_LIFE_LED_AFTERIMAGE_SCALE),
-  );
-  const afterimageInset = (cellSize - afterimageSquareSize) / 2;
   const offsetX = Math.min(0, (life.pixelWidth - cellSize * field.cols) / 2);
   const offsetY = Math.min(0, (life.pixelHeight - cellSize * field.rows) / 2);
+  const fills = waitingLifeFills(life);
 
   context.save();
   context.clearRect(0, 0, life.pixelWidth, life.pixelHeight);
@@ -1786,17 +1818,39 @@ function drawLifeField(life) {
   context.globalCompositeOperation = "source-over";
   context.imageSmoothingEnabled = false;
 
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, afterimageSquareSize, afterimageInset, "dead", WAITING_LIFE_LED_AFTERIMAGE_FILL);
-  context.globalCompositeOperation = "lighter";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "alive", WAITING_LIFE_LED_BLOOM_FILL);
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "born", WAITING_LIFE_LED_BORN_BLOOM_FILL);
-  context.globalCompositeOperation = "source-over";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", "rgba(80, 150, 215, 0.055)");
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", "rgba(255, 255, 255, 0.68)");
-  context.globalCompositeOperation = "lighter";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", "rgba(255, 255, 255, 0.34)");
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", fills.dead);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", fills.alive);
+  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", fills.born);
 
   context.restore();
+}
+
+function waitingLifeFills(life) {
+  if (!life) return WAITING_LIFE_DEFAULT_FILLS;
+  if (!life.fills || life.fillsDirty) refreshWaitingLifeFills(life);
+  return life.fills || WAITING_LIFE_DEFAULT_FILLS;
+}
+
+function refreshWaitingLifeFills(life) {
+  if (!life) return;
+  life.fills = life.canvas ? waitingLifeCanvasFills(life.canvas) : WAITING_LIFE_DEFAULT_FILLS;
+  life.fillsDirty = false;
+}
+
+function waitingLifeCanvasFills(canvas) {
+  const styles = typeof getComputedStyle === "function" && canvas
+    ? getComputedStyle(canvas)
+    : null;
+  return {
+    dead: waitingLifeCssValue(styles, "--waiting-life-dead", WAITING_LIFE_DEAD_FILL),
+    alive: waitingLifeCssValue(styles, "--waiting-life-alive", WAITING_LIFE_ALIVE_FILL),
+    born: waitingLifeCssValue(styles, "--waiting-life-born", WAITING_LIFE_BORN_FILL),
+  };
+}
+
+function waitingLifeCssValue(styles, name, fallback) {
+  const value = styles?.getPropertyValue(name).trim();
+  return value || fallback;
 }
 
 function drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, mode, fillStyle) {
@@ -2597,7 +2651,7 @@ function ensurePromptLifeElement() {
     promptLife.setAttribute("aria-atomic", promptLife.getAttribute("aria-atomic") || "true");
   }
 
-  promptLife.style.background = "transparent";
+  promptLife.style.removeProperty("background");
 
   let canvas = promptLife.querySelector(".prompt-life-canvas");
   if (!canvas) {
@@ -2609,7 +2663,7 @@ function ensurePromptLifeElement() {
     canvas.classList.add("prompt-life-canvas", "life-waiting-canvas");
     canvas.setAttribute("aria-hidden", "true");
   }
-  canvas.style.background = "transparent";
+  canvas.style.removeProperty("background");
 
   let label = promptLife.querySelector(".prompt-life-label");
   if (!label) {
@@ -2996,7 +3050,9 @@ function startLiveTimer() {
       if (!sid) return;
       const startedAt = state.runStartedAtBySession.get(sid);
       if (startedAt) {
-        tile.textContent = formatRuntime(now - startedAt);
+        const display = formatRuntime(now - startedAt);
+        tile.textContent = display;
+        tile.setAttribute("aria-label", `Run active, elapsed ${display}`);
       }
     });
   }, 200);
