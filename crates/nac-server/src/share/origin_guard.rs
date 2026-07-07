@@ -9,7 +9,7 @@ pub(crate) async fn shared_tunnel_origin_guard(request: Request, next: Next) -> 
     if !is_allowed_shared_tunnel_request(request.method(), request.headers()) {
         return (
             StatusCode::FORBIDDEN,
-            "unsafe requests in nac-web share mode require a same-origin Origin header",
+            "nac-web share mode requires Origin to match Host",
         )
             .into_response();
     }
@@ -17,14 +17,11 @@ pub(crate) async fn shared_tunnel_origin_guard(request: Request, next: Next) -> 
 }
 
 fn is_allowed_shared_tunnel_request(method: &Method, headers: &HeaderMap) -> bool {
-    if is_safe_shared_tunnel_method(method) {
-        return true;
-    }
-    let Some(origin) = headers
+    let origin = headers
         .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return false;
+        .and_then(|value| value.to_str().ok());
+    let Some(origin) = origin else {
+        return is_safe_shared_tunnel_method(method);
     };
     let Some(host) = headers
         .get(header::HOST)
@@ -184,6 +181,26 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn shared_tunnel_router_rejects_disallowed_origin_for_read() {
+        let status = shared_tunnel_health_status(
+            Method::GET,
+            "disallowed_read_origin",
+            "nac.example.com",
+            Some("https://evil.example"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn shared_tunnel_router_allows_safe_read_without_origin() {
+        let status =
+            shared_tunnel_health_status(Method::GET, "safe_read_no_origin", "nac.example.com", None)
+                .await;
+        assert_ne!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
