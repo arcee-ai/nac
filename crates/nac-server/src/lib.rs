@@ -10,8 +10,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    extract::{Path as AxumPath, Query, Request, State},
+    http::{header, Method, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -43,6 +44,33 @@ pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CorsPolicy {
+    PermissiveLocal,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExposureMode {
+    Local,
+    SharedTunnel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServeOptions {
+    pub cors: CorsPolicy,
+    pub exposure: ExposureMode,
+}
+
+impl Default for ServeOptions {
+    fn default() -> Self {
+        Self {
+            cors: CorsPolicy::PermissiveLocal,
+            exposure: ExposureMode::Local,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -512,11 +540,7 @@ impl SessionManager {
                 service.destroy_sandbox().await;
             }
         }
-        self.inner
-            .active_sessions
-            .write()
-            .await
-            .remove(session_id);
+        self.inner.active_sessions.write().await.remove(session_id);
 
         // Cascade-delete all DB rows for this session.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
@@ -603,11 +627,7 @@ impl SessionManager {
         sessions::save_session(&self.inner.store_path, &snapshot)?;
 
         // 5. Remove from active_sessions so the next attach re-resumes.
-        self.inner
-            .active_sessions
-            .write()
-            .await
-            .remove(session_id);
+        self.inner.active_sessions.write().await.remove(session_id);
 
         Ok(())
     }
@@ -639,7 +659,11 @@ impl SessionManager {
 }
 
 pub fn router(manager: SessionManager) -> Router {
-    Router::new()
+    router_with_options(manager, ServeOptions::default())
+}
+
+pub fn router_with_options(manager: SessionManager, options: ServeOptions) -> Router {
+    let mut app = Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
@@ -653,26 +677,100 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route("/sessions/{session_id}", get(session_snapshot).delete(delete_session_handler))
-        .route("/sessions/{session_id}/config", patch(update_config_handler))
+        .route(
+            "/sessions/{session_id}",
+            get(session_snapshot).delete(delete_session_handler),
+        )
+        .route(
+            "/sessions/{session_id}/config",
+            patch(update_config_handler),
+        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
-        )
-        .layer(CorsLayer::permissive())
-        .with_state(manager)
+        );
+
+    if options.exposure == ExposureMode::SharedTunnel {
+        app = app.layer(middleware::from_fn(shared_tunnel_origin_guard));
+    }
+    if options.cors == CorsPolicy::PermissiveLocal {
+        app = app.layer(CorsLayer::permissive());
+    }
+
+    app.with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, router(manager))
+    serve_listener(
+        listener,
+        manager,
+        ServeOptions::default(),
+        std::future::pending(),
+    )
+    .await
+}
+
+pub async fn serve_listener<F>(
+    listener: TcpListener,
+    manager: SessionManager,
+    options: ServeOptions,
+    shutdown: F,
+) -> Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    axum::serve(listener, router_with_options(manager, options))
+        .with_graceful_shutdown(shutdown)
         .await
         .context("server stopped unexpectedly")
+}
+
+async fn shared_tunnel_origin_guard(request: Request, next: Next) -> Response {
+    if is_cross_origin_mutation(request.method(), request.headers()) {
+        return (
+            StatusCode::FORBIDDEN,
+            "cross-origin mutating requests are disabled in nac-web share mode",
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
+fn is_cross_origin_mutation(method: &Method, headers: &axum::http::HeaderMap) -> bool {
+    if !matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return false;
+    }
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let Some(origin_host) = origin_authority(origin) else {
+        return true;
+    };
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return true;
+    };
+    !origin_host.eq_ignore_ascii_case(host.trim())
+}
+
+fn origin_authority(origin: &str) -> Option<&str> {
+    let (_, rest) = origin.split_once("://")?;
+    let authority = rest.split('/').next().unwrap_or(rest).trim();
+    (!authority.is_empty()).then_some(authority)
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -1056,6 +1154,19 @@ mod tests {
 
         assert!(payload.contains("\"sequence_id\":42"));
         assert!(payload.contains("\"message\":\"boom\""));
+    }
+
+    #[test]
+    fn shared_tunnel_origin_guard_flags_only_cross_origin_mutations() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::HOST, "nac.example.com".parse().unwrap());
+        headers.insert(header::ORIGIN, "https://nac.example.com".parse().unwrap());
+        assert!(!is_cross_origin_mutation(&Method::POST, &headers));
+        assert!(!is_cross_origin_mutation(&Method::GET, &headers));
+
+        headers.insert(header::ORIGIN, "https://evil.example".parse().unwrap());
+        assert!(is_cross_origin_mutation(&Method::POST, &headers));
+        assert!(!is_cross_origin_mutation(&Method::GET, &headers));
     }
 
     #[test]

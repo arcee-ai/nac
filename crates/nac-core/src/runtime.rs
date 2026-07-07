@@ -94,6 +94,10 @@ impl NacConfig {
     }
 }
 
+pub fn nac_config_path_from_cwd(cwd: &Path) -> Option<PathBuf> {
+    PathContext::new(cwd).nac_config_path()
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StoreOptions {
     pub store_path: Option<PathBuf>,
@@ -1229,7 +1233,7 @@ mod tests {
     }
 
     #[test]
-    fn nac_config_loads_new_sections_alongside_existing_mcp() {
+    fn nac_config_loads_core_sections_and_ignores_provider_specific_sections() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
         let root = std::env::temp_dir().join(format!(
@@ -1258,6 +1262,14 @@ image = "config-image"
 
 [worker]
 thread_timeout_secs = 7200
+
+[ngrok]
+authtoken_env = "NAC_TEST_NGROK_TOKEN"
+oauth_provider = "google"
+allow_emails = ["admin@example.com"]
+allow_domains = ["example.org"]
+domain = "nac.example.com"
+auth_required = true
 
 [mcp_servers.context7]
 enabled = true
