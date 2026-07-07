@@ -97,6 +97,9 @@ pub fn effective_share_config(
     if let Some(allowlist) = &overrides.allowlist {
         ngrok.allow_emails = allowlist.emails.clone();
         ngrok.allow_domains = allowlist.domains.clone();
+        if overrides.auth_required.is_none() {
+            ngrok.auth_required = true;
+        }
     }
     if let Some(auth_required) = overrides.auth_required {
         ngrok.auth_required = auth_required;
@@ -496,5 +499,60 @@ allow_domains = ["Example.Org"]
 
         assert_eq!(effective.allow_emails, vec!["admin@example.com"]);
         assert!(effective.allow_domains.is_empty());
+    }
+
+    #[test]
+    fn effective_config_allowlist_override_reenables_saved_no_auth() {
+        let saved = NgrokConfig {
+            auth_required: false,
+            ..NgrokConfig::default()
+        };
+        let overrides = ShareConfigOverrides {
+            allowlist: Some(ShareAllowlistOverride {
+                emails: vec!["admin@example.com".to_string()],
+                domains: Vec::new(),
+            }),
+            ..ShareConfigOverrides::default()
+        };
+
+        let effective = effective_share_config(&saved, &overrides);
+
+        assert!(effective.auth_required);
+    }
+
+    #[test]
+    fn effective_config_explicit_no_auth_wins_over_allowlist_override() {
+        let saved = NgrokConfig {
+            auth_required: false,
+            ..NgrokConfig::default()
+        };
+        let overrides = ShareConfigOverrides {
+            allowlist: Some(ShareAllowlistOverride {
+                emails: vec!["admin@example.com".to_string()],
+                domains: Vec::new(),
+            }),
+            auth_required: Some(false),
+            ..ShareConfigOverrides::default()
+        };
+
+        let effective = effective_share_config(&saved, &overrides);
+
+        assert!(!effective.auth_required);
+    }
+
+    #[test]
+    fn effective_config_explicit_auth_reenables_saved_no_auth() {
+        let saved = NgrokConfig {
+            auth_required: false,
+            ..NgrokConfig::default()
+        };
+        let overrides = ShareConfigOverrides {
+            auth_required: Some(true),
+            ..ShareConfigOverrides::default()
+        };
+
+        let effective = effective_share_config(&saved, &overrides);
+
+        assert!(effective.auth_required);
     }
 }

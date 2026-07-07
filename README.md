@@ -58,7 +58,7 @@ Remote `nac-web` access is built around native ngrok sharing. The default flow d
 nac-web share configure -C /path/to/project
 ```
 
-`share configure` asks for an ngrok authtoken with terminal echo disabled when neither the configured environment variable nor `$NAC_HOME/secrets.toml` has one, and asks for a Google email or domain allowlist when OAuth is enabled. It stores non-secret defaults under `[ngrok]` and can save the authtoken in `$NAC_HOME/secrets.toml` with user-only file permissions. If any `--allow-email` or `--allow-domain` value is provided, that CLI allowlist replaces the saved allowlist instead of being merged, so stale principals are removed. You can also set the token through an environment variable and provide the allowlist non-interactively:
+`share configure` asks for an ngrok authtoken with terminal echo disabled when neither the configured environment variable nor `$NAC_HOME/secrets.toml` has one, and asks for a Google email or domain allowlist when OAuth is enabled. It stores non-secret defaults under `[ngrok]` and can save the authtoken in `$NAC_HOME/secrets.toml` with user-only file permissions. If any `--allow-email` or `--allow-domain` value is provided, that CLI allowlist replaces the saved allowlist instead of being merged and re-enables OAuth unless `--no-auth` is also explicit, so stale principals are removed without preserving an old no-auth setting silently. Use `--auth` (alias `--auth-required`) to re-enable OAuth without changing the allowlist; `--auth` conflicts with `--no-auth`. You can also set the token through an environment variable and provide the allowlist non-interactively:
 
 ```sh
 export NGROK_AUTHTOKEN=...
@@ -71,7 +71,7 @@ Daily launch is run-only and does not write config or secrets:
 nac-web share -C /path/to/project
 ```
 
-By default, public access is protected with ngrok Google OAuth and the local server binds only to loopback. Paid/custom-domain ngrok accounts can pass `--domain nac.example.com`, but no custom hostname is required. Use `nac-web share doctor -C /path/to/project` to check the saved authtoken, OAuth allowlist, loopback bind policy, and local `/health`. Non-loopback share binds require the explicit unsafe `--insecure-bind` opt-in.
+By default, public access is protected with ngrok Google OAuth and the local server binds only to loopback. Paid/custom-domain ngrok accounts can pass `--domain nac.example.com`, but no custom hostname is required. The run and doctor commands accept the same `--auth`/`--no-auth` and allowlist override semantics ephemerally. Use `nac-web share doctor -C /path/to/project` to check the saved authtoken, OAuth allowlist, loopback bind policy, and local `/health`. Non-loopback share binds require the explicit unsafe `--insecure-bind` opt-in.
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 

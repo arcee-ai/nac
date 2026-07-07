@@ -11,7 +11,14 @@ use clap::Parser;
 use super::config::ShareAllowlistOverride;
 
 #[derive(clap::Args, Clone)]
-struct ShareServerArgs {
+struct ShareRootArgs {
+    /// Server root directory for default config and relative store paths.
+    #[arg(short = 'C', long)]
+    directory: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Clone)]
+struct ShareBindArgs {
     /// Address to bind nac-web to. Share mode requires loopback unless --insecure-bind is set.
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
@@ -19,10 +26,15 @@ struct ShareServerArgs {
     /// Allow share mode to bind a non-loopback address. Unsafe without another network boundary.
     #[arg(long)]
     insecure_bind: bool,
+}
 
-    /// Server root directory for default config and relative store paths.
-    #[arg(short = 'C', long)]
-    directory: Option<PathBuf>,
+#[derive(clap::Args, Clone)]
+struct ShareRunServerArgs {
+    #[command(flatten)]
+    root: ShareRootArgs,
+
+    #[command(flatten)]
+    bind: ShareBindArgs,
 
     /// Override the server SQLite store path.
     #[arg(long)]
@@ -33,6 +45,17 @@ struct ShareServerArgs {
     worker_executable: Option<PathBuf>,
 }
 
+#[derive(clap::Args, Clone, Copy, Default)]
+struct ShareAuthArgs {
+    /// Require ngrok OAuth protection, overriding saved auth_required = false.
+    #[arg(long, visible_alias = "auth-required", conflicts_with = "no_auth")]
+    auth: bool,
+
+    /// Disable ngrok OAuth protection. In configure mode this persists after confirmation.
+    #[arg(long, conflicts_with = "auth")]
+    no_auth: bool,
+}
+
 #[derive(Parser)]
 #[command(
     name = "nac-web share",
@@ -41,7 +64,7 @@ struct ShareServerArgs {
 )]
 pub(crate) struct ShareRunCli {
     #[command(flatten)]
-    server: ShareServerArgs,
+    server: ShareRunServerArgs,
 
     /// Reserved ngrok domain for paid/custom-domain accounts. Ephemeral for this run.
     #[arg(long)]
@@ -51,17 +74,16 @@ pub(crate) struct ShareRunCli {
     #[arg(long)]
     authtoken_env: Option<String>,
 
-    /// Google account email allowed through ngrok OAuth. Can be repeated. Ephemeral for this run.
+    /// Google account email allowed through ngrok OAuth. Can be repeated. Ephemeral for this run. Re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-email")]
     allow_emails: Vec<String>,
 
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Ephemeral for this run.
+    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Ephemeral for this run. Re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-domain")]
     allow_domains: Vec<String>,
 
-    /// Disable ngrok OAuth protection for this run only.
-    #[arg(long)]
-    no_auth: bool,
+    #[command(flatten)]
+    auth: ShareAuthArgs,
 }
 
 #[derive(Parser)]
@@ -71,7 +93,10 @@ pub(crate) struct ShareRunCli {
 )]
 pub(crate) struct ShareConfigureCli {
     #[command(flatten)]
-    server: ShareServerArgs,
+    root: ShareRootArgs,
+
+    #[command(flatten)]
+    bind: ShareBindArgs,
 
     /// Reserved ngrok domain for paid/custom-domain accounts.
     #[arg(long)]
@@ -85,17 +110,16 @@ pub(crate) struct ShareConfigureCli {
     #[arg(long)]
     oauth_provider: Option<String>,
 
-    /// Google account email allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist when provided.
+    /// Google account email allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist when provided and re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-email")]
     allow_emails: Vec<String>,
 
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist when provided.
+    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist when provided and re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-domain")]
     allow_domains: Vec<String>,
 
-    /// Persist auth_required = false after explicit confirmation.
-    #[arg(long)]
-    no_auth: bool,
+    #[command(flatten)]
+    auth: ShareAuthArgs,
 
     /// Do not save a prompted ngrok authtoken to NAC_HOME/secrets.toml.
     #[arg(long)]
@@ -113,7 +137,10 @@ pub(crate) struct ShareConfigureCli {
 )]
 pub(crate) struct ShareDoctorCli {
     #[command(flatten)]
-    server: ShareServerArgs,
+    root: ShareRootArgs,
+
+    #[command(flatten)]
+    bind: ShareBindArgs,
 
     /// Reserved ngrok domain override.
     #[arg(long)]
@@ -123,17 +150,16 @@ pub(crate) struct ShareDoctorCli {
     #[arg(long)]
     authtoken_env: Option<String>,
 
-    /// Google account email allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist for this check when provided.
+    /// Google account email allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist for this check when provided and re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-email")]
     allow_emails: Vec<String>,
 
-    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist for this check when provided.
+    /// Google Workspace/email domain allowed through ngrok OAuth. Can be repeated. Replaces any saved allowlist for this check when provided and re-enables auth unless --no-auth is also set.
     #[arg(long = "allow-domain")]
     allow_domains: Vec<String>,
 
-    /// Disable ngrok OAuth protection for this doctor invocation.
-    #[arg(long)]
-    no_auth: bool,
+    #[command(flatten)]
+    auth: ShareAuthArgs,
 
     /// Skip the local /health check.
     #[arg(long)]
@@ -143,9 +169,8 @@ pub(crate) struct ShareDoctorCli {
 #[derive(Parser)]
 #[command(name = "nac-web share status", about = "Show saved ngrok share config")]
 pub(crate) struct ShareStatusCli {
-    /// Server root directory for default config and relative store paths.
-    #[arg(short = 'C', long)]
-    directory: Option<PathBuf>,
+    #[command(flatten)]
+    root: ShareRootArgs,
 
     /// Reserved ngrok domain override.
     #[arg(long)]
@@ -207,30 +232,31 @@ fn nested_subcommand_args(args: Vec<OsString>, name: &str, skip: usize) -> Vec<O
 
 async fn run_share(cli: ShareRunCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
+    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.server.root.directory.as_deref())?;
+    let overrides = share_overrides(
+        cli.authtoken_env,
+        None,
+        cli.domain,
+        cli.allow_emails,
+        cli.allow_domains,
+        cli.auth,
+    )?;
     super::run_share(super::ShareRunOptions {
         root_cwd,
-        bind: cli.server.bind,
+        bind: cli.server.bind.bind,
         store_path: cli.server.store_path,
         worker_executable: cli.server.worker_executable,
-        overrides: share_overrides(
-            cli.authtoken_env,
-            None,
-            cli.domain,
-            cli.allow_emails,
-            cli.allow_domains,
-            cli.no_auth,
-        ),
+        overrides,
         authtoken: None,
-        insecure_bind: cli.server.insecure_bind,
+        insecure_bind: cli.server.bind.insecure_bind,
     })
     .await
 }
 
 async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
-    super::validate_share_bind(cli.server.bind, cli.server.insecure_bind)?;
+    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.root.directory.as_deref())?;
+    super::validate_share_bind(cli.bind.bind, cli.bind.insecure_bind)?;
 
     let overrides = share_overrides(
         cli.authtoken_env,
@@ -238,8 +264,8 @@ async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
         cli.domain,
         cli.allow_emails,
         cli.allow_domains,
-        cli.no_auth,
-    );
+        cli.auth,
+    )?;
     let saved = super::load_saved_share_config(&root_cwd)?;
     let mut ngrok = super::effective_share_config(&saved, &overrides);
     if !ngrok.auth_required && !cli.yes {
@@ -286,11 +312,11 @@ async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
     }
     let doctor = super::run_doctor(super::DoctorOptions {
         root_cwd: root_cwd.clone(),
-        bind: cli.server.bind,
+        bind: cli.bind.bind,
         overrides: super::ShareConfigOverrides::default(),
         authtoken: prompted_token,
         check_health: false,
-        insecure_bind: cli.server.insecure_bind,
+        insecure_bind: cli.bind.insecure_bind,
     })
     .await;
     print!("{}", super::format_doctor_report(&doctor));
@@ -305,21 +331,22 @@ async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
 
 async fn run_share_doctor(cli: ShareDoctorCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.server.directory.as_deref())?;
+    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.root.directory.as_deref())?;
+    let overrides = share_overrides(
+        cli.authtoken_env,
+        None,
+        cli.domain,
+        cli.allow_emails,
+        cli.allow_domains,
+        cli.auth,
+    )?;
     let report = super::run_doctor(super::DoctorOptions {
         root_cwd,
-        bind: cli.server.bind,
-        overrides: share_overrides(
-            cli.authtoken_env,
-            None,
-            cli.domain,
-            cli.allow_emails,
-            cli.allow_domains,
-            cli.no_auth,
-        ),
+        bind: cli.bind.bind,
+        overrides,
         authtoken: None,
         check_health: !cli.skip_health,
-        insecure_bind: cli.server.insecure_bind,
+        insecure_bind: cli.bind.insecure_bind,
     })
     .await;
     print!("{}", super::format_doctor_report(&report));
@@ -335,7 +362,7 @@ async fn run_share_doctor(cli: ShareDoctorCli) -> Result<()> {
 
 async fn run_share_status(cli: ShareStatusCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.directory.as_deref())?;
+    let root_cwd = crate::resolve_cli_cwd(&launch_cwd, cli.root.directory.as_deref())?;
     let saved = super::load_saved_share_config(&root_cwd)?;
     let ngrok = super::effective_share_config(
         &saved,
@@ -379,19 +406,163 @@ fn share_overrides(
     domain: Option<String>,
     allow_emails: Vec<String>,
     allow_domains: Vec<String>,
-    no_auth: bool,
-) -> super::ShareConfigOverrides {
+    auth: ShareAuthArgs,
+) -> Result<super::ShareConfigOverrides> {
     let allowlist =
         (!allow_emails.is_empty() || !allow_domains.is_empty()).then_some(ShareAllowlistOverride {
             emails: allow_emails,
             domains: allow_domains,
         });
-    super::ShareConfigOverrides {
+    Ok(super::ShareConfigOverrides {
         authtoken_env,
         oauth_provider,
         allowlist,
         domain,
-        auth_required: no_auth.then_some(false),
+        auth_required: auth_required_override(auth)?,
+    })
+}
+
+fn auth_required_override(auth: ShareAuthArgs) -> Result<Option<bool>> {
+    if auth.auth && auth.no_auth {
+        anyhow::bail!("--auth and --no-auth cannot be used together");
+    }
+    if auth.no_auth {
+        Ok(Some(false))
+    } else if auth.auth {
+        Ok(Some(true))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    fn saved_no_auth_config() -> crate::share::config::NgrokConfig {
+        crate::share::config::NgrokConfig {
+            auth_required: false,
+            ..crate::share::config::NgrokConfig::default()
+        }
+    }
+
+    #[test]
+    fn configure_allowlist_reenables_saved_no_auth() {
+        let cli = ShareConfigureCli::try_parse_from([
+            "nac-web share configure",
+            "--allow-email",
+            "user@example.com",
+        ])
+        .expect("parse configure args");
+
+        let overrides = share_overrides(
+            cli.authtoken_env,
+            cli.oauth_provider,
+            cli.domain,
+            cli.allow_emails,
+            cli.allow_domains,
+            cli.auth,
+        )
+        .expect("share overrides");
+        let effective = crate::share::effective_share_config(&saved_no_auth_config(), &overrides);
+
+        assert_eq!(effective.allow_emails, vec!["user@example.com"]);
+        assert!(effective.auth_required);
+    }
+
+    #[test]
+    fn run_allowlist_reenables_saved_no_auth() {
+        let cli = ShareRunCli::try_parse_from(["nac-web share", "--allow-domain", "example.com"])
+            .expect("parse run args");
+
+        let overrides = share_overrides(
+            cli.authtoken_env,
+            None,
+            cli.domain,
+            cli.allow_emails,
+            cli.allow_domains,
+            cli.auth,
+        )
+        .expect("share overrides");
+        let effective = crate::share::effective_share_config(&saved_no_auth_config(), &overrides);
+
+        assert_eq!(effective.allow_domains, vec!["example.com"]);
+        assert!(effective.auth_required);
+    }
+
+    #[test]
+    fn explicit_auth_reenables_saved_no_auth() {
+        let cli = ShareConfigureCli::try_parse_from(["nac-web share configure", "--auth"])
+            .expect("parse configure args");
+
+        let overrides = share_overrides(
+            cli.authtoken_env,
+            cli.oauth_provider,
+            cli.domain,
+            cli.allow_emails,
+            cli.allow_domains,
+            cli.auth,
+        )
+        .expect("share overrides");
+        let effective = crate::share::effective_share_config(&saved_no_auth_config(), &overrides);
+
+        assert!(effective.auth_required);
+    }
+
+    #[test]
+    fn explicit_no_auth_can_override_allowlist_reenable() {
+        let cli = ShareConfigureCli::try_parse_from([
+            "nac-web share configure",
+            "--allow-email",
+            "user@example.com",
+            "--no-auth",
+            "--yes",
+        ])
+        .expect("parse configure args");
+
+        let overrides = share_overrides(
+            cli.authtoken_env,
+            cli.oauth_provider,
+            cli.domain,
+            cli.allow_emails,
+            cli.allow_domains,
+            cli.auth,
+        )
+        .expect("share overrides");
+        let effective = crate::share::effective_share_config(&saved_no_auth_config(), &overrides);
+
+        assert!(!effective.auth_required);
+    }
+
+    #[test]
+    fn auth_flags_conflict() {
+        let error = ShareRunCli::try_parse_from(["nac-web share", "--auth", "--no-auth"])
+            .err()
+            .expect("auth flags should conflict");
+
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn configure_and_doctor_reject_run_only_server_args() {
+        let configure_error = ShareConfigureCli::try_parse_from([
+            "nac-web share configure",
+            "--store-path",
+            "store.db",
+        ])
+        .err()
+        .expect("configure should reject --store-path");
+        let doctor_error = ShareDoctorCli::try_parse_from([
+            "nac-web share doctor",
+            "--worker-executable",
+            "nac-web",
+        ])
+        .err()
+        .expect("doctor should reject --worker-executable");
+
+        assert_eq!(configure_error.kind(), ErrorKind::UnknownArgument);
+        assert_eq!(doctor_error.kind(), ErrorKind::UnknownArgument);
     }
 }
 
