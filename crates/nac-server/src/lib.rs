@@ -735,7 +735,7 @@ async fn shared_tunnel_origin_guard(request: Request, next: Next) -> Response {
     if !is_allowed_shared_tunnel_request(request.method(), request.headers()) {
         return (
             StatusCode::FORBIDDEN,
-            "mutating requests in nac-web share mode require a same-origin Origin header",
+            "unsafe requests in nac-web share mode require a same-origin Origin header",
         )
             .into_response();
     }
@@ -743,7 +743,7 @@ async fn shared_tunnel_origin_guard(request: Request, next: Next) -> Response {
 }
 
 fn is_allowed_shared_tunnel_request(method: &Method, headers: &HeaderMap) -> bool {
-    if !is_mutating_method(method) {
+    if is_safe_shared_tunnel_method(method) {
         return true;
     }
     let Some(origin) = headers
@@ -761,11 +761,8 @@ fn is_allowed_shared_tunnel_request(method: &Method, headers: &HeaderMap) -> boo
     origin_matches_host(origin, host)
 }
 
-fn is_mutating_method(method: &Method) -> bool {
-    matches!(
-        *method,
-        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
-    )
+fn is_safe_shared_tunnel_method(method: &Method) -> bool {
+    matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1286,6 +1283,18 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
+    #[tokio::test]
+    async fn shared_tunnel_router_rejects_extension_method_without_origin() {
+        let status = shared_tunnel_health_status(
+            Method::from_bytes(b"PURGE").expect("extension method"),
+            "extension_method_missing_origin",
+            "nac.example.com",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
     #[test]
     fn invalid_workspace_diff_stage_maps_to_bad_request() {
         let error = view::WorkspaceDiffStage::parse("sideways").unwrap_err();
@@ -1316,6 +1325,15 @@ mod tests {
         host: &str,
         origin: Option<&str>,
     ) -> StatusCode {
+        shared_tunnel_health_status(Method::POST, label, host, origin).await
+    }
+
+    async fn shared_tunnel_health_status(
+        method: Method,
+        label: &str,
+        host: &str,
+        origin: Option<&str>,
+    ) -> StatusCode {
         use axum::body::Body;
         use tower::ServiceExt;
 
@@ -1329,7 +1347,7 @@ mod tests {
             },
         );
         let mut builder = Request::builder()
-            .method(Method::POST)
+            .method(method)
             .uri("/health")
             .header(header::HOST, host);
         if let Some(origin) = origin {
