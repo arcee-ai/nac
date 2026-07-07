@@ -631,6 +631,14 @@ button.session-card {
   border-color: var(--danger-border-strong);
 }
 
+.session-card.selected:focus-visible,
+.session-card.selected.errorish:focus-visible,
+.session-card.selected.mode-sandbox:not(.errorish):focus-visible {
+  border-color: var(--focus-border);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .session-card.pinned {
   border-top-color: var(--status-info);
 }
