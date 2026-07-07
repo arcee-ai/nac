@@ -141,7 +141,7 @@ pub(crate) struct ShareConfigureCli {
 #[derive(Parser)]
 #[command(
     name = "nac-web share doctor",
-    about = "Check ngrok share configuration and local health"
+    about = "Check ngrok share configuration"
 )]
 pub(crate) struct ShareDoctorCli {
     #[command(flatten)]
@@ -173,9 +173,9 @@ pub(crate) struct ShareDoctorCli {
     #[command(flatten)]
     auth: ShareAuthArgs,
 
-    /// Skip the local /health check.
+    /// Also check the local /health endpoint. Useful only when nac-web is already running on --bind.
     #[arg(long)]
-    skip_health: bool,
+    check_health: bool,
 }
 
 #[derive(Parser)]
@@ -364,7 +364,7 @@ async fn run_share_doctor(cli: ShareDoctorCli) -> Result<()> {
         bind: cli.bind.bind,
         overrides,
         authtoken: None,
-        check_health: !cli.skip_health,
+        check_health: cli.check_health,
         insecure_bind: cli.bind.insecure_bind,
     })
     .await;
@@ -621,6 +621,17 @@ mod tests {
 
         assert_eq!(configure_error.kind(), ErrorKind::UnknownArgument);
         assert_eq!(doctor_error.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn doctor_health_check_is_opt_in() {
+        let default_cli =
+            ShareDoctorCli::try_parse_from(["nac-web share doctor"]).expect("parse doctor args");
+        let health_cli = ShareDoctorCli::try_parse_from(["nac-web share doctor", "--check-health"])
+            .expect("parse doctor health args");
+
+        assert!(!default_cli.check_health);
+        assert!(health_cli.check_health);
     }
 }
 

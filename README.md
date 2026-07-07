@@ -71,7 +71,7 @@ Daily launch is run-only and does not write config or secrets:
 nac-web share -C /path/to/project
 ```
 
-By default, public access is protected with ngrok Google OAuth, the local server binds only to loopback, and ngrok generates the public URL. If an old config has a paid custom domain saved, clear it with `nac-web share configure -C /path/to/project --no-domain` (alias `--generated-url`). The run and doctor commands accept the same `--auth`/`--no-auth` and allowlist override semantics ephemerally; `nac-web share --no-domain -C /path/to/project` ignores a saved custom domain for one launch. Use `nac-web share doctor -C /path/to/project` to check the saved authtoken, OAuth allowlist, loopback bind policy, and local `/health`. Non-loopback share binds require the explicit unsafe `--insecure-bind` opt-in.
+By default, public access is protected with ngrok Google OAuth, the local server binds only to loopback, and ngrok generates the public URL. If an old config has a paid custom domain saved, clear it with `nac-web share configure -C /path/to/project --no-domain` (alias `--generated-url`). The run and doctor commands accept the same `--auth`/`--no-auth` and allowlist override semantics ephemerally; `nac-web share --no-domain -C /path/to/project` ignores a saved custom domain for one launch. Use `nac-web share doctor -C /path/to/project` to check the saved authtoken, OAuth allowlist, and loopback bind policy before launch; add `--check-health` only when a local server is already running on the bind address. Non-loopback share binds require the explicit unsafe `--insecure-bind` opt-in.
 
 Paid/custom-domain ngrok accounts can opt in with `--domain your-hostname.example.com`; free accounts should leave `domain` unset so ngrok can allocate the URL.
 
