@@ -66,9 +66,13 @@ pub(crate) struct ShareRunCli {
     #[command(flatten)]
     server: ShareRunServerArgs,
 
-    /// Reserved ngrok domain for paid/custom-domain accounts. Ephemeral for this run.
-    #[arg(long)]
+    /// Reserved ngrok custom domain for paid accounts only. Ephemeral for this run.
+    #[arg(long, conflicts_with = "no_domain")]
     domain: Option<String>,
+
+    /// Ignore any saved custom domain and let ngrok generate a public URL for this run.
+    #[arg(long, visible_alias = "generated-url", conflicts_with = "domain")]
+    no_domain: bool,
 
     /// Environment variable that contains the ngrok authtoken. Ephemeral for this run.
     #[arg(long)]
@@ -98,9 +102,13 @@ pub(crate) struct ShareConfigureCli {
     #[command(flatten)]
     bind: ShareBindArgs,
 
-    /// Reserved ngrok domain for paid/custom-domain accounts.
-    #[arg(long)]
+    /// Reserved ngrok custom domain for paid accounts only.
+    #[arg(long, conflicts_with = "no_domain")]
     domain: Option<String>,
+
+    /// Clear the saved custom domain so ngrok generates public URLs.
+    #[arg(long, visible_alias = "generated-url", conflicts_with = "domain")]
+    no_domain: bool,
 
     /// Environment variable that contains the ngrok authtoken.
     #[arg(long)]
@@ -142,9 +150,13 @@ pub(crate) struct ShareDoctorCli {
     #[command(flatten)]
     bind: ShareBindArgs,
 
-    /// Reserved ngrok domain override.
-    #[arg(long)]
+    /// Reserved ngrok custom domain override for paid accounts only.
+    #[arg(long, conflicts_with = "no_domain")]
     domain: Option<String>,
+
+    /// Ignore any saved custom domain for this check.
+    #[arg(long, visible_alias = "generated-url", conflicts_with = "domain")]
+    no_domain: bool,
 
     /// Environment variable that contains the ngrok authtoken.
     #[arg(long)]
@@ -172,9 +184,13 @@ pub(crate) struct ShareStatusCli {
     #[command(flatten)]
     root: ShareRootArgs,
 
-    /// Reserved ngrok domain override.
-    #[arg(long)]
+    /// Reserved ngrok custom domain override for paid accounts only.
+    #[arg(long, conflicts_with = "no_domain")]
     domain: Option<String>,
+
+    /// Ignore any saved custom domain in this status output.
+    #[arg(long, visible_alias = "generated-url", conflicts_with = "domain")]
+    no_domain: bool,
 
     /// Environment variable that contains the ngrok authtoken.
     #[arg(long)]
@@ -237,6 +253,7 @@ async fn run_share(cli: ShareRunCli) -> Result<()> {
         cli.authtoken_env,
         None,
         cli.domain,
+        cli.no_domain,
         cli.allow_emails,
         cli.allow_domains,
         cli.auth,
@@ -262,6 +279,7 @@ async fn run_share_configure(cli: ShareConfigureCli) -> Result<()> {
         cli.authtoken_env,
         cli.oauth_provider,
         cli.domain,
+        cli.no_domain,
         cli.allow_emails,
         cli.allow_domains,
         cli.auth,
@@ -336,6 +354,7 @@ async fn run_share_doctor(cli: ShareDoctorCli) -> Result<()> {
         cli.authtoken_env,
         None,
         cli.domain,
+        cli.no_domain,
         cli.allow_emails,
         cli.allow_domains,
         cli.auth,
@@ -369,6 +388,7 @@ async fn run_share_status(cli: ShareStatusCli) -> Result<()> {
         &super::ShareConfigOverrides {
             authtoken_env: cli.authtoken_env,
             domain: cli.domain,
+            clear_domain: cli.no_domain,
             ..super::ShareConfigOverrides::default()
         },
     );
@@ -404,6 +424,7 @@ fn share_overrides(
     authtoken_env: Option<String>,
     oauth_provider: Option<String>,
     domain: Option<String>,
+    clear_domain: bool,
     allow_emails: Vec<String>,
     allow_domains: Vec<String>,
     auth: ShareAuthArgs,
@@ -418,6 +439,7 @@ fn share_overrides(
         oauth_provider,
         allowlist,
         domain,
+        clear_domain,
         auth_required: auth_required_override(auth)?,
     })
 }
@@ -460,6 +482,7 @@ mod tests {
             cli.authtoken_env,
             cli.oauth_provider,
             cli.domain,
+            cli.no_domain,
             cli.allow_emails,
             cli.allow_domains,
             cli.auth,
@@ -480,6 +503,7 @@ mod tests {
             cli.authtoken_env,
             None,
             cli.domain,
+            cli.no_domain,
             cli.allow_emails,
             cli.allow_domains,
             cli.auth,
@@ -500,6 +524,7 @@ mod tests {
             cli.authtoken_env,
             cli.oauth_provider,
             cli.domain,
+            cli.no_domain,
             cli.allow_emails,
             cli.allow_domains,
             cli.auth,
@@ -525,6 +550,7 @@ mod tests {
             cli.authtoken_env,
             cli.oauth_provider,
             cli.domain,
+            cli.no_domain,
             cli.allow_emails,
             cli.allow_domains,
             cli.auth,
@@ -541,6 +567,38 @@ mod tests {
             .err()
             .expect("auth flags should conflict");
 
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn no_domain_clears_saved_domain_and_conflicts_with_domain() {
+        let cli =
+            ShareRunCli::try_parse_from(["nac-web share", "--no-domain"]).expect("parse run args");
+        let overrides = share_overrides(
+            cli.authtoken_env,
+            None,
+            cli.domain,
+            cli.no_domain,
+            cli.allow_emails,
+            cli.allow_domains,
+            cli.auth,
+        )
+        .expect("share overrides");
+        let saved = crate::share::config::NgrokConfig {
+            domain: Some("nac.example.com".to_string()),
+            ..crate::share::config::NgrokConfig::default()
+        };
+        let effective = crate::share::effective_share_config(&saved, &overrides);
+        assert!(effective.domain.is_none());
+
+        let error = ShareRunCli::try_parse_from([
+            "nac-web share",
+            "--domain",
+            "nac.example.com",
+            "--no-domain",
+        ])
+        .err()
+        .expect("domain flags should conflict");
         assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
     }
 

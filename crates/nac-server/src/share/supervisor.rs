@@ -145,7 +145,17 @@ async fn start_ngrok_forwarder(
     endpoint
         .listen_and_forward(Url::parse(local_url)?)
         .await
-        .context("failed to start ngrok endpoint")
+        .map_err(|error| {
+            if let Some(domain) = config.domain.as_deref() {
+                anyhow!(
+                    "failed to start ngrok endpoint with custom domain `{domain}`: {error}\n\
+                     Free ngrok accounts should use generated URLs. Clear the saved custom domain with \
+                     `nac-web share configure --no-domain`, or run once with `nac-web share --no-domain`."
+                )
+            } else {
+                anyhow!("failed to start ngrok endpoint: {error}")
+            }
+        })
 }
 
 struct ServerHandle {

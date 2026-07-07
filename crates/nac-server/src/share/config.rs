@@ -50,6 +50,7 @@ pub struct ShareConfigOverrides {
     pub oauth_provider: Option<String>,
     pub allowlist: Option<ShareAllowlistOverride>,
     pub domain: Option<String>,
+    pub clear_domain: bool,
     pub auth_required: Option<bool>,
 }
 
@@ -91,7 +92,9 @@ pub fn effective_share_config(
     if let Some(oauth_provider) = non_empty_clone(&overrides.oauth_provider) {
         ngrok.oauth_provider = oauth_provider;
     }
-    if let Some(domain) = non_empty_clone(&overrides.domain) {
+    if overrides.clear_domain {
+        ngrok.domain = None;
+    } else if let Some(domain) = non_empty_clone(&overrides.domain) {
         ngrok.domain = Some(domain);
     }
     if let Some(allowlist) = &overrides.allowlist {
@@ -468,6 +471,7 @@ allow_domains = ["Example.Org"]
                 domains: Vec::new(),
             }),
             domain: Some("nac.example.com".to_string()),
+            clear_domain: false,
             auth_required: Some(false),
             ..ShareConfigOverrides::default()
         };
@@ -478,6 +482,22 @@ allow_domains = ["Example.Org"]
         assert_eq!(effective.allow_emails, vec!["user@example.com"]);
         assert_eq!(effective.domain.as_deref(), Some("nac.example.com"));
         assert!(!effective.auth_required);
+    }
+
+    #[test]
+    fn effective_config_can_clear_saved_custom_domain() {
+        let saved = NgrokConfig {
+            domain: Some("nac.example.com".to_string()),
+            ..NgrokConfig::default()
+        };
+        let overrides = ShareConfigOverrides {
+            clear_domain: true,
+            ..ShareConfigOverrides::default()
+        };
+
+        let effective = effective_share_config(&saved, &overrides);
+
+        assert!(effective.domain.is_none());
     }
 
     #[test]
