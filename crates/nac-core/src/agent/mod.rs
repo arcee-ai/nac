@@ -755,79 +755,7 @@ mod tests {
         client
     }
 
-    /// Minimal fake chat-completions server: serves the given JSON bodies to
-    /// sequential requests. Before serving the last response it optionally
-    /// waits for `wait_file_before_last` to exist, so a background command
-    /// started by a tool call is guaranteed to be running when the turn ends.
-    fn spawn_fake_model_server(
-        responses: Vec<String>,
-        wait_file_before_last: Option<PathBuf>,
-    ) -> (String, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake model server");
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let handle = std::thread::spawn(move || {
-            let total = responses.len();
-            for (index, body) in responses.into_iter().enumerate() {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    return;
-                };
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-
-                // Read the full request (headers + Content-Length body).
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 4096];
-                let mut header_end = None;
-                let mut content_length = 0usize;
-                loop {
-                    match stream.read(&mut chunk) {
-                        Ok(0) | Err(_) => break,
-                        Ok(read) => buf.extend_from_slice(&chunk[..read]),
-                    }
-                    if header_end.is_none() {
-                        if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n")
-                        {
-                            header_end = Some(pos + 4);
-                            let headers = String::from_utf8_lossy(&buf[..pos]);
-                            content_length = headers
-                                .lines()
-                                .find_map(|line| {
-                                    let (name, value) = line.split_once(':')?;
-                                    name.eq_ignore_ascii_case("content-length")
-                                        .then(|| value.trim().parse::<usize>().ok())
-                                        .flatten()
-                                })
-                                .unwrap_or(0);
-                        }
-                    }
-                    if let Some(end) = header_end {
-                        if buf.len() >= end + content_length {
-                            break;
-                        }
-                    }
-                }
-
-                if index + 1 == total {
-                    if let Some(path) = &wait_file_before_last {
-                        let deadline =
-                            std::time::Instant::now() + std::time::Duration::from_secs(10);
-                        while !path.exists() && std::time::Instant::now() < deadline {
-                            std::thread::sleep(std::time::Duration::from_millis(50));
-                        }
-                    }
-                }
-
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
-            }
-        });
-        (url, handle)
-    }
+    use crate::test_http::spawn_fake_model_server;
 
     /// Success path: a tool call starts a background session mid-turn; when
     /// the final assistant message ends the turn, the dispatch-end
@@ -925,7 +853,7 @@ mod tests {
             .terminal_manager
             .spawn_background(
                 "bg-error-path".to_string(),
-                Some(&cmd),
+                &cmd,
                 None,
                 120,
                 40,

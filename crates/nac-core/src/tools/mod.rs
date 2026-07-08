@@ -171,6 +171,21 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
     Ok(out)
 }
 
+/// Convert a plain `Result<String>` tool outcome into a `ToolResult`,
+/// formatting errors with their full anyhow context chain.
+fn to_tool_result(result: anyhow::Result<String>) -> ToolResult {
+    match result {
+        Ok(content) => ToolResult {
+            content,
+            is_error: false,
+        },
+        Err(e) => ToolResult {
+            content: format!("Error: {:#}", e),
+            is_error: true,
+        },
+    }
+}
+
 pub async fn execute_tool(
     name: &str,
     args: Value,
@@ -191,36 +206,9 @@ pub async fn execute_tool(
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,
-        "exec_command" => match exec_command::execute_exec_command(&args, runtime).await {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Error: {:#}", e),
-                is_error: true,
-            },
-        },
-        "write_stdin" => match exec_command::execute_write_stdin(&args, runtime).await {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Error: {:#}", e),
-                is_error: true,
-            },
-        },
-        "kill_shell" => match exec_command::execute_kill_shell(&args, runtime).await {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Error: {:#}", e),
-                is_error: true,
-            },
-        },
+        "exec_command" => to_tool_result(exec_command::execute_exec_command(&args, runtime).await),
+        "write_stdin" => to_tool_result(exec_command::execute_write_stdin(&args, runtime).await),
+        "kill_shell" => to_tool_result(exec_command::execute_kill_shell(&args, runtime).await),
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,

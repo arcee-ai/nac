@@ -16,6 +16,8 @@ pub mod sessions;
 mod skills;
 mod store;
 mod terminal;
+#[cfg(test)]
+mod test_http;
 mod tools;
 pub mod types;
 pub mod upgrade;

@@ -46,10 +46,10 @@ const MCP_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use crate::test_http::{read_http_request, write_http_response};
     use serde_json::{json, Value};
     use std::env;
     use std::ffi::OsString;
-    use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
     use std::thread;
@@ -103,67 +103,16 @@ pub(crate) mod test_support {
         (url, handle)
     }
 
-    struct FakeHttpRequest {
-        method: String,
-        body: Option<Value>,
-    }
-
-    fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
-        stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 1024];
-        loop {
-            let read = stream.read(&mut chunk).ok()?;
-            if read == 0 {
-                return None;
-            }
-            buf.extend_from_slice(&chunk[..read]);
-            let Some(header_end) = buf.windows(4).position(|window| window == b"\r\n\r\n") else {
-                continue;
-            };
-            let header_text = String::from_utf8_lossy(&buf[..header_end]);
-            let method = header_text
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().next())
-                .unwrap_or("")
-                .to_string();
-            let content_length = header_text
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or(0);
-            let body_start = header_end + 4;
-            while buf.len() < body_start + content_length {
-                let read = stream.read(&mut chunk).ok()?;
-                if read == 0 {
-                    return None;
-                }
-                buf.extend_from_slice(&chunk[..read]);
-            }
-            let body = if content_length == 0 {
-                None
-            } else {
-                serde_json::from_slice(&buf[body_start..body_start + content_length]).ok()
-            };
-            return Some(FakeHttpRequest { method, body });
-        }
-    }
-
     fn handle_fake_http_mcp_request(stream: &mut TcpStream) -> bool {
-        let Some(request) = read_fake_http_request(stream) else {
+        let Some(request) = read_http_request(stream) else {
             return false;
         };
         if request.method != "POST" {
-            write_fake_http_response(stream, "405 Method Not Allowed", None, "");
+            write_http_response(stream, "405 Method Not Allowed", None, "");
             return false;
         }
         let Some(body) = request.body else {
-            write_fake_http_response(stream, "400 Bad Request", None, "");
+            write_http_response(stream, "400 Bad Request", None, "");
             return false;
         };
         let method = body.get("method").and_then(Value::as_str).unwrap_or("");
@@ -179,7 +128,7 @@ pub(crate) mod test_support {
                         "serverInfo": { "name": "fake-http-mcp", "version": "0.1.0" }
                     }
                 });
-                write_fake_http_response(
+                write_http_response(
                     stream,
                     "200 OK",
                     Some("application/json"),
@@ -188,7 +137,7 @@ pub(crate) mod test_support {
                 false
             }
             "notifications/initialized" => {
-                write_fake_http_response(stream, "202 Accepted", None, "");
+                write_http_response(stream, "202 Accepted", None, "");
                 false
             }
             "tools/list" => {
@@ -203,7 +152,7 @@ pub(crate) mod test_support {
                         }]
                     }
                 });
-                write_fake_http_response(
+                write_http_response(
                     stream,
                     "200 OK",
                     Some("application/json"),
@@ -217,7 +166,7 @@ pub(crate) mod test_support {
                     "id": id,
                     "error": { "code": -32601, "message": "method not found" }
                 });
-                write_fake_http_response(
+                write_http_response(
                     stream,
                     "200 OK",
                     Some("application/json"),
@@ -226,23 +175,6 @@ pub(crate) mod test_support {
                 false
             }
         }
-    }
-
-    fn write_fake_http_response(
-        stream: &mut TcpStream,
-        status: &str,
-        content_type: Option<&str>,
-        body: &str,
-    ) {
-        let content_type = content_type
-            .map(|value| format!("Content-Type: {value}\r\n"))
-            .unwrap_or_default();
-        let response = format!(
-            "HTTP/1.1 {status}\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        let _ = stream.write_all(response.as_bytes());
-        let _ = stream.flush();
     }
 }
 

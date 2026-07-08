@@ -16,9 +16,14 @@ use super::keyparse::parse_keys;
 use super::session::{terminal_env_owned, TerminalSession};
 use super::{TerminalInfo, TerminalOutput};
 
-struct SpawnOpts<'a> {
-    background: bool,
-    command: Option<&'a str>,
+/// Outcome of killing a session that existed: whether the process was still
+/// alive when the kill was issued, a final tail of its output (including
+/// anything flushed during teardown), and the exit code if one was reaped.
+pub struct KilledSession {
+    pub was_alive: bool,
+    pub tail: String,
+    pub tail_truncated: bool,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Clone)]
@@ -47,23 +52,13 @@ impl TerminalManager {
         rows: u16,
         backend: &Arc<ExecutionBackend>,
     ) -> Result<TerminalInfo> {
-        self.create_inner(
-            name,
-            cwd,
-            cols,
-            rows,
-            backend,
-            SpawnOpts {
-                background: false,
-                command: None,
-            },
-        )
-        .await
+        self.create_inner(name, cwd, cols, rows, backend, None)
+            .await
     }
 
     /// Spawn a PTY session for a long-running background command and return
-    /// immediately — no initial output wait. The command (if any) is written
-    /// to the shell followed by a carriage return. The session is flagged as
+    /// immediately — no initial output wait. The command is written to the
+    /// shell followed by a carriage return. The session is flagged as
     /// background, which exempts it from LRU eviction while its process is
     /// alive. The PTY child runs in its own session/process group (portable_pty
     /// calls setsid on spawn) and the command is built via the sandbox
@@ -71,26 +66,19 @@ impl TerminalManager {
     pub async fn spawn_background(
         &self,
         name: String,
-        command: Option<&str>,
+        command: &str,
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
     ) -> Result<TerminalInfo> {
-        self.create_inner(
-            name,
-            cwd,
-            cols,
-            rows,
-            backend,
-            SpawnOpts {
-                background: true,
-                command,
-            },
-        )
-        .await
+        self.create_inner(name, cwd, cols, rows, backend, Some(command))
+            .await
     }
 
+    /// `background_command`: `Some(cmd)` spawns a background session (see
+    /// `spawn_background`) running `cmd`; `None` spawns a plain foreground
+    /// session.
     async fn create_inner(
         &self,
         name: String,
@@ -98,7 +86,7 @@ impl TerminalManager {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
-        opts: SpawnOpts<'_>,
+        background_command: Option<&str>,
     ) -> Result<TerminalInfo> {
         let old = {
             let mut sessions = self.sessions.lock().await;
@@ -114,8 +102,8 @@ impl TerminalManager {
         }
 
         let mut session = TerminalSession::spawn(name.clone(), cwd, cols, rows, backend)?;
-        session.background = opts.background;
-        if let Some(command) = opts.command {
+        session.background = background_command.is_some();
+        if let Some(command) = background_command {
             if !command.trim().is_empty() {
                 session.write(format!("{}\r", command).as_bytes())?;
             }
@@ -162,19 +150,37 @@ impl TerminalManager {
 
     /// Kill a session and its full process tree (backend pidfile kill →
     /// SIGTERM descendants + process group → 500ms grace → SIGKILL → reap).
-    /// Returns `Ok(true)` if the process was still alive when the kill was
-    /// issued, `Ok(false)` if it had already exited.
-    pub async fn kill_session(&self, name: &str) -> Result<bool> {
+    /// Returns `Ok(None)` if no such session exists (already killed or
+    /// exited-and-reaped), making repeated kills structurally idempotent.
+    /// Otherwise returns the kill outcome including a final output tail
+    /// (bounded by `max_output`) and the reaped exit code when available.
+    pub async fn kill_session(
+        &self,
+        name: &str,
+        max_output: usize,
+    ) -> Result<Option<KilledSession>> {
         let session = {
             let mut sessions = self.sessions.lock().await;
             sessions.remove(name)
         };
-        let mut session =
-            session.with_context(|| format!("terminal session '{}' not found", name))?;
+        let Some(mut session) = session else {
+            return Ok(None);
+        };
         session.refresh_status();
         let was_alive = session.is_alive();
+        // Drain output produced since the last poll before tearing down,
+        // then again afterwards to catch anything flushed during shutdown.
+        let mut tail = session.read_output();
         session.kill().await?;
-        Ok(was_alive)
+        tail.push_str(&session.read_output());
+        let exit_code = session.exit_code();
+        let (tail, tail_truncated) = head_tail_truncate(&tail, max_output);
+        Ok(Some(KilledSession {
+            was_alive,
+            tail,
+            tail_truncated,
+            exit_code,
+        }))
     }
 
     pub async fn write_stdin(
@@ -504,14 +510,7 @@ mod tests {
         let backend = test_backend();
         let start = Instant::now();
         let info = manager
-            .spawn_background(
-                "bg-run".to_string(),
-                Some("sleep 30"),
-                None,
-                120,
-                40,
-                &backend,
-            )
+            .spawn_background("bg-run".to_string(), "sleep 30", None, 120, 40, &backend)
             .await
             .unwrap();
         assert!(
@@ -524,8 +523,12 @@ mod tests {
         let got = manager.get("bg-run").await.expect("session registered");
         assert!(got.alive, "background session should still be running");
 
-        let was_alive = manager.kill_session("bg-run").await.unwrap();
-        assert!(was_alive, "session was running when killed");
+        let killed = manager
+            .kill_session("bg-run", 8000)
+            .await
+            .unwrap()
+            .expect("session existed");
+        assert!(killed.was_alive, "session was running when killed");
         assert!(manager.get("bg-run").await.is_none());
     }
 
@@ -537,7 +540,7 @@ mod tests {
         manager
             .spawn_background(
                 "bg-kill".to_string(),
-                Some("sleep 30 & echo NAC_CHILD:$!"),
+                "sleep 30 & echo NAC_CHILD:$!",
                 None,
                 120,
                 40,
@@ -564,8 +567,12 @@ mod tests {
             child_pid.unwrap_or_else(|| panic!("child pid not found in: {collected:?}"));
         assert!(process_exists(child_pid), "child exited too early");
 
-        let was_alive = manager.kill_session("bg-kill").await.unwrap();
-        assert!(was_alive);
+        let killed = manager
+            .kill_session("bg-kill", 8000)
+            .await
+            .unwrap()
+            .expect("session existed");
+        assert!(killed.was_alive);
         assert!(manager.get("bg-kill").await.is_none());
 
         let mut orphaned = true;
@@ -585,10 +592,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn kill_session_unknown_name_errors() {
+    async fn kill_session_unknown_name_is_idempotent_none() {
         let manager = TerminalManager::new();
-        let err = manager.kill_session("nope").await.unwrap_err();
-        assert!(err.to_string().contains("not found"));
+        let killed = manager.kill_session("nope", 8000).await.unwrap();
+        assert!(killed.is_none(), "unknown session must report None");
     }
 
     #[tokio::test]
@@ -596,14 +603,7 @@ mod tests {
         let manager = TerminalManager::new();
         let backend = test_backend();
         manager
-            .spawn_background(
-                "bg-exit".to_string(),
-                Some("exit 7"),
-                None,
-                120,
-                40,
-                &backend,
-            )
+            .spawn_background("bg-exit".to_string(), "exit 7", None, 120, 40, &backend)
             .await
             .unwrap();
 
@@ -631,14 +631,7 @@ mod tests {
         let manager = TerminalManager::with_max_sessions(3);
         let backend = test_backend();
         manager
-            .spawn_background(
-                "bg-server".to_string(),
-                Some("sleep 60"),
-                None,
-                120,
-                40,
-                &backend,
-            )
+            .spawn_background("bg-server".to_string(), "sleep 60", None, 120, 40, &backend)
             .await
             .unwrap();
 

@@ -1,11 +1,34 @@
-//! Terminal-backed command execution tools: `exec_command` and `write_stdin`.
+//! Terminal-backed command execution tools: `exec_command`, `write_stdin`,
+//! and `kill_shell`.
 
 use anyhow::{anyhow, Result};
+use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
 
 use crate::tools::ToolRuntime;
 use crate::types::{FunctionDef, ToolDefinition};
+
+/// Response for `exec_command` with `background=true`: the session started
+/// and the call returned immediately without waiting for output.
+#[derive(Serialize)]
+struct BackgroundStarted {
+    session_name: String,
+    background: bool,
+}
+
+/// Response for `kill_shell`. Field presence is fixed across all outcomes:
+/// `was_running=false` with empty output means the session was already gone
+/// (kill_shell is idempotent); `exit_code` is present when the process had
+/// exited and its status was reaped.
+#[derive(Serialize)]
+struct KillShellResult {
+    session_name: String,
+    was_running: bool,
+    output: String,
+    output_truncated: bool,
+    exit_code: Option<i32>,
+}
 
 // ============================================================================
 // exec_command
@@ -51,75 +74,95 @@ The background session stays alive across tool calls until killed; write_stdin c
     }
 }
 
+/// The three execution modes of `exec_command`. `background=true` overrides
+/// `tty`; background mode returns immediately and ignores `yield_time_ms`
+/// and `max_output_chars` (they apply to later `write_stdin` polls instead).
+enum ExecMode {
+    Background,
+    OneShot,
+    Tty,
+}
+
+impl ExecMode {
+    fn from_args(args: &Value) -> Self {
+        let flag = |key| args.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        if flag("background") {
+            ExecMode::Background
+        } else if flag("tty") {
+            ExecMode::Tty
+        } else {
+            ExecMode::OneShot
+        }
+    }
+}
+
 pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result<String> {
-    let manager = &runtime.terminal_manager;
     let cmd = require_str(args, "cmd")?;
-    let tty = args.get("tty").and_then(|v| v.as_bool()).unwrap_or(false);
-    let background = args
-        .get("background")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let default_yield_ms = if tty { 500 } else { 30_000 };
-    let yield_ms = clamp_yield(
-        args.get("yield_time_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(default_yield_ms),
-    );
-    let max_output = args
-        .get("max_output_chars")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
-
-    if background {
-        let session_name = make_session_name();
-        let info = manager
-            .spawn_background(
-                session_name.clone(),
-                Some(&cmd),
-                cwd,
-                120,
-                40,
-                &runtime.backend,
-            )
-            .await?;
-        return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "session_name": info.name,
-            "background": true,
-            "hint": "Command started in a background session. Poll output with write_stdin (empty chars); send input the same way; stop it with kill_shell.",
-        }))?);
+    match ExecMode::from_args(args) {
+        ExecMode::Background => exec_background(&cmd, cwd, runtime).await,
+        ExecMode::OneShot => exec_one_shot(&cmd, cwd, args, runtime).await,
+        ExecMode::Tty => exec_tty(&cmd, cwd, args, runtime).await,
     }
+}
 
-    if !tty {
-        let output = manager
-            .exec_one_shot(
-                &cmd,
-                cwd,
-                120,
-                40,
-                yield_ms,
-                max_output,
-                runtime.backend.as_ref(),
-            )
-            .await?;
-        return Ok(serde_json::to_string_pretty(&output)?);
-    }
+async fn exec_background(cmd: &str, cwd: Option<PathBuf>, runtime: &ToolRuntime) -> Result<String> {
+    let info = runtime
+        .terminal_manager
+        .spawn_background(make_session_name(), cmd, cwd, 120, 40, &runtime.backend)
+        .await?;
+    Ok(serde_json::to_string_pretty(&BackgroundStarted {
+        session_name: info.name,
+        background: true,
+    })?)
+}
 
+async fn exec_one_shot(
+    cmd: &str,
+    cwd: Option<PathBuf>,
+    args: &Value,
+    runtime: &ToolRuntime,
+) -> Result<String> {
+    let yield_ms = yield_ms_arg(args, 30_000);
+    let max_output = max_output_arg(args);
+    let output = runtime
+        .terminal_manager
+        .exec_one_shot(
+            cmd,
+            cwd,
+            120,
+            40,
+            yield_ms,
+            max_output,
+            runtime.backend.as_ref(),
+        )
+        .await?;
+    Ok(serde_json::to_string_pretty(&output)?)
+}
+
+async fn exec_tty(
+    cmd: &str,
+    cwd: Option<PathBuf>,
+    args: &Value,
+    runtime: &ToolRuntime,
+) -> Result<String> {
+    let manager = &runtime.terminal_manager;
+    let yield_ms = yield_ms_arg(args, 500);
+    let max_output = max_output_arg(args);
     let session_name = make_session_name();
     let _info = manager
         .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
         .await?;
 
-    if cmd.trim().is_empty() {
-        let output = manager
+    let output = if cmd.trim().is_empty() {
+        manager
             .write_stdin(&session_name, "", 200, max_output)
-            .await?;
-        return Ok(serde_json::to_string_pretty(&output)?);
-    }
-
-    let output = manager
-        .write_stdin(&session_name, &format!("{}\r", cmd), yield_ms, max_output)
-        .await?;
+            .await?
+    } else {
+        manager
+            .write_stdin(&session_name, &format!("{}\r", cmd), yield_ms, max_output)
+            .await?
+    };
     Ok(serde_json::to_string_pretty(&output)?)
 }
 
@@ -135,8 +178,7 @@ pub fn write_stdin_definition() -> ToolDefinition {
             description: "Send input to a persistent terminal session created by exec_command with tty=true or background=true. \
 Also use this to poll for output by sending empty input.\n\n\
 Calling write_stdin with empty chars is the canonical way to check on a background session: it returns \
-whatever output the session has produced, or the exit_code (with session_name=null) if the process has ended. \
-Poll a background server this way until it reports ready before running commands against it.\n\n\
+whatever output the session has produced, or the exit_code (with session_name=null) if the process has ended.\n\n\
 Supports key notation: <RET> (Enter), <C-c> (Ctrl+C), <C-d> (Ctrl+D), <TAB>, <BSPC> (Backspace), \
 <UP>/<DOWN>/<LEFT>/<RIGHT>."
                 .to_string(),
@@ -158,15 +200,8 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> Result<
     let manager = &runtime.terminal_manager;
     let session_id = require_str(args, "session_id")?;
     let chars = args.get("chars").and_then(|v| v.as_str()).unwrap_or("");
-    let yield_ms = clamp_yield(
-        args.get("yield_time_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(500),
-    );
-    let max_output = args
-        .get("max_output_chars")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8000) as usize;
+    let yield_ms = yield_ms_arg(args, 500);
+    let max_output = max_output_arg(args);
 
     if manager.get(&session_id).await.is_none() {
         return Err(anyhow!(
@@ -194,9 +229,6 @@ pub fn kill_shell_definition() -> ToolDefinition {
                 "Kill a terminal session created by exec_command (background=true or tty=true). \
 Terminates the session's whole process tree and returns whether it was still running, \
 plus a final tail of its output.\n\n\
-This is the cleanup step of the run-server-then-test flow: start a server with \
-exec_command background=true, poll it with write_stdin (empty chars), test against it \
-with one-shot exec_command calls, then kill_shell its session id when done.\n\n\
 Killing is idempotent: calling kill_shell on a session that already exited or was \
 already killed reports was_running=false instead of erroring."
                     .to_string(),
@@ -213,46 +245,32 @@ already killed reports was_running=false instead of erroring."
 }
 
 pub async fn execute_kill_shell(args: &Value, runtime: &ToolRuntime) -> Result<String> {
-    let manager = &runtime.terminal_manager;
     let session_id = require_str(args, "session_id")?;
-    let max_output = args
-        .get("max_output_chars")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8000) as usize;
+    let max_output = max_output_arg(args);
 
-    if manager.get(&session_id).await.is_none() {
-        return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "session_name": session_id,
-            "was_running": false,
-            "output": "",
-            "note": "session not found - it already exited or was already killed",
-        }))?);
-    }
-
-    // Grab a final output tail before killing.
-    let polled = manager
-        .write_stdin(&session_id, "", 100, max_output)
-        .await?;
-
-    if polled.session_name.is_none() {
-        // The process had already exited; the poll reaped it and removed the
-        // entry, so there is nothing left to kill.
-        return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "session_name": session_id,
-            "was_running": false,
-            "output": polled.output,
-            "output_truncated": polled.output_truncated,
-            "exit_code": polled.exit_code,
-        }))?);
-    }
-
-    let was_running = manager.kill_session(&session_id).await?;
-    Ok(serde_json::to_string_pretty(&serde_json::json!({
-        "session_name": session_id,
-        "was_running": was_running,
-        "output": polled.output,
-        "output_truncated": polled.output_truncated,
-    }))?)
+    // A single manager call: the kill is atomic with the final-output grab,
+    // and a missing session (already exited or killed) is a normal outcome.
+    let result = match runtime
+        .terminal_manager
+        .kill_session(&session_id, max_output)
+        .await?
+    {
+        Some(killed) => KillShellResult {
+            session_name: session_id,
+            was_running: killed.was_alive,
+            output: killed.tail,
+            output_truncated: killed.tail_truncated,
+            exit_code: killed.exit_code,
+        },
+        None => KillShellResult {
+            session_name: session_id,
+            was_running: false,
+            output: String::new(),
+            output_truncated: false,
+            exit_code: None,
+        },
+    };
+    Ok(serde_json::to_string_pretty(&result)?)
 }
 
 // ============================================================================
@@ -269,6 +287,20 @@ fn require_str(args: &Value, key: &str) -> Result<String> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow!("missing required argument '{}'", key))
+}
+
+fn yield_ms_arg(args: &Value, default_ms: u64) -> u64 {
+    clamp_yield(
+        args.get("yield_time_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(default_ms),
+    )
+}
+
+fn max_output_arg(args: &Value) -> usize {
+    args.get("max_output_chars")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(8000) as usize
 }
 
 const MAX_YIELD_MS: u64 = 3_600_000; // 1 hour
@@ -584,13 +616,16 @@ mod tests {
         let session = parsed["session_name"].as_str().unwrap().to_string();
         assert!(session.starts_with("shell-"), "got: {}", session);
         assert_eq!(parsed["background"].as_bool(), Some(true));
-        assert!(parsed["hint"].as_str().unwrap().contains("kill_shell"));
 
         // The command is still running: the session exists and is alive.
         let info = runtime.terminal_manager.get(&session).await.unwrap();
         assert!(info.alive, "background command should still be running");
 
-        runtime.terminal_manager.kill_session(&session).await.ok();
+        runtime
+            .terminal_manager
+            .kill_session(&session, 8000)
+            .await
+            .ok();
     }
 
     #[tokio::test]
