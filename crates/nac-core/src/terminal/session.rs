@@ -25,6 +25,9 @@ pub struct TerminalSession {
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
     pub last_output_at: Instant,
+    /// Background sessions (long-running servers etc.) are exempt from LRU
+    /// eviction while alive; see `TerminalManager` eviction policy.
+    pub background: bool,
     alive: Arc<AtomicBool>,
     exit_code: Option<i32>,
     /// Remote process-tree cleanup: backends that return a pidfile from
@@ -112,6 +115,7 @@ impl TerminalSession {
             _reader_thread: reader_thread,
             created_at: Instant::now(),
             last_output_at: Instant::now(),
+            background: false,
             alive,
             exit_code: None,
             backend_cleanup,
