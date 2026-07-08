@@ -119,7 +119,11 @@ impl Agent {
                      - yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short polls (write_stdin with empty chars) for interactive flows; use a single long wait for known-long commands like builds and test suites, and keep waits well under your remaining task budget.\n\
                      - Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Use them for multi-step workflows.\n\
                      - Always prefer write_stdin with empty chars to poll for output from a running command before sending new input.\n\
-                     - Close sessions by sending exit<RET> or <C-d>. Sessions auto-cleanup when the worker finishes.",
+                     - Use exec_command with background=true to start long-running processes like dev servers or watchers: it returns immediately with a session_name while the command keeps running.\n\
+                     - Run-server-then-test flow: start the server with background=true, poll it with empty-chars write_stdin until it reports ready, run normal one-shot exec_command calls (curl, tests) against it, then kill_shell(session_id) to stop it.\n\
+                     - kill_shell is idempotent: it reports was_running plus a final output tail. If a background process dies on its own, the next empty-chars poll returns its exit_code.\n\
+                     - Kill background sessions with kill_shell as soon as you are done with them; live background sessions are never evicted automatically.\n\
+                     - Close sessions by sending exit<RET> or <C-d>. All sessions, including background ones, are cleaned up when the worker finishes — background servers do not survive past the end of this dispatch.",
                     cwd
                 ),
                 tools::worker_tool_definitions(),
@@ -681,6 +685,273 @@ mod tests {
     fn preview_truncates_on_utf8_boundary() {
         assert_eq!(preview("a┌b", 2), "a...");
         assert_eq!(preview("a┌b", 4), "a┌...");
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: i32) -> bool {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    #[cfg(unix)]
+    fn unique_pidfile(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        std::env::temp_dir().join(format!("nac_agent_bg_{label}_{unique}.pid"))
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_pidfile(path: &PathBuf) -> i32 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                if let Ok(pid) = contents.trim().parse::<i32>() {
+                    return pid;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "background command never wrote pidfile {}",
+                path.display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    #[cfg(unix)]
+    async fn assert_process_dies(pid: i32) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while process_alive(pid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "background process {} still alive after Agent::send returned",
+                pid
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Build a model client pointed at `base_url` without touching real
+    /// provider credentials. Holds TEST_ENV_LOCK only for the duration of
+    /// client construction (no awaits while locked).
+    fn test_client_with_base_url(base_url: String) -> ModelClient {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let original = std::env::var_os("OPENAI_API_KEY");
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test-dummy-key");
+        }
+        let client = ModelClient::from_env_with_overrides(crate::model::ClientOverrides {
+            base_url: Some(base_url),
+            model: Some("test-model".to_string()),
+            backend: Some(crate::model::BackendKind::DeepSeekChat),
+            ..Default::default()
+        })
+        .expect("test client must build");
+        match original {
+            Some(value) => unsafe { std::env::set_var("OPENAI_API_KEY", value) },
+            None => unsafe { std::env::remove_var("OPENAI_API_KEY") },
+        }
+        client
+    }
+
+    /// Minimal fake chat-completions server: serves the given JSON bodies to
+    /// sequential requests. Before serving the last response it optionally
+    /// waits for `wait_file_before_last` to exist, so a background command
+    /// started by a tool call is guaranteed to be running when the turn ends.
+    fn spawn_fake_model_server(
+        responses: Vec<String>,
+        wait_file_before_last: Option<PathBuf>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake model server");
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let total = responses.len();
+            for (index, body) in responses.into_iter().enumerate() {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+
+                // Read the full request (headers + Content-Length body).
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut header_end = None;
+                let mut content_length = 0usize;
+                loop {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => buf.extend_from_slice(&chunk[..read]),
+                    }
+                    if header_end.is_none() {
+                        if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n")
+                        {
+                            header_end = Some(pos + 4);
+                            let headers = String::from_utf8_lossy(&buf[..pos]);
+                            content_length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    name.eq_ignore_ascii_case("content-length")
+                                        .then(|| value.trim().parse::<usize>().ok())
+                                        .flatten()
+                                })
+                                .unwrap_or(0);
+                        }
+                    }
+                    if let Some(end) = header_end {
+                        if buf.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                }
+
+                if index + 1 == total {
+                    if let Some(path) = &wait_file_before_last {
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(10);
+                        while !path.exists() && std::time::Instant::now() < deadline {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                        }
+                    }
+                }
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (url, handle)
+    }
+
+    /// Success path: a tool call starts a background session mid-turn; when
+    /// the final assistant message ends the turn, the dispatch-end
+    /// remove_all() must have killed and reaped the background process.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn background_session_started_during_turn_is_reaped_after_send_success() {
+        let pidfile = unique_pidfile("success");
+        let _ = std::fs::remove_file(&pidfile);
+
+        let args = serde_json::json!({
+            "cmd": format!("echo $$ > {}; exec sleep 300", pidfile.display()),
+            "background": true
+        })
+        .to_string();
+        let first = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": serde_json::Value::Null,
+                    "tool_calls": [{
+                        "id": "call_bg_1",
+                        "type": "function",
+                        "function": { "name": "exec_command", "arguments": args }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string();
+        let second = serde_json::json!({
+            "choices": [{
+                "message": { "content": "done" },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+
+        let (url, handle) = spawn_fake_model_server(vec![first, second], Some(pidfile.clone()));
+        let client = test_client_with_base_url(url);
+        let mut agent = Agent::default(client);
+
+        let result = agent.send("start a background server").await;
+        assert_eq!(result.expect("send should succeed"), "done");
+        handle.join().expect("fake model server thread panicked");
+
+        // The background command really started during the turn...
+        let pid = wait_for_pidfile(&pidfile).await;
+        // ...and its process is dead (killed + reaped) now that send returned.
+        assert_process_dies(pid).await;
+
+        // The session itself is gone from the terminal manager.
+        let session_name = agent
+            .messages
+            .iter()
+            .find_map(|message| match message {
+                Message::Tool { content, .. } => serde_json::from_str::<serde_json::Value>(content)
+                    .ok()?
+                    .get("session_name")?
+                    .as_str()
+                    .map(ToString::to_string),
+                _ => None,
+            })
+            .expect("tool result should include session_name");
+        assert!(
+            agent
+                .tool_runtime
+                .terminal_manager
+                .get(&session_name)
+                .await
+                .is_none(),
+            "background session should be removed after send returns"
+        );
+
+        let _ = std::fs::remove_file(&pidfile);
+    }
+
+    /// Error path: a live background session must also be killed and reaped
+    /// by the remove_all() on the model-error exit from Agent::send.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn background_session_is_reaped_after_send_model_error() {
+        // A connect-refused base URL makes send_turn fail immediately.
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let client = test_client_with_base_url(format!("http://127.0.0.1:{}", port));
+        let mut agent = Agent::default(client);
+
+        let pidfile = unique_pidfile("error");
+        let _ = std::fs::remove_file(&pidfile);
+        let cmd = format!("echo $$ > {}; exec sleep 300", pidfile.display());
+        agent
+            .tool_runtime
+            .terminal_manager
+            .spawn_background(
+                "bg-error-path".to_string(),
+                Some(&cmd),
+                None,
+                120,
+                40,
+                &agent.tool_runtime.backend,
+            )
+            .await
+            .expect("background session should spawn");
+
+        let pid = wait_for_pidfile(&pidfile).await;
+        assert!(process_alive(pid), "background process should be running");
+
+        let result = agent.send("hello").await;
+        assert!(result.is_err(), "send should fail with connect error");
+
+        assert!(
+            agent
+                .tool_runtime
+                .terminal_manager
+                .get("bg-error-path")
+                .await
+                .is_none(),
+            "background session should be removed on the error path"
+        );
+        assert_process_dies(pid).await;
+
+        let _ = std::fs::remove_file(&pidfile);
     }
 
     #[test]
