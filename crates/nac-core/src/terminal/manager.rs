@@ -167,9 +167,6 @@ impl TerminalManager {
     /// SIGTERM descendants + process group → 500ms grace → SIGKILL → reap).
     /// Returns `Ok(true)` if the process was still alive when the kill was
     /// issued, `Ok(false)` if it had already exited.
-    // TODO(background-exec tool layer): remove this allow once the tool wires
-    // in session killing.
-    #[allow(dead_code)]
     pub async fn kill_session(&self, name: &str) -> Result<bool> {
         let session = {
             let mut sessions = self.sessions.lock().await;

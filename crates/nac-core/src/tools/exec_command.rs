@@ -25,7 +25,15 @@ Use tty=true for:\n\
 (cd into a directory, set env vars, then run commands)\n\
 - When you need more than one command in the same shell session\n\n\
 When tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.\n\n\
-When tty=true, you get a session_name back. Use write_stdin to continue interacting with that session."
+When tty=true, you get a session_name back. Use write_stdin to continue interacting with that session.\n\n\
+Use background=true for long-running processes like dev servers, watchers, or `python3 -m http.server`: \
+the command starts in a persistent PTY session and this call returns immediately with the session id — \
+it does NOT wait for output. Typical run-server-then-test flow: \
+1) exec_command with background=true to start the server, \
+2) write_stdin with empty chars to poll its output until it is ready, \
+3) run one-shot exec_command calls (curl, tests, etc.) against it, \
+4) kill_shell with the session id to stop it. \
+The background session stays alive across tool calls until killed; write_stdin can also send it interactive input."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -33,6 +41,7 @@ When tty=true, you get a session_name back. Use write_stdin to continue interact
                     "cmd": { "type": "string", "description": "Shell command to execute" },
                     "workdir": { "type": "string", "description": "Working directory for the command (default: project root)" },
                     "tty": { "type": "boolean", "description": "Use false as the bash tool for one-shot shell commands; use true for an interactive/persistent PTY session (default: false)" },
+                    "background": { "type": "boolean", "description": "Start the command in a persistent background PTY session and return immediately with the session id (default: false). Use for servers and other long-running processes. Poll output with write_stdin (empty chars), stop with kill_shell. Overrides tty." },
                     "yield_time_ms": { "type": "number", "description": "For tty=false, command timeout in milliseconds (default: 30000, max: 3600000 = 1 hour). For tty=true, maximum time to wait for terminal output without killing the session (default: 500, max: 3600000)." },
                     "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000, head-tail truncated if exceeded)" }
                 },
@@ -46,6 +55,10 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result
     let manager = &runtime.terminal_manager;
     let cmd = require_str(args, "cmd")?;
     let tty = args.get("tty").and_then(|v| v.as_bool()).unwrap_or(false);
+    let background = args
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let default_yield_ms = if tty { 500 } else { 30_000 };
     let yield_ms = clamp_yield(
         args.get("yield_time_ms")
@@ -57,6 +70,25 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result
         .and_then(|v| v.as_u64())
         .unwrap_or(8000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
+
+    if background {
+        let session_name = make_session_name();
+        let info = manager
+            .spawn_background(
+                session_name.clone(),
+                Some(&cmd),
+                cwd,
+                120,
+                40,
+                &runtime.backend,
+            )
+            .await?;
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "session_name": info.name,
+            "background": true,
+            "hint": "Command started in a background session. Poll output with write_stdin (empty chars); send input the same way; stop it with kill_shell.",
+        }))?);
+    }
 
     if !tty {
         let output = manager
@@ -100,8 +132,11 @@ pub fn write_stdin_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "write_stdin".to_string(),
-            description: "Send input to a persistent terminal session created by exec_command with tty=true. \
+            description: "Send input to a persistent terminal session created by exec_command with tty=true or background=true. \
 Also use this to poll for output by sending empty input.\n\n\
+Calling write_stdin with empty chars is the canonical way to check on a background session: it returns \
+whatever output the session has produced, or the exit_code (with session_name=null) if the process has ended. \
+Poll a background server this way until it reports ready before running commands against it.\n\n\
 Supports key notation: <RET> (Enter), <C-c> (Ctrl+C), <C-d> (Ctrl+D), <TAB>, <BSPC> (Backspace), \
 <UP>/<DOWN>/<LEFT>/<RIGHT>."
                 .to_string(),
@@ -109,7 +144,7 @@ Supports key notation: <RET> (Enter), <C-c> (Ctrl+C), <C-d> (Ctrl+D), <TAB>, <BS
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
-                    "chars": { "type": "string", "description": "Input to send to the terminal. Supports key notation: <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, <UP>/<DOWN>/<LEFT>/<RIGHT>. Leave empty to just poll for output." },
+                    "chars": { "type": "string", "description": "Input to send to the terminal. Supports key notation: <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, <UP>/<DOWN>/<LEFT>/<RIGHT>. Leave empty to just poll for output — the canonical output check for background sessions." },
                     "yield_time_ms": { "type": "number", "description": "Maximum time to wait for output in milliseconds (default: 500, max: 3600000 = 1 hour)" },
                     "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000)" }
                 },
@@ -144,6 +179,80 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> Result<
         .write_stdin(&session_id, chars, yield_ms, max_output)
         .await?;
     Ok(serde_json::to_string_pretty(&output)?)
+}
+
+// ============================================================================
+// kill_shell
+// ============================================================================
+
+pub fn kill_shell_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "kill_shell".to_string(),
+            description:
+                "Kill a terminal session created by exec_command (background=true or tty=true). \
+Terminates the session's whole process tree and returns whether it was still running, \
+plus a final tail of its output.\n\n\
+This is the cleanup step of the run-server-then-test flow: start a server with \
+exec_command background=true, poll it with write_stdin (empty chars), test against it \
+with one-shot exec_command calls, then kill_shell its session id when done.\n\n\
+Killing is idempotent: calling kill_shell on a session that already exited or was \
+already killed reports was_running=false instead of erroring."
+                    .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
+                    "max_output_chars": { "type": "number", "description": "Maximum characters of final output to return (default: 8000, head-tail truncated if exceeded)" }
+                },
+                "required": ["session_id"]
+            }),
+        },
+    }
+}
+
+pub async fn execute_kill_shell(args: &Value, runtime: &ToolRuntime) -> Result<String> {
+    let manager = &runtime.terminal_manager;
+    let session_id = require_str(args, "session_id")?;
+    let max_output = args
+        .get("max_output_chars")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(8000) as usize;
+
+    if manager.get(&session_id).await.is_none() {
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "session_name": session_id,
+            "was_running": false,
+            "output": "",
+            "note": "session not found - it already exited or was already killed",
+        }))?);
+    }
+
+    // Grab a final output tail before killing.
+    let polled = manager
+        .write_stdin(&session_id, "", 100, max_output)
+        .await?;
+
+    if polled.session_name.is_none() {
+        // The process had already exited; the poll reaped it and removed the
+        // entry, so there is nothing left to kill.
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "session_name": session_id,
+            "was_running": false,
+            "output": polled.output,
+            "output_truncated": polled.output_truncated,
+            "exit_code": polled.exit_code,
+        }))?);
+    }
+
+    let was_running = manager.kill_session(&session_id).await?;
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "session_name": session_id,
+        "was_running": was_running,
+        "output": polled.output,
+        "output_truncated": polled.output_truncated,
+    }))?)
 }
 
 // ============================================================================
@@ -443,6 +552,226 @@ mod tests {
         assert!(result.is_ok(), "error: {:?}", result.err());
         let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert!(parsed["session_name"].is_string());
+    }
+
+    // ------------------------------------------------------------------
+    // background exec + kill_shell
+    // ------------------------------------------------------------------
+
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    #[tokio::test]
+    async fn exec_command_background_returns_immediately_while_command_runs() {
+        let runtime = test_runtime();
+        let start = std::time::Instant::now();
+        let output = execute_exec_command(
+            &json!({ "cmd": "sleep 30", "background": true, "yield_time_ms": 30000 }),
+            &runtime,
+        )
+        .await
+        .unwrap();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "background exec blocked instead of returning immediately"
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        let session = parsed["session_name"].as_str().unwrap().to_string();
+        assert!(session.starts_with("shell-"), "got: {}", session);
+        assert_eq!(parsed["background"].as_bool(), Some(true));
+        assert!(parsed["hint"].as_str().unwrap().contains("kill_shell"));
+
+        // The command is still running: the session exists and is alive.
+        let info = runtime.terminal_manager.get(&session).await.unwrap();
+        assert!(info.alive, "background command should still be running");
+
+        runtime.terminal_manager.kill_session(&session).await.ok();
+    }
+
+    #[tokio::test]
+    async fn background_server_serves_one_shot_request_then_kill_shell_stops_it() {
+        let runtime = test_runtime();
+        let port = free_port();
+
+        // 1. Start the server in the background.
+        let output = execute_exec_command(
+            &json!({
+                "cmd": format!("python3 -m http.server {} --bind 127.0.0.1", port),
+                "background": true
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        let session = parsed["session_name"].as_str().unwrap().to_string();
+
+        // 2. Poll with empty-input write_stdin until the server reports ready.
+        let mut ready = false;
+        for _ in 0..50 {
+            let poll = execute_write_stdin(
+                &json!({ "session_id": session, "chars": "", "yield_time_ms": 200 }),
+                &runtime,
+            )
+            .await
+            .unwrap();
+            let poll: Value = serde_json::from_str(&poll).unwrap();
+            assert!(
+                poll["session_name"].is_string(),
+                "server died during startup: {}",
+                poll
+            );
+            if poll["output"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Serving HTTP")
+            {
+                ready = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(ready, "server never reported ready");
+
+        // 3. A one-shot exec succeeds against the live background server.
+        let curl = execute_exec_command(
+            &json!({
+                "cmd": format!("curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{}/", port),
+                "tty": false,
+                "yield_time_ms": 10000
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap();
+        let curl: Value = serde_json::from_str(&curl).unwrap();
+        assert_eq!(curl["exit_code"].as_i64(), Some(0), "got: {}", curl);
+        assert!(
+            curl["output"].as_str().unwrap().contains("200"),
+            "got: {}",
+            curl
+        );
+
+        // 4. kill_shell terminates the server and reports it was running.
+        let killed = execute_kill_shell(&json!({ "session_id": session }), &runtime)
+            .await
+            .unwrap();
+        let killed: Value = serde_json::from_str(&killed).unwrap();
+        assert_eq!(
+            killed["was_running"].as_bool(),
+            Some(true),
+            "got: {}",
+            killed
+        );
+        // The final tail contains output produced since the last poll —
+        // here, the server's log line for the curl request above.
+        assert!(
+            killed["output"].as_str().unwrap().contains("GET /"),
+            "final tail missing server output: {}",
+            killed
+        );
+
+        // The port is actually free again (server really died).
+        let mut freed = false;
+        for _ in 0..20 {
+            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                freed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(freed, "port still bound after kill_shell");
+
+        // 5. A second kill_shell reports not-running instead of erroring.
+        let second = execute_kill_shell(&json!({ "session_id": session }), &runtime)
+            .await
+            .unwrap();
+        let second: Value = serde_json::from_str(&second).unwrap();
+        assert_eq!(
+            second["was_running"].as_bool(),
+            Some(false),
+            "got: {}",
+            second
+        );
+    }
+
+    #[tokio::test]
+    async fn kill_shell_on_exited_session_reports_not_running() {
+        let runtime = test_runtime();
+        let output =
+            execute_exec_command(&json!({ "cmd": "exit 3", "background": true }), &runtime)
+                .await
+                .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        let session = parsed["session_name"].as_str().unwrap().to_string();
+
+        // Wait for the shell to exit.
+        let mut gone = false;
+        for _ in 0..50 {
+            match runtime.terminal_manager.get(&session).await {
+                None => {
+                    gone = true;
+                    break;
+                }
+                Some(info) if !info.alive => break,
+                _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+            }
+        }
+
+        let killed = execute_kill_shell(&json!({ "session_id": session }), &runtime)
+            .await
+            .unwrap();
+        let killed: Value = serde_json::from_str(&killed).unwrap();
+        assert_eq!(
+            killed["was_running"].as_bool(),
+            Some(false),
+            "gone={} got: {}",
+            gone,
+            killed
+        );
+    }
+
+    #[tokio::test]
+    async fn kill_shell_missing_session_id_fails() {
+        assert!(execute_kill_shell(&json!({}), &test_runtime())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn kill_shell_definition_shape() {
+        let def = kill_shell_definition();
+        assert_eq!(def.function.name, "kill_shell");
+        let required = def
+            .function
+            .parameters
+            .get("required")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert!(required.iter().any(|v| v.as_str() == Some("session_id")));
+        assert!(def.function.description.contains("background=true"));
+    }
+
+    #[tokio::test]
+    async fn exec_command_foreground_unaffected_by_background_default() {
+        // background defaults to false: one-shot output shape is unchanged.
+        let output = execute_exec_command(
+            &json!({ "cmd": "echo fg-check", "tty": false, "yield_time_ms": 2000 }),
+            &test_runtime(),
+        )
+        .await
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed["output"].as_str().unwrap().contains("fg-check"));
+        assert_eq!(parsed["exit_code"].as_i64(), Some(0));
+        assert!(parsed["session_name"].is_null());
+        assert!(parsed.get("background").is_none() || parsed["background"].is_null());
+        assert!(parsed.get("hint").is_none() || parsed["hint"].is_null());
     }
 
     // ------------------------------------------------------------------
