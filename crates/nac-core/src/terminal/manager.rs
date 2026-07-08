@@ -68,9 +68,6 @@ impl TerminalManager {
     /// alive. The PTY child runs in its own session/process group (portable_pty
     /// calls setsid on spawn) and the command is built via the sandbox
     /// backend's `terminal_pty_command`, so podman/smolvm/ssh keep working.
-    // TODO(background-exec tool layer): remove this allow once the tool wires
-    // in background spawning.
-    #[allow(dead_code)]
     pub async fn spawn_background(
         &self,
         name: String,
