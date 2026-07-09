@@ -151,7 +151,7 @@ textarea {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-rows: auto minmax(44px, 1fr) auto;
+  grid-template-rows: minmax(44px, 1fr);
   place-items: center;
   gap: var(--space-md);
   min-width: 0;
@@ -208,25 +208,6 @@ textarea {
   inset: 7px 3px;
   border-left: 1px solid var(--muted);
   border-right: 1px solid var(--muted);
-}
-
-.splitter-button {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  padding: 0;
-  border-radius: var(--radius-md);
-  color: var(--muted);
-}
-
-.splitter-button .icon {
-  width: 15px;
-  height: 15px;
-}
-
-.splitter-button:focus-visible {
-  box-shadow: var(--neu-pressed), 0 0 0 2px var(--highlight);
 }
 
 body.inspector-fullscreen .app-shell {
@@ -633,41 +614,80 @@ body.inspector-fullscreen .inspector {
   box-shadow: 0 0 0 2px var(--highlight);
 }
 
-.session-card-actions,
-.session-position-actions {
+.session-card-controls {
+  position: absolute;
+  z-index: 1;
+  top: var(--space-md);
+  right: var(--space-md);
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
+  pointer-events: none;
 }
 
-.session-card-actions {
-  justify-content: space-between;
-  margin-top: var(--space-md);
-}
-
-.session-position-actions {
-  margin-left: auto;
+.session-card-controls .status-dot {
+  flex: 0 0 auto;
+  margin-right: var(--space-2xs);
 }
 
 .session-card-action {
   display: grid;
-  width: var(--button-size-compact);
-  height: var(--button-size-compact);
+  width: 28px;
+  height: 28px;
   place-items: center;
   flex: 0 0 auto;
   padding: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  box-shadow: none;
   color: var(--muted);
+  pointer-events: auto;
+  transition: color 120ms ease, background-color 120ms ease, box-shadow 120ms ease, transform 80ms ease;
 }
 
-.session-card-action:hover,
-.session-card-action:focus-visible {
+.session-card-action .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.session-card-action:hover {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: none;
   color: var(--text);
+}
+
+.session-card-action:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 2px var(--highlight);
+  color: var(--text);
+}
+
+.session-card-action:active {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  transform: scale(0.9);
+}
+
+.session-card-action:disabled {
+  cursor: default;
+  opacity: 0.38;
+  transform: none;
 }
 
 .session-pin-button[aria-pressed="true"] {
-  color: var(--text);
-  box-shadow: var(--neu-pressed), 0 0 0 1px rgba(255, 255, 255, 0.18);
+  background: transparent;
+  box-shadow: none;
+  color: var(--amber);
+}
+
+.session-pin-button[aria-pressed="true"]:hover,
+.session-pin-button[aria-pressed="true"]:focus-visible {
+  background: rgba(232, 168, 56, 0.2);
+  color: var(--amber);
+}
+
+.session-pin-button[aria-pressed="true"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--highlight);
 }
 
 .reorder-handle {
@@ -801,10 +821,9 @@ button.session-card {
 }
 
 .session-card-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-md);
+  display: block;
   min-width: 0;
+  padding-right: 78px;
 }
 
 .session-card-head > div {
@@ -2092,6 +2111,27 @@ button.session-card {
 
   .launch-submit {
     justify-self: start;
+  }
+}
+
+/* Keep narrow/touch cards readable while retaining generous invisible icon targets. */
+@media (max-width: 767px), (pointer: coarse) {
+  .session-card-head {
+    padding-right: 0;
+  }
+
+  .session-card-select {
+    padding-bottom: 44px;
+  }
+
+  .session-card-controls {
+    top: auto;
+    bottom: var(--space-md);
+  }
+
+  .session-card-action {
+    width: 40px;
+    height: 40px;
   }
 }
 

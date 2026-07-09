@@ -70,7 +70,6 @@ const PANE_DESKTOP_QUERY = "(min-width: 1180px)";
 const PANE_BOARD_MIN_PX = 340;
 const PANE_INSPECTOR_MIN_PX = 420;
 const PANE_KEYBOARD_STEP = 0.02;
-const PANE_BUTTON_STEP = 0.05;
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -122,8 +121,6 @@ function bindElements() {
     "sessionInspector",
     "paneSplitter",
     "paneSeparator",
-    "narrowBoardBtn",
-    "widenBoardBtn",
     "inspectorTitle",
     "inspectorMeta",
     "cancelRun",
@@ -225,8 +222,6 @@ function bindEvents() {
 
   el.paneSeparator.addEventListener("pointerdown", handlePanePointerDown);
   el.paneSeparator.addEventListener("keydown", handlePaneKeydown);
-  el.narrowBoardBtn.addEventListener("click", () => adjustPaneRatio(-PANE_BUTTON_STEP));
-  el.widenBoardBtn.addEventListener("click", () => adjustPaneRatio(PANE_BUTTON_STEP));
   document.addEventListener("pointermove", handlePanePointerMove);
   document.addEventListener("pointerup", handlePanePointerUp);
   document.addEventListener("pointercancel", handlePanePointerCancel);
@@ -1467,7 +1462,6 @@ function renderSessionCard(card, index, count) {
             <h2>${escapeHtml(card.displayTitle)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true"><title>sandbox active</title><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true"><title>ssh: ${escapeHtml(card.sshHost)}</title><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
             <div class="cwd">${escapeHtml(card.cwd)}</div>
           </div>
-          <span class="status-dot ${card.statusClass}" aria-hidden="true"></span>
         </div>
         <div class="telemetry-grid">
           <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
@@ -1476,21 +1470,14 @@ function renderSessionCard(card, index, count) {
         </div>
         <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
       </button>
-      <div class="session-card-actions">
+      <div class="session-card-controls">
+        <span class="status-dot ${card.statusClass}" aria-hidden="true"></span>
         <button class="session-card-action session-pin-button" data-action="toggle-pin" type="button" aria-label="${escapeAttr(pinLabel)}" title="${escapeAttr(pinLabel)} — ${escapeAttr(card.sessionId)}" aria-pressed="${card.pinned}"${busy}>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-3 1-4 4-1 5-2-2-4 4-1-1 4-4-2-2 5-1 4-4Z"></path></svg>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg>
         </button>
         <button class="session-card-action reorder-handle" data-action="reorder-handle" type="button" aria-label="Reorder ${escapeAttr(card.displayTitle)} in ${groupLabel}; position ${index + 1} of ${count}" title="Reorder ${escapeAttr(card.displayTitle)} — ${escapeAttr(card.sessionId)}" aria-describedby="reorderInstructions"${busy}>
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg>
         </button>
-        <div class="session-position-actions">
-          <button class="session-card-action" data-action="move-earlier" type="button" aria-label="Move ${escapeAttr(card.displayTitle)} earlier" title="Move earlier"${busy}${index === 0 ? " disabled" : ""}>
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5"></path></svg>
-          </button>
-          <button class="session-card-action" data-action="move-later" type="button" aria-label="Move ${escapeAttr(card.displayTitle)} later" title="Move later"${busy}${index === count - 1 ? " disabled" : ""}>
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
-          </button>
-        </div>
       </div>
     </article>`;
 }
@@ -1516,8 +1503,6 @@ function handleSessionGridClick(event) {
     selectSession(sessionId);
   } else if (action === "toggle-pin" && sessionId) {
     toggleSessionPin(sessionId, actionTarget);
-  } else if ((action === "move-earlier" || action === "move-later") && sessionId) {
-    moveSessionByButton(sessionId, action === "move-earlier" ? -1 : 1);
   }
 }
 
@@ -1704,11 +1689,6 @@ function sessionCardElement(sessionId) {
     .find((card) => card.dataset.sessionId === sessionId) || null;
 }
 
-function sessionGroupGridForPinned(pinned) {
-  return Array.from(el.sessionGrid.querySelectorAll(".session-card-grid"))
-    .find((grid) => grid.dataset.pinned === String(Boolean(pinned))) || null;
-}
-
 function sessionGroupGridForCard(card) {
   return card?.closest(".session-card-grid") || null;
 }
@@ -1809,41 +1789,6 @@ function commitKeyboardSessionReorder() {
   cleanupSessionReorderDom(reorder, false);
   reorder.kind = "committing";
   submitSessionOrder(reorder, ids);
-}
-
-async function moveSessionByButton(sessionId, delta) {
-  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
-  const summary = currentSessionSummary(sessionId);
-  if (!summary) return;
-  const pinned = Boolean(summary.pinned);
-  const originalIds = sessionGroupIds(pinned);
-  const index = originalIds.indexOf(sessionId);
-  const nextIndex = clampInt(index + delta, 0, originalIds.length - 1);
-  if (index < 0 || nextIndex === index) return;
-  const ids = originalIds.slice();
-  ids.splice(index, 1);
-  ids.splice(nextIndex, 0, sessionId);
-  const grid = sessionGroupGridForPinned(pinned);
-  const reorder = {
-    kind: "committing",
-    sessionId,
-    pinned,
-    originalIds,
-    currentIds: ids,
-    grid,
-    card: sessionCardElement(sessionId),
-  };
-  state.sessionsLoadGeneration += 1;
-  state.sessionReorder = reorder;
-  if (grid) {
-    reorderGroupCardsDom(grid, ids);
-    updateGroupCardPositionControls(grid);
-    grid.classList.add("is-reordering");
-  }
-  reorder.card?.classList.add("is-reordering");
-  document.body.classList.add("session-reordering");
-  announceReorder(sessionPositionAnnouncement(sessionId, nextIndex, ids.length, pinned, "Saving."));
-  await submitSessionOrder(reorder, ids);
 }
 
 function handleSessionPointerDown(event) {
@@ -2084,10 +2029,6 @@ function updateGroupCardPositionControls(grid) {
     if (handle) {
       handle.setAttribute("aria-label", `Reorder ${title} in ${pinned ? "pinned sessions" : "sessions"}; position ${index + 1} of ${cards.length}`);
     }
-    const earlier = card.querySelector("[data-action='move-earlier']");
-    const later = card.querySelector("[data-action='move-later']");
-    if (earlier) earlier.disabled = index === 0;
-    if (later) later.disabled = index === cards.length - 1;
   });
 }
 
@@ -2227,8 +2168,6 @@ function syncPaneSplitter() {
   const usable = paneSplitterIsUsable();
   el.paneSeparator.tabIndex = usable ? 0 : -1;
   el.paneSeparator.setAttribute("aria-disabled", String(!usable));
-  el.narrowBoardBtn.disabled = !usable;
-  el.widenBoardBtn.disabled = !usable;
   if (usable) applyPaneRatio(state.paneRatio);
 }
 
@@ -2247,8 +2186,6 @@ function applyPaneRatio(ratio) {
   el.paneSeparator.setAttribute("aria-valuemax", String(maxPercent));
   el.paneSeparator.setAttribute("aria-valuenow", String(valuePercent));
   el.paneSeparator.setAttribute("aria-valuetext", `${valuePercent}% session matrix width`);
-  el.narrowBoardBtn.disabled = nextRatio <= metrics.minRatio + 0.001;
-  el.widenBoardBtn.disabled = nextRatio >= metrics.maxRatio - 0.001;
 }
 
 function adjustPaneRatio(delta) {
