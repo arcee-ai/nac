@@ -222,7 +222,7 @@ impl ModelClient {
                 serde_json::to_value(&tools).unwrap_or_else(|_| Value::Array(Vec::new()));
         }
 
-        let value = self.post_json_with_retry(&url, &request).await?;
+        let value = self.post_arcee_json_with_retry(&url, &request).await?;
         parse_chat_completions_response(&value, &url)
     }
 
@@ -284,6 +284,16 @@ impl ModelClient {
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {}", api_key))
+        })
+        .await
+    }
+
+    async fn post_arcee_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+        let api_key = self.api_key.as_str();
+        self.post_json_with_retry_headers(url, body, |request| {
+            request
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("X-Arcee-Client", "nac-cli")
         })
         .await
     }
