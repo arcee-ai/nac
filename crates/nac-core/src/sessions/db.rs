@@ -124,47 +124,335 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
     let conn = crate::store::open_connection(path)?;
-    let mut stmt = conn.prepare(
-        "SELECT session_id, cwd, model, base_url, backend, sandbox_json, messages_json, created_at, updated_at, host_id
-         FROM sessions
-         ORDER BY updated_at DESC, created_at DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, String>(6)?,
-            row.get::<_, String>(7)?,
-            row.get::<_, String>(8)?,
-            row.get::<_, Option<String>>(9)?,
-        ))
+    query_session_summaries(&conn, None)
+}
+
+pub fn update_session_presentation(
+    path: &Path,
+    session_id: &str,
+    title: &str,
+    pinned: bool,
+    expected_version: i64,
+) -> std::result::Result<SessionSummary, SessionPresentationError> {
+    let title = normalize_presentation_title(title)?;
+    if expected_version < 0 {
+        return Err(SessionPresentationError::InvalidInput(
+            "expected_version must not be negative".to_string(),
+        ));
+    }
+
+    let mut conn = crate::store::open_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let current = tx
+        .query_row(
+            "SELECT COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             WHERE s.session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? != 0,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((current_pinned, current_sort_order, current_version)) = current else {
+        return Err(SessionPresentationError::NotFound(format!(
+            "session '{session_id}' was not found"
+        )));
+    };
+    if current_version != expected_version {
+        return Err(SessionPresentationError::Conflict(format!(
+            "session '{session_id}' presentation version changed (expected {expected_version}, found {current_version})"
+        )));
+    }
+
+    let sort_order = if current_pinned == pinned {
+        current_sort_order
+    } else {
+        let maximum: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(COALESCE(p.sort_order, 0)), -1)
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             WHERE s.session_id <> ?1 AND COALESCE(p.pinned, 0) = ?2",
+            params![session_id, i64::from(pinned)],
+            |row| row.get(0),
+        )?;
+        maximum.checked_add(1).ok_or_else(|| {
+            SessionPresentationError::Store(anyhow!("session presentation order overflow"))
+        })?
+    };
+    let next_version = current_version.checked_add(1).ok_or_else(|| {
+        SessionPresentationError::Store(anyhow!("session presentation version overflow"))
     })?;
 
-    let mut sessions = Vec::new();
-    for row in rows {
-        let (
+    tx.execute(
+        "INSERT INTO session_presentations (session_id, title, pinned, sort_order, version)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(session_id) DO UPDATE SET
+             title = excluded.title,
+             pinned = excluded.pinned,
+             sort_order = excluded.sort_order,
+             version = excluded.version",
+        params![
             session_id,
-            cwd,
-            model,
-            base_url,
-            backend_raw,
-            sandbox_json,
-            messages_json,
-            created_at,
-            updated_at,
-            ssh_host,
-        ) = row?;
-        let backend = parse_backend(backend_raw, &base_url)?;
-        let cwd = PathBuf::from(cwd);
-        let sandbox_spec = deserialize_sandbox(sandbox_json)?;
+            title,
+            i64::from(pinned),
+            sort_order,
+            next_version
+        ],
+    )?;
+
+    let summary = query_session_summary(&tx, session_id)?.ok_or_else(|| {
+        SessionPresentationError::Store(anyhow!(
+            "session '{session_id}' disappeared during presentation update"
+        ))
+    })?;
+    tx.commit()?;
+    Ok(summary)
+}
+
+pub fn reorder_sessions(
+    path: &Path,
+    pinned: bool,
+    session_ids: &[String],
+    expected_versions: &BTreeMap<String, i64>,
+) -> std::result::Result<Vec<SessionSummary>, SessionPresentationError> {
+    let mut submitted_ids = HashSet::with_capacity(session_ids.len());
+    for session_id in session_ids {
+        if session_id.trim().is_empty() {
+            return Err(SessionPresentationError::InvalidInput(
+                "session IDs must not be blank".to_string(),
+            ));
+        }
+        if !submitted_ids.insert(session_id.as_str()) {
+            return Err(SessionPresentationError::InvalidInput(format!(
+                "duplicate session ID '{session_id}'"
+            )));
+        }
+    }
+    if expected_versions.values().any(|version| *version < 0) {
+        return Err(SessionPresentationError::InvalidInput(
+            "expected presentation versions must not be negative".to_string(),
+        ));
+    }
+    if expected_versions.len() != session_ids.len()
+        || session_ids
+            .iter()
+            .any(|session_id| !expected_versions.contains_key(session_id))
+    {
+        return Err(SessionPresentationError::InvalidInput(
+            "expected_versions keys must exactly match session_ids".to_string(),
+        ));
+    }
+
+    let mut conn = crate::store::open_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let mut current_versions = BTreeMap::new();
+    for session_id in session_ids {
+        let current = tx
+            .query_row(
+                "SELECT COALESCE(p.pinned, 0), COALESCE(p.version, 0)
+                 FROM sessions s
+                 LEFT JOIN session_presentations p ON p.session_id = s.session_id
+                 WHERE s.session_id = ?1",
+                params![session_id],
+                |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        let Some((current_pinned, current_version)) = current else {
+            return Err(SessionPresentationError::NotFound(format!(
+                "session '{session_id}' was not found"
+            )));
+        };
+        if current_pinned != pinned {
+            return Err(SessionPresentationError::Conflict(format!(
+                "session '{session_id}' is not in the requested pin group"
+            )));
+        }
+        current_versions.insert(session_id.clone(), current_version);
+    }
+
+    let authoritative_ids = {
+        let mut stmt = tx.prepare(
+            "SELECT s.session_id
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             WHERE COALESCE(p.pinned, 0) = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![i64::from(pinned)], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    if authoritative_ids.len() != session_ids.len()
+        || authoritative_ids
+            .iter()
+            .any(|session_id| !submitted_ids.contains(session_id.as_str()))
+    {
+        return Err(SessionPresentationError::Conflict(
+            "session group membership changed".to_string(),
+        ));
+    }
+
+    for session_id in session_ids {
+        let current_version = current_versions[session_id];
+        let expected_version = expected_versions[session_id];
+        if current_version != expected_version {
+            return Err(SessionPresentationError::Conflict(format!(
+                "session '{session_id}' presentation version changed (expected {expected_version}, found {current_version})"
+            )));
+        }
+    }
+
+    for (position, session_id) in session_ids.iter().enumerate() {
+        let sort_order = i64::try_from(position).map_err(|_| {
+            SessionPresentationError::InvalidInput("too many sessions to reorder".to_string())
+        })?;
+        let next_version = current_versions[session_id].checked_add(1).ok_or_else(|| {
+            SessionPresentationError::Store(anyhow!("session presentation version overflow"))
+        })?;
+        tx.execute(
+            "INSERT INTO session_presentations (session_id, pinned, sort_order, version)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 pinned = excluded.pinned,
+                 sort_order = excluded.sort_order,
+                 version = excluded.version",
+            params![session_id, i64::from(pinned), sort_order, next_version],
+        )?;
+    }
+
+    let summaries = query_session_summaries(&tx, Some(pinned))?;
+    tx.commit()?;
+    Ok(summaries)
+}
+
+fn normalize_presentation_title(
+    title: &str,
+) -> std::result::Result<Option<String>, SessionPresentationError> {
+    if title.chars().any(char::is_control) {
+        return Err(SessionPresentationError::InvalidInput(
+            "session title must not contain control characters".to_string(),
+        ));
+    }
+    let title = title.trim();
+    if title.chars().count() > 120 {
+        return Err(SessionPresentationError::InvalidInput(
+            "session title must not exceed 120 characters".to_string(),
+        ));
+    }
+    Ok((!title.is_empty()).then(|| title.to_string()))
+}
+
+fn query_session_summary(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<Option<SessionSummary>> {
+    let row = conn
+        .query_row(
+            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
+                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             WHERE s.session_id = ?1",
+            params![session_id],
+            map_session_summary_row,
+        )
+        .optional()?;
+    row.map(SessionSummaryRow::into_summary).transpose()
+}
+
+fn query_session_summaries(
+    conn: &rusqlite::Connection,
+    pinned: Option<bool>,
+) -> Result<Vec<SessionSummary>> {
+    let sql = match pinned {
+        Some(_) => {
+            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
+                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             WHERE COALESCE(p.pinned, 0) = ?1
+             ORDER BY COALESCE(p.pinned, 0) DESC,
+                      COALESCE(p.sort_order, 0) ASC,
+                      s.created_at DESC,
+                      s.session_id DESC"
+        }
+        None => {
+            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
+                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+             FROM sessions s
+             LEFT JOIN session_presentations p ON p.session_id = s.session_id
+             ORDER BY COALESCE(p.pinned, 0) DESC,
+                      COALESCE(p.sort_order, 0) ASC,
+                      s.created_at DESC,
+                      s.session_id DESC"
+        }
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let rows = match pinned {
+        Some(pinned) => stmt
+            .query_map(params![i64::from(pinned)], map_session_summary_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        None => stmt
+            .query_map([], map_session_summary_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+    };
+    rows.into_iter()
+        .map(SessionSummaryRow::into_summary)
+        .collect()
+}
+
+fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummaryRow> {
+    Ok(SessionSummaryRow {
+        session_id: row.get(0)?,
+        cwd: row.get(1)?,
+        model: row.get(2)?,
+        base_url: row.get(3)?,
+        backend_raw: row.get(4)?,
+        sandbox_json: row.get(5)?,
+        messages_json: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        ssh_host: row.get(9)?,
+        title: row.get(10)?,
+        pinned: row.get::<_, i64>(11)? != 0,
+        sort_order: row.get(12)?,
+        presentation_version: row.get(13)?,
+    })
+}
+
+struct SessionSummaryRow {
+    session_id: String,
+    cwd: String,
+    model: String,
+    base_url: String,
+    backend_raw: Option<String>,
+    sandbox_json: Option<String>,
+    messages_json: String,
+    created_at: String,
+    updated_at: String,
+    ssh_host: Option<String>,
+    title: Option<String>,
+    pinned: bool,
+    sort_order: i64,
+    presentation_version: i64,
+}
+
+impl SessionSummaryRow {
+    fn into_summary(self) -> Result<SessionSummary> {
+        let backend = parse_backend(self.backend_raw, &self.base_url)?;
+        let cwd = PathBuf::from(self.cwd);
+        let sandbox_spec = deserialize_sandbox(self.sandbox_json)?;
         let sandboxed = sandbox_spec.is_some();
-        let workspace_host_path = if ssh_host.is_some() {
-            // Remote session: the stored cwd lives on the remote host, so
-            // there is no local path for host-side inspection (git stats).
+        let workspace_host_path = if self.ssh_host.is_some() {
             None
         } else {
             match sandbox_spec.as_ref() {
@@ -172,24 +460,26 @@ pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
                 None => Some(cwd.clone()),
             }
         };
-        let messages: Vec<Message> = serde_json::from_str(&messages_json)
+        let messages: Vec<Message> = serde_json::from_str(&self.messages_json)
             .context("failed to parse stored session messages")?;
-        sessions.push(SessionSummary {
-            session_id,
+        Ok(SessionSummary {
+            session_id: self.session_id,
             cwd,
             workspace_host_path,
-            model,
+            model: self.model,
             backend,
             visible_message_count: visible_message_count(&messages),
             last_user_prompt: last_user_prompt(&messages),
             sandboxed,
-            ssh_host,
-            created_at,
-            updated_at,
-        });
+            ssh_host: self.ssh_host,
+            title: self.title,
+            pinned: self.pinned,
+            sort_order: self.sort_order,
+            presentation_version: self.presentation_version,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        })
     }
-
-    Ok(sessions)
 }
 
 fn insert_or_replace_session(
@@ -213,14 +503,18 @@ fn insert_or_replace_session(
     let extra_headers_json = if snapshot.extra_headers.is_empty() {
         None
     } else {
-        Some(serde_json::to_string(&snapshot.extra_headers)
-            .context("failed to serialize session extra_headers")?)
+        Some(
+            serde_json::to_string(&snapshot.extra_headers)
+                .context("failed to serialize session extra_headers")?,
+        )
     };
     let token_usages_json = if snapshot.token_usages.is_empty() {
         None
     } else {
-        Some(serde_json::to_string(&snapshot.token_usages)
-            .context("failed to serialize session token usages")?)
+        Some(
+            serde_json::to_string(&snapshot.token_usages)
+                .context("failed to serialize session token usages")?,
+        )
     };
 
     // The legacy `store_path` column is kept physically (NOT NULL in existing

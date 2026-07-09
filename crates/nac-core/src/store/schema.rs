@@ -20,6 +20,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
 
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA journal_mode = WAL;
@@ -86,6 +87,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
              token_usages_json TEXT,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS session_presentations (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             title TEXT,
+             pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+             sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
          );
          CREATE INDEX IF NOT EXISTS idx_episodes_thread_session_created
              ON episodes(thread_name, session_id, id);
