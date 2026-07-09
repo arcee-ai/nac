@@ -30,7 +30,15 @@ impl ModelClient {
             .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
         let backend = match requested_backend {
             BackendKind::Auto => {
-                if explicit_base_url.is_none() && arcee::stored_auth_present()? {
+                let prefer_arcee = explicit_base_url.is_none()
+                    && match arcee::stored_auth_present() {
+                        Ok(present) => present,
+                        Err(error) => {
+                            eprintln!("nac: ignoring unreadable Arcee auth: {error:#}");
+                            false
+                        }
+                    };
+                if prefer_arcee {
                     BackendKind::Arcee
                 } else {
                     let probe = explicit_base_url.clone().unwrap_or_else(|| {
