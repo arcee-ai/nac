@@ -163,6 +163,21 @@ mod tests {
             detect_backend("https://api.together.ai/v1").unwrap(),
             BackendKind::TogetherChat
         );
+        assert_eq!(
+            detect_backend("https://api.arcee.ai").unwrap(),
+            BackendKind::Arcee
+        );
+        assert_eq!(
+            detect_backend("https://api.internal.arcee.ai").unwrap(),
+            BackendKind::Arcee
+        );
+        assert_eq!(
+            detect_backend("https://arcee.ai").unwrap(),
+            BackendKind::Arcee
+        );
+        assert!(detect_backend("https://arcee.ai.evil.com/v1").is_err());
+        assert!(detect_backend("https://evil-arcee.ai.attacker.com/v1").is_err());
+        assert!(detect_backend("https://notarcee.ai").is_err());
         assert!(detect_backend("https://example.com/v1").is_err());
     }
 

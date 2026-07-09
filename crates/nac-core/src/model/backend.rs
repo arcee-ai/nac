@@ -101,7 +101,7 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
         .host_str()
         .ok_or_else(|| anyhow!("OPENAI_BASE_URL '{}' does not include a host", base_url))?;
 
-    if host.contains("arcee.ai") {
+    if host == "arcee.ai" || host.ends_with(".arcee.ai") {
         return Ok(BackendKind::Arcee);
     }
     if host.contains("together.ai") {
