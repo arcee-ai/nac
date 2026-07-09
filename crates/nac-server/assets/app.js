@@ -34,13 +34,27 @@ const state = {
   sessionsLoadIncludesWorkspaceStats: false,
   sessionsLoadQueuedOptions: null,
   sessionsLoadQueuedPromise: null,
+  sessionsLoadGeneration: 0,
   lastSessionsDigest: "",
   lastSelectedSessionDigest: "",
   lastWorkspaceStatsRefresh: 0,
   transcriptRenderedSessionId: null,
   transcriptRenderedSignature: "",
   pendingDeleteSessionId: null,
-  pinnedSessionIds: new Set(),
+  renameSessionId: null,
+  renameDialogGeneration: 0,
+  renameSubmission: null,
+  renameReturnFocus: null,
+  presentationMutations: new Set(),
+  sessionReorder: null,
+  deferredSessionLoadOptions: null,
+  renderSessionsDeferred: false,
+  pendingSessionFocus: null,
+  suppressSessionClickUntil: 0,
+  suppressSessionClickSessionId: null,
+  paneRatio: 0.5,
+  paneResize: null,
+  paneDesktopMedia: null,
 };
 
 const el = {};
@@ -50,6 +64,13 @@ const WORKSPACE_DIFF_CONTEXT = 3;
 const WORKSPACE_FILE_LIMIT = 80;
 const SESSION_POLL_INTERVAL_MS = 5000;
 const SESSION_WORKSPACE_STATS_INTERVAL_MS = 30000;
+const REORDER_DRAG_THRESHOLD_PX = 6;
+const SESSION_TITLE_MAX_CHARS = 120;
+const PANE_DESKTOP_QUERY = "(min-width: 1180px)";
+const PANE_BOARD_MIN_PX = 340;
+const PANE_INSPECTOR_MIN_PX = 420;
+const PANE_KEYBOARD_STEP = 0.02;
+const PANE_BUTTON_STEP = 0.05;
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -70,6 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function bindElements() {
   for (const id of [
     "storePath",
+    "appShell",
     "launchOverlay",
     "closeLaunch",
     "launchForm",
@@ -95,6 +117,13 @@ function bindElements() {
     "eventCount",
     "matrixSubtitle",
     "sessionGrid",
+    "reorderLiveRegion",
+    "sessionBoard",
+    "sessionInspector",
+    "paneSplitter",
+    "paneSeparator",
+    "narrowBoardBtn",
+    "widenBoardBtn",
     "inspectorTitle",
     "inspectorMeta",
     "cancelRun",
@@ -119,6 +148,13 @@ function bindElements() {
     "deleteConfirmText",
     "deleteStatus",
     "deleteSessionBtn",
+    "renameSessionBtn",
+    "renameOverlay",
+    "closeRename",
+    "renameForm",
+    "renameTitleInput",
+    "confirmRename",
+    "renameStatus",
     "fullscreenBtn",
     "fullscreenEnterIcon",
     "fullscreenExitIcon",
@@ -147,6 +183,13 @@ function bindEvents() {
   el.deleteSessionBtn.addEventListener("click", () => {
     if (state.selectedId) deleteSession(state.selectedId);
   });
+  el.renameSessionBtn.addEventListener("click", showRenameOverlay);
+  el.closeRename.addEventListener("click", () => hideRenameOverlay(true));
+  el.renameOverlay.addEventListener("click", (event) => {
+    if (event.target === el.renameOverlay) hideRenameOverlay(true);
+  });
+  el.renameOverlay.addEventListener("keydown", containRenameDialogFocus);
+  el.renameForm.addEventListener("submit", renameSelectedSession);
   el.fullscreenBtn.addEventListener("click", toggleInspectorFullscreen);
   el.settingsBtn.addEventListener("click", showSettingsOverlay);
   el.closeSettings.addEventListener("click", hideSettingsOverlay);
@@ -164,8 +207,54 @@ function bindEvents() {
     if (event.target === el.deleteOverlay) hideDeleteOverlay();
   });
   el.confirmDelete.addEventListener("click", confirmDeleteSession);
+
+  el.sessionGrid.addEventListener("click", handleSessionGridClick);
+  el.sessionGrid.addEventListener("keydown", handleSessionGridKeydown);
+  el.sessionGrid.addEventListener("pointerdown", handleSessionPointerDown);
+  el.sessionGrid.addEventListener("dragstart", (event) => {
+    if (event.target.closest(".reorder-handle")) event.preventDefault();
+  });
+  document.addEventListener("pointermove", handleSessionPointerMove);
+  document.addEventListener("pointerup", handleSessionPointerUp);
+  document.addEventListener("pointercancel", handleSessionPointerCancel);
+  el.sessionGrid.addEventListener("lostpointercapture", handleSessionLostPointerCapture);
+  window.addEventListener("blur", cancelPointerSessionReorder);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") cancelPointerSessionReorder();
+  });
+
+  el.paneSeparator.addEventListener("pointerdown", handlePanePointerDown);
+  el.paneSeparator.addEventListener("keydown", handlePaneKeydown);
+  el.narrowBoardBtn.addEventListener("click", () => adjustPaneRatio(-PANE_BUTTON_STEP));
+  el.widenBoardBtn.addEventListener("click", () => adjustPaneRatio(PANE_BUTTON_STEP));
+  document.addEventListener("pointermove", handlePanePointerMove);
+  document.addEventListener("pointerup", handlePanePointerUp);
+  document.addEventListener("pointercancel", handlePanePointerCancel);
+  state.paneDesktopMedia = window.matchMedia(PANE_DESKTOP_QUERY);
+  const handlePaneMediaChange = () => {
+    cancelPaneResize(true);
+    syncPaneSplitter();
+  };
+  if (typeof state.paneDesktopMedia.addEventListener === "function") {
+    state.paneDesktopMedia.addEventListener("change", handlePaneMediaChange);
+  } else if (typeof state.paneDesktopMedia.addListener === "function") {
+    state.paneDesktopMedia.addListener(handlePaneMediaChange);
+  }
+  window.addEventListener("resize", () => {
+    cancelPaneResize(true);
+    syncPaneSplitter();
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (cancelSessionReorder()) {
+      event.preventDefault();
+      return;
+    }
+    if (!el.renameOverlay.hidden) {
+      hideRenameOverlay(true);
+      return;
+    }
     if (!el.settingsOverlay.hidden) {
       hideSettingsOverlay();
       return;
@@ -194,7 +283,7 @@ function bindEvents() {
 }
 
 async function boot() {
-  state.pinnedSessionIds = new Set(JSON.parse(localStorage.getItem("nac:pinnedSessions") || "[]"));
+  syncPaneSplitter();
   try {
     state.store = await apiGet("/store");
     el.storePath.textContent = basename(state.store.store_path);
@@ -223,6 +312,15 @@ async function apiPost(path, body) {
   return readJson(response);
 }
 
+async function apiPut(path, body) {
+  const response = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
 async function apiDelete(path) {
   const response = await fetch(path, { method: "DELETE" });
   return readJson(response);
@@ -236,13 +334,23 @@ async function readJson(response) {
     payload = {};
   }
   if (!response.ok) {
-    throw new Error(payload.error || `${response.status} ${response.statusText}`);
+    const error = new Error(payload.error || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return payload;
 }
 
 async function loadSessions(options = {}) {
   const loadOptions = normalizeSessionLoadOptions(options);
+  if (sessionReorderInProgress()) {
+    state.deferredSessionLoadOptions = mergeSessionLoadOptions(
+      state.deferredSessionLoadOptions,
+      loadOptions,
+    );
+    return null;
+  }
   if (state.sessionsLoadPromise) {
     const currentIncludesRequestedStats = !loadOptions.workspaceStats || state.sessionsLoadIncludesWorkspaceStats;
     if (!loadOptions.forceFetch && currentIncludesRequestedStats) return joinCurrentSessionLoad(loadOptions);
@@ -259,7 +367,8 @@ async function loadSessions(options = {}) {
   }
 
   state.sessionsLoadIncludesWorkspaceStats = loadOptions.workspaceStats;
-  state.sessionsLoadPromise = loadSessionsOnce(loadOptions);
+  const loadGeneration = state.sessionsLoadGeneration;
+  state.sessionsLoadPromise = loadSessionsOnce(loadOptions, loadGeneration);
   try {
     return await state.sessionsLoadPromise;
   } finally {
@@ -302,10 +411,11 @@ function joinCurrentSessionLoad(loadOptions) {
   });
 }
 
-async function loadSessionsOnce(options) {
+async function loadSessionsOnce(options, loadGeneration) {
   try {
     const path = options.workspaceStats ? "/sessions?workspace_stats=true" : "/sessions";
-    const sessions = sortSessionsByCreation(await apiGet(path));
+    const sessions = await apiGet(path);
+    if (loadGeneration !== state.sessionsLoadGeneration) return null;
     preserveSessionWorkspaceStats(sessions);
     sanitizeSessionListActiveRuns(sessions);
     updateSessionActivity(sessions);
@@ -441,11 +551,16 @@ function sessionCardViewModel(entry) {
   return {
     sessionId,
     shortId: shortId(sessionId),
+    title: typeof summary.title === "string" ? summary.title : "",
+    displayTitle: displaySessionTitle(summary),
     cwd: summary.cwd || "",
     sshHost: summary.ssh_host || "",
     sandboxed: Boolean(summary.sandboxed),
     selected: sessionId === state.selectedId,
-    pinned: state.pinnedSessionIds.has(sessionId),
+    pinned: Boolean(summary.pinned),
+    sortOrder: Number(summary.sort_order) || 0,
+    presentationVersion: Number(summary.presentation_version) || 0,
+    presentationBusy: state.presentationMutations.has(sessionId),
     tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
     errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
     statusClass: sessionStatusClass(entry),
@@ -464,11 +579,16 @@ function sessionCardRenderDigest(card) {
   return [
     card.sessionId,
     card.shortId,
+    card.title,
+    card.displayTitle,
     card.cwd,
     card.sshHost,
     card.sandboxed ? "1" : "0",
     card.selected ? "1" : "0",
     card.pinned ? "1" : "0",
+    String(card.sortOrder),
+    String(card.presentationVersion),
+    card.presentationBusy ? "1" : "0",
     card.tone,
     card.errorish,
     card.statusClass,
@@ -545,10 +665,27 @@ function selectSession(sessionId) {
   state.activeTab = "chat";
   state.mobileDetailOpen = true;
   state.scrollChatToBottom = true;
-  el.selectedId.textContent = shortId(sessionId);
+  const entry = sessionEntryById(sessionId);
+  el.selectedId.textContent = entry ? displaySessionTitle(entry.summary) : shortId(sessionId);
+  el.selectedId.title = sessionId;
   requestRender({ inspector: true });
+  focusMobileSessionDetail(sessionId);
   openEventStream(sessionId);
   loadSnapshot(sessionId, false);
+}
+
+function focusMobileSessionDetail(sessionId) {
+  requestAnimationFrame(() => {
+    const mobile = typeof window.matchMedia === "function"
+      && window.matchMedia(PANE_DESKTOP_QUERY).matches === false;
+    if (!mobile || state.selectedId !== sessionId || !state.mobileDetailOpen) return;
+    if (!document.body.classList.contains("detail-open")) return;
+    try {
+      el.mobileBack.focus({ preventScroll: true });
+    } catch (_) {
+      el.mobileBack.focus();
+    }
+  });
 }
 
 function showLaunchOverlay() {
@@ -569,7 +706,9 @@ function hideLaunchOverlay() {
 function showDeleteOverlay(sessionId) {
   if (!sessionId) return;
   state.pendingDeleteSessionId = sessionId;
-  el.deleteConfirmText.textContent = `Delete session ${shortId(sessionId)}? This permanently removes all threads, episodes, and worksets.`;
+  const entry = sessionEntryById(sessionId);
+  const label = entry ? displaySessionTitle(entry.summary) : shortId(sessionId);
+  el.deleteConfirmText.textContent = `Delete session ${label} (${sessionId})? This permanently removes all threads, episodes, and worksets.`;
   el.deleteStatus.textContent = "";
   el.deleteStatus.classList.remove("error");
   el.deleteOverlay.hidden = false;
@@ -669,6 +808,15 @@ function showMobileSessions() {
   state.mobileDetailOpen = false;
   renderMobileMode();
   syncPromptBusy(state.selectedId);
+  const target = sessionCardElement(state.selectedId)?.querySelector("[data-action='select-session']")
+    || el.sessionGrid.querySelector("[data-action='new-session']");
+  if (target) {
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      target.focus();
+    }
+  }
 }
 
 async function createSession(event) {
@@ -807,8 +955,8 @@ function clearSessionClientState(sessionId) {
     if (entrySessionId === sessionId) state.workspaceDiffEntries.delete(entryKey);
   }
   state.expandedThreadNamesBySession.delete(sessionId);
-  state.pinnedSessionIds.delete(sessionId);
-  savePinnedSessions();
+  state.presentationMutations.delete(sessionId);
+  if (state.renameSessionId === sessionId) hideRenameOverlay(false);
 }
 
 async function confirmDeleteSession() {
@@ -846,21 +994,87 @@ async function confirmDeleteSession() {
   }
 }
 
-function openEventStream(sessionId) {
+function clearSessionSequenceEpoch(sessionId) {
+  state.eventsBySession.delete(sessionId);
+  state.activeThreadsBySession.delete(sessionId);
+  state.expandedThreadNamesBySession.delete(sessionId);
+  state.terminalRunsBySession.delete(sessionId);
+  requestRender({
+    shell: false,
+    metrics: true,
+    sessions: true,
+    inspector: state.selectedId === sessionId,
+  });
+}
+
+function openEventStream(sessionId, options = {}) {
   if (!sessionId) return;
   if (state.eventSource) state.eventSource.close();
-  const last = state.lastSequence.get(sessionId);
-  const params = last ? `?after_sequence_id=${last}&limit=256` : "?limit=256";
+  const storedPrior = state.lastSequence.get(sessionId);
+  const requestedPriorSequence = options.replayFromBeginning
+    ? null
+    : (Number.isFinite(storedPrior) ? storedPrior : null);
+  const params = requestedPriorSequence !== null
+    ? `?after_sequence_id=${requestedPriorSequence}&limit=256`
+    : "?limit=256";
   const source = new EventSource(`/sessions/${encodeURIComponent(sessionId)}/events/stream${params}`);
   state.eventSource = source;
+  let observationFloor = null;
+
+  source.addEventListener("replay_boundary", (event) => {
+    if (state.eventSource !== source) return;
+    try {
+      const payload = JSON.parse(event.data);
+      const boundary = Number(payload.replay_boundary_sequence_id);
+      if (!Number.isSafeInteger(boundary) || boundary < 0) throw new Error("invalid replay boundary");
+      const observedPrior = state.lastSequence.get(sessionId);
+      const priorAtBoundary = Number.isFinite(observedPrior) ? observedPrior : requestedPriorSequence;
+      if (priorAtBoundary === null) {
+        observationFloor = boundary;
+      } else if (priorAtBoundary <= boundary) {
+        observationFloor = priorAtBoundary;
+      } else {
+        clearSessionSequenceEpoch(sessionId);
+        state.lastSequence.delete(sessionId);
+        if (requestedPriorSequence !== null) {
+          // Native EventSource reconnects retain their URL, so replace a stale
+          // cursor-bearing source before hydrating the new sequence epoch.
+          openEventStream(sessionId, { replayFromBeginning: true });
+          return;
+        }
+        // This source already requests the full replay; keep it so repeated
+        // epoch resets cannot create a cursor-free reconnect loop.
+        observationFloor = boundary;
+      }
+    } catch (error) {
+      const observedPrior = state.lastSequence.get(sessionId);
+      observationFloor = Number.isFinite(observedPrior)
+        ? observedPrior
+        : (requestedPriorSequence ?? Number.POSITIVE_INFINITY);
+      pushLocalEvent("stream", error.message || "invalid replay boundary", sessionId);
+    }
+  });
 
   source.addEventListener("session_event", (event) => {
     if (state.eventSource !== source) return;
-    const envelope = JSON.parse(event.data);
-    state.lastSequence.set(sessionId, envelope.sequence_id);
+    let envelope;
+    try {
+      envelope = JSON.parse(event.data);
+    } catch (_) {
+      pushLocalEvent("stream", "invalid session event", sessionId);
+      return;
+    }
+
+    const sequenceId = Number(envelope.sequence_id);
+    if (!Number.isSafeInteger(sequenceId) || sequenceId < 0) return;
+    const lastSequence = state.lastSequence.get(sessionId);
+    if (Number.isFinite(lastSequence) && sequenceId <= lastSequence) return;
+
+    state.lastSequence.set(sessionId, sequenceId);
     pushEnvelopeForSession(sessionId, envelope);
-    const runStarted = isRunStartedSessionEvent(envelope);
-    const terminalRun = isTerminalSessionEvent(envelope);
+    const historicalHydration = observationFloor === null || sequenceId <= observationFloor;
+    const runStarted = !historicalHydration && isRunStartedSessionEvent(envelope);
+    const terminalRun = !historicalHydration && isTerminalSessionEvent(envelope);
     if (runStarted) {
       handleRunStarted(sessionId, envelope);
       loadSessions({ forceFetch: true });
@@ -869,7 +1083,7 @@ function openEventStream(sessionId) {
       handleTerminalRun(sessionId, envelope);
       loadSessions({ forceFetch: true });
     }
-    if (shouldRefreshSnapshot(envelope)) {
+    if (!historicalHydration && shouldRefreshSnapshot(envelope)) {
       loadSnapshot(sessionId, false);
     }
     requestRender({
@@ -1149,6 +1363,7 @@ function setInspectorFullscreen(enabled) {
     && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches
     && inspector?.contains(document.activeElement);
 
+  if (nextEnabled !== state.inspectorFullscreen) cancelPaneResize(true);
   state.inspectorFullscreen = nextEnabled;
   renderInspectorFullscreenMode();
   if (focusWouldBeHidden) {
@@ -1165,6 +1380,7 @@ function renderInspectorFullscreenMode() {
   el.fullscreenBtn.setAttribute("aria-pressed", String(enabled));
   el.fullscreenEnterIcon.hidden = enabled;
   el.fullscreenExitIcon.hidden = !enabled;
+  syncPaneSplitter();
 }
 
 function renderMobileMode() {
@@ -1177,59 +1393,49 @@ function renderMetrics() {
   const active = state.sessions.filter((entry) => activeRunCountsForSession(entry.summary.session_id, entry.active_run)).length;
   const sandbox = state.sessions.filter((entry) => entry.summary.sandboxed).length;
   const selectedEvents = getSessionEvents(state.selectedId);
-  el.matrixSubtitle.textContent = `${state.sessions.length} tracked sessions / ${active} active / ${sandbox} sandboxed / creation ordered`;
+  const selectedEntry = sessionEntryById(state.selectedId);
+  el.matrixSubtitle.textContent = `${state.sessions.length} tracked sessions / ${active} active / ${sandbox} sandboxed / presentation ordered`;
   el.eventCount.textContent = selectedEvents.length;
-  el.selectedId.textContent = state.selectedId ? shortId(state.selectedId) : "none";
+  el.selectedId.textContent = selectedEntry ? displaySessionTitle(selectedEntry.summary) : "none";
+  el.selectedId.title = state.selectedId || "";
 }
 
 function renderSessions() {
-  const cards = filteredSessions().map(sessionCardViewModel);
-  const pinnedCards = cards.filter((card) => card && state.pinnedSessionIds.has(card.sessionId));
-  const unpinnedCards = cards.filter((card) => card && !state.pinnedSessionIds.has(card.sessionId));
-  const hasPinned = pinnedCards.length > 0;
-
-  let sessionCards;
-  if (cards.length === 0) {
-    sessionCards = renderNewSessionCard() + `<div class="empty-state matrix-empty">No sessions yet.</div>`;
-  } else if (hasPinned) {
-    sessionCards = `<div class="pinned-section-label">Pinned</div>`;
-    sessionCards += pinnedCards.map(renderSessionCard).join("");
-    sessionCards += `<div class="pinned-separator"></div>`;
-    sessionCards += renderNewSessionCard();
-    sessionCards += unpinnedCards.map(renderSessionCard).join("");
-  } else {
-    sessionCards = renderNewSessionCard() + cards.map(renderSessionCard).join("");
+  if (sessionReorderInProgress()) {
+    state.renderSessionsDeferred = true;
+    return;
   }
 
-  el.sessionGrid.innerHTML = sessionCards;
-  el.sessionGrid.querySelector("[data-action='new-session']")?.addEventListener("click", showLaunchOverlay);
-  el.sessionGrid.querySelectorAll("[data-session-id]").forEach((card) => {
-    card.addEventListener("click", (event) => {
-      if (event.shiftKey) {
-        event.preventDefault();
-        toggleSessionPin(card.dataset.sessionId);
-        return;
-      }
-      selectSession(card.dataset.sessionId);
-    });
-  });
+  const focusedControl = focusedSessionControl();
+  const cards = filteredSessions().map(sessionCardViewModel).filter(Boolean);
+  const pinnedCards = cards.filter((card) => card.pinned);
+  const unpinnedCards = cards.filter((card) => !card.pinned);
+  const sections = [];
+  if (pinnedCards.length > 0) sections.push(renderSessionGroup(true, pinnedCards));
+  sections.push(renderNewSessionCard());
+  sections.push(renderSessionGroup(false, unpinnedCards));
+  el.sessionGrid.innerHTML = sections.join("");
+  restorePendingSessionFocus(focusedControl);
   state.lastSessionsDigest = sessionCardListRenderDigest(cards);
-  state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card?.sessionId === state.selectedId));
+  state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card.sessionId === state.selectedId));
 }
 
-function toggleSessionPin(sessionId) {
-  if (!sessionId) return;
-  if (state.pinnedSessionIds.has(sessionId)) {
-    state.pinnedSessionIds.delete(sessionId);
-  } else {
-    state.pinnedSessionIds.add(sessionId);
-  }
-  savePinnedSessions();
-  renderSessions();
-}
-
-function savePinnedSessions() {
-  localStorage.setItem("nac:pinnedSessions", JSON.stringify([...state.pinnedSessionIds]));
+function renderSessionGroup(pinned, cards) {
+  const label = pinned ? "Pinned sessions" : "Sessions";
+  const groupName = pinned ? "pinned" : "unpinned";
+  const body = cards.length > 0
+    ? cards.map((card, index) => renderSessionCard(card, index, cards.length)).join("")
+    : `<div class="empty-state">No ${pinned ? "pinned " : ""}sessions${pinned ? "." : " yet."}</div>`;
+  return `
+    <section class="session-group" data-session-group="${groupName}" aria-labelledby="session-group-${groupName}-title">
+      <header class="session-group-head">
+        <h2 id="session-group-${groupName}-title" class="session-group-title">${label}</h2>
+        <span class="session-group-count">${cards.length}</span>
+      </header>
+      <div class="session-card-grid" data-pinned="${pinned}" role="list" aria-label="${label}">
+        ${body}
+      </div>
+    </section>`;
 }
 
 function renderNewSessionCard() {
@@ -1248,31 +1454,884 @@ function renderNewSessionCard() {
     </button>`;
 }
 
-function renderSessionCard(card) {
+function renderSessionCard(card, index, count) {
   if (!card) return "";
+  const busy = card.presentationBusy ? " disabled" : "";
+  const pinLabel = card.pinned ? `Unpin ${card.displayTitle}` : `Pin ${card.displayTitle}`;
+  const groupLabel = card.pinned ? "pinned sessions" : "sessions";
   return `
-    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" title="${card.pinned ? "Shift-click to unpin" : "Shift-click to pin"}">
-      <div class="session-card-head">
-        <div>
-          <h2>${escapeHtml(card.shortId)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true" title="sandbox active"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true" title="ssh: ${escapeAttr(card.sshHost)}"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
-          <div class="cwd">${escapeHtml(card.cwd)}</div>
+    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" data-pinned="${card.pinned}" role="listitem" title="Session ID: ${escapeAttr(card.sessionId)}">
+      <button class="session-card-select" data-action="select-session" type="button" aria-label="Select ${escapeAttr(card.displayTitle)}, session ${escapeAttr(card.sessionId)}">
+        <div class="session-card-head">
+          <div>
+            <h2>${escapeHtml(card.displayTitle)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true"><title>sandbox active</title><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true"><title>ssh: ${escapeHtml(card.sshHost)}</title><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
+            <div class="cwd">${escapeHtml(card.cwd)}</div>
+          </div>
+          <span class="status-dot ${card.statusClass}" aria-hidden="true"></span>
         </div>
-        <span class="status-dot ${card.statusClass}"></span>
+        <div class="telemetry-grid">
+          <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
+          <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
+          <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
+        </div>
+        <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
+      </button>
+      <div class="session-card-actions">
+        <button class="session-card-action session-pin-button" data-action="toggle-pin" type="button" aria-label="${escapeAttr(pinLabel)}" title="${escapeAttr(pinLabel)} — ${escapeAttr(card.sessionId)}" aria-pressed="${card.pinned}"${busy}>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-3 1-4 4-1 5-2-2-4 4-1-1 4-4-2-2 5-1 4-4Z"></path></svg>
+        </button>
+        <button class="session-card-action reorder-handle" data-action="reorder-handle" type="button" aria-label="Reorder ${escapeAttr(card.displayTitle)} in ${groupLabel}; position ${index + 1} of ${count}" title="Reorder ${escapeAttr(card.displayTitle)} — ${escapeAttr(card.sessionId)}" aria-describedby="reorderInstructions"${busy}>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg>
+        </button>
+        <div class="session-position-actions">
+          <button class="session-card-action" data-action="move-earlier" type="button" aria-label="Move ${escapeAttr(card.displayTitle)} earlier" title="Move earlier"${busy}${index === 0 ? " disabled" : ""}>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5"></path></svg>
+          </button>
+          <button class="session-card-action" data-action="move-later" type="button" aria-label="Move ${escapeAttr(card.displayTitle)} later" title="Move later"${busy}${index === count - 1 ? " disabled" : ""}>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+          </button>
+        </div>
       </div>
-      <div class="telemetry-grid">
-        <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
-        <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
-        <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
-      </div>
-      <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
     </article>`;
+}
+
+function handleSessionGridClick(event) {
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget || !el.sessionGrid.contains(actionTarget)) return;
+  const action = actionTarget.dataset.action;
+  const card = actionTarget.closest("[data-session-id]");
+  const sessionId = card?.dataset.sessionId || null;
+
+  if (state.suppressSessionClickUntil > Date.now()
+    && sessionId
+    && sessionId === state.suppressSessionClickSessionId) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  if (action === "new-session") {
+    showLaunchOverlay();
+  } else if (action === "select-session" && sessionId && !sessionReorderInProgress()) {
+    selectSession(sessionId);
+  } else if (action === "toggle-pin" && sessionId) {
+    toggleSessionPin(sessionId, actionTarget);
+  } else if ((action === "move-earlier" || action === "move-later") && sessionId) {
+    moveSessionByButton(sessionId, action === "move-earlier" ? -1 : 1);
+  }
+}
+
+function currentSessionSummary(sessionId) {
+  return sessionEntryById(sessionId)?.summary || null;
+}
+
+function sessionGroupEntries(pinned) {
+  return state.sessions.filter((entry) => Boolean(entry.summary.pinned) === Boolean(pinned));
+}
+
+function sessionGroupIds(pinned) {
+  return sessionGroupEntries(pinned).map((entry) => entry.summary.session_id);
+}
+
+function expectedVersionsForSessionIds(sessionIds) {
+  const expectedVersions = {};
+  for (const sessionId of sessionIds) {
+    const summary = currentSessionSummary(sessionId);
+    if (!summary) return null;
+    expectedVersions[sessionId] = Number(summary.presentation_version) || 0;
+  }
+  return expectedVersions;
+}
+
+async function toggleSessionPin(sessionId, button) {
+  if (!sessionId || sessionReorderInProgress() || state.presentationMutations.has(sessionId)) return;
+  const summary = currentSessionSummary(sessionId);
+  if (!summary) return;
+  state.presentationMutations.add(sessionId);
+  setSessionCardActionsDisabled(sessionId, true);
+  if (button) button.setAttribute("aria-busy", "true");
+
+  try {
+    await apiPut(`/sessions/${encodeURIComponent(sessionId)}/presentation`, {
+      title: typeof summary.title === "string" ? summary.title : "",
+      pinned: !Boolean(summary.pinned),
+      expected_version: Number(summary.presentation_version) || 0,
+    });
+    state.pendingSessionFocus = { sessionId, action: "toggle-pin" };
+    announceReorder(`${displaySessionTitle(summary)} ${summary.pinned ? "unpinned" : "pinned"}.`);
+  } catch (error) {
+    announceReorder(`Could not ${summary.pinned ? "unpin" : "pin"} ${displaySessionTitle(summary)}: ${error.message}. Reloaded current sessions.`);
+  } finally {
+    state.presentationMutations.delete(sessionId);
+    const loaded = await loadSessions({ forceFetch: true, forceRender: true });
+    if (loaded === null) state.pendingSessionFocus = null;
+  }
+}
+
+function setSessionCardActionsDisabled(sessionId, disabled) {
+  const card = sessionCardElement(sessionId);
+  card?.querySelectorAll(".session-card-action").forEach((button) => {
+    button.disabled = Boolean(disabled);
+  });
+}
+
+function showRenameOverlay() {
+  if (sessionReorderInProgress() || state.presentationMutations.has(state.selectedId)) return;
+  const summary = currentSessionSummary(state.selectedId);
+  if (!summary) return;
+  const active = document.activeElement;
+  state.renameDialogGeneration += 1;
+  state.renameSessionId = summary.session_id;
+  state.renameSubmission = null;
+  state.renameReturnFocus = el.appShell.contains(active) && active !== document.body
+    ? active
+    : el.renameSessionBtn;
+  el.renameTitleInput.value = typeof summary.title === "string" ? summary.title : "";
+  setRenameStatus("", false);
+  el.renameForm.removeAttribute("aria-busy");
+  el.confirmRename.disabled = false;
+  el.appShell.setAttribute("inert", "");
+  el.renameOverlay.hidden = false;
+  const dialogGeneration = state.renameDialogGeneration;
+  const sessionId = state.renameSessionId;
+  requestAnimationFrame(() => {
+    if (el.renameOverlay.hidden
+      || state.renameDialogGeneration !== dialogGeneration
+      || state.renameSessionId !== sessionId
+      || el.renameOverlay.contains(document.activeElement)) return;
+    el.renameTitleInput.focus();
+    el.renameTitleInput.select();
+  });
+}
+
+function hideRenameOverlay(restoreFocus = false) {
+  const returnFocus = state.renameReturnFocus;
+  state.renameDialogGeneration += 1;
+  state.renameSubmission = null;
+  state.renameReturnFocus = null;
+  el.renameOverlay.hidden = true;
+  el.appShell.removeAttribute("inert");
+  state.renameSessionId = null;
+  el.renameForm.removeAttribute("aria-busy");
+  setRenameStatus("", false);
+  if (!restoreFocus) return;
+  const target = returnFocus?.isConnected && !returnFocus.disabled
+    ? returnFocus
+    : (!el.renameSessionBtn.disabled ? el.renameSessionBtn : null);
+  target?.focus();
+}
+
+function containRenameDialogFocus(event) {
+  if (event.key !== "Tab" || el.renameOverlay.hidden) return;
+  const focusable = Array.from(el.renameOverlay.querySelectorAll(
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
+  )).filter((target) => !target.hidden && target.getAttribute("aria-hidden") !== "true");
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !el.renameOverlay.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function setRenameStatus(message, error) {
+  el.renameStatus.textContent = message || "";
+  el.renameStatus.classList.toggle("error", Boolean(error));
+}
+
+function renameSubmissionIsCurrent(submission) {
+  return state.renameSubmission === submission
+    && state.renameDialogGeneration === submission.dialogGeneration
+    && state.renameSessionId === submission.sessionId
+    && !el.renameOverlay.hidden;
+}
+
+async function renameSelectedSession(event) {
+  event.preventDefault();
+  const sessionId = state.renameSessionId;
+  const summary = currentSessionSummary(sessionId);
+  if (!sessionId || !summary || state.presentationMutations.has(sessionId)) return;
+  const title = el.renameTitleInput.value;
+  const normalized = title.trim();
+  if (Array.from(normalized).length > SESSION_TITLE_MAX_CHARS) {
+    setRenameStatus(`Title must be at most ${SESSION_TITLE_MAX_CHARS} characters.`, true);
+    el.renameTitleInput.focus();
+    return;
+  }
+
+  const submission = {
+    dialogGeneration: state.renameDialogGeneration,
+    sessionId,
+  };
+  state.renameSubmission = submission;
+  state.presentationMutations.add(sessionId);
+  el.renameForm.setAttribute("aria-busy", "true");
+  el.confirmRename.disabled = true;
+  setRenameStatus("saving", false);
+  try {
+    await apiPut(`/sessions/${encodeURIComponent(sessionId)}/presentation`, {
+      title,
+      pinned: Boolean(summary.pinned),
+      expected_version: Number(summary.presentation_version) || 0,
+    });
+    if (renameSubmissionIsCurrent(submission)) hideRenameOverlay(true);
+  } catch (error) {
+    if (renameSubmissionIsCurrent(submission)) setRenameStatus(error.message, true);
+  } finally {
+    state.presentationMutations.delete(sessionId);
+    if (renameSubmissionIsCurrent(submission)) {
+      state.renameSubmission = null;
+      el.renameForm.removeAttribute("aria-busy");
+      el.confirmRename.disabled = false;
+    }
+    await loadSessions({ forceFetch: true, forceRender: true });
+  }
+}
+
+function sessionReorderInProgress() {
+  return Boolean(state.sessionReorder);
+}
+
+function sessionCardElement(sessionId) {
+  return Array.from(el.sessionGrid.querySelectorAll("article[data-session-id]"))
+    .find((card) => card.dataset.sessionId === sessionId) || null;
+}
+
+function sessionGroupGridForPinned(pinned) {
+  return Array.from(el.sessionGrid.querySelectorAll(".session-card-grid"))
+    .find((grid) => grid.dataset.pinned === String(Boolean(pinned))) || null;
+}
+
+function sessionGroupGridForCard(card) {
+  return card?.closest(".session-card-grid") || null;
+}
+
+function announceReorder(message) {
+  el.reorderLiveRegion.textContent = "";
+  requestAnimationFrame(() => {
+    el.reorderLiveRegion.textContent = message || "";
+  });
+}
+
+function sessionPositionAnnouncement(sessionId, position, count, pinned, suffix = "") {
+  const summary = currentSessionSummary(sessionId);
+  const title = summary ? displaySessionTitle(summary) : shortId(sessionId);
+  const group = pinned ? "pinned sessions" : "sessions";
+  return `${title}, position ${position + 1} of ${count} in ${group}.${suffix ? ` ${suffix}` : ""}`;
+}
+
+function handleSessionGridKeydown(event) {
+  const handle = event.target.closest(".reorder-handle");
+  if (!handle || !el.sessionGrid.contains(handle)) return;
+  const card = handle.closest("article[data-session-id]");
+  const sessionId = card?.dataset.sessionId;
+  if (!sessionId) return;
+
+  const reorder = state.sessionReorder;
+  if (!reorder) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      startKeyboardSessionReorder(sessionId);
+    }
+    return;
+  }
+  if (reorder.kind !== "keyboard" || reorder.sessionId !== sessionId) return;
+
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    commitKeyboardSessionReorder();
+    return;
+  }
+
+  let nextIndex = reorder.currentIds.indexOf(sessionId);
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex -= 1;
+  else if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex += 1;
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = reorder.currentIds.length - 1;
+  else return;
+
+  event.preventDefault();
+  moveKeyboardSessionTo(nextIndex);
+}
+
+function startKeyboardSessionReorder(sessionId) {
+  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
+  const summary = currentSessionSummary(sessionId);
+  if (!summary) return;
+  const pinned = Boolean(summary.pinned);
+  const originalIds = sessionGroupIds(pinned);
+  const card = sessionCardElement(sessionId);
+  const grid = sessionGroupGridForCard(card);
+  if (!card || !grid) return;
+
+  state.sessionsLoadGeneration += 1;
+  state.sessionReorder = {
+    kind: "keyboard",
+    sessionId,
+    pinned,
+    originalIds,
+    currentIds: originalIds.slice(),
+    card,
+    grid,
+  };
+  card.classList.add("is-reordering", "keyboard-reordering");
+  grid.classList.add("is-reordering");
+  document.body.classList.add("session-reordering");
+  const position = originalIds.indexOf(sessionId);
+  announceReorder(sessionPositionAnnouncement(sessionId, position, originalIds.length, pinned, "Use arrow keys, Home, or End, then Enter or Space to save."));
+}
+
+function moveKeyboardSessionTo(rawIndex) {
+  const reorder = state.sessionReorder;
+  if (!reorder || reorder.kind !== "keyboard") return;
+  const currentIndex = reorder.currentIds.indexOf(reorder.sessionId);
+  const nextIndex = clampInt(rawIndex, 0, reorder.currentIds.length - 1);
+  if (nextIndex === currentIndex) return;
+  reorder.currentIds.splice(currentIndex, 1);
+  reorder.currentIds.splice(nextIndex, 0, reorder.sessionId);
+  reorderGroupCardsDom(reorder.grid, reorder.currentIds);
+  updateGroupCardPositionControls(reorder.grid);
+  reorder.card.querySelector(".reorder-handle")?.focus();
+  announceReorder(sessionPositionAnnouncement(reorder.sessionId, nextIndex, reorder.currentIds.length, reorder.pinned));
+}
+
+function commitKeyboardSessionReorder() {
+  const reorder = state.sessionReorder;
+  if (!reorder || reorder.kind !== "keyboard") return;
+  const ids = reorder.currentIds.slice();
+  cleanupSessionReorderDom(reorder, false);
+  reorder.kind = "committing";
+  submitSessionOrder(reorder, ids);
+}
+
+async function moveSessionByButton(sessionId, delta) {
+  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
+  const summary = currentSessionSummary(sessionId);
+  if (!summary) return;
+  const pinned = Boolean(summary.pinned);
+  const originalIds = sessionGroupIds(pinned);
+  const index = originalIds.indexOf(sessionId);
+  const nextIndex = clampInt(index + delta, 0, originalIds.length - 1);
+  if (index < 0 || nextIndex === index) return;
+  const ids = originalIds.slice();
+  ids.splice(index, 1);
+  ids.splice(nextIndex, 0, sessionId);
+  const grid = sessionGroupGridForPinned(pinned);
+  const reorder = {
+    kind: "committing",
+    sessionId,
+    pinned,
+    originalIds,
+    currentIds: ids,
+    grid,
+    card: sessionCardElement(sessionId),
+  };
+  state.sessionsLoadGeneration += 1;
+  state.sessionReorder = reorder;
+  if (grid) {
+    reorderGroupCardsDom(grid, ids);
+    updateGroupCardPositionControls(grid);
+    grid.classList.add("is-reordering");
+  }
+  reorder.card?.classList.add("is-reordering");
+  document.body.classList.add("session-reordering");
+  announceReorder(sessionPositionAnnouncement(sessionId, nextIndex, ids.length, pinned, "Saving."));
+  await submitSessionOrder(reorder, ids);
+}
+
+function handleSessionPointerDown(event) {
+  const handle = event.target.closest(".reorder-handle");
+  if (!handle || !el.sessionGrid.contains(handle) || handle.disabled) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
+  const card = handle.closest("article[data-session-id]");
+  const grid = sessionGroupGridForCard(card);
+  const sessionId = card?.dataset.sessionId;
+  const summary = currentSessionSummary(sessionId);
+  if (!card || !grid || !summary) return;
+
+  const rect = card.getBoundingClientRect();
+  state.sessionsLoadGeneration += 1;
+  state.sessionReorder = {
+    kind: "pointer-pending",
+    pointerId: event.pointerId,
+    pointerType: event.pointerType,
+    sessionId,
+    pinned: Boolean(summary.pinned),
+    originalIds: sessionGroupIds(Boolean(summary.pinned)),
+    card,
+    grid,
+    handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    cardRect: rect,
+    placeholder: null,
+  };
+  try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+}
+
+function handleSessionPointerMove(event) {
+  const reorder = state.sessionReorder;
+  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
+  if (reorder.kind === "pointer-pending") {
+    const distance = Math.hypot(event.clientX - reorder.startX, event.clientY - reorder.startY);
+    if (distance < REORDER_DRAG_THRESHOLD_PX) return;
+    beginPointerSessionReorder(reorder);
+  }
+  if (reorder.kind !== "pointer") return;
+  event.preventDefault();
+  positionDraggedSessionCard(reorder, event.clientX, event.clientY);
+  positionSessionPlaceholder(reorder, event.clientX, event.clientY);
+}
+
+function beginPointerSessionReorder(reorder) {
+  if (state.sessionReorder !== reorder || reorder.kind !== "pointer-pending") return;
+  const placeholder = document.createElement("div");
+  placeholder.className = "session-card-placeholder";
+  placeholder.style.minHeight = `${Math.max(1, Math.round(reorder.cardRect.height))}px`;
+  placeholder.setAttribute("aria-hidden", "true");
+  const marker = document.createElement("span");
+  marker.className = "session-drop-marker";
+  placeholder.append(marker);
+  reorder.grid.insertBefore(placeholder, reorder.card);
+  reorder.placeholder = placeholder;
+  reorder.kind = "pointer";
+  reorder.card.classList.add("is-reordering", "is-dragging");
+  reorder.card.setAttribute("aria-grabbed", "true");
+  reorder.grid.classList.add("is-reordering", "is-dragging");
+  document.body.classList.add("session-reordering");
+  Object.assign(reorder.card.style, {
+    position: "fixed",
+    left: `${reorder.cardRect.left}px`,
+    top: `${reorder.cardRect.top}px`,
+    width: `${reorder.cardRect.width}px`,
+    height: `${reorder.cardRect.height}px`,
+    margin: "0",
+    zIndex: "1000",
+  });
+  announceReorder(sessionPositionAnnouncement(
+    reorder.sessionId,
+    reorder.originalIds.indexOf(reorder.sessionId),
+    reorder.originalIds.length,
+    reorder.pinned,
+    "Dragging. Drop within this group or press Escape to cancel.",
+  ));
+}
+
+function positionDraggedSessionCard(reorder, clientX, clientY) {
+  reorder.card.style.left = `${Math.round(clientX - reorder.offsetX)}px`;
+  reorder.card.style.top = `${Math.round(clientY - reorder.offsetY)}px`;
+}
+
+function positionSessionPlaceholder(reorder, clientX, clientY) {
+  const gridRect = reorder.grid.getBoundingClientRect();
+  if (clientX < gridRect.left || clientX > gridRect.right || clientY < gridRect.top || clientY > gridRect.bottom) return;
+  const candidates = Array.from(reorder.grid.querySelectorAll(":scope > article[data-session-id]"))
+    .filter((card) => card !== reorder.card);
+  let before = null;
+  for (const candidate of candidates) {
+    const rect = candidate.getBoundingClientRect();
+    const beforeRow = clientY < rect.top + rect.height / 2;
+    const beforeInRow = clientY <= rect.bottom && clientX < rect.left + rect.width / 2;
+    if (beforeRow || beforeInRow) {
+      before = candidate;
+      break;
+    }
+  }
+  if (before) reorder.grid.insertBefore(reorder.placeholder, before);
+  else reorder.grid.append(reorder.placeholder);
+
+  const ids = sessionIdsAtPointerPlaceholder(reorder);
+  const position = ids.indexOf(reorder.sessionId);
+  if (position >= 0 && position !== reorder.lastAnnouncedPosition) {
+    reorder.lastAnnouncedPosition = position;
+    announceReorder(sessionPositionAnnouncement(reorder.sessionId, position, ids.length, reorder.pinned));
+  }
+}
+
+function sessionIdsAtPointerPlaceholder(reorder) {
+  const ids = [];
+  for (const child of reorder.grid.children) {
+    if (child === reorder.card) continue;
+    if (child === reorder.placeholder) ids.push(reorder.sessionId);
+    else if (child.matches?.("article[data-session-id]")) ids.push(child.dataset.sessionId);
+  }
+  return ids;
+}
+
+function pointerIsInsideSessionGroup(reorder, clientX, clientY) {
+  const rect = reorder.grid?.getBoundingClientRect();
+  return Boolean(rect
+    && clientX >= rect.left
+    && clientX <= rect.right
+    && clientY >= rect.top
+    && clientY <= rect.bottom);
+}
+
+function handleSessionPointerUp(event) {
+  const reorder = state.sessionReorder;
+  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
+  if (reorder.kind === "pointer-pending") {
+    state.sessionReorder = null;
+    releaseSessionPointerCapture(reorder);
+    flushDeferredSessionLoad(false);
+    return;
+  }
+
+  event.preventDefault();
+  state.suppressSessionClickUntil = Date.now() + 600;
+  state.suppressSessionClickSessionId = reorder.sessionId;
+  if (!pointerIsInsideSessionGroup(reorder, event.clientX, event.clientY)) {
+    cancelSessionReorder();
+    return;
+  }
+
+  const ids = sessionIdsAtPointerPlaceholder(reorder);
+  cleanupSessionReorderDom(reorder, false);
+  reorder.kind = "committing";
+  reorder.currentIds = ids;
+  releaseSessionPointerCapture(reorder);
+  submitSessionOrder(reorder, ids);
+}
+
+function handleSessionPointerCancel(event) {
+  const reorder = state.sessionReorder;
+  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
+  cancelSessionReorder();
+}
+
+function handleSessionLostPointerCapture(event) {
+  const reorder = state.sessionReorder;
+  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
+  if (!reorder.pointerCaptureReleased) cancelSessionReorder();
+}
+
+function cancelPointerSessionReorder() {
+  const reorder = state.sessionReorder;
+  if (!reorder || !reorder.kind.startsWith("pointer")) return false;
+  return cancelSessionReorder();
+}
+
+function releaseSessionPointerCapture(reorder) {
+  reorder.pointerCaptureReleased = true;
+  try {
+    if (reorder.handle?.hasPointerCapture(reorder.pointerId)) {
+      reorder.handle.releasePointerCapture(reorder.pointerId);
+    }
+  } catch (_) {}
+}
+
+function cancelSessionReorder() {
+  const reorder = state.sessionReorder;
+  if (!reorder || reorder.kind === "committing") return false;
+  releaseSessionPointerCapture(reorder);
+  cleanupSessionReorderDom(reorder, true);
+  state.sessionReorder = null;
+  state.pendingSessionFocus = { sessionId: reorder.sessionId, action: "reorder-handle" };
+  announceReorder(`Reorder cancelled for ${displaySessionTitle(currentSessionSummary(reorder.sessionId) || { session_id: reorder.sessionId })}.`);
+  flushDeferredSessionLoad(true);
+  return true;
+}
+
+function cleanupSessionReorderDom(reorder, restoreOriginal) {
+  if (reorder.kind === "pointer" && reorder.placeholder) {
+    reorder.grid.insertBefore(reorder.card, reorder.placeholder);
+    reorder.placeholder.remove();
+    reorder.placeholder = null;
+  }
+  if (reorder.card) {
+    reorder.card.classList.remove("is-reordering", "is-dragging", "keyboard-reordering");
+    reorder.card.removeAttribute("aria-grabbed");
+    for (const property of ["position", "left", "top", "width", "height", "margin", "z-index"]) {
+      reorder.card.style.removeProperty(property);
+    }
+  }
+  reorder.grid?.classList.remove("is-reordering", "is-dragging");
+  document.body.classList.remove("session-reordering");
+  if (restoreOriginal && reorder.grid && reorder.originalIds) {
+    reorderGroupCardsDom(reorder.grid, reorder.originalIds);
+    updateGroupCardPositionControls(reorder.grid);
+  }
+}
+
+function reorderGroupCardsDom(grid, sessionIds) {
+  const cards = new Map(
+    Array.from(grid?.querySelectorAll(":scope > article[data-session-id]") || [])
+      .map((card) => [card.dataset.sessionId, card]),
+  );
+  for (const sessionId of sessionIds) {
+    const card = cards.get(sessionId);
+    if (card) grid.append(card);
+  }
+}
+
+function updateGroupCardPositionControls(grid) {
+  const cards = Array.from(grid?.querySelectorAll(":scope > article[data-session-id]") || []);
+  cards.forEach((card, index) => {
+    const summary = currentSessionSummary(card.dataset.sessionId);
+    const title = summary ? displaySessionTitle(summary) : shortId(card.dataset.sessionId);
+    const pinned = card.dataset.pinned === "true";
+    const handle = card.querySelector(".reorder-handle");
+    if (handle) {
+      handle.setAttribute("aria-label", `Reorder ${title} in ${pinned ? "pinned sessions" : "sessions"}; position ${index + 1} of ${cards.length}`);
+    }
+    const earlier = card.querySelector("[data-action='move-earlier']");
+    const later = card.querySelector("[data-action='move-later']");
+    if (earlier) earlier.disabled = index === 0;
+    if (later) later.disabled = index === cards.length - 1;
+  });
+}
+
+function sessionOrdersMatch(left, right) {
+  return left.length === right.length && left.every((sessionId, index) => sessionId === right[index]);
+}
+
+async function submitSessionOrder(reorder, sessionIds) {
+  if (sessionOrdersMatch(sessionIds, reorder.originalIds || [])) {
+    await finishSessionReorder(reorder, true, null, sessionIds, true);
+    return;
+  }
+
+  const expectedVersions = expectedVersionsForSessionIds(sessionIds);
+  if (!expectedVersions) {
+    announceReorder("Could not reorder sessions because the session list changed. Reloading.");
+    await finishSessionReorder(reorder, false);
+    return;
+  }
+
+  let succeeded = false;
+  let failure = null;
+  try {
+    await apiPut("/sessions/order", {
+      pinned: reorder.pinned,
+      session_ids: sessionIds,
+      expected_versions: expectedVersions,
+    });
+    succeeded = true;
+  } catch (error) {
+    failure = error;
+  }
+  await finishSessionReorder(reorder, succeeded, failure, sessionIds);
+}
+
+async function finishSessionReorder(reorder, succeeded, failure = null, sessionIds = null, unchanged = false) {
+  if (state.sessionReorder !== reorder) return;
+  if (!succeeded) cleanupSessionReorderDom(reorder, true);
+  else cleanupSessionReorderDom(reorder, false);
+  state.sessionReorder = null;
+  state.pendingSessionFocus = { sessionId: reorder.sessionId, action: "reorder-handle" };
+  const finalIds = sessionIds || reorder.originalIds || [];
+  const position = finalIds.indexOf(reorder.sessionId);
+  if (unchanged) {
+    announceReorder(sessionPositionAnnouncement(reorder.sessionId, Math.max(0, position), finalIds.length, reorder.pinned, "Order unchanged."));
+  } else if (succeeded) {
+    announceReorder(sessionPositionAnnouncement(reorder.sessionId, Math.max(0, position), finalIds.length, reorder.pinned, "Saved."));
+  } else if (failure) {
+    announceReorder(`Could not reorder ${displaySessionTitle(currentSessionSummary(reorder.sessionId) || { session_id: reorder.sessionId })}: ${failure.message}. Reloaded current order.`);
+  }
+  await flushDeferredSessionLoad(!unchanged);
+  restorePendingSessionFocus();
+}
+
+async function flushDeferredSessionLoad(forceReload) {
+  const deferred = state.deferredSessionLoadOptions;
+  state.deferredSessionLoadOptions = null;
+  const renderDeferred = state.renderSessionsDeferred;
+  state.renderSessionsDeferred = false;
+  if (forceReload || deferred) {
+    const options = mergeSessionLoadOptions(deferred, {
+      forceFetch: Boolean(forceReload),
+      forceRender: Boolean(forceReload || renderDeferred),
+      workspaceStats: false,
+      inspector: false,
+    });
+    const loaded = await loadSessions(options);
+    if (loaded === null) state.pendingSessionFocus = null;
+  } else if (renderDeferred) {
+    requestRender({ shell: false, sessions: true });
+  }
+}
+
+function focusedSessionControl() {
+  const active = document.activeElement;
+  if (!(active instanceof Element) || !el.sessionGrid.contains(active)) return null;
+  const actionTarget = active.closest("[data-action]");
+  if (!actionTarget) return null;
+  return {
+    sessionId: actionTarget.closest("article[data-session-id]")?.dataset.sessionId || null,
+    action: actionTarget.dataset.action || null,
+  };
+}
+
+function sessionControlForFocus(descriptor) {
+  if (!descriptor?.action) return null;
+  if (!descriptor.sessionId) {
+    return Array.from(el.sessionGrid.querySelectorAll("[data-action]"))
+      .find((target) => target.dataset.action === descriptor.action) || null;
+  }
+  const card = sessionCardElement(descriptor.sessionId);
+  return Array.from(card?.querySelectorAll("[data-action]") || [])
+    .find((target) => target.dataset.action === descriptor.action) || null;
+}
+
+function restorePendingSessionFocus(fallback = null) {
+  const pending = state.pendingSessionFocus;
+  const descriptor = pending || fallback;
+  if (!descriptor) return;
+  const target = sessionControlForFocus(descriptor);
+  if (pending) state.pendingSessionFocus = null;
+  if (!target || target.disabled) return;
+  try {
+    target.focus({ preventScroll: true });
+  } catch (_) {
+    target.focus();
+  }
+}
+
+function paneSplitterIsUsable() {
+  return Boolean(state.paneDesktopMedia?.matches && !state.inspectorFullscreen);
+}
+
+function paneLayoutMetrics() {
+  const boardRect = el.sessionBoard.getBoundingClientRect();
+  const inspectorRect = el.sessionInspector.getBoundingClientRect();
+  const splitterWidth = el.paneSplitter.getBoundingClientRect().width;
+  const paneWidth = boardRect.width + inspectorRect.width;
+  if (!Number.isFinite(paneWidth) || paneWidth <= 0) return null;
+  let minBoard = Math.min(PANE_BOARD_MIN_PX, paneWidth / 2);
+  let maxBoard = paneWidth - Math.min(PANE_INSPECTOR_MIN_PX, paneWidth / 2);
+  if (maxBoard < minBoard) {
+    minBoard = paneWidth / 2;
+    maxBoard = paneWidth / 2;
+  }
+  return {
+    boardLeft: boardRect.left,
+    paneWidth,
+    splitterWidth,
+    minRatio: minBoard / paneWidth,
+    maxRatio: maxBoard / paneWidth,
+  };
+}
+
+function syncPaneSplitter() {
+  if (!el.paneSeparator || !state.paneDesktopMedia) return;
+  const usable = paneSplitterIsUsable();
+  el.paneSeparator.tabIndex = usable ? 0 : -1;
+  el.paneSeparator.setAttribute("aria-disabled", String(!usable));
+  el.narrowBoardBtn.disabled = !usable;
+  el.widenBoardBtn.disabled = !usable;
+  if (usable) applyPaneRatio(state.paneRatio);
+}
+
+function applyPaneRatio(ratio) {
+  if (!paneSplitterIsUsable()) return;
+  const metrics = paneLayoutMetrics();
+  if (!metrics) return;
+  const nextRatio = Math.min(metrics.maxRatio, Math.max(metrics.minRatio, ratio));
+  state.paneRatio = nextRatio;
+  const boardWidth = Math.round(metrics.paneWidth * nextRatio);
+  document.documentElement.style.setProperty("--board-width", `${boardWidth}px`);
+  const minPercent = Math.round(metrics.minRatio * 100);
+  const maxPercent = Math.round(metrics.maxRatio * 100);
+  const valuePercent = Math.round(nextRatio * 100);
+  el.paneSeparator.setAttribute("aria-valuemin", String(minPercent));
+  el.paneSeparator.setAttribute("aria-valuemax", String(maxPercent));
+  el.paneSeparator.setAttribute("aria-valuenow", String(valuePercent));
+  el.paneSeparator.setAttribute("aria-valuetext", `${valuePercent}% session matrix width`);
+  el.narrowBoardBtn.disabled = nextRatio <= metrics.minRatio + 0.001;
+  el.widenBoardBtn.disabled = nextRatio >= metrics.maxRatio - 0.001;
+}
+
+function adjustPaneRatio(delta) {
+  if (!paneSplitterIsUsable()) return;
+  applyPaneRatio(state.paneRatio + delta);
+}
+
+function handlePaneKeydown(event) {
+  if (!paneSplitterIsUsable()) return;
+  const step = event.shiftKey ? 0.1 : PANE_KEYBOARD_STEP;
+  if (event.key === "ArrowLeft") adjustPaneRatio(-step);
+  else if (event.key === "ArrowRight") adjustPaneRatio(step);
+  else if (event.key === "Home") {
+    const metrics = paneLayoutMetrics();
+    if (metrics) applyPaneRatio(metrics.minRatio);
+  } else if (event.key === "End") {
+    const metrics = paneLayoutMetrics();
+    if (metrics) applyPaneRatio(metrics.maxRatio);
+  } else return;
+  event.preventDefault();
+}
+
+function handlePanePointerDown(event) {
+  if (!paneSplitterIsUsable() || (event.pointerType === "mouse" && event.button !== 0)) return;
+  state.paneResize = {
+    pointerId: event.pointerId,
+    startRatio: state.paneRatio,
+  };
+  el.paneSplitter.classList.add("is-resizing");
+  try { el.paneSeparator.setPointerCapture(event.pointerId); } catch (_) {}
+  event.preventDefault();
+}
+
+function handlePanePointerMove(event) {
+  const resize = state.paneResize;
+  if (!resize || resize.pointerId !== event.pointerId || !paneSplitterIsUsable()) return;
+  const metrics = paneLayoutMetrics();
+  if (!metrics) return;
+  event.preventDefault();
+  applyPaneRatio((event.clientX - metrics.boardLeft - metrics.splitterWidth / 2) / metrics.paneWidth);
+}
+
+function handlePanePointerUp(event) {
+  if (!state.paneResize || state.paneResize.pointerId !== event.pointerId) return;
+  finishPaneResize();
+}
+
+function handlePanePointerCancel(event) {
+  if (!state.paneResize || state.paneResize.pointerId !== event.pointerId) return;
+  cancelPaneResize(true);
+}
+
+function finishPaneResize() {
+  const resize = state.paneResize;
+  if (!resize) return;
+  try {
+    if (el.paneSeparator.hasPointerCapture(resize.pointerId)) {
+      el.paneSeparator.releasePointerCapture(resize.pointerId);
+    }
+  } catch (_) {}
+  state.paneResize = null;
+  el.paneSplitter.classList.remove("is-resizing");
+}
+
+function cancelPaneResize(restoreStart) {
+  const resize = state.paneResize;
+  if (!resize) return false;
+  finishPaneResize();
+  if (restoreStart) {
+    state.paneRatio = resize.startRatio;
+    if (paneSplitterIsUsable()) applyPaneRatio(resize.startRatio);
+  }
+  return true;
 }
 
 function renderInspector() {
   const sessionId = state.selectedId;
+  const selectedEntry = sessionEntryById(sessionId);
+  const selectedTitle = selectedEntry ? displaySessionTitle(selectedEntry.summary) : (sessionId ? shortId(sessionId) : null);
   const snapshot = selectedSessionIsUsable() ? state.snapshots.get(sessionId) : null;
   if (!sessionId || !snapshot) {
-    el.inspectorTitle.textContent = sessionId ? shortId(sessionId) : "No session selected";
+    el.inspectorTitle.textContent = selectedTitle || "No session selected";
+    el.inspectorTitle.title = sessionId || "";
     el.inspectorMeta.textContent = sessionId ? "Loading snapshot." : "Launch or select a session.";
     el.snapModel.textContent = "--";
     el.snapBackend.textContent = "--";
@@ -1281,7 +2340,8 @@ function renderInspector() {
     el.snapTokens.textContent = "--";
     el.snapContext.textContent = "--";
     el.cancelRun.disabled = true;
-    el.deleteSessionBtn.disabled = true;
+    el.deleteSessionBtn.disabled = !selectedEntry;
+    el.renameSessionBtn.disabled = !selectedEntry;
     el.fullscreenBtn.disabled = true;
     el.settingsBtn.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
@@ -1296,7 +2356,10 @@ function renderInspector() {
 
   const metadata = snapshot.metadata;
   const runActive = sessionHasActiveRun(metadata.session_id, snapshot);
-  el.inspectorTitle.textContent = shortId(metadata.session_id);
+  el.inspectorTitle.textContent = selectedEntry
+    ? displaySessionTitle(selectedEntry.summary)
+    : shortId(metadata.session_id);
+  el.inspectorTitle.title = metadata.session_id;
   el.inspectorMeta.textContent = metadata.cwd;
   el.snapModel.textContent = metadata.model;
   el.snapBackend.textContent = metadata.backend;
@@ -1313,6 +2376,7 @@ function renderInspector() {
   }
   el.cancelRun.disabled = !runActive;
   el.deleteSessionBtn.disabled = false;
+  el.renameSessionBtn.disabled = false;
   el.fullscreenBtn.disabled = false;
   el.settingsBtn.disabled = false;
 
@@ -2992,13 +4056,9 @@ function displayPromptFromMessageText(content) {
   return value ? `/${kind} ${value}` : text;
 }
 
-function sortSessionsByCreation(sessions) {
-  return sessions.slice().sort((left, right) => {
-    const leftTime = Date.parse(left.summary.created_at) || 0;
-    const rightTime = Date.parse(right.summary.created_at) || 0;
-    if (leftTime !== rightTime) return rightTime - leftTime;
-    return right.summary.session_id.localeCompare(left.summary.session_id);
-  });
+function displaySessionTitle(summary) {
+  const title = typeof summary?.title === "string" ? summary.title.trim() : "";
+  return title || shortId(summary?.session_id || "");
 }
 
 function setLaunchStatus(message, error) {
