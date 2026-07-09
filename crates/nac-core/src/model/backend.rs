@@ -33,7 +33,7 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
         BackendKind::ChatGptCodexResponses => "https://chatgpt.com/backend-api",
         BackendKind::AnthropicMessages => "https://api.anthropic.com",
         BackendKind::TogetherChat => "https://api.together.ai/v1",
-        BackendKind::Arcee => "http://api.internal.arcee.ai",
+        BackendKind::Arcee => "https://api.arcee.ai",
         BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
             "https://api.openai.com/v1"
         }

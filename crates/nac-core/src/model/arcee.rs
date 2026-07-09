@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "nac-cli";
 const AUTH_TYPE: &str = "arcee_api_key";
-const DEFAULT_BASE_URL: &str = "http://api.internal.arcee.ai";
+const DEFAULT_BASE_URL: &str = "https://api.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_EXPIRES_IN_SECS: u64 = 900;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
