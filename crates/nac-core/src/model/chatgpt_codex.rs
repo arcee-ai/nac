@@ -93,10 +93,15 @@ pub async fn codex_auth_login() -> Result<()> {
 
 pub fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
-    let removed = with_auth_lock(|| match fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
+    let removed = with_auth_lock(|| match read_auth_file_optional()? {
+        Some(_) => match fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to remove {}", path.display()))
+            }
+        },
+        None => Ok(false),
     })?;
 
     if removed {
