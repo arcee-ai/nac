@@ -671,15 +671,13 @@ fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
             return Err(error).with_context(|| format!("failed to read {}", path.display()))
         }
     };
-    let auth: StoredCodexAuth = serde_json::from_str(&raw)
+    let value: Value = serde_json::from_str(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    if auth.auth_type != AUTH_TYPE {
-        return Err(anyhow!(
-            "{} contains unsupported auth type '{}'",
-            path.display(),
-            auth.auth_type
-        ));
+    if value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
+        return Ok(None);
     }
+    let auth: StoredCodexAuth = serde_json::from_value(value)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(auth))
 }
 

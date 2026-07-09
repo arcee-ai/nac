@@ -8,6 +8,7 @@ pub(super) fn default_model_for_backend(backend: BackendKind) -> String {
         BackendKind::FireworksChat => "gpt-5.5".to_string(),
         BackendKind::TogetherChat => "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string(),
         BackendKind::AnthropicMessages => "claude-opus-4-6".to_string(),
+        BackendKind::Arcee => "trinity-large-thinking".to_string(),
         BackendKind::Auto => unreachable!("auto backend does not have a default model"),
     }
 }
@@ -21,6 +22,7 @@ pub(super) fn default_reasoning_effort(backend: BackendKind) -> Option<Reasoning
         BackendKind::FireworksChat => None,
         BackendKind::TogetherChat => None,
         BackendKind::AnthropicMessages => None,
+        BackendKind::Arcee => None,
         BackendKind::Auto => None,
     }
 }
@@ -31,6 +33,7 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
         BackendKind::ChatGptCodexResponses => "https://chatgpt.com/backend-api",
         BackendKind::AnthropicMessages => "https://api.anthropic.com",
         BackendKind::TogetherChat => "https://api.together.ai/v1",
+        BackendKind::Arcee => "http://api.internal.arcee.ai",
         BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
             "https://api.openai.com/v1"
         }
@@ -42,7 +45,7 @@ pub(super) fn api_key_for_backend(
     configured_env: Option<&str>,
 ) -> Result<String> {
     match backend {
-        BackendKind::ChatGptCodexResponses => Ok(String::new()),
+        BackendKind::ChatGptCodexResponses | BackendKind::Arcee => Ok(String::new()),
         BackendKind::TogetherChat => {
             if let Ok(api_key) = std::env::var("TOGETHER_API_KEY") {
                 return Ok(api_key);
@@ -98,6 +101,9 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
         .host_str()
         .ok_or_else(|| anyhow!("OPENAI_BASE_URL '{}' does not include a host", base_url))?;
 
+    if host.contains("arcee.ai") {
+        return Ok(BackendKind::Arcee);
+    }
     if host.contains("together.ai") {
         return Ok(BackendKind::TogetherChat);
     }
@@ -118,7 +124,7 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
     }
 
     Err(anyhow!(
-        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend together-chat, --backend openai-responses, --backend chatgpt-codex-responses, or --backend anthropic-messages",
+        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend together-chat, --backend openai-responses, --backend chatgpt-codex-responses, --backend anthropic-messages, or --backend arcee",
         base_url
     ))
 }

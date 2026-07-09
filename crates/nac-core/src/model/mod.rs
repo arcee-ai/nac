@@ -9,6 +9,8 @@ use url::Url;
 use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 mod anthropic;
+mod arcee;
+mod auth_store;
 mod backend;
 mod chat;
 mod chatgpt_codex;
@@ -17,6 +19,7 @@ mod requests;
 mod responses;
 mod types;
 
+use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub(crate) use backend::detect_backend;
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub(crate) use client::ModelClient;
@@ -35,6 +38,21 @@ pub async fn run_codex_auth_action(action: CodexAuthAction) -> Result<()> {
         CodexAuthAction::Login => codex_auth_login().await,
         CodexAuthAction::Status => codex_auth_status(),
         CodexAuthAction::Logout => codex_auth_logout(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArceeAuthAction {
+    Login,
+    Status,
+    Logout,
+}
+
+pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
+    match action {
+        ArceeAuthAction::Login => arcee_auth_login().await,
+        ArceeAuthAction::Status => arcee_auth_status(),
+        ArceeAuthAction::Logout => arcee_auth_logout(),
     }
 }
 
@@ -62,8 +80,11 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 
         let original = std::env::var("OPENAI_API_KEY").ok();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let empty_home = std::env::temp_dir().join("nac-missing-api-key-test-home");
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
+            std::env::set_var("NAC_HOME", &empty_home);
         }
 
         let result = ModelClient::from_env();
@@ -87,6 +108,7 @@ mod tests {
                 std::env::remove_var("OPENAI_API_KEY");
             }
         }
+        restore_env("NAC_HOME", original_nac_home);
     }
 
     #[test]
