@@ -29,16 +29,15 @@ impl ModelClient {
             .clone()
             .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
         let backend = match requested_backend {
-            BackendKind::Auto if explicit_base_url.is_none() && arcee::has_stored_auth() => {
-                BackendKind::Arcee
-            }
             BackendKind::Auto => {
-                let probe = explicit_base_url
-                    .clone()
-                    .unwrap_or_else(|| {
+                if explicit_base_url.is_none() && arcee::stored_auth_present()? {
+                    BackendKind::Arcee
+                } else {
+                    let probe = explicit_base_url.clone().unwrap_or_else(|| {
                         default_base_url_for_backend_hint(BackendKind::Auto).to_string()
                     });
-                detect_backend(&probe)?
+                    detect_backend(&probe)?
+                }
             }
             explicit => explicit,
         };
