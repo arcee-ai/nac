@@ -4,7 +4,7 @@ use super::*;
 #[command(
     name = "nac",
     about = "agent",
-    after_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac upgrade                Reinstall the latest nac release"
+    after_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release"
 )]
 pub(super) struct RunCli {
     /// Working directory (default: current directory)
@@ -76,6 +76,8 @@ pub(super) enum BackendArg {
     ChatGptCodexResponses,
     #[value(name = "anthropic-messages")]
     AnthropicMessages,
+    #[value(name = "arcee")]
+    Arcee,
 }
 
 impl From<BackendArg> for BackendKind {
@@ -88,6 +90,7 @@ impl From<BackendArg> for BackendKind {
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
+            BackendArg::Arcee => Self::Arcee,
         }
     }
 }
@@ -258,6 +261,23 @@ pub(super) enum CodexAuthCommand {
 }
 
 #[derive(Parser)]
+#[command(name = "nac arcee-auth", about = "manage Arcee auth")]
+pub(super) struct ArceeAuthCli {
+    #[command(subcommand)]
+    pub(super) command: Option<ArceeAuthCommand>,
+}
+
+#[derive(Subcommand)]
+pub(super) enum ArceeAuthCommand {
+    /// Sign in with Arcee using device code authorization
+    Login,
+    /// Show stored Arcee auth status
+    Status,
+    /// Remove stored Arcee auth
+    Logout,
+}
+
+#[derive(Parser)]
 #[command(name = "nac upgrade", about = "reinstall the latest nac release")]
 pub(super) struct UpgradeCli {
     /// Install directory to replace (default: current nac executable directory)
@@ -270,6 +290,7 @@ pub(super) enum ParsedCli {
     ManagedWorker(ManagedWorkerCli),
     Resume(ResumeCli),
     CodexAuth(CodexAuthCli),
+    ArceeAuth(ArceeAuthCli),
     Upgrade(UpgradeCli),
 }
 
@@ -299,6 +320,14 @@ pub(super) fn parse_cli_from(args: Vec<OsString>) -> ParsedCli {
         ParsedCli::CodexAuth(CodexAuthCli::parse_from(subcommand_args(
             args,
             "nac codex-auth",
+        )))
+    } else if args
+        .get(1)
+        .is_some_and(|value| value == OsStr::new("arcee-auth"))
+    {
+        ParsedCli::ArceeAuth(ArceeAuthCli::parse_from(subcommand_args(
+            args,
+            "nac arcee-auth",
         )))
     } else if args
         .get(1)

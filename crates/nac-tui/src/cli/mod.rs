@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
-use nac_core::model::{run_codex_auth_action, BackendKind, CodexAuthAction, ReasoningEffort};
+use nac_core::model::{
+    run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind, CodexAuthAction,
+    ReasoningEffort,
+};
 use nac_core::runtime::{
     self, run_managed_worker, ManagedWorkerOptions, ModelOptions, ResumeOptions, RunOptions,
     RunState, SandboxOptions, StoreOptions, WorkerDispatchOptions,
@@ -25,7 +28,10 @@ pub async fn run() -> Result<()> {
         io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     if !matches!(
         cli,
-        ParsedCli::ManagedWorker(_) | ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_)
+        ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
+            | ParsedCli::Upgrade(_)
     ) && !terminal_available
     {
         if matches!(&cli, ParsedCli::Resume(resume_cli) if resume_cli.session_id.is_none() && !resume_cli.last)
@@ -37,6 +43,11 @@ pub async fn run() -> Result<()> {
 
     if let ParsedCli::CodexAuth(cli) = cli {
         run_codex_auth_cli(cli).await?;
+        return Ok(());
+    }
+
+    if let ParsedCli::ArceeAuth(cli) = cli {
+        run_arcee_auth_cli(cli).await?;
         return Ok(());
     }
 
@@ -144,6 +155,7 @@ async fn build_run_state(
             start_in_session_picker: false,
         }),
         ParsedCli::CodexAuth(_) => unreachable!("codex-auth is handled before loading config"),
+        ParsedCli::ArceeAuth(_) => unreachable!("arcee-auth is handled before loading config"),
         ParsedCli::Upgrade(_) => unreachable!("upgrade is handled before loading config"),
     }
 }
@@ -168,6 +180,26 @@ fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
     }
 }
 
+async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
+    match cli.command {
+        Some(command) => run_arcee_auth_action(arcee_auth_action(command)).await,
+        None => {
+            let mut command = ArceeAuthCli::command();
+            command.print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
+    match command {
+        ArceeAuthCommand::Login => ArceeAuthAction::Login,
+        ArceeAuthCommand::Status => ArceeAuthAction::Status,
+        ArceeAuthCommand::Logout => ArceeAuthAction::Logout,
+    }
+}
+
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
     run_upgrade(UpgradeRequest {
         install_dir: cli.install_dir,
@@ -189,7 +221,9 @@ fn effective_cli_cwd(cli: &ParsedCli, launch_cwd: &Path) -> Result<PathBuf> {
             (Some(_), Some(remote_cwd)) => Ok(remote_cwd.clone()),
             _ => resolve_cli_cwd(launch_cwd, cli.workspace_cwd.as_deref()),
         },
-        ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            Ok(launch_cwd.to_path_buf())
+        }
     }
 }
 
@@ -205,7 +239,9 @@ fn effective_cli_config_cwd(
             None => Ok(effective_cwd.to_path_buf()),
         },
         ParsedCli::Run(_) | ParsedCli::Resume(_) => Ok(effective_cwd.to_path_buf()),
-        ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            Ok(launch_cwd.to_path_buf())
+        }
     }
 }
 
@@ -334,6 +370,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::ManagedWorker(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected resume cli")
             }
@@ -351,6 +388,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::ManagedWorker(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected resume cli")
             }
@@ -392,6 +430,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected managed worker cli")
             }
@@ -421,6 +460,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected managed worker cli")
             }
@@ -441,6 +481,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected codex-auth cli")
             }
@@ -458,8 +499,42 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected codex-auth cli")
+            }
+        }
+    }
+
+    #[test]
+    fn parse_arcee_auth_command_uses_arcee_auth_cli() {
+        let parsed = parse_cli_from(vec![OsString::from("nac"), OsString::from("arcee-auth")]);
+        match parsed {
+            ParsedCli::ArceeAuth(cli) => assert!(cli.command.is_none()),
+            ParsedCli::Run(_)
+            | ParsedCli::Resume(_)
+            | ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::Upgrade(_) => {
+                panic!("expected arcee-auth cli")
+            }
+        }
+
+        let parsed = parse_cli_from(vec![
+            OsString::from("nac"),
+            OsString::from("arcee-auth"),
+            OsString::from("login"),
+        ]);
+        match parsed {
+            ParsedCli::ArceeAuth(cli) => {
+                assert!(matches!(cli.command, Some(ArceeAuthCommand::Login)))
+            }
+            ParsedCli::Run(_)
+            | ParsedCli::Resume(_)
+            | ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::Upgrade(_) => {
+                panic!("expected arcee-auth cli")
             }
         }
     }
@@ -472,7 +547,8 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_) => panic!("expected upgrade cli"),
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_) => panic!("expected upgrade cli"),
         }
 
         let parsed = parse_cli_from(vec![
@@ -488,7 +564,8 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_) => panic!("expected upgrade cli"),
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_) => panic!("expected upgrade cli"),
         }
     }
 }

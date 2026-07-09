@@ -24,16 +24,36 @@ impl ModelClient {
 
     pub fn from_env_with_overrides(overrides: ClientOverrides) -> Result<Self> {
         let requested_backend = overrides.backend.unwrap_or(BackendKind::Auto);
-        let base_url = overrides.base_url.unwrap_or_else(|| {
-            std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| {
-                default_base_url_for_backend_hint(requested_backend).to_string()
-            })
-        });
+        let explicit_base_url = overrides
+            .base_url
+            .clone()
+            .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
         let backend = match requested_backend {
-            BackendKind::Auto => detect_backend(&base_url)?,
+            BackendKind::Auto if explicit_base_url.is_none() && arcee::has_stored_auth() => {
+                BackendKind::Arcee
+            }
+            BackendKind::Auto => {
+                let probe = explicit_base_url
+                    .clone()
+                    .unwrap_or_else(|| {
+                        default_base_url_for_backend_hint(BackendKind::Auto).to_string()
+                    });
+                detect_backend(&probe)?
+            }
             explicit => explicit,
         };
-        let api_key = api_key_for_backend(backend, overrides.api_key_env.as_deref())?;
+        let mut base_url = explicit_base_url
+            .clone()
+            .unwrap_or_else(|| default_base_url_for_backend_hint(backend).to_string());
+        let mut api_key = api_key_for_backend(backend, overrides.api_key_env.as_deref())?;
+
+        if backend == BackendKind::Arcee {
+            let record = arcee::read_stored_auth()?;
+            api_key = record.api_key;
+            if explicit_base_url.is_none() {
+                base_url = record.base_url;
+            }
+        }
         let model = overrides.model.unwrap_or_else(|| {
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
         });
@@ -74,6 +94,7 @@ impl ModelClient {
             BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
             BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
             BackendKind::TogetherChat => self.send_together_chat(messages, tools).await,
+            BackendKind::Arcee => self.send_arcee_chat(messages, tools).await,
             BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
             BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
             BackendKind::ChatGptCodexResponses => {
@@ -179,6 +200,30 @@ impl ModelClient {
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_together_chat_response(&value, &url)
+    }
+
+    async fn send_arcee_chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let mut request = json!({
+            "model": self.model,
+            "messages": messages
+                .iter()
+                .map(fireworks_message_to_value)
+                .collect::<Vec<_>>(),
+            "temperature": 0.0,
+        });
+
+        if !tools.is_empty() {
+            request["tools"] =
+                serde_json::to_value(&tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+        }
+
+        let value = self.post_json_with_retry(&url, &request).await?;
+        parse_chat_completions_response(&value, &url)
     }
 
     async fn send_deepseek_chat(

@@ -14,6 +14,7 @@ pub enum BackendKind {
     ChatGptCodexResponses,
     #[serde(rename = "anthropic-messages")]
     AnthropicMessages,
+    Arcee,
 }
 
 impl BackendKind {
@@ -26,6 +27,7 @@ impl BackendKind {
             Self::OpenAiResponses => "openai-responses",
             Self::ChatGptCodexResponses => "chatgpt-codex-responses",
             Self::AnthropicMessages => "anthropic-messages",
+            Self::Arcee => "arcee",
         }
     }
 }

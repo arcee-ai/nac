@@ -91,6 +91,8 @@ enum BackendArg {
     ChatGptCodexResponses,
     #[value(name = "anthropic-messages")]
     AnthropicMessages,
+    #[value(name = "arcee")]
+    Arcee,
 }
 
 impl From<BackendArg> for BackendKind {
@@ -103,6 +105,7 @@ impl From<BackendArg> for BackendKind {
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
+            BackendArg::Arcee => Self::Arcee,
         }
     }
 }
