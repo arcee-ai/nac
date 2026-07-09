@@ -132,6 +132,28 @@ textarea {
   overflow: hidden;
 }
 
+body.inspector-fullscreen .app-shell {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  height: 100vh;
+  height: 100dvh;
+  padding: 0;
+}
+
+body.inspector-fullscreen .board {
+  display: none;
+}
+
+body.inspector-fullscreen .inspector {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .matrix-subtitle,
 .inspector-head p {
   color: var(--muted);
@@ -279,6 +301,10 @@ textarea {
   box-shadow: var(--neu-pressed);
 }
 
+.icon-button:focus-visible {
+  box-shadow: var(--neu-pressed), 0 0 0 2px var(--highlight);
+}
+
 .icon-button-destructive:active {
   box-shadow: var(--neu-pressed), 0 0 0 1px var(--danger-ring);
 }
@@ -297,6 +323,10 @@ textarea {
   stroke-width: 2.1;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.icon[hidden] {
+  display: none;
 }
 
 .form-status {

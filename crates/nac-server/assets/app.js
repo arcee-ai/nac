@@ -2,6 +2,7 @@ const state = {
   store: null,
   sessions: [],
   snapshots: new Map(),
+  snapshotLoadGenerationBySession: new Map(),
   selectedId: null,
   eventsBySession: new Map(),
   activeThreadsBySession: new Map(),
@@ -16,6 +17,7 @@ const state = {
   lastSequence: new Map(),
   activeTab: "chat",
   mobileDetailOpen: false,
+  inspectorFullscreen: false,
   scrollChatToBottom: false,
   waitingLife: null,
   workspaceSelectedPathBySession: new Map(),
@@ -117,6 +119,9 @@ function bindElements() {
     "deleteConfirmText",
     "deleteStatus",
     "deleteSessionBtn",
+    "fullscreenBtn",
+    "fullscreenEnterIcon",
+    "fullscreenExitIcon",
     "settingsBtn",
     "settingsOverlay",
     "closeSettings",
@@ -142,6 +147,7 @@ function bindEvents() {
   el.deleteSessionBtn.addEventListener("click", () => {
     if (state.selectedId) deleteSession(state.selectedId);
   });
+  el.fullscreenBtn.addEventListener("click", toggleInspectorFullscreen);
   el.settingsBtn.addEventListener("click", showSettingsOverlay);
   el.closeSettings.addEventListener("click", hideSettingsOverlay);
   el.settingsOverlay.addEventListener("click", (event) => {
@@ -160,9 +166,19 @@ function bindEvents() {
   el.confirmDelete.addEventListener("click", confirmDeleteSession);
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    if (!el.launchOverlay.hidden) hideLaunchOverlay();
-    if (!el.deleteOverlay.hidden) hideDeleteOverlay();
-    if (!el.settingsOverlay.hidden) hideSettingsOverlay();
+    if (!el.settingsOverlay.hidden) {
+      hideSettingsOverlay();
+      return;
+    }
+    if (!el.deleteOverlay.hidden) {
+      hideDeleteOverlay();
+      return;
+    }
+    if (!el.launchOverlay.hidden) {
+      hideLaunchOverlay();
+      return;
+    }
+    if (state.inspectorFullscreen) setInspectorFullscreen(false);
   });
 
   el.tabs.addEventListener("click", (event) => {
@@ -300,7 +316,26 @@ async function loadSessionsOnce(options) {
     }
 
     if (options.workspaceStats) state.lastWorkspaceStatsRefresh = Date.now();
+    const previousSelectedId = state.selectedId;
+    const selectedSessionMissing = Boolean(
+      previousSelectedId
+      && !sessions.some((entry) => entry.summary.session_id === previousSelectedId),
+    );
+    if (selectedSessionMissing) {
+      clearSessionClientState(previousSelectedId);
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+      state.selectedId = null;
+      state.transcriptRenderedSessionId = null;
+      state.transcriptRenderedSignature = "";
+    }
     if (!state.selectedId && sessions.length > 0) state.selectedId = sessions[0].summary.session_id;
+    if (selectedSessionMissing && !state.selectedId) {
+      state.mobileDetailOpen = false;
+      setInspectorFullscreen(false);
+    }
 
     const nextSessionsDigest = sessionListRenderDigest(sessions);
     const selectedEntry = sessions.find((entry) => entry.summary.session_id === state.selectedId) || null;
@@ -323,7 +358,9 @@ async function loadSessionsOnce(options) {
         inspector: inspectorChanged,
       });
     }
-    if (needsSelectedSnapshot) loadSnapshot(state.selectedId, true);
+    if (state.selectedId && (selectedSessionMissing || needsSelectedSnapshot)) {
+      loadSnapshot(state.selectedId, true);
+    }
     return sessions;
   } catch (error) {
     setLaunchStatus(error.message, true);
@@ -460,9 +497,12 @@ function setVisible(element, visible) {
 
 async function loadSnapshot(sessionId, openStream = false) {
   if (!sessionId) return null;
+  const loadGeneration = state.snapshotLoadGenerationBySession.get(sessionId) || 0;
   try {
     const previousMessageCount = effectiveMessageCount(sessionId);
     const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}`);
+    if (loadGeneration !== (state.snapshotLoadGenerationBySession.get(sessionId) || 0)
+      || !sessionEntryById(sessionId)) return null;
     sanitizeSnapshotActiveRun(sessionId, snapshot);
     if (activeRunCountsForSession(sessionId, snapshot.active_run)) {
       clearRunSubmitting(sessionId);
@@ -478,7 +518,7 @@ async function loadSnapshot(sessionId, openStream = false) {
     if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
       requestChatScrollToBottom();
     }
-    if (openStream) openEventStream(sessionId);
+    if (openStream && state.selectedId === sessionId) openEventStream(sessionId);
     if (state.selectedId === sessionId) {
       if (sessionHasActiveRun(sessionId, snapshot)) {
         startLiveTimer();
@@ -625,6 +665,7 @@ async function updateSessionConfig(event) {
 }
 
 function showMobileSessions() {
+  setInspectorFullscreen(false);
   state.mobileDetailOpen = false;
   renderMobileMode();
   syncPromptBusy(state.selectedId);
@@ -746,6 +787,30 @@ async function deleteSession(sessionId) {
   showDeleteOverlay(sessionId);
 }
 
+function clearSessionClientState(sessionId) {
+  state.snapshotLoadGenerationBySession.set(
+    sessionId,
+    (state.snapshotLoadGenerationBySession.get(sessionId) || 0) + 1,
+  );
+  state.snapshots.delete(sessionId);
+  state.eventsBySession.delete(sessionId);
+  state.activeThreadsBySession.delete(sessionId);
+  state.attentionSessions.delete(sessionId);
+  state.activeRunsBySession.delete(sessionId);
+  state.terminalRunsBySession.delete(sessionId);
+  clearRunSubmitting(sessionId);
+  state.runStartedAtBySession.delete(sessionId);
+  state.lastSequence.delete(sessionId);
+  state.workspaceSelectedPathBySession.delete(sessionId);
+  for (const entryKey of state.workspaceDiffEntries.keys()) {
+    const [entrySessionId] = JSON.parse(entryKey);
+    if (entrySessionId === sessionId) state.workspaceDiffEntries.delete(entryKey);
+  }
+  state.expandedThreadNamesBySession.delete(sessionId);
+  state.pinnedSessionIds.delete(sessionId);
+  savePinnedSessions();
+}
+
 async function confirmDeleteSession() {
   const sessionId = state.pendingDeleteSessionId;
   if (!sessionId) return;
@@ -753,22 +818,7 @@ async function confirmDeleteSession() {
   el.confirmDelete.disabled = true;
   try {
     await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
-    // Clean up all client-side state for this session
-    state.snapshots.delete(sessionId);
-    state.eventsBySession.delete(sessionId);
-    state.activeThreadsBySession.delete(sessionId);
-    state.attentionSessions.delete(sessionId);
-    state.activeRunsBySession.delete(sessionId);
-    state.terminalRunsBySession.delete(sessionId);
-    state.submittingRunsBySession.delete(sessionId);
-    state.submittingRunTimersBySession.delete(sessionId);
-    state.runStartedAtBySession.delete(sessionId);
-    state.lastSequence.delete(sessionId);
-    state.workspaceSelectedPathBySession.delete(sessionId);
-    state.workspaceDiffEntries.delete(sessionId);
-    state.expandedThreadNamesBySession.delete(sessionId);
-    state.pinnedSessionIds.delete(sessionId);
-    savePinnedSessions();
+    clearSessionClientState(sessionId);
     // If the deleted session was selected, pick a new one or clear
     if (state.selectedId === sessionId) {
       if (state.eventSource) {
@@ -784,7 +834,9 @@ async function confirmDeleteSession() {
     if (state.selectedId) {
       selectSession(state.selectedId);
     } else {
-      requestRender({ inspector: true });
+      state.mobileDetailOpen = false;
+      setInspectorFullscreen(false);
+      requestRender({ mobile: true, inspector: true });
     }
   } catch (error) {
     pushLocalEvent("delete_error", error.message, sessionId);
@@ -1076,8 +1128,48 @@ function renderShell() {
   renderMobileMode();
 }
 
+function selectedSessionIsUsable() {
+  const sessionId = state.selectedId;
+  return Boolean(sessionId && state.snapshots.has(sessionId) && sessionEntryById(sessionId));
+}
+
+function toggleInspectorFullscreen() {
+  if (!selectedSessionIsUsable()) return;
+  setInspectorFullscreen(!state.inspectorFullscreen);
+}
+
+function setInspectorFullscreen(enabled) {
+  const nextEnabled = Boolean(enabled);
+  const inspector = el.fullscreenBtn.closest(".inspector");
+  const focusWouldBeHidden = state.inspectorFullscreen
+    && !nextEnabled
+    && !state.mobileDetailOpen
+    && typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches
+    && inspector?.contains(document.activeElement);
+
+  state.inspectorFullscreen = nextEnabled;
+  renderInspectorFullscreenMode();
+  if (focusWouldBeHidden) {
+    el.sessionGrid.querySelector("[data-action='new-session']")?.focus();
+  }
+}
+
+function renderInspectorFullscreenMode() {
+  const enabled = state.inspectorFullscreen;
+  const label = enabled ? "Exit full screen" : "Enter full screen";
+  document.body.classList.toggle("inspector-fullscreen", enabled);
+  el.fullscreenBtn.setAttribute("aria-label", label);
+  el.fullscreenBtn.setAttribute("title", label);
+  el.fullscreenBtn.setAttribute("aria-pressed", String(enabled));
+  el.fullscreenEnterIcon.hidden = enabled;
+  el.fullscreenExitIcon.hidden = !enabled;
+}
+
 function renderMobileMode() {
   document.body.classList.toggle("detail-open", Boolean(state.mobileDetailOpen && state.selectedId));
+  renderInspectorFullscreenMode();
   if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
 }
 
@@ -1178,7 +1270,7 @@ function renderSessionCard(card) {
 
 function renderInspector() {
   const sessionId = state.selectedId;
-  const snapshot = sessionId ? state.snapshots.get(sessionId) : null;
+  const snapshot = selectedSessionIsUsable() ? state.snapshots.get(sessionId) : null;
   if (!sessionId || !snapshot) {
     el.inspectorTitle.textContent = sessionId ? shortId(sessionId) : "No session selected";
     el.inspectorMeta.textContent = sessionId ? "Loading snapshot." : "Launch or select a session.";
@@ -1190,6 +1282,7 @@ function renderInspector() {
     el.snapContext.textContent = "--";
     el.cancelRun.disabled = true;
     el.deleteSessionBtn.disabled = true;
+    el.fullscreenBtn.disabled = true;
     el.settingsBtn.disabled = true;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
     state.transcriptRenderedSessionId = null;
@@ -1220,6 +1313,7 @@ function renderInspector() {
   }
   el.cancelRun.disabled = !runActive;
   el.deleteSessionBtn.disabled = false;
+  el.fullscreenBtn.disabled = false;
   el.settingsBtn.disabled = false;
 
   const tokenUsage = snapshot.response_timing?.cumulative_token_usage
@@ -1434,7 +1528,7 @@ function chatPanelIsVisible(sessionId) {
   const mobileMode = typeof window !== "undefined"
     && typeof window.matchMedia === "function"
     && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches;
-  return !mobileMode || Boolean(state.mobileDetailOpen);
+  return !mobileMode || Boolean(state.mobileDetailOpen || state.inspectorFullscreen);
 }
 
 function waitingLifeIsStillActive(life) {
