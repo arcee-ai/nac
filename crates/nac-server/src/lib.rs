@@ -10,13 +10,13 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
     http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
     },
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use nac_core::{
@@ -133,6 +133,26 @@ pub struct UpdateConfigRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct UpdateSessionPresentationRequest {
+    pub title: String,
+    pub pinned: bool,
+    pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReorderSessionsRequest {
+    pub pinned: bool,
+    pub session_ids: Vec<String>,
+    pub expected_versions: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReorderSessionsResponse {
+    pub pinned: bool,
+    pub sessions: Vec<SessionSummarySnapshot>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
 }
@@ -160,6 +180,11 @@ pub struct WorkspaceDiffQuery {
     pub path: String,
     pub stage: Option<String>,
     pub context: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayBoundaryEvent {
+    pub replay_boundary_sequence_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -233,6 +258,55 @@ impl SessionManager {
         }
 
         Ok(sessions)
+    }
+
+    pub async fn update_session_presentation(
+        &self,
+        session_id: &str,
+        title: &str,
+        pinned: bool,
+        expected_version: i64,
+    ) -> std::result::Result<SessionSummarySnapshot, sessions::SessionPresentationError> {
+        let store_path = self.inner.store_path.clone();
+        let session_id = session_id.to_string();
+        let title = title.to_string();
+        tokio::task::spawn_blocking(move || {
+            sessions::update_session_presentation(
+                &store_path,
+                &session_id,
+                &title,
+                pinned,
+                expected_version,
+            )
+            .map(Into::into)
+        })
+        .await
+        .map_err(|error| {
+            sessions::SessionPresentationError::Store(anyhow!(
+                "session presentation update task failed: {error}"
+            ))
+        })?
+    }
+
+    pub async fn reorder_sessions(
+        &self,
+        pinned: bool,
+        session_ids: &[String],
+        expected_versions: &BTreeMap<String, i64>,
+    ) -> std::result::Result<Vec<SessionSummarySnapshot>, sessions::SessionPresentationError> {
+        let store_path = self.inner.store_path.clone();
+        let session_ids = session_ids.to_vec();
+        let expected_versions = expected_versions.clone();
+        tokio::task::spawn_blocking(move || {
+            sessions::reorder_sessions(&store_path, pinned, &session_ids, &expected_versions)
+                .map(|summaries| summaries.into_iter().map(Into::into).collect())
+        })
+        .await
+        .map_err(|error| {
+            sessions::SessionPresentationError::Store(anyhow!(
+                "session reorder task failed: {error}"
+            ))
+        })?
     }
 
     async fn populate_workspace_diff(&self, sessions: &mut [ManagedSessionSummary]) -> Result<()> {
@@ -465,6 +539,7 @@ impl SessionManager {
         after_sequence_id: Option<u64>,
         limit: usize,
     ) -> Result<(
+        u64,
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
         SessionEventReceiver,
@@ -474,6 +549,7 @@ impl SessionManager {
             .connect_client()
             .subscribe_events_with_replay(after_sequence_id, limit);
         Ok((
+            subscription.replay_boundary_sequence_id,
             subscription.replay_gap,
             subscription.replayed_events,
             subscription.receiver,
@@ -512,11 +588,7 @@ impl SessionManager {
                 service.destroy_sandbox().await;
             }
         }
-        self.inner
-            .active_sessions
-            .write()
-            .await
-            .remove(session_id);
+        self.inner.active_sessions.write().await.remove(session_id);
 
         // Cascade-delete all DB rows for this session.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
@@ -603,11 +675,7 @@ impl SessionManager {
         sessions::save_session(&self.inner.store_path, &snapshot)?;
 
         // 5. Remove from active_sessions so the next attach re-resumes.
-        self.inner
-            .active_sessions
-            .write()
-            .await
-            .remove(session_id);
+        self.inner.active_sessions.write().await.remove(session_id);
 
         Ok(())
     }
@@ -652,9 +720,20 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
+        .route("/sessions/order", put(reorder_sessions_handler))
+        .route(
+            "/sessions/{session_id}/presentation",
+            put(update_session_presentation_handler),
+        )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route("/sessions/{session_id}", get(session_snapshot).delete(delete_session_handler))
-        .route("/sessions/{session_id}/config", patch(update_config_handler))
+        .route(
+            "/sessions/{session_id}",
+            get(session_snapshot).delete(delete_session_handler),
+        )
+        .route(
+            "/sessions/{session_id}/config",
+            patch(update_config_handler),
+        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
@@ -731,6 +810,41 @@ async fn list_sessions(
     Ok(Json(manager.list_sessions(query.workspace_stats).await?))
 }
 
+async fn update_session_presentation_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateSessionPresentationRequest>, JsonRejection>,
+) -> std::result::Result<Json<SessionSummarySnapshot>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let summary = manager
+        .update_session_presentation(
+            &session_id,
+            &request.title,
+            request.pinned,
+            request.expected_version,
+        )
+        .await?;
+    Ok(Json(summary))
+}
+
+async fn reorder_sessions_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ReorderSessionsRequest>, JsonRejection>,
+) -> std::result::Result<Json<ReorderSessionsResponse>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let sessions = manager
+        .reorder_sessions(
+            request.pinned,
+            &request.session_ids,
+            &request.expected_versions,
+        )
+        .await?;
+    Ok(Json(ReorderSessionsResponse {
+        pinned: request.pinned,
+        sessions,
+    }))
+}
+
 async fn create_session(
     State(manager): State<SessionManager>,
     Json(request): Json<CreateSessionRequest>,
@@ -790,35 +904,19 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (replay_gap, replayed_events, mut receiver) = manager
+    let (replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
             query.limit.unwrap_or(DEFAULT_REPLAY_LIMIT),
         )
         .await?;
-    let mut replayed_events = VecDeque::from(replayed_events);
-
-    let event_stream = stream! {
-        if let Some(replay_gap) = replay_gap {
-            yield Ok(sse_json_event("replay_gap", None, &ReplayGapEvent { replay_gap }));
-        }
-
-        while let Some(envelope) = replayed_events.pop_front() {
-            yield Ok(sse_envelope_event(&envelope));
-        }
-
-        loop {
-            match receiver.recv().await {
-                Ok(envelope) => yield Ok(sse_envelope_event(&envelope)),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    let payload = serde_json::json!({ "missed": count });
-                    yield Ok(sse_json_event("lagged", None, &payload));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    };
+    let event_stream = session_event_stream(
+        replay_boundary_sequence_id,
+        replay_gap,
+        replayed_events,
+        receiver,
+    );
 
     Ok(Sse::new(event_stream).keep_alive(
         KeepAlive::new()
@@ -938,6 +1036,43 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
     }
 }
 
+fn session_event_stream(
+    replay_boundary_sequence_id: u64,
+    replay_gap: Option<SessionReplayGap>,
+    replayed_events: Vec<SessionEventEnvelope>,
+    mut receiver: SessionEventReceiver,
+) -> impl futures_core::Stream<Item = std::result::Result<Event, Infallible>> {
+    let mut replayed_events = VecDeque::from(replayed_events);
+    stream! {
+        yield Ok(sse_json_event(
+            "replay_boundary",
+            None,
+            &ReplayBoundaryEvent {
+                replay_boundary_sequence_id,
+            },
+        ));
+
+        if let Some(replay_gap) = replay_gap {
+            yield Ok(sse_json_event("replay_gap", None, &ReplayGapEvent { replay_gap }));
+        }
+
+        while let Some(envelope) = replayed_events.pop_front() {
+            yield Ok(sse_envelope_event(&envelope));
+        }
+
+        loop {
+            match receiver.recv().await {
+                Ok(envelope) => yield Ok(sse_envelope_event(&envelope)),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    let payload = serde_json::json!({ "missed": count });
+                    yield Ok(sse_json_event("lagged", None, &payload));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    }
+}
+
 fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
     sse_json_event(
         "session_event",
@@ -977,6 +1112,31 @@ fn canonicalize_file(path: PathBuf) -> Result<PathBuf> {
 pub struct ApiError {
     status: StatusCode,
     message: String,
+}
+
+impl From<JsonRejection> for ApiError {
+    fn from(error: JsonRejection) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("invalid JSON request body: {error}"),
+        }
+    }
+}
+
+impl From<sessions::SessionPresentationError> for ApiError {
+    fn from(error: sessions::SessionPresentationError) -> Self {
+        let status = match &error {
+            sessions::SessionPresentationError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            sessions::SessionPresentationError::NotFound(_) => StatusCode::NOT_FOUND,
+            sessions::SessionPresentationError::Conflict(_)
+            | sessions::SessionPresentationError::Busy(_) => StatusCode::CONFLICT,
+            sessions::SessionPresentationError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
@@ -1123,5 +1283,295 @@ mod tests {
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn seed_session(root: &std::path::Path, session_id: &str, created_at: &str) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.created_at = created_at.to_string();
+        snapshot.updated_at = created_at.to_string();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
+    }
+
+    fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {
+        SessionEventEnvelope {
+            session_id: Some("session-1".to_string()),
+            sequence_id,
+            client_id: None,
+            run_id: None,
+            event: nac_core::events::SessionEvent::RunFailed {
+                message: message.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn presentation_requests_require_the_complete_contract() {
+        let update: UpdateSessionPresentationRequest = serde_json::from_str(
+            r#"{"title":"  Build release  ","pinned":true,"expected_version":3}"#,
+        )
+        .unwrap();
+        assert_eq!(update.title, "  Build release  ");
+        assert!(update.pinned);
+        assert_eq!(update.expected_version, 3);
+        assert!(serde_json::from_str::<UpdateSessionPresentationRequest>(
+            r#"{"pinned":true,"expected_version":3}"#
+        )
+        .is_err());
+
+        let reorder: ReorderSessionsRequest = serde_json::from_str(
+            r#"{"pinned":false,"session_ids":["b","a"],"expected_versions":{"a":2,"b":4}}"#,
+        )
+        .unwrap();
+        assert_eq!(reorder.session_ids, ["b", "a"]);
+        assert_eq!(reorder.expected_versions["a"], 2);
+    }
+
+    #[test]
+    fn presentation_errors_map_to_exact_statuses() {
+        use sessions::SessionPresentationError;
+
+        let cases = [
+            (
+                SessionPresentationError::InvalidInput("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                SessionPresentationError::NotFound("missing".to_string()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                SessionPresentationError::Conflict("stale".to_string()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                SessionPresentationError::Busy("locked".to_string()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                SessionPresentationError::Store(anyhow::anyhow!("disk failed")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected_status) in cases {
+            let error = ApiError::from(error);
+            assert_eq!(error.status, expected_status);
+        }
+    }
+
+    #[tokio::test]
+    async fn presentation_handlers_preserve_error_shape_and_status() {
+        let root = temp_root("presentation_status");
+        seed_session(&root, "known", "2026-01-01 00:00:00.000000000");
+        let manager = test_manager(&root);
+
+        let invalid = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: "bad\ttitle".to_string(),
+                pinned: false,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+
+        let missing = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("missing".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: "title".to_string(),
+                pinned: false,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
+        let _ = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: "title".to_string(),
+                pinned: false,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap();
+        let stale = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: "new title".to_string(),
+                pinned: false,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap_err();
+        let response = stale.into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body.as_object().unwrap().len(), 1);
+        assert!(body["error"].as_str().unwrap().contains("version changed"));
+
+        let malformed_reorder = reorder_sessions_handler(
+            State(manager.clone()),
+            Ok(Json(ReorderSessionsRequest {
+                pinned: false,
+                session_ids: vec!["known".to_string()],
+                expected_versions: BTreeMap::new(),
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(malformed_reorder.status, StatusCode::BAD_REQUEST);
+
+        let membership_conflict = reorder_sessions_handler(
+            State(manager),
+            Ok(Json(ReorderSessionsRequest {
+                pinned: false,
+                session_ids: Vec::new(),
+                expected_versions: BTreeMap::new(),
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(membership_conflict.status, StatusCode::CONFLICT);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn presentation_routes_serialize_summaries_and_drive_list_order() {
+        let root = temp_root("presentation_order");
+        seed_session(&root, "a", "2026-01-01 00:00:00.000000000");
+        seed_session(&root, "b", "2026-01-02 00:00:00.000000000");
+        seed_session(&root, "c", "2026-01-03 00:00:00.000000000");
+        let manager = test_manager(&root);
+
+        let Json(a) = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("a".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: "  Alpha  ".to_string(),
+                pinned: true,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(a.title.as_deref(), Some("Alpha"));
+        assert!(a.pinned);
+        assert_eq!(a.presentation_version, 1);
+        let serialized = serde_json::to_value(&a).unwrap();
+        assert_eq!(serialized["title"], "Alpha");
+        assert_eq!(serialized["pinned"], true);
+        assert_eq!(serialized["sort_order"], 0);
+        assert_eq!(serialized["presentation_version"], 1);
+
+        let _ = update_session_presentation_handler(
+            State(manager.clone()),
+            AxumPath("b".to_string()),
+            Ok(Json(UpdateSessionPresentationRequest {
+                title: String::new(),
+                pinned: true,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap();
+
+        let Json(reordered) = reorder_sessions_handler(
+            State(manager.clone()),
+            Ok(Json(ReorderSessionsRequest {
+                pinned: true,
+                session_ids: vec!["b".to_string(), "a".to_string()],
+                expected_versions: BTreeMap::from([("a".to_string(), 1), ("b".to_string(), 1)]),
+            })),
+        )
+        .await
+        .unwrap();
+        assert!(reordered.pinned);
+        assert_eq!(
+            reordered
+                .sessions
+                .iter()
+                .map(|summary| summary.session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "a"]
+        );
+        assert_eq!(reordered.sessions[0].sort_order, 0);
+        assert_eq!(reordered.sessions[1].sort_order, 1);
+        assert!(reordered
+            .sessions
+            .iter()
+            .all(|summary| summary.presentation_version == 2));
+
+        let listed = manager.list_sessions(false).await.unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|entry| entry.summary.session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "a", "c"]
+        );
+        assert!(listed.iter().all(|entry| !entry.active));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn sse_orders_boundary_then_gap_replay_and_live_events() {
+        let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
+        let live = test_event(6, "live-6");
+        let (sender, receiver) = tokio::sync::broadcast::channel(4);
+        sender.send(live).unwrap();
+        drop(sender);
+
+        let stream = session_event_stream(
+            5,
+            Some(SessionReplayGap {
+                missing_from_sequence_id: 2,
+                missing_to_sequence_id: 3,
+            }),
+            replayed,
+            receiver,
+        );
+        let response = Sse::new(stream).into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        let boundary = body.find("event: replay_boundary").unwrap();
+        let gap = body.find("event: replay_gap").unwrap();
+        let replay_4 = body.find("\"sequence_id\":4").unwrap();
+        let replay_5 = body.find("\"sequence_id\":5").unwrap();
+        let live_6 = body.find("\"sequence_id\":6").unwrap();
+        assert!(boundary < gap && gap < replay_4 && replay_4 < replay_5 && replay_5 < live_6);
+        assert!(body.contains("\"replay_boundary_sequence_id\":5"));
+
+        let boundary_frame = body.split("\n\n").next().unwrap();
+        assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));
     }
 }
