@@ -142,6 +142,37 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_arcee_auth_does_not_block_other_backends() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+
+        let original_key = std::env::var_os("OPENAI_API_KEY");
+        let original_base = std::env::var_os("OPENAI_BASE_URL");
+        let original_model = std::env::var_os("OPENAI_MODEL");
+        let original_home = std::env::var_os("NAC_HOME");
+
+        let home = std::env::temp_dir().join("nac-corrupt-auth-fallback-test");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("auth.json"), "{ not valid json").unwrap();
+
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test_openai_key");
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("OPENAI_MODEL");
+            std::env::set_var("NAC_HOME", &home);
+        }
+
+        let client = ModelClient::from_env_with_overrides(ClientOverrides::default())
+            .expect("corrupt Arcee auth must not block an OpenAI run");
+        assert_eq!(client.backend(), BackendKind::OpenAiResponses);
+
+        let _ = std::fs::remove_file(home.join("auth.json"));
+        restore_env("OPENAI_API_KEY", original_key);
+        restore_env("OPENAI_BASE_URL", original_base);
+        restore_env("OPENAI_MODEL", original_model);
+        restore_env("NAC_HOME", original_home);
+    }
+
+    #[test]
     fn detects_backend_from_url() {
         assert_eq!(
             detect_backend("https://api.openai.com/v1").unwrap(),
