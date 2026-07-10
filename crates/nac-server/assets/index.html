@@ -10,30 +10,9 @@
     <div id="appShell" class="app-shell">
       <main id="sessionBoard" class="board">
         <header class="top-strip">
-          <div class="strip-cell">
-            <span>nac</span>
-            <strong id="storePath">store pending</strong>
-          </div>
-          <div class="strip-cell">
-            <span>Workspace</span>
-            <strong id="rootCwd">pending</strong>
-          </div>
-          <div class="strip-cell">
-            <span>Selected</span>
-            <strong id="selectedId">none</strong>
-          </div>
-          <div class="strip-cell">
-            <span>Events</span>
-            <strong id="eventCount">0</strong>
-          </div>
+          <div class="nac-wordmark">NAC</div>
+          <strong id="storePath" class="store-path" title="Store path pending">store path pending</strong>
         </header>
-
-        <section class="matrix-toolbar">
-          <div>
-            <div class="matrix-title">Session Matrix</div>
-            <div class="matrix-subtitle" id="matrixSubtitle">0 tracked sessions</div>
-          </div>
-        </section>
 
         <p id="reorderInstructions" class="visually-hidden">
           To reorder a session, focus its move handle and press Enter or Space. Use the arrow keys, Home, or End to choose a position, then press Enter or Space to save. Press Escape to cancel.

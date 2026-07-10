@@ -25,7 +25,6 @@ const state = {
   workspaceDiffRequestSeq: 0,
   expandedThreadNamesBySession: new Map(),
   renderRafId: null,
-  renderMetricsPending: false,
   renderSessionsPending: false,
   renderMobilePending: false,
   renderInspectorPending: false,
@@ -111,10 +110,6 @@ function bindElements() {
     "sandboxMounts",
     "initialPrompt",
     "launchStatus",
-    "rootCwd",
-    "selectedId",
-    "eventCount",
-    "matrixSubtitle",
     "sessionGrid",
     "reorderLiveRegion",
     "sessionBoard",
@@ -281,8 +276,9 @@ async function boot() {
   syncPaneSplitter();
   try {
     state.store = await apiGet("/store");
-    el.storePath.textContent = basename(state.store.store_path);
-    el.rootCwd.textContent = state.store.root_cwd;
+    const storePath = state.store.store_path || "--";
+    el.storePath.textContent = storePath;
+    el.storePath.title = storePath;
     el.launchCwd.value = state.store.root_cwd;
   } catch (error) {
     setLaunchStatus(error.message, true);
@@ -397,7 +393,6 @@ function joinCurrentSessionLoad(loadOptions) {
     const shell = loadOptions.forceRender;
     requestRender({
       shell: false,
-      metrics: shell,
       sessions: shell,
       mobile: shell,
       inspector: loadOptions.inspector || shell,
@@ -457,7 +452,6 @@ async function loadSessionsOnce(options, loadGeneration) {
     if (shellChanged || inspectorChanged) {
       requestRender({
         shell: false,
-        metrics: shellChanged,
         sessions: shellChanged,
         mobile: shellChanged,
         inspector: inspectorChanged,
@@ -996,7 +990,6 @@ function clearSessionSequenceEpoch(sessionId) {
   state.terminalRunsBySession.delete(sessionId);
   requestRender({
     shell: false,
-    metrics: true,
     sessions: true,
     inspector: state.selectedId === sessionId,
   });
@@ -1083,7 +1076,6 @@ function openEventStream(sessionId, options = {}) {
     }
     requestRender({
       shell: false,
-      metrics: true,
       sessions: runStarted || terminalRun,
       inspector: true,
     });
@@ -1277,17 +1269,14 @@ function handleTerminalRun(sessionId, envelope) {
 
 function requestRender(options = {}) {
   const hasShellBits = "shell" in options
-    || "metrics" in options
     || "sessions" in options
     || "mobile" in options;
   const shell = options.shell === true || (!hasShellBits && options.shell !== false);
-  if (shell || options.metrics) state.renderMetricsPending = true;
   if (shell || options.sessions) state.renderSessionsPending = true;
   if (shell || options.mobile) state.renderMobilePending = true;
   if (options.inspector !== false) state.renderInspectorPending = true;
 
-  const hasPendingRender = state.renderMetricsPending
-    || state.renderSessionsPending
+  const hasPendingRender = state.renderSessionsPending
     || state.renderMobilePending
     || state.renderInspectorPending;
   if (!hasPendingRender || state.renderRafId) return;
@@ -1305,26 +1294,22 @@ function requestInspectorRender() {
 function requestEventsRender() {
   requestRender({
     shell: false,
-    metrics: true,
     inspector: state.activeTab === "events",
   });
 }
 
 function flushRender() {
   state.renderRafId = null;
-  const renderMetricsPending = state.renderMetricsPending;
   const renderSessionsPending = state.renderSessionsPending;
   const renderMobilePending = state.renderMobilePending;
   const renderInspectorPending = state.renderInspectorPending;
-  state.renderMetricsPending = false;
   state.renderSessionsPending = false;
   state.renderMobilePending = false;
   state.renderInspectorPending = false;
 
-  if (renderMetricsPending && renderSessionsPending && renderMobilePending) {
+  if (renderSessionsPending && renderMobilePending) {
     renderShell();
   } else {
-    if (renderMetricsPending) renderMetrics();
     if (renderSessionsPending) renderSessions();
     if (renderMobilePending) renderMobileMode();
   }
@@ -1332,7 +1317,6 @@ function flushRender() {
 }
 
 function renderShell() {
-  renderMetrics();
   renderSessions();
   renderMobileMode();
 }
@@ -1384,17 +1368,6 @@ function renderMobileMode() {
   if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
 }
 
-function renderMetrics() {
-  const active = state.sessions.filter((entry) => activeRunCountsForSession(entry.summary.session_id, entry.active_run)).length;
-  const sandbox = state.sessions.filter((entry) => entry.summary.sandboxed).length;
-  const selectedEvents = getSessionEvents(state.selectedId);
-  const selectedEntry = sessionEntryById(state.selectedId);
-  el.matrixSubtitle.textContent = `${state.sessions.length} tracked sessions / ${active} active / ${sandbox} sandboxed / presentation ordered`;
-  el.eventCount.textContent = selectedEvents.length;
-  el.selectedId.textContent = selectedEntry ? displaySessionTitle(selectedEntry.summary) : "none";
-  el.selectedId.title = state.selectedId || "";
-}
-
 function renderSessions() {
   if (sessionReorderInProgress()) {
     state.renderSessionsDeferred = true;
@@ -1407,7 +1380,6 @@ function renderSessions() {
   const unpinnedCards = cards.filter((card) => !card.pinned);
   const sections = [];
   if (pinnedCards.length > 0) sections.push(renderSessionGroup(true, pinnedCards));
-  sections.push(renderNewSessionCard());
   sections.push(renderSessionGroup(false, unpinnedCards));
   el.sessionGrid.innerHTML = sections.join("");
   restorePendingSessionFocus(focusedControl);
@@ -1418,15 +1390,10 @@ function renderSessions() {
 function renderSessionGroup(pinned, cards) {
   const label = pinned ? "Pinned sessions" : "Sessions";
   const groupName = pinned ? "pinned" : "unpinned";
-  const body = cards.length > 0
-    ? cards.map((card, index) => renderSessionCard(card, index, cards.length)).join("")
-    : `<div class="empty-state">No ${pinned ? "pinned " : ""}sessions${pinned ? "." : " yet."}</div>`;
+  const sessionCards = cards.map((card, index) => renderSessionCard(card, index, cards.length)).join("");
+  const body = `${pinned ? "" : renderNewSessionCard()}${sessionCards}`;
   return `
-    <section class="session-group" data-session-group="${groupName}" aria-labelledby="session-group-${groupName}-title">
-      <header class="session-group-head">
-        <h2 id="session-group-${groupName}-title" class="session-group-title">${label}</h2>
-        <span class="session-group-count">${cards.length}</span>
-      </header>
+    <section class="session-group" data-session-group="${groupName}" aria-label="${label}">
       <div class="session-card-grid" data-pinned="${pinned}" role="list" aria-label="${label}">
         ${body}
       </div>
@@ -1435,18 +1402,20 @@ function renderSessionGroup(pinned, cards) {
 
 function renderNewSessionCard() {
   return `
-    <button class="session-card new-session-card" data-action="new-session" type="button">
-      <span class="new-session-plus">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 5v14"></path>
-          <path d="M5 12h14"></path>
-        </svg>
-      </span>
-      <span>
-        <strong>New Session</strong>
-        <small>ssh, cwd, sandbox, model, prompt</small>
-      </span>
-    </button>`;
+    <div class="new-session-card-item" role="listitem">
+      <button class="session-card new-session-card" data-action="new-session" type="button">
+        <span class="new-session-plus">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14"></path>
+            <path d="M5 12h14"></path>
+          </svg>
+        </span>
+        <span>
+          <strong>New Session</strong>
+          <small>ssh, cwd, sandbox, model, prompt</small>
+        </span>
+      </button>
+    </div>`;
 }
 
 function renderSessionCard(card, index, count) {
@@ -4013,12 +3982,6 @@ function csv(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function basename(path) {
-  if (!path) return "--";
-  const parts = String(path).split(/[\\/]/).filter(Boolean);
-  return parts.at(-1) || path;
 }
 
 function shortId(id) {

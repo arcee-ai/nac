@@ -712,6 +712,11 @@ pub fn router(manager: SessionManager) -> Router {
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
+        .route(
+            "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
+            get(doto_rounded_extra_bold_font),
+        )
+        .route("/assets/fonts/doto/OFL.txt", get(doto_font_license))
         .route("/assets/vendor/purify.min.js", get(vendor_purify_js))
         .route(
             "/assets/vendor/markdown-it.min.js",
@@ -776,6 +781,20 @@ async fn app_js() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/app.js"),
+    )
+}
+
+async fn doto_rounded_extra_bold_font() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "font/woff2")],
+        include_bytes!("../assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2").as_slice(),
+    )
+}
+
+async fn doto_font_license() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        include_str!("../assets/fonts/doto/OFL.txt"),
     )
 }
 
