@@ -19,25 +19,10 @@ mod share;
     about = "web dashboard for managing nac sessions",
     args_conflicts_with_subcommands = true
 )]
-struct Cli {
+struct ServerCli {
     #[command(subcommand)]
     command: Option<ServerCommand>,
 
-    #[command(flatten)]
-    server: ServerCli,
-}
-
-#[derive(clap::Subcommand)]
-enum ServerCommand {
-    /// Share nac-web through the ngrok CLI (run-only).
-    Share(share::ShareCli),
-
-    #[command(name = "__worker", hide = true)]
-    ManagedWorker(Box<ManagedWorkerCli>),
-}
-
-#[derive(clap::Args)]
-struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
@@ -53,6 +38,14 @@ struct ServerCli {
     /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
+}
+
+#[derive(clap::Subcommand)]
+enum ServerCommand {
+    /// Share nac-web through the ngrok CLI (run-only).
+    Share(share::ShareCli),
+    #[command(name = "__worker", hide = true)]
+    ManagedWorker(Box<ManagedWorkerCli>),
 }
 
 #[derive(clap::Args)]
@@ -260,9 +253,9 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
-        None => run_server(cli.server).await,
+    let mut cli = ServerCli::parse();
+    match cli.command.take() {
+        None => run_server(cli).await,
         Some(ServerCommand::Share(share)) => share::run(share).await,
         Some(ServerCommand::ManagedWorker(worker)) => run_managed_worker(*worker).await,
     }
@@ -356,68 +349,47 @@ pub(crate) fn resolve_cli_cwd(
 mod cli_tests {
     use clap::{error::ErrorKind, Parser};
 
-    use super::{Cli, ServerCommand};
+    use super::ServerCli;
+    use ErrorKind::{ArgumentConflict as Conflict, ValueValidation as Invalid};
 
-    #[test]
-    fn root_server_options_conflict_with_share() {
-        for root_options in [
-            &["--bind", "127.0.0.1:9999"][..],
-            &["--store-path", "parent.db"][..],
-            &["--directory", "parent"][..],
-            &["--worker-executable", "parent-worker"][..],
-        ] {
-            let args = [
-                &["nac-web"][..],
-                root_options,
-                &["share", "-C", ".", "--public"][..],
-            ]
-            .concat();
-            let error = Cli::try_parse_from(args)
-                .err()
-                .expect("root options must be rejected");
-            assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
-        }
+    fn rejects(command: &str, expected: clap::error::ErrorKind) {
+        let error = ServerCli::try_parse_from(command.split_whitespace())
+            .err()
+            .expect("command must fail");
+        assert_eq!(error.kind(), expected, "{command}");
     }
 
     #[test]
-    fn server_share_and_hidden_worker_forms_still_parse() {
-        let server = Cli::try_parse_from(["nac-web", "--store-path", "server.db"]).unwrap();
-        assert!(server.command.is_none());
-        assert_eq!(
-            server.server.store_path.as_deref(),
-            Some(std::path::Path::new("server.db"))
-        );
-
-        let share = Cli::try_parse_from([
-            "nac-web",
-            "share",
-            "-C",
-            ".",
-            "--store-path",
-            "share.db",
-            "--worker-executable",
-            "worker",
-            "--public",
-        ])
-        .unwrap();
-        assert!(matches!(share.command, Some(ServerCommand::Share(_))));
-
-        let worker = Cli::try_parse_from([
-            "nac-web",
-            "__worker",
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--action",
-            "action",
-            "--store-path",
-            "worker.db",
-        ])
-        .unwrap();
-        assert!(matches!(
-            worker.command,
-            Some(ServerCommand::ManagedWorker(_))
-        ));
+    fn parser_contract() {
+        for command in [
+            "nac-web --store-path server.db",
+            "nac-web share -C . --store-path db --worker-executable worker --public --url https://nac.example.com",
+            "nac-web __worker --session-id s --thread-name t --action a",
+        ] {
+            ServerCli::try_parse_from(command.split_whitespace()).unwrap();
+        }
+        rejects("nac-web --help", ErrorKind::DisplayHelp);
+        rejects("nac-web share --help", ErrorKind::DisplayHelp);
+        for option in [
+            "--bind 127.0.0.1:9999",
+            "--store-path parent.db",
+            "-C parent",
+            "--worker-executable parent-worker",
+        ] {
+            rejects(&format!("nac-web {option} share -C . --public"), Conflict);
+        }
+        rejects("nac-web share -C .", ErrorKind::MissingRequiredArgument);
+        rejects("nac-web share -C . --public --allow-email a@b.co", Conflict);
+        for url in [
+            "http://nac.example.com",
+            "https://me@nac.example.com",
+            "https://nac.example.com:443",
+            "https://nac.example.com/",
+            "https://nac.example.com?x",
+            "https://nac.example.com#x",
+            "https://bad-.example.com",
+        ] {
+            rejects(&format!("nac-web share -C . --public --url {url}"), Invalid);
+        }
     }
 }

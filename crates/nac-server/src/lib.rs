@@ -50,13 +50,6 @@ pub struct ServerOptions {
     pub worker_executable: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ServeOptions {
-    #[default]
-    Local,
-    SharedTunnel,
-}
-
 #[derive(Clone)]
 pub struct SessionManager {
     inner: Arc<SessionManagerInner>,
@@ -524,7 +517,11 @@ impl SessionManager {
                 service.destroy_sandbox().await;
             }
         }
-        self.inner.active_sessions.write().await.remove(session_id);
+        self.inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
 
         // Cascade-delete all DB rows for this session.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
@@ -611,7 +608,11 @@ impl SessionManager {
         sessions::save_session(&self.inner.store_path, &snapshot)?;
 
         // 5. Remove from active_sessions so the next attach re-resumes.
-        self.inner.active_sessions.write().await.remove(session_id);
+        self.inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
 
         Ok(())
     }
@@ -642,12 +643,10 @@ impl SessionManager {
     }
 }
 
-pub fn router(manager: SessionManager) -> Router {
-    router_with_options(manager, ServeOptions::default())
-}
-
-pub fn router_with_options(manager: SessionManager, options: ServeOptions) -> Router {
-    let app = Router::new()
+fn routes() -> Router<SessionManager> {
+    let session = get(session_snapshot).delete(delete_session_handler);
+    let config = patch(update_config_handler);
+    Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
@@ -661,55 +660,44 @@ pub fn router_with_options(manager: SessionManager, options: ServeOptions) -> Ro
         .route("/store", get(store_info))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route(
-            "/sessions/{session_id}",
-            get(session_snapshot).delete(delete_session_handler),
-        )
-        .route(
-            "/sessions/{session_id}/config",
-            patch(update_config_handler),
-        )
+        .route("/sessions/{session_id}", session)
+        .route("/sessions/{session_id}/config", config)
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
-        );
+        )
+}
 
-    match options {
-        ServeOptions::Local => app.layer(CorsLayer::permissive()).with_state(manager),
-        ServeOptions::SharedTunnel => app
-            .layer(middleware::from_fn(
-                shared_tunnel::shared_tunnel_origin_guard,
-            ))
-            .with_state(manager),
-    }
+pub fn router(manager: SessionManager) -> Router {
+    routes().layer(CorsLayer::permissive()).with_state(manager)
+}
+
+fn shared_router(manager: SessionManager) -> Router {
+    let guard = middleware::from_fn(shared_tunnel::shared_tunnel_origin_guard);
+    routes().layer(guard).with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    serve_listener(
-        listener,
-        manager,
-        ServeOptions::default(),
-        std::future::pending(),
-    )
-    .await
+    axum::serve(listener, router(manager))
+        .await
+        .context("server stopped unexpectedly")
 }
 
-pub async fn serve_listener<F>(
+pub async fn serve_shared_listener<F>(
     listener: TcpListener,
     manager: SessionManager,
-    options: ServeOptions,
     shutdown: F,
 ) -> Result<()>
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    axum::serve(listener, router_with_options(manager, options))
+    axum::serve(listener, shared_router(manager))
         .with_graceful_shutdown(shutdown)
         .await
         .context("server stopped unexpectedly")
@@ -1121,6 +1109,40 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    #[tokio::test]
+    async fn shared_router_wires_guard_without_cors() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let root = temp_root("shared_router");
+        let manager = test_manager(&root);
+        let request = |method, origin| {
+            let mut request = Request::builder()
+                .method(method)
+                .uri("/health")
+                .header(header::HOST, "nac.example.com");
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            request.body(Body::empty()).unwrap()
+        };
+        let origin = Some("https://nac.example.com");
+        let local = router(manager.clone()).oneshot(request("GET", origin));
+        let local = local.await.unwrap();
+        assert_eq!(local.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+
+        let shared = shared_router(manager);
+        let matching = shared.clone().oneshot(request("GET", origin));
+        let matching = matching.await.unwrap();
+        assert_eq!(matching.status(), StatusCode::OK);
+        assert!(!matching
+            .headers()
+            .contains_key("access-control-allow-origin"));
+        let missing = shared.oneshot(request("POST", None)).await.unwrap();
+        assert_eq!(missing.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
