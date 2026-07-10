@@ -654,9 +654,6 @@ function selectSession(sessionId) {
   state.activeTab = "chat";
   state.mobileDetailOpen = true;
   state.scrollChatToBottom = true;
-  const entry = sessionEntryById(sessionId);
-  el.selectedId.textContent = entry ? displaySessionTitle(entry.summary) : shortId(sessionId);
-  el.selectedId.title = sessionId;
   requestRender({ inspector: true });
   focusMobileSessionDetail(sessionId);
   openEventStream(sessionId);
@@ -1428,7 +1425,7 @@ function renderSessionCard(card, index, count) {
       <button class="session-card-select" data-action="select-session" type="button" aria-label="Select ${escapeAttr(card.displayTitle)}, session ${escapeAttr(card.sessionId)}">
         <div class="session-card-head">
           <div>
-            <h2>${escapeHtml(card.displayTitle)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true"><title>sandbox active</title><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true"><title>ssh: ${escapeHtml(card.sshHost)}</title><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</h2>
+            <h2><span class="status-dot ${card.statusClass}" aria-hidden="true"></span><span class="session-card-title-text">${escapeHtml(card.displayTitle)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true"><title>sandbox active</title><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true"><title>ssh: ${escapeHtml(card.sshHost)}</title><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</span></h2>
             <div class="cwd">${escapeHtml(card.cwd)}</div>
           </div>
         </div>
@@ -1440,7 +1437,6 @@ function renderSessionCard(card, index, count) {
         <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
       </button>
       <div class="session-card-controls">
-        <span class="status-dot ${card.statusClass}" aria-hidden="true"></span>
         <button class="session-card-action session-pin-button" data-action="toggle-pin" type="button" aria-label="${escapeAttr(pinLabel)}" title="${escapeAttr(pinLabel)} — ${escapeAttr(card.sessionId)}" aria-pressed="${card.pinned}"${busy}>
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg>
         </button>

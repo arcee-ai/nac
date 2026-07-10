@@ -535,10 +535,12 @@ body.inspector-fullscreen .inspector {
 
 .summary-grid div {
   min-width: 0;
+  border: 0;
   border-radius: var(--radius-md);
   padding: var(--space-md) var(--space-lg);
   background: var(--bg-sunken);
-  box-shadow: var(--neu-sunken);
+  background-image: none;
+  box-shadow: none;
 }
 
 .summary-grid span {
@@ -592,8 +594,8 @@ body.inspector-fullscreen .inspector {
 }
 
 .session-group[data-session-group="pinned"] ~ .session-group[data-session-group="unpinned"] {
-  border-top: 1px solid var(--line-soft);
-  padding-top: var(--space-md);
+  border-top: 0;
+  padding-top: calc(var(--space-md) * 1.5);
 }
 
 .session-card-grid {
@@ -633,11 +635,6 @@ body.inspector-fullscreen .inspector {
   align-items: center;
   gap: var(--space-xs);
   pointer-events: none;
-}
-
-.session-card-controls .status-dot {
-  flex: 0 0 auto;
-  margin-right: var(--space-2xs);
 }
 
 .session-card-action {
@@ -753,7 +750,7 @@ body.session-reordering {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   background: var(--panel-2);
-  box-shadow: var(--neu-raised);
+  box-shadow: none;
   cursor: pointer;
   padding: var(--space-md);
 }
@@ -776,6 +773,15 @@ button.session-card {
   min-height: 118px;
   height: 100%;
   color: var(--text);
+}
+
+.new-session-card:hover,
+.new-session-card:active {
+  box-shadow: 0 0 0 1px var(--highlight);
+}
+
+.new-session-card:focus-visible {
+  box-shadow: 0 0 0 2px var(--highlight);
 }
 
 .new-session-card strong,
@@ -807,12 +813,17 @@ button.session-card {
 
 .session-card.errorish {
   border-color: rgba(208, 208, 212, 0.16);
-  box-shadow: var(--neu-raised), 0 0 0 1px rgba(208, 208, 212, 0.06);
+  box-shadow: 0 0 0 1px rgba(208, 208, 212, 0.06);
 }
 
-.session-card.selected,
+.session-card.selected {
+  border-color: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.32), 0 0 16px rgba(255, 255, 255, 0.12);
+}
+
 .session-card.selected.errorish {
-  box-shadow: var(--neu-selected);
+  border-color: #fff;
+  box-shadow: 0 0 0 1px rgba(208, 208, 212, 0.06), 0 0 8px rgba(255, 255, 255, 0.32), 0 0 16px rgba(255, 255, 255, 0.12);
 }
 
 .pinned-section-label {
@@ -846,10 +857,23 @@ button.session-card {
 }
 
 .session-card h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
   margin: 0;
   overflow: hidden;
   font-family: var(--mono);
   font-size: var(--type-ui);
+  white-space: nowrap;
+}
+
+.session-card h2 .status-dot {
+  flex: 0 0 auto;
+}
+
+.session-card-title-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -897,10 +921,12 @@ button.session-card {
 
 .telemetry-grid div {
   min-width: 0;
+  border: 0;
   border-radius: var(--radius-sm);
   padding: var(--space-sm);
   background: var(--bg-sunken);
-  box-shadow: var(--neu-sunken-soft);
+  background-image: none;
+  box-shadow: none;
 }
 
 .telemetry-grid span {
@@ -975,6 +1001,38 @@ button.session-card {
   gap: var(--space-sm);
 }
 
+.inspector .icon-button,
+.inspector .mobile-back {
+  background: var(--bg-sunken);
+  box-shadow: none;
+}
+
+.inspector .icon-button:hover,
+.inspector .mobile-back:hover {
+  box-shadow: 0 0 0 1px var(--highlight);
+}
+
+.inspector .icon-button-destructive {
+  background: var(--danger-panel);
+  box-shadow: 0 0 0 1px var(--danger-ring);
+}
+
+.inspector .icon-button-destructive:hover {
+  box-shadow: 0 0 0 1px var(--danger-ring-strong);
+}
+
+.inspector .icon-button:active {
+  box-shadow: none;
+}
+
+.inspector .icon-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--highlight);
+}
+
+.inspector .icon-button-destructive:active {
+  box-shadow: 0 0 0 1px var(--danger-ring);
+}
+
 .inspector-head h1 {
   margin: 0;
   overflow: hidden;
@@ -992,14 +1050,20 @@ button.session-card {
 
 .tabs button {
   padding: var(--space-sm) var(--space-xs);
+  background: var(--bg-sunken);
+  box-shadow: none;
   color: var(--muted);
   font-family: var(--mono);
   font-size: var(--type-meta);
 }
 
+.tabs button:hover {
+  box-shadow: 0 0 0 1px var(--highlight);
+}
+
 .tabs button.active {
   color: var(--text);
-  box-shadow: var(--neu-pressed), 0 0 0 1px var(--highlight);
+  box-shadow: 0 0 0 1px var(--highlight);
 }
 
 .summary-grid {
@@ -1036,6 +1100,8 @@ button.session-card {
 
 .transcript {
   overflow-x: hidden;
+  background: var(--bg-sunken);
+  box-shadow: none;
 }
 
 .message-row {
@@ -1343,13 +1409,13 @@ button.session-card {
   --prompt-life-padding-inline: var(--space-xs);
   display: grid;
   border-radius: var(--radius-xl);
-  background: var(--panel);
-  box-shadow: var(--neu-pressed);
+  background: var(--bg-sunken);
+  box-shadow: none;
   padding: var(--space-xs);
 }
 
 .prompt-form:focus-within {
-  box-shadow: var(--neu-pressed);
+  box-shadow: none;
 }
 
 .prompt-submit {
@@ -1433,7 +1499,7 @@ button.session-card {
 .prompt-form.busy {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-sm);
-  box-shadow: var(--neu-pressed);
+  box-shadow: none;
 }
 
 .prompt-form.busy::after {
@@ -1475,7 +1541,7 @@ button.session-card {
   color: var(--faint);
   opacity: 0.42;
   background: var(--bg-sunken);
-  box-shadow: var(--neu-pressed);
+  box-shadow: none;
 }
 
 .event-log,
@@ -1935,6 +2001,46 @@ button.session-card {
   height: var(--button-size);
   padding: 0;
   border-radius: var(--radius-md);
+}
+
+#launchOverlay input,
+#launchOverlay select,
+#launchOverlay textarea,
+#settingsOverlay input,
+#settingsOverlay select,
+#settingsOverlay textarea {
+  background: var(--bg-sunken);
+  box-shadow: none;
+}
+
+#launchOverlay input:focus,
+#launchOverlay select:focus,
+#launchOverlay textarea:focus,
+#settingsOverlay input:focus,
+#settingsOverlay select:focus,
+#settingsOverlay textarea:focus {
+  box-shadow: 0 0 0 1px var(--highlight);
+}
+
+#launchOverlay button,
+#settingsOverlay button {
+  background: var(--bg-sunken);
+  box-shadow: none;
+}
+
+#launchOverlay button:hover,
+#settingsOverlay button:hover {
+  box-shadow: 0 0 0 1px var(--highlight);
+}
+
+#launchOverlay button:active,
+#settingsOverlay button:active {
+  box-shadow: none;
+}
+
+#launchOverlay button:focus-visible,
+#settingsOverlay button:focus-visible {
+  box-shadow: 0 0 0 2px var(--highlight);
 }
 
 .mobile-back {
