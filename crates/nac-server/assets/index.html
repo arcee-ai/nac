@@ -205,6 +205,7 @@
                 <option value="anthropic-messages">anthropic-messages</option>
                 <option value="deepseek-chat">deepseek-chat</option>
                 <option value="fireworks-chat">fireworks-chat</option>
+                <option value="together-chat">together-chat</option>
               </select>
             </label>
             <label>
@@ -229,6 +230,14 @@
               <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="config" />
             </label>
           </div>
+          <label>
+            <span>API Key Env</span>
+            <input id="launchApiKeyEnv" autocomplete="off" placeholder="config" />
+          </label>
+          <label>
+            <span>Extra Headers (JSON)</span>
+            <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
+          </label>
           <div id="sandboxFields" class="launch-form">
             <div class="toggle-row">
               <label class="toggle">
@@ -335,6 +344,7 @@
                 <option value="anthropic-messages">anthropic-messages</option>
                 <option value="deepseek-chat">deepseek-chat</option>
                 <option value="fireworks-chat">fireworks-chat</option>
+                <option value="together-chat">together-chat</option>
               </select>
             </label>
             <label>

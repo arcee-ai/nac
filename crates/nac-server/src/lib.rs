@@ -93,6 +93,9 @@ pub struct CreateSessionRequest {
     pub base_url: Option<String>,
     pub backend: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub api_key_env: Option<String>,
+    /// JSON string containing an object whose keys and values are strings.
+    pub extra_headers: Option<String>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -427,6 +430,8 @@ impl SessionManager {
                     request.base_url,
                     request.backend,
                     request.reasoning_effort,
+                    request.api_key_env,
+                    request.extra_headers,
                 )?,
                 sandbox: sandbox_options(request.sandbox),
                 ssh_host,
@@ -974,6 +979,8 @@ fn model_options(
     base_url: Option<String>,
     backend: Option<String>,
     reasoning_effort: Option<String>,
+    api_key_env: Option<String>,
+    extra_headers: Option<String>,
 ) -> Result<ModelOptions> {
     Ok(ModelOptions {
         backend: backend
@@ -984,9 +991,29 @@ fn model_options(
             .transpose()?,
         api_base_url: base_url,
         api_model: model,
-        api_key_env: None,
-        extra_headers: None,
+        api_key_env: api_key_env.and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }),
+        extra_headers: parse_extra_headers(extra_headers)?,
     })
+}
+
+fn parse_extra_headers(extra_headers: Option<String>) -> Result<Option<BTreeMap<String, String>>> {
+    let Some(extra_headers) = extra_headers else {
+        return Ok(None);
+    };
+    let trimmed = extra_headers.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str::<BTreeMap<String, String>>(trimmed)
+        .map(Some)
+        .map_err(|error| {
+            anyhow!(
+                "invalid extra_headers: expected a JSON object with string keys and string values: {error}"
+            )
+        })
 }
 
 fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
@@ -1207,6 +1234,8 @@ mod tests {
             Some("https://example.com/v1".to_string()),
             Some("openai-responses".to_string()),
             Some("xhigh".to_string()),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1217,6 +1246,80 @@ mod tests {
             options.api_base_url.as_deref(),
             Some("https://example.com/v1")
         );
+    }
+
+    #[test]
+    fn parses_together_launch_options_with_api_key_env_and_headers() {
+        let options = model_options(
+            None,
+            None,
+            Some("together-chat".to_string()),
+            None,
+            Some("  CUSTOM_TOGETHER_KEY  ".to_string()),
+            Some(r#"{"X-Trace":"launch","X-Mode":"test"}"#.to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(options.backend, Some(BackendKind::TogetherChat));
+        assert_eq!(options.api_key_env.as_deref(), Some("CUSTOM_TOGETHER_KEY"));
+        assert_eq!(
+            options.extra_headers,
+            Some(BTreeMap::from([
+                ("X-Mode".to_string(), "test".to_string()),
+                ("X-Trace".to_string(), "launch".to_string()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn launch_header_options_distinguish_inherit_from_explicit_empty_map() {
+        let inherited = model_options(None, None, None, None, None, None).unwrap();
+        let blank = model_options(
+            None,
+            None,
+            None,
+            None,
+            Some("   ".to_string()),
+            Some("   ".to_string()),
+        )
+        .unwrap();
+        let cleared = model_options(None, None, None, None, None, Some("{}".to_string())).unwrap();
+
+        assert_eq!(inherited.api_key_env, None);
+        assert_eq!(inherited.extra_headers, None);
+        assert_eq!(blank.api_key_env, None);
+        assert_eq!(blank.extra_headers, None);
+        assert_eq!(cleared.extra_headers, Some(BTreeMap::new()));
+    }
+
+    #[test]
+    fn invalid_launch_headers_map_to_bad_request() {
+        for invalid in ["{not-json}", r#"["value"]"#, r#"{"X-Count":3}"#] {
+            let error =
+                model_options(None, None, None, None, None, Some(invalid.to_string())).unwrap_err();
+            assert!(error.to_string().contains("invalid extra_headers"));
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
+    }
+
+    #[test]
+    fn web_configuration_controls_include_together_and_launch_parity_fields() {
+        let html = include_str!("../assets/index.html");
+        for select_id in ["launchBackend", "settingsBackend"] {
+            let select = html
+                .split(&format!("id=\"{select_id}\""))
+                .nth(1)
+                .and_then(|tail| tail.split("</select>").next())
+                .expect("backend select");
+            assert!(select.contains("<option value=\"together-chat\">together-chat</option>"));
+        }
+        assert!(html.contains("id=\"launchApiKeyEnv\""));
+        assert!(html.contains("id=\"launchExtraHeaders\""));
+
+        let app = include_str!("../assets/app.js");
+        assert!(app.contains("api_key_env: nullable(el.launchApiKeyEnv.value)"));
+        assert!(app.contains("extra_headers: extraHeaders"));
+        assert!(app.contains("serializeExtraHeaders(el.launchExtraHeaders.value)"));
     }
 
     #[test]
@@ -1264,9 +1367,20 @@ mod tests {
 
     #[test]
     fn create_session_request_deserializes_optional_ssh_host() {
-        let with_host: CreateSessionRequest =
-            serde_json::from_str(r#"{"ssh_host":"build-box"}"#).unwrap();
+        let with_host: CreateSessionRequest = serde_json::from_str(
+            r#"{"ssh_host":"build-box","backend":"together-chat","api_key_env":"TOGETHER_CUSTOM_KEY","extra_headers":"{\"X-Launch\":\"yes\"}"}"#,
+        )
+        .unwrap();
         assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(with_host.backend.as_deref(), Some("together-chat"));
+        assert_eq!(
+            with_host.api_key_env.as_deref(),
+            Some("TOGETHER_CUSTOM_KEY")
+        );
+        assert_eq!(
+            with_host.extra_headers.as_deref(),
+            Some(r#"{"X-Launch":"yes"}"#)
+        );
 
         let alias_host: CreateSessionRequest =
             serde_json::from_str(r#"{"host_id":"legacy-box"}"#).unwrap();
@@ -1291,6 +1405,8 @@ mod tests {
             base_url: None,
             backend: None,
             reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: None,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,

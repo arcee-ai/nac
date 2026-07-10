@@ -100,6 +100,8 @@ function bindElements() {
     "launchEffort",
     "launchModel",
     "launchBaseUrl",
+    "launchApiKeyEnv",
+    "launchExtraHeaders",
     "sandboxFields",
     "sandboxEnabled",
     "sandboxNoMount",
@@ -745,15 +747,13 @@ async function updateSessionConfig(event) {
   if (!sessionId) return;
   setSettingsStatus("saving", false);
 
-  const extraHeadersRaw = el.settingsExtraHeaders.value.trim();
+  const extraHeadersRaw = el.settingsExtraHeaders.value;
   let extraHeaders = null;
-  if (extraHeadersRaw) {
-    try {
-      extraHeaders = JSON.stringify(JSON.parse(extraHeadersRaw));
-    } catch (parseError) {
-      setSettingsStatus("Extra Headers must be valid JSON", true);
-      return;
-    }
+  try {
+    extraHeaders = serializeExtraHeaders(extraHeadersRaw);
+  } catch (parseError) {
+    setSettingsStatus(parseError.message, true);
+    return;
   }
 
   const body = {
@@ -807,6 +807,14 @@ function showMobileSessions() {
 
 async function createSession(event) {
   event.preventDefault();
+  let extraHeaders = null;
+  try {
+    extraHeaders = serializeExtraHeaders(el.launchExtraHeaders.value);
+  } catch (parseError) {
+    setLaunchStatus(parseError.message, true);
+    return;
+  }
+
   setLaunchStatus("launching", false);
   const initialPrompt = el.initialPrompt.value.trim();
   const sshHost = nullable(el.launchSshHost.value);
@@ -817,6 +825,8 @@ async function createSession(event) {
     base_url: nullable(el.launchBaseUrl.value),
     backend: nullable(el.launchBackend.value),
     reasoning_effort: nullable(el.launchEffort.value),
+    api_key_env: nullable(el.launchApiKeyEnv.value),
+    extra_headers: extraHeaders,
   };
   if (!sshHost) {
     body.sandbox = {
@@ -3966,6 +3976,27 @@ function displaySessionTitle(summary) {
 function setLaunchStatus(message, error) {
   el.launchStatus.textContent = message || "";
   el.launchStatus.classList.toggle("error", Boolean(error));
+}
+
+function serializeExtraHeaders(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    throw new Error("Extra Headers must be valid JSON");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("Extra Headers must be a JSON object with string keys and string values");
+  }
+  for (const [key, headerValue] of Object.entries(parsed)) {
+    if (typeof headerValue !== "string") {
+      throw new Error(`Extra Headers value for "${key}" must be a string`);
+    }
+  }
+  return JSON.stringify(parsed);
 }
 
 function nullable(value) {
