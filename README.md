@@ -52,28 +52,29 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
 - `POST /sessions/{session_id}/cancel-active-run`
 
-Remote `nac-web` access is built around native ngrok sharing. The default flow does not require choosing or owning a hostname; ngrok generates the public URL at launch. First persist the ngrok setup explicitly:
+Remote `nac-web` access uses an installed ngrok CLI, not an embedded SDK. Install ngrok CLI 3.16 or newer from [ngrok's download page](https://ngrok.com/download); the latest release is recommended. Authenticate through ngrok's standard configuration or environment variable:
 
 ```sh
-nac-web share configure -C /path/to/project
+ngrok config add-authtoken YOUR_TOKEN
+# Alternatively, for this shell:
+export NGROK_AUTHTOKEN=YOUR_TOKEN
 ```
 
-`share configure` asks for an ngrok authtoken with terminal echo disabled when neither the configured environment variable nor `$NAC_HOME/secrets.toml` has one, and asks for a Google email or domain allowlist when OAuth is enabled. It stores non-secret defaults under `[ngrok]` and can save the authtoken in `$NAC_HOME/secrets.toml` with user-only file permissions. If any `--allow-email` or `--allow-domain` value is provided, that CLI allowlist replaces the saved allowlist instead of being merged and re-enables OAuth unless `--no-auth` is also explicit, so stale principals are removed without preserving an old no-auth setting silently. Use `--auth` (alias `--auth-required`) to re-enable OAuth without changing the allowlist; `--auth` conflicts with `--no-auth`. You can also set the token through an environment variable and provide the allowlist non-interactively:
+Launch an authenticated share by supplying at least one Google email or domain allowlist entry:
 
 ```sh
-export NGROK_AUTHTOKEN=...
-nac-web share configure -C /path/to/project --allow-email you@example.com
+nac-web share -C /path/to/project --allow-email you@example.com
 ```
 
-Daily launch is run-only and does not write config or secrets:
+For a deliberately unauthenticated share, use:
 
 ```sh
-nac-web share -C /path/to/project
+nac-web share -C /path/to/project --public
 ```
 
-By default, public access is protected with ngrok Google OAuth, the local server binds only to loopback, and ngrok generates the public URL. If an old config has a paid custom domain saved, clear it with `nac-web share configure -C /path/to/project --no-domain` (alias `--generated-url`). The run and doctor commands accept the same `--auth`/`--no-auth` and allowlist override semantics ephemerally; `nac-web share --no-domain -C /path/to/project` ignores a saved custom domain for one launch. Use `nac-web share doctor -C /path/to/project` to check the saved authtoken, OAuth allowlist, and loopback bind policy before launch; add `--check-health` only when a local server is already running on the bind address. Non-loopback share binds require the explicit unsafe `--insecure-bind` opt-in.
+`share` is run-only: it always binds the local server to `127.0.0.1`, creates a temporary Google OAuth Traffic Policy for authenticated runs, and directly starts `ngrok http`. Repeat `--allow-email` and `--allow-domain` as needed. Ngrok generates the public URL by default; accounts with a reserved hostname can pass an exact origin such as `--url https://nac.example.com`. The native ngrok console output is inherited unchanged, so use its printed public URL and diagnostics.
 
-Paid/custom-domain ngrok accounts can opt in with `--domain your-hostname.example.com`; free accounts should leave `domain` unset so ngrok can allocate the URL.
+Ngrok owns its authtoken and configuration. Branch-era `[ngrok]` entries in NAC `config.toml` and `[ngrok].authtoken` in NAC `secrets.toml` are ignored and are not automatically deleted; after migrating the token to standard ngrok configuration or `NGROK_AUTHTOKEN`, remove those old entries manually if desired. On Unix, NAC terminates the ngrok process group during controlled shutdown. On Windows, descendant cleanup is limited: NAC terminates and reaps the direct ngrok process but cannot guarantee cleanup of subprocesses it created.
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 
@@ -140,13 +141,6 @@ image = "python:3.13-bookworm"
 
 [worker]
 thread_timeout_secs = 3600
-
-[ngrok]
-authtoken_env = "NGROK_AUTHTOKEN"
-oauth_provider = "google"
-allow_emails = ["you@example.com"]
-allow_domains = []
-auth_required = true
 
 [mcp_servers.exa_web_search]
 enabled = true

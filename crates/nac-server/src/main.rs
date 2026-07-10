@@ -1,9 +1,4 @@
-use std::{
-    ffi::{OsStr, OsString},
-    net::SocketAddr,
-    path::PathBuf,
-    process,
-};
+use std::{net::SocketAddr, path::PathBuf, process};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -16,15 +11,32 @@ use nac_core::{
 };
 use nac_server::{serve, ServerOptions, SessionManager};
 
-#[cfg(feature = "share-ngrok")]
 mod share;
 
 #[derive(Parser)]
 #[command(
     name = "nac-web",
     about = "web dashboard for managing nac sessions",
-    after_help = "Commands:\n  share             Share nac-web through ngrok (run-only)\n  share configure   Persist ngrok share setup\n  share doctor      Check ngrok share setup\n  share status      Show saved ngrok share config"
+    args_conflicts_with_subcommands = true
 )]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<ServerCommand>,
+
+    #[command(flatten)]
+    server: ServerCli,
+}
+
+#[derive(clap::Subcommand)]
+enum ServerCommand {
+    /// Share nac-web through the ngrok CLI (run-only).
+    Share(share::ShareCli),
+
+    #[command(name = "__worker", hide = true)]
+    ManagedWorker(Box<ManagedWorkerCli>),
+}
+
+#[derive(clap::Args)]
 struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
@@ -43,12 +55,7 @@ struct ServerCli {
     worker_executable: Option<PathBuf>,
 }
 
-#[derive(Parser)]
-#[command(
-    name = "nac-web __worker",
-    about = "internal managed worker dispatch",
-    hide = true
-)]
+#[derive(clap::Args)]
 struct ManagedWorkerCli {
     /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
@@ -244,53 +251,6 @@ struct SandboxArgs {
     sandbox_workdir: Option<String>,
 }
 
-enum ParsedCli {
-    Serve(ServerCli),
-    #[cfg(feature = "share-ngrok")]
-    Share(share::cli::ShareCli),
-    #[cfg(not(feature = "share-ngrok"))]
-    ShareUnavailable,
-    ManagedWorker(ManagedWorkerCli),
-}
-
-fn parse_cli() -> ParsedCli {
-    let args: Vec<OsString> = std::env::args_os().collect();
-    if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("__worker"))
-    {
-        ParsedCli::ManagedWorker(ManagedWorkerCli::parse_from(subcommand_args(
-            args,
-            "nac-web __worker",
-        )))
-    } else if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("share"))
-    {
-        #[cfg(feature = "share-ngrok")]
-        {
-            ParsedCli::Share(share::cli::parse_from(args))
-        }
-        #[cfg(not(feature = "share-ngrok"))]
-        {
-            ParsedCli::ShareUnavailable
-        }
-    } else {
-        ParsedCli::Serve(ServerCli::parse_from(args))
-    }
-}
-
-fn subcommand_args(args: Vec<OsString>, name: &str) -> Vec<OsString> {
-    nested_subcommand_args(args, name, 2)
-}
-
-fn nested_subcommand_args(args: Vec<OsString>, name: &str, skip: usize) -> Vec<OsString> {
-    let mut parsed = Vec::with_capacity(args.len().saturating_sub(1));
-    parsed.push(OsString::from(name));
-    parsed.extend(args.into_iter().skip(skip));
-    parsed
-}
-
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -300,15 +260,11 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    match parse_cli() {
-        ParsedCli::Serve(cli) => run_server(cli).await,
-        #[cfg(feature = "share-ngrok")]
-        ParsedCli::Share(cli) => share::cli::run(cli).await,
-        #[cfg(not(feature = "share-ngrok"))]
-        ParsedCli::ShareUnavailable => anyhow::bail!(
-            "nac-web was built without ngrok share support; rebuild with --features nac-server/share-ngrok"
-        ),
-        ParsedCli::ManagedWorker(cli) => run_managed_worker(cli).await,
+    let cli = Cli::parse();
+    match cli.command {
+        None => run_server(cli.server).await,
+        Some(ServerCommand::Share(share)) => share::run(share).await,
+        Some(ServerCommand::ManagedWorker(worker)) => run_managed_worker(*worker).await,
     }
 }
 
@@ -394,4 +350,74 @@ pub(crate) fn resolve_cli_cwd(
     target
         .canonicalize()
         .with_context(|| format!("failed to resolve working directory {}", target.display()))
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use clap::{error::ErrorKind, Parser};
+
+    use super::{Cli, ServerCommand};
+
+    #[test]
+    fn root_server_options_conflict_with_share() {
+        for root_options in [
+            &["--bind", "127.0.0.1:9999"][..],
+            &["--store-path", "parent.db"][..],
+            &["--directory", "parent"][..],
+            &["--worker-executable", "parent-worker"][..],
+        ] {
+            let args = [
+                &["nac-web"][..],
+                root_options,
+                &["share", "-C", ".", "--public"][..],
+            ]
+            .concat();
+            let error = Cli::try_parse_from(args)
+                .err()
+                .expect("root options must be rejected");
+            assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+        }
+    }
+
+    #[test]
+    fn server_share_and_hidden_worker_forms_still_parse() {
+        let server = Cli::try_parse_from(["nac-web", "--store-path", "server.db"]).unwrap();
+        assert!(server.command.is_none());
+        assert_eq!(
+            server.server.store_path.as_deref(),
+            Some(std::path::Path::new("server.db"))
+        );
+
+        let share = Cli::try_parse_from([
+            "nac-web",
+            "share",
+            "-C",
+            ".",
+            "--store-path",
+            "share.db",
+            "--worker-executable",
+            "worker",
+            "--public",
+        ])
+        .unwrap();
+        assert!(matches!(share.command, Some(ServerCommand::Share(_))));
+
+        let worker = Cli::try_parse_from([
+            "nac-web",
+            "__worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "action",
+            "--store-path",
+            "worker.db",
+        ])
+        .unwrap();
+        assert!(matches!(
+            worker.command,
+            Some(ServerCommand::ManagedWorker(_))
+        ));
+    }
 }

@@ -9,6 +9,7 @@ mod mcp;
 pub mod model;
 mod paths;
 mod process;
+pub use process::{isolate_process_group, terminate_child_tree};
 pub mod runtime;
 mod sandbox;
 pub mod session_service;

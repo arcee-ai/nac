@@ -36,8 +36,9 @@ use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::RwLock};
 use tower_http::cors::CorsLayer;
 
-#[path = "share/origin_guard.rs"]
 mod shared_tunnel;
+
+pub use shared_tunnel::is_valid_dns_host;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
@@ -49,31 +50,11 @@ pub struct ServerOptions {
     pub worker_executable: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CorsPolicy {
-    PermissiveLocal,
-    Disabled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExposureMode {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ServeOptions {
+    #[default]
     Local,
     SharedTunnel,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ServeOptions {
-    pub cors: CorsPolicy,
-    pub exposure: ExposureMode,
-}
-
-impl Default for ServeOptions {
-    fn default() -> Self {
-        Self {
-            cors: CorsPolicy::PermissiveLocal,
-            exposure: ExposureMode::Local,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -666,7 +647,7 @@ pub fn router(manager: SessionManager) -> Router {
 }
 
 pub fn router_with_options(manager: SessionManager, options: ServeOptions) -> Router {
-    let mut app = Router::new()
+    let app = Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
@@ -696,16 +677,14 @@ pub fn router_with_options(manager: SessionManager, options: ServeOptions) -> Ro
             post(cancel_active_run),
         );
 
-    if options.exposure == ExposureMode::SharedTunnel {
-        app = app.layer(middleware::from_fn(
-            shared_tunnel::shared_tunnel_origin_guard,
-        ));
+    match options {
+        ServeOptions::Local => app.layer(CorsLayer::permissive()).with_state(manager),
+        ServeOptions::SharedTunnel => app
+            .layer(middleware::from_fn(
+                shared_tunnel::shared_tunnel_origin_guard,
+            ))
+            .with_state(manager),
     }
-    if options.cors == CorsPolicy::PermissiveLocal {
-        app = app.layer(CorsLayer::permissive());
-    }
-
-    app.with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {

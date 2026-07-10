@@ -10,10 +10,6 @@ name = "nac_server"
 name = "nac-web"
 path = "src/main.rs"
 
-[features]
-default = ["share-ngrok"]
-share-ngrok = ["dep:ngrok", "dep:reqwest", "dep:toml", "dep:toml_edit", "dep:url"]
-
 [dependencies]
 nac-core = { path = "../nac-core" }
 anyhow = "1"
@@ -21,16 +17,11 @@ async-stream = "0.3"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
-libc = "0.2"
-ngrok = { version = "0.19.0", optional = true }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
-toml = { version = "0.8", optional = true }
-toml_edit = { version = "0.22", optional = true }
+tokio = { version = "1", default-features = false, features = ["macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tower-http = { version = "0.6", features = ["cors"] }
-url = { version = "2", optional = true }
 
 [dev-dependencies]
+libc = "0.2"
 tower = { version = "0.5", features = ["util"] }
