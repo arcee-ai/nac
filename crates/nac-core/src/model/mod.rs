@@ -17,6 +17,8 @@ mod chatgpt_codex;
 mod client;
 mod requests;
 mod responses;
+#[cfg(test)]
+mod test_http;
 mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};

@@ -442,8 +442,23 @@ async fn poll_device_code(
     base: &str,
     device: &DeviceCode,
 ) -> Result<TokenSuccess> {
+    poll_device_code_with(client, base, device, now_ms, sleep).await
+}
+
+async fn poll_device_code_with<Now, Sleep, SleepFuture>(
+    client: &Client,
+    base: &str,
+    device: &DeviceCode,
+    mut now: Now,
+    mut sleep_for: Sleep,
+) -> Result<TokenSuccess>
+where
+    Now: FnMut() -> u64,
+    Sleep: FnMut(Duration) -> SleepFuture,
+    SleepFuture: std::future::Future<Output = ()>,
+{
     let url = format!("{base}/app/v1/device/token");
-    let started = now_ms();
+    let started = now();
     let mut interval_secs = device.interval_secs;
 
     loop {
@@ -490,13 +505,13 @@ async fn poll_device_code(
             }
         }
 
-        if now_ms().saturating_sub(started) >= device.expires_in_secs.saturating_mul(1000) {
+        if now().saturating_sub(started) >= device.expires_in_secs.saturating_mul(1000) {
             return Err(anyhow!(
                 "Arcee device authorization timed out; run `nac arcee-auth login` again"
             ));
         }
 
-        sleep(Duration::from_secs(interval_secs)).await;
+        sleep_for(Duration::from_secs(interval_secs)).await;
     }
 }
 
@@ -536,8 +551,12 @@ fn truncate(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_http::{ScriptedResponse, ScriptedServer};
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::future::ready;
     use std::path::PathBuf;
+    use std::rc::Rc;
 
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
@@ -581,6 +600,229 @@ mod tests {
 
     fn write_json(path: &Path, auth: &StoredArceeAuth) {
         fs::write(path, serde_json::to_string_pretty(auth).unwrap()).unwrap();
+    }
+
+    fn assert_device_request(request: &super::super::test_http::CapturedRequest, path: &str) {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, path);
+        assert_eq!(
+            request.headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
+        assert_eq!(
+            request.headers.get("user-agent").map(String::as_str),
+            Some(user_agent().as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "device_code": "device-123",
+                "user_code": "ABCD-EFGH",
+                "verification_uri_complete": "https://accounts.arcee.ai/device?code=ABCD-EFGH",
+                "interval": 3,
+                "expires_in": 120
+            })
+            .to_string(),
+        )]);
+
+        let device = request_device_code(&Client::new(), &server.base_url)
+            .await
+            .expect("device-code response should parse");
+        let requests = server.finish();
+
+        assert_eq!(device.device_code, "device-123");
+        assert_eq!(device.user_code, "ABCD-EFGH");
+        assert_eq!(
+            device.verification_uri_complete,
+            "https://accounts.arcee.ai/device?code=ABCD-EFGH"
+        );
+        assert_eq!(device.interval_secs, 3);
+        assert_eq!(device.expires_in_secs, 120);
+        assert_eq!(requests.len(), 1);
+        assert_device_request(&requests[0], "/app/v1/device/code");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
+            json!({"client_id": CLIENT_ID})
+        );
+    }
+
+    #[tokio::test]
+    async fn device_code_request_supports_fallback_uri_and_default_timing() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "device_code": "device-fallback",
+                "user_code": "FALL-BACK",
+                "verification_uri": "https://accounts.arcee.ai/device"
+            })
+            .to_string(),
+        )]);
+
+        let device = request_device_code(&Client::new(), &server.base_url)
+            .await
+            .expect("fallback verification URI should parse");
+        server.finish();
+
+        assert_eq!(
+            device.verification_uri_complete,
+            "https://accounts.arcee.ai/device"
+        );
+        assert_eq!(device.interval_secs, DEFAULT_INTERVAL_SECS);
+        assert_eq!(device.expires_in_secs, DEFAULT_EXPIRES_IN_SECS);
+    }
+
+    #[tokio::test]
+    async fn device_code_request_reports_malformed_and_non_success_responses() {
+        let cases = [
+            (
+                "200 OK",
+                r#"{"device_code":"only-one-field"}"#,
+                "did not include user_code",
+            ),
+            (
+                "401 Unauthorized",
+                r#"{"error":"invalid_client"}"#,
+                "failed with HTTP 401",
+            ),
+        ];
+
+        for (status, body, expected) in cases {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body)]);
+            let error = request_device_code(&Client::new(), &server.base_url)
+                .await
+                .expect_err("invalid device-code response should fail");
+            let requests = server.finish();
+
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?} in {error:#}"
+            );
+            assert_device_request(&requests[0], "/app/v1/device/code");
+        }
+    }
+
+    #[tokio::test]
+    async fn token_poll_handles_pending_and_slow_down_then_parses_success_without_waiting() {
+        let server = ScriptedServer::start(vec![
+            ScriptedResponse::json("400 Bad Request", r#"{"error":"authorization_pending"}"#),
+            ScriptedResponse::json("400 Bad Request", r#"{"error":"slow_down"}"#),
+            ScriptedResponse::json(
+                "200 OK",
+                json!({
+                    "api_key": "rcai-device-token",
+                    "base_url": "https://api.arcee.ai",
+                    "organization_id": "org-device",
+                    "workspace_name": "device-workspace"
+                })
+                .to_string(),
+            ),
+        ]);
+        let device = DeviceCode {
+            device_code: "device-poll".to_string(),
+            user_code: "POLL-CODE".to_string(),
+            verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
+            interval_secs: 2,
+            expires_in_secs: 60,
+        };
+        let clock = Rc::new(Cell::new(0u64));
+        let sleeps = Rc::new(RefCell::new(Vec::new()));
+        let now_clock = Rc::clone(&clock);
+        let sleep_clock = Rc::clone(&clock);
+        let recorded_sleeps = Rc::clone(&sleeps);
+
+        let success = poll_device_code_with(
+            &Client::new(),
+            &server.base_url,
+            &device,
+            move || now_clock.get(),
+            move |duration| {
+                recorded_sleeps.borrow_mut().push(duration);
+                sleep_clock.set(
+                    sleep_clock
+                        .get()
+                        .saturating_add(duration.as_millis() as u64),
+                );
+                ready(())
+            },
+        )
+        .await
+        .expect("pending poll should eventually succeed");
+        let requests = server.finish();
+
+        assert_eq!(success.api_key, "rcai-device-token");
+        assert_eq!(success.base_url, "https://api.arcee.ai");
+        assert_eq!(success.organization_id, "org-device");
+        assert_eq!(success.workspace_name, "device-workspace");
+        assert_eq!(
+            sleeps.borrow().as_slice(),
+            [Duration::from_secs(2), Duration::from_secs(7)]
+        );
+        assert_eq!(requests.len(), 3);
+        for request in &requests {
+            assert_device_request(request, "/app/v1/device/token");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&request.body).unwrap(),
+                json!({"device_code": "device-poll", "client_id": CLIENT_ID})
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
+        let cases = [
+            (
+                "400 Bad Request",
+                r#"{"error":"access_denied"}"#,
+                "authorization was denied",
+            ),
+            (
+                "400 Bad Request",
+                r#"{"error":"expired_token"}"#,
+                "device code expired",
+            ),
+            (
+                "200 OK",
+                r#"{"api_key":"missing-other-success-fields"}"#,
+                "failed to parse Arcee device authorization response",
+            ),
+            (
+                "503 Service Unavailable",
+                "upstream unavailable",
+                "failed with HTTP 503",
+            ),
+        ];
+
+        for (status, body, expected) in cases {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body)]);
+            let device = DeviceCode {
+                device_code: "device-error".to_string(),
+                user_code: "ERROR".to_string(),
+                verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
+                interval_secs: 1,
+                expires_in_secs: 60,
+            };
+            let error = poll_device_code_with(
+                &Client::new(),
+                &server.base_url,
+                &device,
+                || 0,
+                |_| ready(()),
+            )
+            .await
+            .expect_err("terminal poll response should fail");
+            let requests = server.finish();
+
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?} in {error:#}"
+            );
+            assert_eq!(requests.len(), 1);
+            assert_device_request(&requests[0], "/app/v1/device/token");
+        }
     }
 
     #[test]

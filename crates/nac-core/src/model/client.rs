@@ -251,7 +251,10 @@ impl ModelClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
         let mut request = json!({
             "model": self.model,
             "messages": messages
@@ -463,10 +466,118 @@ impl ModelClient {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_http::{ScriptedResponse, ScriptedServer};
     use super::*;
+    use crate::types::FunctionDef;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    #[tokio::test]
+    async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "choices": [{
+                    "message": {
+                        "content": "Hello from Arcee",
+                        "reasoning_content": "brief reasoning"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 7,
+                    "total_tokens": 18,
+                    "prompt_tokens_details": {"cached_tokens": 3}
+                }
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient {
+            client: Client::new(),
+            base_url: format!("{}/tenant/base", server.base_url),
+            api_key: "stored-login-credential".to_string(),
+            model: "arcee-test-model".to_string(),
+            backend: BackendKind::Arcee,
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: std::collections::BTreeMap::new(),
+            cache_ttl: None,
+        };
+        let messages = vec![
+            Message::System {
+                content: "Follow instructions".to_string(),
+            },
+            Message::User {
+                content: "Say hello".to_string(),
+            },
+        ];
+        let tools = vec![ToolDefinition {
+            def_type: "function".to_string(),
+            function: FunctionDef {
+                name: "lookup".to_string(),
+                description: "Look up a value".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"]
+                }),
+            },
+        }];
+
+        let response = client
+            .send_turn(messages, tools.clone())
+            .await
+            .expect("valid Arcee chat response should parse");
+        let requests = server.finish();
+
+        assert_eq!(
+            response.assistant.content.as_deref(),
+            Some("Hello from Arcee")
+        );
+        assert_eq!(
+            response.assistant.reasoning_text.as_deref(),
+            Some("brief reasoning")
+        );
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+        let usage = response.usage.expect("usage should parse");
+        assert_eq!(usage.input_tokens, 8);
+        assert_eq!(usage.cache_read_tokens, 3);
+        assert_eq!(usage.output_tokens, 7);
+        assert_eq!(usage.orchestrator_context_tokens, 18);
+
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/tenant/base/v1/chat/completions");
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer stored-login-credential")
+        );
+        assert_eq!(
+            request.headers.get("x-arcee-client").map(String::as_str),
+            Some("nac-cli")
+        );
+        assert_eq!(
+            request.headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
+        let body: Value = serde_json::from_slice(&request.body).expect("request JSON");
+        assert_eq!(body["model"], "arcee-test-model");
+        assert_eq!(body["temperature"], 0.0);
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role": "system", "content": "Follow instructions"},
+                {"role": "user", "content": "Say hello"}
+            ])
+        );
+        assert_eq!(
+            body["tools"],
+            serde_json::to_value(&tools).expect("tool definitions serialize")
+        );
+    }
 
     #[test]
     fn truncate_utf8_backs_up_to_character_boundary() {
