@@ -17,8 +17,8 @@ mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_model_config, reorder_sessions, save_session, update_session_model_config,
-    update_session_presentation,
+    load_session_model_config, reorder_sessions, save_session, update_raw_session_model_config,
+    update_session_model_config, update_session_presentation,
 };
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
@@ -26,15 +26,19 @@ use codec::*;
 use summary::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionModelConfig {
+pub struct RawSessionModelConfig {
     pub session_id: String,
     pub model: String,
     pub base_url: String,
-    pub backend: BackendKind,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub backend: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub api_key_env: Option<String>,
-    pub extra_headers: BTreeMap<String, String>,
+    pub extra_headers_json: Option<String>,
     pub config_version: i64,
+    /// Structural parse failures in the persisted values. These are diagnostics,
+    /// not migrations: callers must explicitly PATCH every invalid value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -112,7 +116,11 @@ pub struct SessionSummary {
     pub cwd: PathBuf,
     pub workspace_host_path: Option<PathBuf>,
     pub model: String,
-    pub backend: BackendKind,
+    /// Raw persisted backend. Empty means the legacy row has no backend.
+    pub backend: String,
+    /// Per-row model configuration parse failure; listing remains available so
+    /// the row can be selected and repaired.
+    pub model_config_error: Option<String>,
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
@@ -617,6 +625,99 @@ mod tests {
         );
         assert!(sessions[0].sandboxed);
 
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn listing_and_raw_config_isolate_structurally_invalid_model_rows() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("raw_invalid_model_rows");
+        for (index, id) in ["healthy", "auto", "missing", "effort", "headers"]
+            .into_iter()
+            .enumerate()
+        {
+            let snapshot = test_snapshot(
+                id,
+                &format!("2026-01-0{} 00:00:00.000000000", index + 1),
+                &format!("2026-01-0{} 00:00:01.000000000", index + 1),
+            );
+            create_session(&store_path, &snapshot).unwrap();
+        }
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET backend = 'auto' WHERE session_id = 'auto'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET backend = NULL WHERE session_id = 'missing'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET reasoning_effort = 'ultra' WHERE session_id = 'effort'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET extra_headers_json = '{broken' WHERE session_id = 'headers'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 5);
+        let by_id = summaries
+            .into_iter()
+            .map(|summary| (summary.session_id.clone(), summary))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(by_id["healthy"].model_config_error, None);
+        assert!(by_id["auto"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("auto"));
+        assert_eq!(by_id["missing"].backend, "");
+        assert!(by_id["missing"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("no backend"));
+        assert!(by_id["effort"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("ultra"));
+        assert!(by_id["headers"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("malformed stored extra headers"));
+
+        let raw = load_session_model_config(&store_path, "headers").unwrap();
+        assert_eq!(raw.extra_headers_json.as_deref(), Some("{broken"));
+        assert_eq!(raw.config_version, 0);
+        assert!(!raw.diagnostics.is_empty());
+        let mut repaired = raw.clone();
+        repaired.extra_headers_json = None;
+        repaired.diagnostics.clear();
+        assert_eq!(
+            update_raw_session_model_config(&store_path, &repaired).unwrap(),
+            1
+        );
+        let mut stale = raw;
+        stale.extra_headers_json = Some("{\"X-Test\":\"yes\"}".to_string());
+        assert!(matches!(
+            update_raw_session_model_config(&store_path, &stale),
+            Err(SessionConfigUpdateError::Conflict(_))
+        ));
+        assert_eq!(
+            load_session_model_config(&store_path, "headers")
+                .unwrap()
+                .extra_headers_json,
+            None
+        );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

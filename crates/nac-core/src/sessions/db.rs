@@ -39,10 +39,6 @@ pub fn update_session_model_config(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> std::result::Result<i64, SessionConfigUpdateError> {
-    let expected_version = snapshot.config_version;
-    let next_version = expected_version.checked_add(1).ok_or_else(|| {
-        SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
-    })?;
     let extra_headers_json = if snapshot.extra_headers.is_empty() {
         None
     } else {
@@ -51,6 +47,35 @@ pub fn update_session_model_config(
                 .context("failed to serialize session extra_headers")?,
         )
     };
+    update_raw_session_model_config(
+        path,
+        &RawSessionModelConfig {
+            session_id: snapshot.session_id.clone(),
+            model: snapshot.model.clone(),
+            base_url: snapshot.base_url.clone(),
+            backend: Some(snapshot.backend.as_str().to_string()),
+            reasoning_effort: snapshot
+                .reasoning_effort
+                .map(|effort| effort.as_str().to_string()),
+            api_key_env: snapshot.api_key_env.clone(),
+            extra_headers_json,
+            config_version: snapshot.config_version,
+            diagnostics: Vec::new(),
+        },
+    )
+}
+
+/// Writes only model columns using the raw row revision as an optimistic CAS.
+/// Callers are responsible for strictly validating the complete prospective
+/// raw configuration before invoking this low-level persistence operation.
+pub fn update_raw_session_model_config(
+    path: &Path,
+    config: &RawSessionModelConfig,
+) -> std::result::Result<i64, SessionConfigUpdateError> {
+    let expected_version = config.config_version;
+    let next_version = expected_version.checked_add(1).ok_or_else(|| {
+        SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
+    })?;
 
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -65,16 +90,14 @@ pub fn update_session_model_config(
              config_version = ?7
          WHERE session_id = ?8 AND config_version = ?9",
         params![
-            snapshot.model,
-            snapshot.base_url,
-            snapshot.backend.as_str(),
-            snapshot
-                .reasoning_effort
-                .map(|effort| effort.as_str().to_string()),
-            snapshot.api_key_env,
-            extra_headers_json,
+            config.model,
+            config.base_url,
+            config.backend,
+            config.reasoning_effort,
+            config.api_key_env,
+            config.extra_headers_json,
             next_version,
-            snapshot.session_id,
+            config.session_id,
             expected_version,
         ],
     )?;
@@ -82,18 +105,18 @@ pub fn update_session_model_config(
         let current_version = tx
             .query_row(
                 "SELECT config_version FROM sessions WHERE session_id = ?1",
-                params![snapshot.session_id],
+                params![config.session_id],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?;
         return match current_version {
             Some(current_version) => Err(SessionConfigUpdateError::Conflict(format!(
                 "session '{}' configuration changed concurrently (expected version {}, found {})",
-                snapshot.session_id, expected_version, current_version
+                config.session_id, expected_version, current_version
             ))),
             None => Err(SessionConfigUpdateError::NotFound(format!(
                 "session '{}' was not found",
-                snapshot.session_id
+                config.session_id
             ))),
         };
     }
@@ -120,7 +143,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
-pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<SessionModelConfig> {
+pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<RawSessionModelConfig> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
@@ -129,45 +152,30 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<Sessio
              WHERE session_id = ?1",
             params![session_id],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, i64>(7)?,
-                ))
+                Ok(RawSessionModelConfig {
+                    session_id: row.get(0)?,
+                    model: row.get(1)?,
+                    base_url: row.get(2)?,
+                    backend: row.get(3)?,
+                    reasoning_effort: row.get(4)?,
+                    api_key_env: row.get(5)?,
+                    extra_headers_json: row.get(6)?,
+                    config_version: row.get(7)?,
+                    diagnostics: Vec::new(),
+                })
             },
         )
         .optional()?;
 
-    let Some((
-        session_id,
-        model,
-        base_url,
-        backend,
-        reasoning_effort,
-        api_key_env,
-        headers_json,
-        config_version,
-    )) = row
-    else {
+    let Some(mut config) = row else {
         return Err(anyhow!("session '{}' was not found", session_id));
     };
-    let extra_headers = parse_extra_headers(headers_json.as_deref())?;
-
-    Ok(SessionModelConfig {
-        session_id,
-        model,
-        base_url,
-        backend: parse_backend(backend)?,
-        reasoning_effort: parse_reasoning_effort(reasoning_effort)?,
-        api_key_env,
-        extra_headers,
-        config_version,
-    })
+    config.diagnostics = model_config_diagnostics(
+        config.backend.as_deref(),
+        config.reasoning_effort.as_deref(),
+        config.extra_headers_json.as_deref(),
+    );
+    Ok(config)
 }
 
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
@@ -474,9 +482,10 @@ fn query_session_summary(
 ) -> Result<Option<SessionSummary>> {
     let row = conn
         .query_row(
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
-                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
-                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
+                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
+                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -493,9 +502,10 @@ fn query_session_summaries(
 ) -> Result<Vec<SessionSummary>> {
     let sql = match pinned {
         Some(_) => {
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
-                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
-                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
+                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
+                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE COALESCE(p.pinned, 0) = ?1
@@ -505,9 +515,10 @@ fn query_session_summaries(
                       s.session_id DESC"
         }
         None => {
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
-                    s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
-                    COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
+                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
+                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              ORDER BY COALESCE(p.pinned, 0) DESC,
@@ -536,15 +547,17 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         cwd: row.get(1)?,
         model: row.get(2)?,
         backend_raw: row.get(3)?,
-        sandbox_json: row.get(4)?,
-        messages_json: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
-        ssh_host: row.get(8)?,
-        title: row.get(9)?,
-        pinned: row.get::<_, i64>(10)? != 0,
-        sort_order: row.get(11)?,
-        presentation_version: row.get(12)?,
+        reasoning_effort_raw: row.get(4)?,
+        extra_headers_json: row.get(5)?,
+        sandbox_json: row.get(6)?,
+        messages_json: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        ssh_host: row.get(10)?,
+        title: row.get(11)?,
+        pinned: row.get::<_, i64>(12)? != 0,
+        sort_order: row.get(13)?,
+        presentation_version: row.get(14)?,
     })
 }
 
@@ -553,6 +566,8 @@ struct SessionSummaryRow {
     cwd: String,
     model: String,
     backend_raw: Option<String>,
+    reasoning_effort_raw: Option<String>,
+    extra_headers_json: Option<String>,
     sandbox_json: Option<String>,
     messages_json: String,
     created_at: String,
@@ -566,7 +581,12 @@ struct SessionSummaryRow {
 
 impl SessionSummaryRow {
     fn into_summary(self) -> Result<SessionSummary> {
-        let backend = parse_backend(self.backend_raw)?;
+        let diagnostics = model_config_diagnostics(
+            self.backend_raw.as_deref(),
+            self.reasoning_effort_raw.as_deref(),
+            self.extra_headers_json.as_deref(),
+        );
+        let backend = self.backend_raw.unwrap_or_default();
         let cwd = PathBuf::from(self.cwd);
         let sandbox_spec = deserialize_sandbox(self.sandbox_json)?;
         let sandboxed = sandbox_spec.is_some();
@@ -586,6 +606,7 @@ impl SessionSummaryRow {
             workspace_host_path,
             model: self.model,
             backend,
+            model_config_error: (!diagnostics.is_empty()).then(|| diagnostics.join("; ")),
             visible_message_count: visible_message_count(&messages),
             last_user_prompt: last_user_prompt(&messages),
             sandboxed,
@@ -744,6 +765,33 @@ impl SessionRow {
             updated_at: self.updated_at,
         })
     }
+}
+
+fn model_config_diagnostics(
+    backend: Option<&str>,
+    reasoning_effort: Option<&str>,
+    extra_headers_json: Option<&str>,
+) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+    match backend {
+        Some(raw) => {
+            if let Err(error) = raw.parse::<BackendKind>() {
+                diagnostics.push(format!("unsupported stored backend '{raw}': {error}"));
+            }
+        }
+        None => diagnostics.push("stored session has no backend".to_string()),
+    }
+    if let Some(raw) = reasoning_effort {
+        if parse_reasoning_effort(Some(raw.to_string())).is_err() {
+            diagnostics.push(format!("unsupported stored reasoning effort '{raw}'"));
+        }
+    }
+    if let Some(raw) = extra_headers_json.filter(|raw| !raw.is_empty()) {
+        if let Err(error) = serde_json::from_str::<BTreeMap<String, String>>(raw) {
+            diagnostics.push(format!("malformed stored extra headers: {error}"));
+        }
+    }
+    diagnostics
 }
 
 fn parse_extra_headers(raw: Option<&str>) -> Result<BTreeMap<String, String>> {

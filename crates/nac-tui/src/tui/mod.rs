@@ -526,6 +526,56 @@ mod tests {
     }
 
     #[test]
+    fn session_picker_lists_and_diagnoses_invalid_model_rows() {
+        let dir = temp_dir("invalid-session-picker-row");
+        let metadata = metadata_for(&dir);
+        for id in ["healthy", "invalid"] {
+            let snapshot = sessions::new_snapshot(
+                id.to_string(),
+                dir.clone(),
+                "gpt-test".to_string(),
+                "https://api.example.test/v1".to_string(),
+                nac_core::model::BackendKind::OpenAiResponses,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some("OPENAI_API_KEY".to_string()),
+                BTreeMap::new(),
+            );
+            sessions::create_session(&metadata.store_path, &snapshot).unwrap();
+        }
+        let mut raw = sessions::load_session_model_config(&metadata.store_path, "invalid").unwrap();
+        raw.backend = Some("auto".to_string());
+        raw.reasoning_effort = Some("ultra".to_string());
+        raw.extra_headers_json = Some("{broken".to_string());
+        sessions::update_raw_session_model_config(&metadata.store_path, &raw).unwrap();
+
+        let mut app = App::new_without_service(metadata, &[], true);
+        app.refresh_session_picker();
+        assert_eq!(app.session_picker.sessions.len(), 2);
+        assert!(app.session_picker.error.is_none());
+        app.session_picker.selected = app
+            .session_picker
+            .sessions
+            .iter()
+            .position(|session| session.session_id == "invalid")
+            .unwrap();
+        assert!(app.session_picker.sessions[app.session_picker.selected]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("auto"));
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let rendered = rendered_symbols(&terminal);
+        assert!(rendered.contains("Settings repair required"), "{rendered}");
+        assert!(rendered.contains("Backend: auto"), "{rendered}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn shift_enter_inserts_newline() {
         let dir = temp_dir("newline");
         let mut app = App::new(metadata_for(&dir), &[], false);
@@ -1552,8 +1602,8 @@ mod tests {
             None,
             None,
             messages,
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(3_333);
         snapshot.previous_response_duration_ms = Some(2_222);

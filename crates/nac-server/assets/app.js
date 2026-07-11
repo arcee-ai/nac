@@ -724,18 +724,59 @@ async function settingsMetadataForSession(sessionId, snapshot, fetchConfig = api
   return fetchConfig(`/sessions/${encodeURIComponent(sessionId)}/config`);
 }
 
+function rawHeadersFromMetadata(metadata) {
+  if (Object.prototype.hasOwnProperty.call(metadata || {}, "extra_headers_json")) {
+    const raw = metadata.extra_headers_json;
+    if (raw === null || raw === undefined || raw === "") {
+      return { text: "", value: {}, invalid: false };
+    }
+    try {
+      const value = JSON.parse(raw);
+      if (!value || Array.isArray(value) || typeof value !== "object"
+          || Object.values(value).some((entry) => typeof entry !== "string")) {
+        return { text: raw, value: {}, invalid: true };
+      }
+      return { text: JSON.stringify(value, null, 2), value, invalid: false };
+    } catch (_) {
+      return { text: raw, value: {}, invalid: true };
+    }
+  }
+  const value = metadata?.extra_headers || {};
+  return {
+    text: Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "",
+    value,
+    invalid: false,
+  };
+}
+
+function setSettingsSelectRawValue(select, raw, fieldLabel) {
+  for (const option of Array.from(select.querySelectorAll("option[data-raw-invalid]"))) {
+    option.remove();
+  }
+  const value = raw ?? "";
+  if (value && !Array.from(select.options).some((option) => option.value === value)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = `${value} (unsupported — select a replacement ${fieldLabel})`;
+    option.dataset.rawInvalid = "true";
+    select.append(option);
+  }
+  select.value = value;
+}
+
 function populateSettingsForm(metadata) {
   el.settingsModel.value = metadata.model || "";
   el.settingsBaseUrl.value = metadata.base_url || "";
-  el.settingsBackend.value = metadata.backend || "";
-  el.settingsEffort.value = metadata.reasoning_effort || "__clear__";
+  setSettingsSelectRawValue(el.settingsBackend, metadata.backend, "backend");
+  setSettingsSelectRawValue(
+    el.settingsEffort,
+    metadata.reasoning_effort || "__clear__",
+    "reasoning effort",
+  );
   const hasApiKeyEnv = metadata.api_key_env !== null && metadata.api_key_env !== undefined;
   el.settingsCredentialMode.value = hasApiKeyEnv ? "variable" : "none";
   el.settingsApiKeyEnv.value = metadata.api_key_env ?? "";
-  el.settingsExtraHeaders.value = metadata.extra_headers
-    && Object.keys(metadata.extra_headers).length > 0
-    ? JSON.stringify(metadata.extra_headers, null, 2)
-    : "";
+  el.settingsExtraHeaders.value = rawHeadersFromMetadata(metadata).text;
   state.settingsInitial = settingsValuesFromMetadata(metadata);
   renderCredentialControls();
 }
@@ -752,7 +793,13 @@ async function showSettingsOverlay() {
     const metadata = await settingsMetadataForSession(sessionId, snapshot);
     if (state.selectedId !== sessionId || el.settingsOverlay.hidden) return;
     populateSettingsForm(metadata);
-    setSettingsStatus(snapshot?.metadata ? "" : "Loaded persisted settings for repair", false);
+    const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics : [];
+    setSettingsStatus(
+      diagnostics.length > 0
+        ? `Repair required: ${diagnostics.join("; ")}`
+        : (snapshot?.metadata ? "" : "Loaded persisted settings for repair"),
+      diagnostics.length > 0,
+    );
   } catch (error) {
     if (state.selectedId === sessionId && !el.settingsOverlay.hidden) {
       setSettingsStatus(error.message, true);
@@ -4506,14 +4553,17 @@ function buildLaunchModelPayload(values) {
 }
 
 function settingsValuesFromMetadata(metadata) {
-  return {
+  const headers = rawHeadersFromMetadata(metadata);
+  const values = {
     model: String(metadata?.model || "").trim(),
     base_url: String(metadata?.base_url || "").trim(),
     backend: String(metadata?.backend || "").trim(),
     reasoning_effort: metadata?.reasoning_effort || null,
     api_key_env: metadata?.api_key_env ?? null,
-    extra_headers: metadata?.extra_headers || {},
+    extra_headers: headers.value,
   };
+  if (headers.invalid) values.extra_headers_invalid = true;
+  return values;
 }
 
 function sameHeaderObject(left, right) {
@@ -4541,7 +4591,8 @@ function buildSettingsPatch(values, initial) {
   for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
     if (current[field] !== initial[field]) patch[field] = current[field];
   }
-  if (!sameHeaderObject(current.extra_headers, initial.extra_headers || {})) {
+  if (initial.extra_headers_invalid
+      || !sameHeaderObject(current.extra_headers, initial.extra_headers || {})) {
     patch.extra_headers = current.extra_headers;
   }
   return patch;

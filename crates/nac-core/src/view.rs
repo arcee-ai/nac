@@ -25,6 +25,8 @@ pub struct SessionSummarySnapshot {
     pub workspace_host_path: Option<PathBuf>,
     pub model: String,
     pub backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_config_error: Option<String>,
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
@@ -147,7 +149,8 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             cwd: summary.cwd,
             workspace_host_path: summary.workspace_host_path,
             model: summary.model,
-            backend: summary.backend.as_str().to_string(),
+            backend: summary.backend,
+            model_config_error: summary.model_config_error,
             visible_message_count: summary.visible_message_count,
             last_user_prompt: summary.last_user_prompt,
             sandboxed: summary.sandboxed,

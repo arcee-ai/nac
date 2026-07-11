@@ -595,7 +595,7 @@ impl SessionManager {
         Ok(service)
     }
 
-    pub fn session_config(&self, session_id: &str) -> Result<sessions::SessionModelConfig> {
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
         sessions::load_session_model_config(&self.inner.store_path, session_id)
     }
 
@@ -766,7 +766,7 @@ impl SessionManager {
             }
         }
 
-        let current = sessions::load_session(&self.inner.store_path, session_id)?;
+        let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
         #[cfg(test)]
         let update_barrier = {
             self.inner
@@ -780,30 +780,32 @@ impl SessionManager {
             barrier.wait().await;
         }
         let mut prospective = current.clone();
-        apply_config_patch(&mut prospective, request)?;
+        apply_raw_config_patch(&mut prospective, request)?;
+        let (backend, reasoning_effort, extra_headers) =
+            parse_prospective_model_config(&prospective)?;
 
         let _settings = EffectiveModelSettings::new(
-            prospective.backend,
+            backend,
             prospective.model.clone(),
             prospective.base_url.clone(),
-            prospective.reasoning_effort,
+            reasoning_effort,
             prospective.api_key_env.clone(),
-            prospective.extra_headers.clone(),
+            extra_headers.clone(),
         )?;
         validate_model_configuration(
-            prospective.backend,
+            backend,
             &prospective.model,
             Some(&prospective.base_url),
-            prospective.reasoning_effort,
+            reasoning_effort,
             prospective.api_key_env.as_deref(),
-            &prospective.extra_headers,
+            &extra_headers,
         )?;
 
         // Persist only model columns after all caller-controlled configuration
         // and credential checks succeed. The revision CAS rejects a concurrent
         // PATCH, while run/history writes remain independent of these columns.
         // A store failure or conflict leaves the active map untouched.
-        sessions::update_session_model_config(&self.inner.store_path, &prospective)?;
+        sessions::update_raw_session_model_config(&self.inner.store_path, &prospective)?;
         active.remove(session_id);
         Ok(())
     }
@@ -1092,7 +1094,7 @@ async fn delete_session_handler(
 async fn session_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<sessions::SessionModelConfig>, ApiError> {
+) -> std::result::Result<Json<sessions::RawSessionModelConfig>, ApiError> {
     Ok(Json(manager.session_config(&session_id)?))
 }
 
@@ -1184,8 +1186,8 @@ fn model_options(
     })
 }
 
-fn apply_config_patch(
-    snapshot: &mut sessions::SessionSnapshot,
+fn apply_raw_config_patch(
+    config: &mut sessions::RawSessionModelConfig,
     request: UpdateConfigRequest,
 ) -> Result<()> {
     match request.model {
@@ -1195,7 +1197,7 @@ fn apply_config_patch(
                 "invalid model configuration: required field 'model' cannot be null",
             ));
         }
-        RequestField::Value(value) => snapshot.model = nonblank_request_string(value, "model")?,
+        RequestField::Value(value) => config.model = nonblank_request_string(value, "model")?,
     }
     match request.base_url {
         RequestField::Omitted => {}
@@ -1205,7 +1207,7 @@ fn apply_config_patch(
             ));
         }
         RequestField::Value(value) => {
-            snapshot.base_url = nonblank_request_string(value, "base_url")?;
+            config.base_url = nonblank_request_string(value, "base_url")?;
         }
     }
     match request.backend {
@@ -1216,34 +1218,78 @@ fn apply_config_patch(
             ));
         }
         RequestField::Value(value) => {
-            let value = nonblank_request_string(value, "backend")?;
-            snapshot.backend = parse_request_enum::<BackendKind>(&value, "backend")?;
+            config.backend = Some(nonblank_request_string(value, "backend")?);
         }
     }
     match request.reasoning_effort {
         RequestField::Omitted => {}
-        RequestField::Null => snapshot.reasoning_effort = None,
+        RequestField::Null => config.reasoning_effort = None,
         RequestField::Value(value) => {
-            let value = nonblank_request_string(value, "reasoning_effort")?;
-            snapshot.reasoning_effort = Some(parse_request_enum::<ReasoningEffort>(
-                &value,
-                "reasoning_effort",
-            )?);
+            config.reasoning_effort = Some(nonblank_request_string(value, "reasoning_effort")?);
         }
     }
     match request.api_key_env {
         RequestField::Omitted => {}
-        RequestField::Null => snapshot.api_key_env = None,
-        RequestField::Value(value) => {
-            snapshot.api_key_env = Some(value);
-        }
+        RequestField::Null => config.api_key_env = None,
+        RequestField::Value(value) => config.api_key_env = Some(value),
     }
     match request.extra_headers {
         RequestField::Omitted => {}
-        RequestField::Null => snapshot.extra_headers.clear(),
-        RequestField::Value(HeadersRequest(headers)) => snapshot.extra_headers = headers,
+        RequestField::Null => config.extra_headers_json = None,
+        RequestField::Value(HeadersRequest(headers)) => {
+            config.extra_headers_json = if headers.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&headers).map_err(|error| {
+                    request_configuration_error(format!(
+                        "invalid model configuration: failed to serialize extra_headers: {error}"
+                    ))
+                })?)
+            };
+        }
     }
+    config.diagnostics.clear();
     Ok(())
+}
+
+fn parse_prospective_model_config(
+    config: &sessions::RawSessionModelConfig,
+) -> Result<(
+    BackendKind,
+    Option<ReasoningEffort>,
+    BTreeMap<String, String>,
+)> {
+    nonblank_request_string(config.model.clone(), "model")?;
+    nonblank_request_string(config.base_url.clone(), "base_url")?;
+    let backend_raw = config.backend.as_deref().ok_or_else(|| {
+        request_configuration_error(
+            "invalid model configuration: required field 'backend' is missing; explicitly select a backend",
+        )
+    })?;
+    let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
+    let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
+    let reasoning_effort = config
+        .reasoning_effort
+        .as_deref()
+        .map(|raw| {
+            let raw = nonblank_request_string(raw.to_string(), "reasoning_effort")?;
+            parse_request_enum::<ReasoningEffort>(&raw, "reasoning_effort")
+        })
+        .transpose()?;
+    let extra_headers = config
+        .extra_headers_json
+        .as_deref()
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| {
+            serde_json::from_str::<BTreeMap<String, String>>(raw).map_err(|error| {
+                request_configuration_error(format!(
+                    "invalid model configuration: stored extra_headers must be replaced or cleared: {error}"
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok((backend, reasoning_effort, extra_headers))
 }
 
 fn parse_request_enum<T>(value: &str, field: &str) -> Result<T>
@@ -2224,7 +2270,10 @@ thread_timeout_secs = 7200
         }
 
         let missing_selector = manager.session_config("missing-selector").unwrap();
-        assert_eq!(missing_selector.backend, BackendKind::OpenAiResponses);
+        assert_eq!(
+            missing_selector.backend.as_deref(),
+            Some("openai-responses")
+        );
         assert_eq!(missing_selector.api_key_env, None);
         let missing_environment = manager.session_config("missing-environment-value").unwrap();
         assert_eq!(
@@ -2232,7 +2281,7 @@ thread_timeout_secs = 7200
             Some("MISSING_SERVER_REPAIR_KEY")
         );
         let unavailable_managed = manager.session_config("unavailable-managed-auth").unwrap();
-        assert_eq!(unavailable_managed.backend, BackendKind::ArceeAuth);
+        assert_eq!(unavailable_managed.backend.as_deref(), Some("arcee-auth"));
         assert_eq!(unavailable_managed.api_key_env, None);
         assert!(
             manager.inner.active_sessions.read().await.is_empty(),
@@ -2283,7 +2332,7 @@ thread_timeout_secs = 7200
             .await
             .expect("unavailable managed auth should be repairable by switching credential mode");
         let repaired_auth = manager.session_config("unavailable-managed-auth").unwrap();
-        assert_eq!(repaired_auth.backend, BackendKind::ArceeApi);
+        assert_eq!(repaired_auth.backend.as_deref(), Some("arcee-api"));
         assert_eq!(repaired_auth.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
 
         let before_failed_repair = manager.session_config("missing-selector").unwrap();
@@ -2307,6 +2356,141 @@ thread_timeout_secs = 7200
         let listed_after_repairs = manager.list_sessions(false).await.unwrap();
         assert_eq!(listed_after_repairs.len(), 4);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn structurally_invalid_raw_settings_require_explicit_transactional_repair() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("repair_structurally_invalid_settings");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
+        let store_path = root.join("store.db");
+        for id in ["healthy", "auto", "arcee", "missing", "effort", "headers"] {
+            seed_editable_session(&root, id);
+        }
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            let mut raw = sessions::load_session_model_config(&store_path, id).unwrap();
+            match id {
+                "auto" => raw.backend = Some("auto".to_string()),
+                "arcee" => raw.backend = Some("arcee".to_string()),
+                "missing" => raw.backend = None,
+                "effort" => raw.reasoning_effort = Some("ultra".to_string()),
+                "headers" => raw.extra_headers_json = Some("{broken".to_string()),
+                _ => unreachable!(),
+            }
+            sessions::update_raw_session_model_config(&store_path, &raw).unwrap();
+        }
+
+        let manager = test_manager(&root);
+        let listed = manager.list_sessions(false).await.unwrap();
+        assert_eq!(listed.len(), 6);
+        assert_eq!(
+            listed
+                .iter()
+                .find(|entry| entry.summary.session_id == "healthy")
+                .unwrap()
+                .summary
+                .model_config_error,
+            None
+        );
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            assert!(
+                listed
+                    .iter()
+                    .find(|entry| entry.summary.session_id == id)
+                    .unwrap()
+                    .summary
+                    .model_config_error
+                    .is_some(),
+                "{id} should be diagnosed without breaking listing"
+            );
+        }
+
+        let raw_auto = manager.session_config("auto").unwrap();
+        assert_eq!(raw_auto.backend.as_deref(), Some("auto"));
+        assert!(!raw_auto.diagnostics.is_empty());
+        let raw_missing = manager.session_config("missing").unwrap();
+        assert_eq!(raw_missing.backend, None);
+        let raw_effort = manager.session_config("effort").unwrap();
+        assert_eq!(raw_effort.reasoning_effort.as_deref(), Some("ultra"));
+        let raw_headers = manager.session_config("headers").unwrap();
+        assert_eq!(raw_headers.extra_headers_json.as_deref(), Some("{broken"));
+        let Json(endpoint_headers) =
+            session_config_handler(State(manager.clone()), AxumPath("headers".to_string()))
+                .await
+                .unwrap();
+        assert_eq!(endpoint_headers, raw_headers);
+        assert!(manager.inner.active_sessions.read().await.is_empty());
+
+        let before_failed = raw_auto.clone();
+        let error = manager
+            .update_session_config(
+                "auto",
+                UpdateConfigRequest {
+                    model: RequestField::Value("replacement-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert_eq!(manager.session_config("auto").unwrap(), before_failed);
+
+        for id in ["auto", "arcee", "missing"] {
+            manager
+                .update_session_config(
+                    id,
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("openai-responses".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        manager
+            .update_session_config(
+                "effort",
+                UpdateConfigRequest {
+                    reasoning_effort: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+        manager
+            .update_session_config(
+                "headers",
+                UpdateConfigRequest {
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                        "X-Repaired".to_string(),
+                        "yes".to_string(),
+                    )]))),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            let repaired = manager.session_config(id).unwrap();
+            assert!(
+                repaired.diagnostics.is_empty(),
+                "{id}: {:?}",
+                repaired.diagnostics
+            );
+            assert_eq!(repaired.config_version, 2);
+            sessions::load_session(&store_path, id).expect("repaired row must strictly load");
+        }
+        assert_eq!(
+            manager
+                .session_config("headers")
+                .unwrap()
+                .extra_headers_json
+                .as_deref(),
+            Some("{\"X-Repaired\":\"yes\"}")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     async fn point_session_at_hanging_endpoint(

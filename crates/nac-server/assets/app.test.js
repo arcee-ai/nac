@@ -309,6 +309,46 @@ test("settings metadata falls back to persisted config when no resumed snapshot 
   assert.match(appSource, /el\.settingsBtn\.disabled = !selectedEntry/);
 });
 
+test("raw persisted settings preserve unsupported values and force explicit repair", () => {
+  const invalid = settingsValuesFromMetadata({
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: "auto",
+    reasoning_effort: "ultra",
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers_json: "{broken",
+    diagnostics: ["unsupported backend", "malformed headers"],
+  });
+  assert.equal(invalid.backend, "auto");
+  assert.equal(invalid.reasoning_effort, "ultra");
+  assert.equal(invalid.extra_headers_invalid, true);
+  assert.deepEqual(plain(buildSettingsPatch(settingsFixture({
+    backend: "openai-responses",
+    reasoning_effort: "medium",
+    extra_headers: "",
+  }), invalid)), {
+    backend: "openai-responses",
+    reasoning_effort: "medium",
+    extra_headers: {},
+  });
+
+  const missingBackend = settingsValuesFromMetadata({
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: null,
+    reasoning_effort: null,
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers_json: null,
+  });
+  assert.equal(missingBackend.backend, "");
+  assert.deepEqual(plain(buildSettingsPatch(settingsFixture({
+    reasoning_effort: "__clear__",
+    extra_headers: "",
+  }), missingBackend)), { backend: "openai-responses" });
+  assert.match(appSource, /unsupported — select a replacement/);
+  assert.match(appSource, /Repair required:/);
+});
+
 test("settings metadata uses an available snapshot without fetching persisted config", async () => {
   const metadata = { model: "ready-model", api_key_env: "MISSING_CURRENT_VALUE" };
   const loaded = await settingsMetadataForSession(
