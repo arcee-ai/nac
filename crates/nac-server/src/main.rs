@@ -161,9 +161,13 @@ struct ModelArgs {
     #[arg(long = "api-key-env", hide = true)]
     api_key_env: Option<String>,
 
-    /// Internal extra headers override (JSON object) used by managed workers to inherit session config.
-    #[arg(long = "extra-headers", hide = true)]
-    extra_headers: Option<String>,
+    /// Internal extra headers snapshot transport (JSON object) used by managed workers.
+    #[arg(
+        long = "extra-headers",
+        hide = true,
+        value_parser = runtime::parse_extra_headers_json
+    )]
+    extra_headers: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(clap::Args)]
@@ -327,11 +331,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             api_base_url: cli.model.api_base_url,
             api_model: cli.model.api_model,
             api_key_env: cli.model.api_key_env,
-            extra_headers: cli
-                .model
-                .extra_headers
-                .as_deref()
-                .and_then(runtime::parse_extra_headers_json),
+            extra_headers: cli.model.extra_headers,
         },
         sandbox: SandboxOptions {
             sandbox: cli.sandbox.sandbox,
@@ -369,6 +369,25 @@ fn resolve_cli_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_cli_rejects_malformed_header_json() {
+        let error = ManagedWorkerCli::try_parse_from([
+            "nac-web __worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "work",
+            "--extra-headers",
+            "not-json",
+        ])
+        .err()
+        .expect("malformed worker headers must be rejected")
+        .to_string();
+        assert!(error.contains("expected a JSON object"), "{error}");
+    }
 
     #[test]
     fn worker_cli_accepts_explicit_arcee_modes_and_rejects_removed_names() {

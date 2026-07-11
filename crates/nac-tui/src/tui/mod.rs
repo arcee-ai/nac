@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc,
@@ -117,10 +118,47 @@ pub enum TuiOutcome {
     ResumeSession(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionPickerConfig {
+    pub cwd: String,
+    pub workspace_host_path: Option<PathBuf>,
+    pub store_path: PathBuf,
+}
+
+pub async fn run_session_picker(config: SessionPickerConfig) -> Result<TuiOutcome> {
+    let init = SessionServiceInit {
+        metadata: SessionMetadata {
+            cwd: config.cwd,
+            workspace_host_path: config.workspace_host_path,
+            store_path: config.store_path,
+            model: String::new(),
+            backend: String::new(),
+            session_id: None,
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            base_url: String::new(),
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: Default::default(),
+        },
+        restored_messages: Vec::new(),
+        response_timing: Default::default(),
+    };
+    run_inner(None, init, None, true).await
+}
+
 pub async fn run(
     service: SessionService,
     init: SessionServiceInit,
-    mut event_rx: SessionEventReceiver,
+    event_rx: SessionEventReceiver,
+) -> Result<TuiOutcome> {
+    run_inner(Some(service), init, Some(event_rx), false).await
+}
+
+async fn run_inner(
+    service: Option<SessionService>,
+    init: SessionServiceInit,
+    mut event_rx: Option<SessionEventReceiver>,
     start_in_session_picker: bool,
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
@@ -160,12 +198,15 @@ pub async fn run(
     let previous_response_duration = response_timing
         .previous_response_duration_ms
         .map(Duration::from_millis);
-    let mut app = App::new_with_service(
-        service.clone(),
-        metadata,
-        &restored_messages,
-        start_in_session_picker,
-    );
+    let mut app = match service.clone() {
+        Some(service) => App::new_with_service(
+            service,
+            metadata,
+            &restored_messages,
+            start_in_session_picker,
+        ),
+        None => App::new_without_service(metadata, &restored_messages, start_in_session_picker),
+    };
     app.restore_response_duration_history(
         response_duration_history.as_deref(),
         last_response_duration,
@@ -190,7 +231,10 @@ pub async fn run(
                             if let Some(action) = app.handle_crossterm_event(event) {
                                 match action {
                                     AppAction::Submit(prompt) => {
-                                        submit_prompt(prompt, &service, &mut app, &mut terminal)?;
+                                        let service = service.as_ref().ok_or_else(|| {
+                                            anyhow::anyhow!("session picker cannot submit prompts")
+                                        })?;
+                                        submit_prompt(prompt, service, &mut app, &mut terminal)?;
                                         terminal_action = true;
                                     }
                                     AppAction::ResumeSession(session_id) => {
@@ -210,7 +254,10 @@ pub async fn run(
                                     if let Some(action) = app.handle_crossterm_event(next_event) {
                                         match action {
                                             AppAction::Submit(prompt) => {
-                                                submit_prompt(prompt, &service, &mut app, &mut terminal)?;
+                                                let service = service.as_ref().ok_or_else(|| {
+                                                    anyhow::anyhow!("session picker cannot submit prompts")
+                                                })?;
+                                                submit_prompt(prompt, service, &mut app, &mut terminal)?;
                                                 break;
                                             }
                                             AppAction::ResumeSession(session_id) => {
@@ -237,8 +284,13 @@ pub async fn run(
                         }
                     }
                 }
-                event = event_rx.recv() => {
-                    match event {
+                event = async {
+                    match event_rx.as_mut() {
+                        Some(receiver) => Some(receiver.recv().await),
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match event.expect("disabled event branch cannot complete") {
                         Ok(envelope) => {
                             handle_session_event(&mut app, envelope);
                         }

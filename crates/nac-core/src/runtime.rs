@@ -218,6 +218,7 @@ impl EffectiveSandboxOptions {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum OrchestratorSession {
     Active {
         session_id: String,
@@ -269,11 +270,16 @@ impl OrchestratorRunConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ResumePickerRunConfig {
+    pub store_path: PathBuf,
+    pub lookup_cwd: PathBuf,
+    pub worker_executable: Option<PathBuf>,
+}
+
 pub enum RunState {
-    Orchestrator {
-        run_config: OrchestratorRunConfig,
-        start_in_session_picker: bool,
-    },
+    Orchestrator { run_config: OrchestratorRunConfig },
+    ResumePicker(ResumePickerRunConfig),
     ManagedWorker(ManagedWorkerRunConfig),
 }
 
@@ -380,13 +386,16 @@ fn managed_worker_effective_model_settings(model: &ModelOptions) -> Result<Effec
     )
 }
 
-/// Parse a JSON object string into a `BTreeMap<String, String>`.
-/// Returns `None` for empty or invalid input.
-pub fn parse_extra_headers_json(json: &str) -> Option<BTreeMap<String, String>> {
-    if json.is_empty() {
-        return None;
-    }
-    serde_json::from_str::<BTreeMap<String, String>>(json).ok()
+/// Parse the hidden worker header transport as a JSON object.
+///
+/// A present argument must be valid JSON. In particular, workers use `{}` to
+/// transport an explicitly empty snapshot header map; absence is represented by
+/// omitting the argument entirely.
+pub fn parse_extra_headers_json(
+    json: &str,
+) -> std::result::Result<BTreeMap<String, String>, String> {
+    serde_json::from_str::<BTreeMap<String, String>>(json)
+        .map_err(|error| format!("expected a JSON object with string header values: {error}"))
 }
 
 pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
@@ -688,54 +697,19 @@ pub async fn build_managed_worker_config(
 pub async fn build_resume_picker_config(
     options: ResumeOptions,
     config: &NacConfig,
-) -> Result<OrchestratorRunConfig> {
-    let client = ModelClient::from_effective_settings(effective_model_settings(
-        &ModelOptions::default(),
-        config,
-    )?)?
-    .with_cache_ttl(Some("1h"));
+) -> Result<ResumePickerRunConfig> {
+    if options.last || options.session_id.is_some() {
+        anyhow::bail!("session picker does not accept a session id or --last");
+    }
+
     let lookup_cwd = options.lookup_cwd;
-    let paths = PathContext::new(&lookup_cwd);
-    let agents_md = AgentsMdBundle::load(Some(&lookup_cwd), &paths)?;
-    let skills = SkillRegistry::load(Some(&lookup_cwd), SkillPathVisibility::Visible, &paths)?;
-    let working_directory = directory_display(&lookup_cwd);
-    let workspace_host_path = Some(lookup_cwd.clone());
-    let sandbox_status = "off".to_string();
-    let agents_md_status = agents_md.status_text();
     let store_path = resolve_store_path(&lookup_cwd, options.store, config);
     store::initialize(&store_path)?;
-    let agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
-            mode: AgentMode::Orchestrator,
-            store_path: store_path.clone(),
-            session_id: None,
-            initial_messages: Vec::new(),
-            thread_name: None,
-            event_sink: EventSink::none(),
-            workspace_cwd: lookup_cwd.clone(),
-            config_cwd: lookup_cwd.clone(),
-            working_directory: working_directory.clone(),
-            worker_executable: options.worker_executable,
-            sandbox: None,
-            ssh_host: None,
-            mcp: None,
-            skills,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: agents_md.system_message(),
-            thread_timeout_secs: worker_thread_timeout_secs(config),
-        },
-    )?;
 
-    Ok(OrchestratorRunConfig {
-        agent,
-        client,
-        session: OrchestratorSession::Picker { store_path },
-        sandbox_status,
-        agents_md_status,
-        workspace_display: working_directory,
-        workspace_host_path,
-        resume_base_cwd: lookup_cwd,
+    Ok(ResumePickerRunConfig {
+        store_path,
+        lookup_cwd,
+        worker_executable: options.worker_executable,
     })
 }
 
@@ -1233,16 +1207,88 @@ mod tests {
         assert!(error.to_string().contains("model"));
     }
 
+    #[tokio::test]
+    async fn resume_picker_defers_snapshot_and_credential_validation_until_selection() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_MISSING_PICKER_SELECTION_KEY";
+        let original = std::env::var_os(key_name);
+        unsafe { std::env::remove_var(key_name) };
+
+        let root = temp_store_path("credential_free_picker")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        store::initialize(&store_path).unwrap();
+        sessions::create_session(
+            &store_path,
+            &sessions::new_snapshot(
+                "picker-session".to_string(),
+                root.clone(),
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+
+        let picker = build_resume_picker_config(
+            ResumeOptions {
+                lookup_cwd: root.clone(),
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                ..ResumeOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("picker startup must not resolve model settings or credentials");
+        assert_eq!(picker.store_path, store_path);
+        assert_eq!(
+            sessions::list_sessions(&picker.store_path).unwrap().len(),
+            1
+        );
+
+        let error = match build_resume_config_for_session(
+            picker.store_path,
+            "picker-session",
+            &NacConfig::default(),
+            picker.lookup_cwd,
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("selecting a session with a missing credential must fail"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(key_name), "{error:#}");
+
+        match original {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
-    fn parse_extra_headers_json_handles_empty_object() {
-        assert_eq!(parse_extra_headers_json(""), None);
-        assert_eq!(parse_extra_headers_json("{}"), Some(BTreeMap::new()));
+    fn parse_extra_headers_json_requires_valid_object() {
+        assert!(parse_extra_headers_json("").is_err());
+        assert_eq!(parse_extra_headers_json("{}").unwrap(), BTreeMap::new());
         let headers = BTreeMap::from([("X-Custom".to_string(), "val".to_string())]);
         assert_eq!(
-            parse_extra_headers_json(r#"{"X-Custom":"val"}"#),
-            Some(headers)
+            parse_extra_headers_json(r#"{"X-Custom":"val"}"#).unwrap(),
+            headers
         );
-        assert_eq!(parse_extra_headers_json("not json"), None);
+        assert!(parse_extra_headers_json("not json").is_err());
+        assert!(parse_extra_headers_json(r#"{"X-Custom":1}"#).is_err());
     }
 
     #[tokio::test]

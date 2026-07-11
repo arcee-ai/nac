@@ -76,10 +76,33 @@ pub async fn run() -> Result<()> {
                 run_managed_worker(run_config).await?;
                 return Ok(());
             }
-            RunState::Orchestrator {
-                run_config,
-                start_in_session_picker,
-            } => {
+            RunState::ResumePicker(picker_config) => {
+                let store_path = picker_config.store_path.clone();
+                let resume_base_cwd = picker_config.lookup_cwd.clone();
+                let worker_executable = picker_config.worker_executable.clone();
+                match nac_tui::run_session_picker(nac_tui::SessionPickerConfig {
+                    cwd: picker_config.lookup_cwd.display().to_string(),
+                    workspace_host_path: Some(picker_config.lookup_cwd),
+                    store_path: picker_config.store_path,
+                })
+                .await?
+                {
+                    TuiOutcome::Exit => return Ok(()),
+                    TuiOutcome::ResumeSession(session_id) => {
+                        run_state = RunState::Orchestrator {
+                            run_config: runtime::build_resume_config_for_session(
+                                store_path,
+                                &session_id,
+                                &app_config,
+                                resume_base_cwd,
+                                worker_executable,
+                            )
+                            .await?,
+                        };
+                    }
+                }
+            }
+            RunState::Orchestrator { run_config } => {
                 let resume_base_cwd = run_config.resume_base_cwd().to_path_buf();
                 let session_service = SessionService::from_orchestrator_run_config(run_config);
                 let store_path = session_service.init.metadata.store_path.clone();
@@ -88,7 +111,6 @@ pub async fn run() -> Result<()> {
                     session_service.service,
                     session_service.init,
                     session_service.events,
-                    start_in_session_picker,
                 )
                 .await?
                 {
@@ -103,9 +125,7 @@ pub async fn run() -> Result<()> {
                                 Some(worker_executable.clone()),
                             )
                             .await?,
-                            start_in_session_picker: false,
                         };
-                        continue;
                     }
                 }
             }
@@ -127,7 +147,6 @@ async fn build_run_state(
                 config,
             )
             .await?,
-            start_in_session_picker: false,
         }),
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
             runtime::build_managed_worker_config(
@@ -137,14 +156,13 @@ async fn build_run_state(
             .await?,
         )),
         ParsedCli::Resume(cli) if cli.session_id.is_none() && !cli.last => {
-            Ok(RunState::Orchestrator {
-                run_config: runtime::build_resume_picker_config(
+            Ok(RunState::ResumePicker(
+                runtime::build_resume_picker_config(
                     resume_options(cli, effective_cwd, worker_executable),
                     config,
                 )
                 .await?,
-                start_in_session_picker: true,
-            })
+            ))
         }
         ParsedCli::Resume(cli) => Ok(RunState::Orchestrator {
             run_config: runtime::build_resume_config(
@@ -152,7 +170,6 @@ async fn build_run_state(
                 config,
             )
             .await?,
-            start_in_session_picker: false,
         }),
         ParsedCli::CodexAuth(_) => unreachable!("codex-auth is handled before loading config"),
         ParsedCli::ArceeAuth(_) => unreachable!("arcee-auth is handled before loading config"),
@@ -263,17 +280,13 @@ fn store_options(cli: StoreArgs) -> StoreOptions {
 }
 
 fn model_options(cli: ModelArgs) -> ModelOptions {
-    let extra_headers = cli
-        .extra_headers
-        .as_deref()
-        .and_then(runtime::parse_extra_headers_json);
     ModelOptions {
         backend: cli.backend.map(Into::into),
         reasoning_effort: cli.reasoning_effort.map(Into::into),
         api_base_url: cli.api_base_url,
         api_model: cli.api_model,
         api_key_env: cli.api_key_env,
-        extra_headers,
+        extra_headers: cli.extra_headers,
     }
 }
 
