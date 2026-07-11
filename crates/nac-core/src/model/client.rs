@@ -83,6 +83,11 @@ impl ModelClient {
             }
             explicit => explicit,
         };
+        validate_backend_api_key_env(
+            backend,
+            explicit_base_url.as_deref(),
+            overrides.api_key_env.as_deref(),
+        )?;
         let (base_url, api_key) = if backend == BackendKind::Arcee {
             resolve_arcee_credentials(explicit_base_url.as_deref())?
         } else {

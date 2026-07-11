@@ -40,6 +40,34 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
     }
 }
 
+pub fn validate_backend_api_key_env(
+    backend: BackendKind,
+    base_url: Option<&str>,
+    api_key_env: Option<&str>,
+) -> Result<()> {
+    let Some(_) = api_key_env.filter(|name| !name.trim().is_empty()) else {
+        return Ok(());
+    };
+
+    let resolved_backend = match backend {
+        BackendKind::Auto => {
+            let base_url =
+                base_url.unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::Auto));
+            detect_backend(base_url)
+                .map_err(|error| anyhow!("invalid model configuration: {error}"))?
+        }
+        backend => backend,
+    };
+
+    if resolved_backend == BackendKind::Arcee {
+        anyhow::bail!(
+            "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY"
+        );
+    }
+
+    Ok(())
+}
+
 pub(super) fn api_key_for_backend(
     backend: BackendKind,
     configured_env: Option<&str>,

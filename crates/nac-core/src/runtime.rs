@@ -1527,6 +1527,93 @@ url = "https://mcp.context7.com/mcp"
     }
 
     #[tokio::test]
+    async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
+        let root = temp_store_path("arcee_api_key_env_paths")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let expected =
+            "invalid model configuration: api_key_env is not supported for backend 'arcee'";
+
+        let snapshot = sessions::new_snapshot(
+            "invalid-arcee-resume".to_string(),
+            root.clone(),
+            "model".to_string(),
+            "https://api.arcee.ai".to_string(),
+            BackendKind::Arcee,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("SESSION_ARCEE_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        let resume_store = root.join("resume.db");
+        let resume_error = match build_resume_config_from_snapshot(
+            snapshot,
+            resume_store.clone(),
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("Arcee session resume must reject api_key_env"),
+            Err(error) => error,
+        };
+        assert!(
+            resume_error.to_string().contains(expected),
+            "got: {resume_error:#}"
+        );
+        assert!(
+            !resume_store.exists(),
+            "invalid resume initialized its store"
+        );
+
+        let worker_store = root.join("worker.db");
+        let worker_error = match build_managed_worker_config(
+            ManagedWorkerOptions {
+                workspace_cwd: root.clone(),
+                config_cwd: None,
+                dispatch: WorkerDispatchOptions {
+                    session_id: "session".to_string(),
+                    thread_name: "impl".to_string(),
+                    action: "work".to_string(),
+                    source_threads: Vec::new(),
+                    skills: Vec::new(),
+                },
+                store: StoreOptions {
+                    store_path: Some(worker_store.clone()),
+                },
+                model: ModelOptions {
+                    backend: Some(BackendKind::Arcee),
+                    api_key_env: Some("DELEGATED_ARCEE_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
+                sandbox: SandboxOptions::default(),
+                ssh_host: None,
+            },
+            &NacConfig::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("delegated Arcee worker must reject api_key_env"),
+            Err(error) => error,
+        };
+        assert!(
+            worker_error.to_string().contains(expected),
+            "got: {worker_error:#}"
+        );
+        assert!(
+            !worker_store.exists(),
+            "invalid worker initialized its store"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn managed_worker_builds_user_messages_from_self_and_source_threads() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 

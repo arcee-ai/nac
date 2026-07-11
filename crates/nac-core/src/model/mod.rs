@@ -21,6 +21,7 @@ mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub(crate) use backend::detect_backend;
+pub use backend::validate_backend_api_key_env;
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub(crate) use client::ModelClient;
 pub(crate) use types::{AssistantTurn, ClientOverrides, ModelTurnResponse, TokenUsage};
@@ -194,6 +195,49 @@ mod tests {
             }
         }
         restore_env("NAC_HOME", original_nac_home);
+    }
+
+    #[test]
+    fn resolved_arcee_rejects_nonempty_api_key_env_before_credentials() {
+        let expected = "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY";
+        let cases = [
+            ClientOverrides {
+                backend: Some(BackendKind::Arcee),
+                api_key_env: Some("ARCEE_API_KEY".to_string()),
+                ..ClientOverrides::default()
+            },
+            ClientOverrides {
+                backend: Some(BackendKind::Arcee),
+                base_url: Some("http://127.0.0.1:8080".to_string()),
+                api_key_env: Some("CUSTOM_KEY".to_string()),
+                ..ClientOverrides::default()
+            },
+            ClientOverrides {
+                backend: Some(BackendKind::Auto),
+                base_url: Some("https://api.arcee.ai/custom".to_string()),
+                api_key_env: Some("AUTO_KEY".to_string()),
+                ..ClientOverrides::default()
+            },
+        ];
+
+        for overrides in cases {
+            let error = ModelClient::from_env_with_overrides(overrides)
+                .err()
+                .expect("resolved Arcee configuration must reject api_key_env");
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn resolved_arcee_allows_absent_or_empty_api_key_env() {
+        for api_key_env in [None, Some(""), Some("   ")] {
+            validate_backend_api_key_env(
+                BackendKind::Arcee,
+                Some("https://api.arcee.ai"),
+                api_key_env,
+            )
+            .expect("empty api_key_env must be treated as absent");
+        }
     }
 
     #[test]
