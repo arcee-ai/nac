@@ -124,11 +124,15 @@
         </div>
 
         <div class="tab-panel" id="tab-events">
-          <div id="eventLog" class="event-log"></div>
+          <div class="events-toolbar">
+            <span class="events-toolbar-label">Events by thread</span>
+            <div id="eventStreamStatus" class="events-stream-status" role="status" aria-live="polite">Connecting</div>
+          </div>
+          <div id="eventLog" class="event-log event-streams" aria-label="Events by thread"></div>
         </div>
 
         <div class="tab-panel" id="tab-threads">
-          <div id="threadsView" class="dense-list"></div>
+          <div id="threadsView" class="threads-view" aria-label="Thread lifecycle"></div>
         </div>
 
         <div class="tab-panel" id="tab-worksets">

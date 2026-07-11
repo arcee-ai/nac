@@ -1323,6 +1323,59 @@ mod tests {
     }
 
     #[test]
+    fn grouped_events_and_tiled_threads_assets_expose_their_contracts() {
+        let html = include_str!("../assets/index.html");
+        for id in ["eventStreamStatus", "eventLog", "threadsView"] {
+            assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(!html.contains("eventViewThreads"));
+        assert!(!html.contains("eventViewChronology"));
+        assert!(!html.contains("events-view-switch"));
+        assert!(html.contains("role=\"status\" aria-live=\"polite\""));
+        assert!(html.contains("class=\"event-log event-streams\""));
+        assert!(html.contains("class=\"threads-view\" aria-label=\"Thread lifecycle\""));
+
+        let app = include_str!("../assets/app.js");
+        for area in ["Orchestrator", "Queued", "Running", "Finished"] {
+            assert!(
+                app.contains(&format!("renderEventStreamArea(\"{area}\"")),
+                "missing dense Events {area} area"
+            );
+            assert!(
+                app.contains(&format!("renderThreadTileArea(\"{area}\"")),
+                "missing Threads tile {area} area"
+            );
+        }
+        assert!(app.contains("class=\"event-thread-stream event-tone-${tone}\""));
+        assert!(app.contains("items.map(renderDenseEventRow)"));
+        assert!(!app.contains("[...items].reverse()"));
+        assert!(!app.contains("renderEventChronology"));
+        assert!(!app.contains("eventsViewBySession"));
+        assert!(app.contains("data-thread-key=\"${escapeAttr(key)}\""));
+        assert!(app.contains("aria-expanded=\"${expanded ? \"true\" : \"false\"}\""));
+        assert!(app.contains("aria-controls=\"${escapeAttr(controlsId)}\""));
+        assert!(app.contains("label: \"Timed out\""));
+        assert!(app.contains("label: \"Dispatch error\""));
+        assert!(app.contains(
+            "const terminalError = threadError\n      && evidenceIsNewer(threadError, dispatch.start);"
+        ));
+        assert!(!app.contains("&& !snapshotActive"));
+        assert!(app.contains("label: \"Retained history\""));
+        assert!(app.contains("tile.episodes.map(renderThreadEpisode)"));
+        assert!(app.contains("const episodes = snapshot?.thread_episodes?.[name] || [];"));
+        assert!(app.contains("episodes,\n      retained,"));
+
+        let css = include_str!("../assets/app.css");
+        for threshold in [600, 900, 1200] {
+            assert!(css.contains(&format!("@container threads (min-width: {threshold}px)")));
+        }
+        assert!(!css.contains("@container events"));
+        assert!(css.contains(".thread-tile-cell.is-expanded"));
+        assert!(css.contains("grid-column: 1 / -1"));
+        assert!(css.contains(".event-stream-row"));
+    }
+
+    #[test]
     fn session_event_envelope_serializes_for_sse_payloads() {
         let envelope = SessionEventEnvelope {
             session_id: Some("session-1".to_string()),

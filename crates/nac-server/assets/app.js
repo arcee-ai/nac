@@ -132,6 +132,7 @@ function bindElements() {
     "transcript",
     "promptForm",
     "promptInput",
+    "eventStreamStatus",
     "eventLog",
     "threadsView",
     "worksetsView",
@@ -2311,7 +2312,7 @@ function renderInspector() {
 function renderActiveInspectorPanel(snapshot) {
   switch (state.activeTab) {
     case "events":
-      renderEvents();
+      renderEvents(snapshot);
       break;
     case "threads":
       renderThreads(snapshot);
@@ -3043,125 +3044,575 @@ function safeMarkdownLinkHref(target) {
   }
 }
 
-function renderEvents() {
-  const events = getSessionEvents(state.selectedId);
-  if (events.length === 0) {
-    el.eventLog.innerHTML = `<div class="empty-state">No events captured.</div>`;
-    return;
-  }
-
-  el.eventLog.innerHTML = events.slice(0, 160).map((envelope) => {
-    const kind = eventKind(envelope);
-    const detail = eventDetail(envelope);
-    const classes = ["event-item"];
-    if (kind === "tool_call_started") classes.push("event-tool-start");
-    if (kind === "tool_call_finished") {
-      classes.push("event-tool-finish");
-      const inner = envelope.event?.event || {};
-      if (inner.is_error) classes.push("event-tool-error");
-    }
-    return `
-    <div class="${classes.join(" ")}">
-      <div class="event-meta">
-        <span class="event-kind">${escapeHtml(kind)}</span>
-        <span>${envelope.sequence_id ? `#${envelope.sequence_id}` : "local"}</span>
-      </div>
-      <div class="event-body">${escapeHtml(detail)}</div>
-    </div>
-  `;
-  }).join("");
+function renderEvents(snapshot) {
+  const sessionId = snapshot?.metadata?.session_id || state.selectedId;
+  const events = getSessionEvents(sessionId);
+  el.eventStreamStatus.textContent = eventStreamStatus(events);
+  const previousScrollTop = el.eventLog.scrollTop;
+  el.eventLog.innerHTML = renderGroupedEventStreams(snapshot, events);
+  el.eventLog.scrollTop = previousScrollTop;
 }
 
-function handleThreadClick(event) {
-  const button = event.target.closest("button[data-thread-name]");
-  if (!button || !el.threadsView.contains(button)) return;
+function eventStreamStatus(events) {
+  const notices = events.filter((envelope) => envelope.local).slice(0, 40);
+  if (notices.some((envelope) => envelope.event?.type === "replay_gap")) {
+    return "Replay gap · lifecycle may be incomplete";
+  }
+  if (notices.some((envelope) => envelope.event?.type === "lagged")) {
+    return "Lag detected · lifecycle may be incomplete";
+  }
+  const interruptedIndex = events.findIndex((envelope) => envelope.local && envelope.event?.type === "stream");
+  const latestServerIndex = events.findIndex((envelope) => !envelope.local);
+  if (interruptedIndex >= 0 && (latestServerIndex < 0 || interruptedIndex < latestServerIndex)) {
+    return "Reconnecting · stream interrupted";
+  }
+  if (state.eventSource?.readyState === 1) return "Live";
+  if (state.eventSource?.readyState === 0) return "Connecting";
+  return "Snapshot · stream unavailable";
+}
 
-  const sessionId = state.selectedId;
-  const name = button.dataset.threadName;
-  if (!sessionId || !name) return;
+function indexedEventEvidence(events) {
+  return events.map((envelope, index) => ({
+    envelope,
+    index,
+    event: agentEvent(envelope),
+    runId: runIdFromEnvelope(envelope),
+  }));
+}
 
+function workerNameForEnvelope(envelope) {
+  const event = agentEvent(envelope);
+  if (!event) return null;
+  if (["thread_started", "thread_finished", "thread_log"].includes(event.type)) {
+    return event.name || null;
+  }
+  return event.thread_name || null;
+}
+
+function evidenceIsNewer(left, right) {
+  if (!left) return false;
+  if (!right) return true;
+  const leftSequence = Number(left.envelope?.sequence_id);
+  const rightSequence = Number(right.envelope?.sequence_id);
+  if (Number.isSafeInteger(leftSequence) && Number.isSafeInteger(rightSequence)) {
+    return leftSequence > rightSequence;
+  }
+  return left.index < right.index;
+}
+
+function evidenceRunsMatch(left, right) {
+  return !left?.runId || !right?.runId || left.runId === right.runId;
+}
+
+function currentRunIdForEvents(snapshot, evidence) {
+  const active = String(snapshot?.active_run?.run_id || "");
+  if (active) return active;
+  const canonical = evidence.find((item) => item.envelope.event?.type === "run_started");
+  return canonical?.runId || "";
+}
+
+function latestEpisode(episodes) {
+  return [...(episodes || [])].sort((left, right) => {
+    const leftId = Number(left?.id);
+    const rightId = Number(right?.id);
+    if (Number.isFinite(leftId) && Number.isFinite(rightId)) return rightId - leftId;
+    return String(right?.created_at || "").localeCompare(String(left?.created_at || ""));
+  })[0] || null;
+}
+
+function selectThreadDispatch(items, currentRunId, snapshotActive) {
+  const starts = items.filter((item) => item.event?.type === "thread_started");
+  const finishes = items.filter((item) => item.event?.type === "thread_finished");
+  let start = null;
+  let finish = null;
+
+  if (currentRunId) {
+    start = starts.find((item) => item.runId === currentRunId) || null;
+    finish = finishes.find((item) => item.runId === currentRunId) || null;
+    if (start && finish && (!evidenceIsNewer(finish, start) || !evidenceRunsMatch(start, finish))) {
+      finish = null;
+    }
+    if (start || finish || snapshotActive) {
+      return { start, finish, runId: currentRunId };
+    }
+  }
+
+  start = starts[0] || null;
+  finish = finishes[0] || null;
+  if (start && finish) {
+    if (evidenceIsNewer(finish, start) && evidenceRunsMatch(start, finish)) {
+      return { start, finish, runId: finish.runId || start.runId };
+    }
+    return { start, finish: null, runId: start.runId };
+  }
+  return {
+    start,
+    finish,
+    runId: start?.runId || finish?.runId || "",
+  };
+}
+
+function dispatchActivity(items, dispatch) {
+  let scoped = items;
+  if (dispatch.runId) {
+    const matching = items.filter((item) => !item.runId || item.runId === dispatch.runId);
+    if (matching.length > 0) scoped = matching;
+  }
+  if (dispatch.start && dispatch.finish) {
+    scoped = scoped.filter((item) => item.index >= dispatch.finish.index && item.index <= dispatch.start.index);
+  } else if (dispatch.start) {
+    scoped = scoped.filter((item) => item.index <= dispatch.start.index);
+  }
+  return scoped;
+}
+
+function classifyWorkerThread({ items, dispatch, snapshotActive, retained, persisted }) {
+  if (dispatch.finish) {
+    const event = dispatch.finish.event;
+    if (event.timed_out) return { area: "finished", label: "Timed out", tone: "danger" };
+    if (Number(event.exit_code) !== 0) return { area: "finished", label: "Failed", tone: "danger" };
+    return { area: "finished", label: "Finished", tone: "finished" };
+  }
+  const threadError = items.find((item) => item.event?.type === "error");
+  if (dispatch.start) {
+    const terminalError = threadError
+      && evidenceIsNewer(threadError, dispatch.start);
+    if (terminalError) {
+      return { area: "finished", label: "Dispatch error", tone: "danger", error: threadError };
+    }
+    return { area: "running", label: "Running", tone: "running" };
+  }
+  if (snapshotActive) return { area: "queued", label: "Active — execution not confirmed", tone: "queued" };
+  if (threadError) return { area: "finished", label: "Dispatch error", tone: "danger", error: threadError };
+  const hasUnterminatedEvidence = items.some((item) => [
+    "run_started", "model_call_started", "tool_call_started", "tool_call_finished",
+    "thread_log", "assistant_message", "run_finished",
+  ].includes(item.event?.type));
+  if (hasUnterminatedEvidence) return { area: "finished", label: "Outcome not observed", tone: "unknown" };
+  if (retained || persisted) return { area: "finished", label: "Retained history", tone: "history" };
+  return { area: "finished", label: "Outcome not observed", tone: "unknown" };
+}
+
+function workerCurrentOperation(classification, activity, finish) {
+  if (finish) {
+    if (finish.event.timed_out) return finish.event.timeout_reason || `Exit ${finish.event.exit_code}`;
+    if (Number(finish.event.exit_code) !== 0) return `Exit ${finish.event.exit_code}`;
+    return "Exited successfully";
+  }
+  if (classification.area === "queued") return "Execution not confirmed from the available lifecycle stream";
+  if (classification.label === "Dispatch error") {
+    return classification.error?.event?.message || "Worker finish was not emitted";
+  }
+  if (classification.label === "Retained history") return "Lifecycle unavailable";
+  if (classification.label === "Outcome not observed") return "Finish outcome was not observed";
+
+  const latest = activity.find((item) => item.event?.type !== "thread_started");
+  const event = latest?.event;
+  if (!event) return "Worker started";
+  switch (event.type) {
+    case "model_call_started": return `Model call · iteration ${event.iteration}`;
+    case "tool_call_started": return `Tool · ${event.name || "unknown"}`;
+    case "tool_call_finished": return `${event.is_error ? "Tool error" : "Tool result"} · ${event.name || "unknown"}`;
+    case "assistant_message": return "Response observed";
+    case "error": return `Error · ${event.message || "unknown error"}`;
+    case "thread_log": return `Diagnostics · ${event.line || ""}`;
+    case "run_started": return "Agent started";
+    case "run_finished": return "Agent response complete";
+    default: return event.type.replaceAll("_", " ");
+  }
+}
+
+function deriveThreadPresentations(snapshot, evidence) {
+  const activeNames = new Set(snapshot?.active_threads || []);
+  const persistedByName = new Map((snapshot?.threads || []).map((thread) => [thread.name, thread]));
+  const names = new Set([
+    ...activeNames,
+    ...persistedByName.keys(),
+    ...Object.keys(snapshot?.thread_episodes || {}),
+  ]);
+  const byName = new Map();
+  for (const item of evidence) {
+    const name = workerNameForEnvelope(item.envelope);
+    if (!name) continue;
+    names.add(name);
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(item);
+  }
+
+  const currentRunId = currentRunIdForEvents(snapshot, evidence);
+  return Array.from(names).map((name) => {
+    const items = byName.get(name) || [];
+    const persisted = persistedByName.get(name) || null;
+    const episodes = snapshot?.thread_episodes?.[name] || [];
+    const retained = latestEpisode(episodes);
+    const dispatch = selectThreadDispatch(items, currentRunId, activeNames.has(name));
+    const activity = dispatchActivity(items, dispatch);
+    const classification = classifyWorkerThread({
+      items: activity.length > 0 ? activity : items,
+      dispatch,
+      snapshotActive: activeNames.has(name),
+      retained,
+      persisted,
+    });
+    const observedEvidence = activity.find((item) => item.event?.type === "assistant_message")
+      || (!dispatch.runId ? items.find((item) => item.event?.type === "assistant_message") : null);
+    const observed = observedEvidence?.event?.content
+      ? { content: observedEvidence.event.content, evidence: observedEvidence }
+      : null;
+    const startEvent = dispatch.start?.event;
+    const action = startEvent?.action || retained?.action || persisted?.latest_action || "No action available";
+    const sources = startEvent?.source_threads || [];
+    return {
+      key: `worker:${name}`,
+      name,
+      action,
+      sources,
+      episodes,
+      retained,
+      observed,
+      persisted,
+      snapshotActive: activeNames.has(name),
+      dispatch,
+      classification,
+      activity,
+      items,
+      currentOperation: workerCurrentOperation(classification, activity, dispatch.finish),
+      latestIndex: Math.min(...items.map((item) => item.index), Number.MAX_SAFE_INTEGER),
+    };
+  }).sort((left, right) => left.latestIndex - right.latestIndex || left.name.localeCompare(right.name));
+}
+
+function deriveOrchestratorPresentation(snapshot, evidence) {
+  const canonical = evidence.filter((item) => ["run_started", "run_completed", "run_failed"].includes(item.envelope.event?.type));
+  const activeRunId = String(snapshot?.active_run?.run_id || "");
+  const scopedCanonical = activeRunId
+    ? canonical.filter((item) => !item.runId || item.runId === activeRunId)
+    : canonical;
+  const latestLifecycle = activeRunId ? (scopedCanonical[0] || null) : (canonical[0] || null);
+  const event = latestLifecycle?.envelope?.event;
+  let label = "No active run observed";
+  let tone = "history";
+  if (event?.type === "run_completed") { label = "Completed"; tone = "finished"; }
+  else if (event?.type === "run_failed") { label = "Failed"; tone = "danger"; }
+  else if (event?.type === "run_started" || snapshot?.active_run) { label = "Running"; tone = "running"; }
+
+  const allActivity = evidence.filter((item) => item.envelope.local || !workerNameForEnvelope(item.envelope));
+  const runId = latestLifecycle?.runId || activeRunId;
+  const activity = allActivity.filter((item) => {
+    if (item.envelope.local) return false;
+    if (runId && item.runId && item.runId !== runId) return false;
+    return true;
+  });
+  const assistant = activity.find((item) => item.event?.type === "assistant_message");
+  const completed = activity.find((item) => item.envelope.event?.type === "run_completed");
+  const response = completed?.envelope?.event?.response || assistant?.event?.content || "";
+  const prompt = activity.find((item) => item.envelope.event?.type === "run_started")?.envelope?.event?.prompt_preview
+    || snapshot?.active_run?.prompt_preview || "No prompt available";
+  return {
+    key: "orchestrator",
+    label,
+    tone,
+    prompt,
+    response,
+    lifecycle: event || null,
+    activity,
+    allActivity,
+    currentOperation: orchestratorCurrentOperation(activity, label),
+  };
+}
+
+function orchestratorCurrentOperation(activity, label) {
+  if (label === "Failed") {
+    return activity.find((item) => item.envelope.event?.type === "run_failed")?.envelope?.event?.message || "Run failed";
+  }
+  if (label === "Completed") return "Run completed";
+  const latest = activity.find((item) => item.event || item.envelope.event?.type === "run_started");
+  const event = latest?.event;
+  if (event?.type === "tool_call_started") return `Tool · ${event.name || "unknown"}`;
+  if (event?.type === "tool_call_finished") return `${event.is_error ? "Tool error" : "Tool result"} · ${event.name || "unknown"}`;
+  if (event?.type === "model_call_started") return `Model call · iteration ${event.iteration}`;
+  if (event?.type === "assistant_message") return "Response observed";
+  return label === "Running" ? "Orchestrator active" : "Lifecycle unavailable";
+}
+
+function renderGroupedEventStreams(snapshot, events) {
+  const evidence = indexedEventEvidence(events);
+  const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);
+  const threads = deriveThreadPresentations(snapshot, evidence);
+  const areas = {
+    queued: threads.filter((thread) => thread.classification.area === "queued"),
+    running: threads.filter((thread) => thread.classification.area === "running"),
+    finished: threads.filter((thread) => thread.classification.area === "finished"),
+  };
+  return `
+    <div class="event-stream-stack">
+      ${renderEventStreamArea("Orchestrator", [orchestrator], "orchestrator")}
+      ${renderEventStreamArea("Queued", areas.queued, "queued")}
+      ${renderEventStreamArea("Running", areas.running, "running")}
+      ${renderEventStreamArea("Finished", areas.finished, "finished")}
+    </div>`;
+}
+
+function renderEventStreamArea(title, streams, area) {
+  const count = area === "orchestrator" ? "" : `<span>${streams.length}</span>`;
+  const content = streams.length > 0
+    ? streams.map((stream) => area === "orchestrator"
+      ? renderDenseEventStream("Orchestrator", stream.label, stream.allActivity, stream.tone, "No orchestrator events captured.")
+      : renderDenseEventStream(stream.name, stream.classification.label, stream.items, stream.classification.tone,
+        stream.classification.area === "queued" ? stream.currentOperation : "No captured lifecycle events for this thread."))
+      .join("")
+    : `<div class="event-stream-area-empty">None</div>`;
+  return `
+    <section class="event-stream-area event-stream-area-${area}" aria-labelledby="event-stream-${area}-title">
+      <h3 id="event-stream-${area}-title" class="event-stream-area-title"><span>${title}</span>${count}</h3>
+      ${content}
+    </section>`;
+}
+
+function renderDenseEventStream(name, status, items, tone, emptyText) {
+  return `
+    <article class="event-thread-stream event-tone-${tone}">
+      <header class="event-thread-header">
+        <h4>${escapeHtml(name)}</h4>
+        <span>${escapeHtml(status)}</span>
+      </header>
+      ${items.length > 0 ? `<ol class="event-stream-rows">${items.map(renderDenseEventRow).join("")}</ol>`
+        : `<div class="event-stream-state">${escapeHtml(emptyText)}</div>`}
+    </article>`;
+}
+
+function renderDenseEventRow(item) {
+  const kind = eventKind(item.envelope);
+  const rawDetail = String(eventDetail(item.envelope) ?? "");
+  const detail = rawDetail.length > 360 ? `${rawDetail.slice(0, 359)}…` : rawDetail;
+  const isError = kind === "error" || kind === "run_failed" || (kind === "tool_call_finished" && item.event?.is_error);
+  return `
+    <li class="event-stream-row${isError ? " is-error" : ""}">
+      <span class="event-stream-sequence">${item.envelope.sequence_id ? `#${item.envelope.sequence_id}` : "local"}</span>
+      <span class="event-stream-kind">${escapeHtml(kind)}</span>
+      <span class="event-stream-detail">${escapeHtml(detail)}</span>
+    </li>`;
+}
+
+function threadCardDomId(sessionId, key) {
+  let hash = 2166136261;
+  const value = `${sessionId}:${key}`;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `thread-card-${(hash >>> 0).toString(36)}`;
+}
+
+function tokenUsageSummary(usage) {
+  const parts = [];
+  if (usage.input_tokens != null) parts.push(`Input ${formatTokens(usage.input_tokens)}`);
+  if (usage.cache_read_tokens) parts.push(`Cache ${formatTokens(usage.cache_read_tokens)}`);
+  if (usage.output_tokens != null) parts.push(`Output ${formatTokens(usage.output_tokens)}`);
+  return parts.join(" · ");
+}
+
+function activityLabel(item) {
+  const event = item.event;
+  const kind = event?.type || eventKind(item.envelope);
+  if (event?.type === "thread_started") return `Assigned · ${event.action || "No action"}`;
+  if (event?.type === "thread_finished") {
+    return event.timed_out ? `Timed out · ${event.timeout_reason || `exit ${event.exit_code}`}` : `Finished · exit ${event.exit_code}`;
+  }
+  if (event?.type === "tool_call_started") return `Tool started · ${event.name || "unknown"} · ${event.args_preview || ""}`;
+  if (event?.type === "tool_call_finished") return `${event.is_error ? "Tool error" : "Tool preview"} · ${event.name || "unknown"} · ${event.content_preview || ""}`;
+  if (event?.type === "assistant_message") return "Assistant response emitted";
+  if (event?.type === "thread_log") return `Diagnostics · ${event.line || ""}`;
+  if (event?.type === "error") return `Error · ${event.message || ""}`;
+  if (event?.type === "model_call_started") return `Model call · iteration ${event.iteration}`;
+  if (event?.type === "run_started") return `Agent started · ${event.prompt_preview || ""}`;
+  if (event?.type === "run_finished") return "Agent response complete";
+  return `${kind} · ${eventDetail(item.envelope)}`;
+}
+
+function renderThreadActivity(activity) {
+  if (!activity || activity.length === 0) return `<div class="thread-detail-empty">No lifecycle activity available.</div>`;
+  return `<ol class="thread-activity-list">${[...activity].reverse().map((item) => `
+    <li>
+      <span>${item.envelope.sequence_id ? `#${item.envelope.sequence_id}` : "local"}</span>
+      <div>${escapeHtml(activityLabel(item))}</div>
+    </li>`).join("")}</ol>`;
+}
+
+function expandedThreadCards(sessionId) {
   let expanded = state.expandedThreadNamesBySession.get(sessionId);
   if (!expanded) {
     expanded = new Set();
     state.expandedThreadNamesBySession.set(sessionId, expanded);
   }
+  return expanded;
+}
 
-  if (expanded.has(name)) {
-    expanded.delete(name);
-  } else {
-    expanded.add(name);
-  }
-
+function handleThreadClick(event) {
+  const button = event.target.closest("button[data-thread-key]");
+  if (!button || !el.threadsView.contains(button)) return;
+  const sessionId = state.selectedId;
+  const key = button.dataset.threadKey;
+  if (!sessionId || !key) return;
+  const expanded = expandedThreadCards(sessionId);
+  if (expanded.has(key)) expanded.delete(key);
+  else expanded.add(key);
   requestInspectorRender();
 }
 
 function renderThreads(snapshot) {
   const sessionId = snapshot.metadata.session_id;
-  const persisted = new Map((snapshot.threads || []).map((thread) => [thread.name, thread]));
+  const events = getSessionEvents(sessionId);
+  const evidence = indexedEventEvidence(events);
+  const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);
+  const threads = deriveThreadPresentations(snapshot, evidence);
   const live = state.activeThreadsBySession.get(sessionId) || new Map();
-  const names = [
-    ...Array.from(live.keys()),
-    ...(snapshot.threads || []).map((thread) => thread.name),
-  ].filter((name, index, all) => all.indexOf(name) === index);
+  const areas = {
+    queued: threads.filter((thread) => thread.classification.area === "queued"),
+    running: threads.filter((thread) => thread.classification.area === "running"),
+    finished: threads.filter((thread) => thread.classification.area === "finished"),
+  };
+  const focusedKey = el.threadsView.contains(document.activeElement)
+    ? document.activeElement?.dataset?.threadKey || null
+    : null;
+  const previousScrollTop = el.threadsView.scrollTop;
 
-  if (names.length === 0) {
-    el.threadsView.innerHTML = `<div class="empty-state">No worker threads.</div>`;
-    return;
+  el.threadsView.innerHTML = `
+    <div class="thread-lifecycle-stack">
+      ${renderThreadTileArea("Orchestrator", [orchestrator], "orchestrator", snapshot, live)}
+      ${renderThreadTileArea("Queued", areas.queued, "queued", snapshot, live)}
+      ${renderThreadTileArea("Running", areas.running, "running", snapshot, live)}
+      ${renderThreadTileArea("Finished", areas.finished, "finished", snapshot, live)}
+    </div>`;
+  el.threadsView.scrollTop = previousScrollTop;
+
+  if (focusedKey) {
+    const replacement = Array.from(el.threadsView.querySelectorAll("button[data-thread-key]"))
+      .find((button) => button.dataset.threadKey === focusedKey);
+    if (replacement) {
+      try { replacement.focus({ preventScroll: true }); } catch (_) { replacement.focus(); }
+    }
   }
+}
 
-  const expanded = state.expandedThreadNamesBySession.get(sessionId) || new Set();
+function renderThreadTileArea(title, tiles, area, snapshot, live) {
+  const count = area === "orchestrator" ? "" : `<span>${tiles.length}</span>`;
+  const content = tiles.length > 0
+    ? `<ol class="thread-tile-grid">${tiles.map((tile) => area === "orchestrator"
+      ? renderOrchestratorThreadTile(tile, snapshot)
+      : renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
+    : `<div class="thread-area-empty">None</div>`;
+  return `
+    <section class="thread-lifecycle-area thread-area-${area}" aria-labelledby="thread-area-${area}-title">
+      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span>${count}</h3>
+      ${content}
+    </section>`;
+}
 
-  el.threadsView.innerHTML = names.map((name) => {
-    const thread = persisted.get(name);
-    const liveThread = live.get(name);
-    const status = liveThread?.status === "active" ? "active" : liveThread?.status || (thread ? "stored" : "pending");
-    const episodes = snapshot.thread_episodes?.[name] || [];
-    const action = liveThread?.action || thread?.latest_action || "no action";
-    const episodeCount = thread?.episode_count ?? episodes.length;
-    const isExpanded = expanded.has(name);
-    const classes = [
-      "dense-item",
-      "thread-row",
-      status === "active" ? "thread-active" : "",
-      isExpanded ? "expanded" : "",
-    ].filter(Boolean).join(" ");
+function renderThreadDisclosure(key, expanded, controlsId) {
+  return `
+    <button type="button" class="thread-card-disclosure" data-thread-key="${escapeAttr(key)}"
+      aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeAttr(controlsId)}">
+      ${expanded ? "Hide details" : "Details"}
+    </button>`;
+}
 
-    const header = `
-        <span class="dense-title">
-          <span><span class="status-dot ${status === "active" ? "active" : "idle"}"></span>${escapeHtml(name)}</span>
-          <span>${escapeHtml(status)} / ${episodeCount} eps</span>
-        </span>
-        <span class="dense-meta"><span>${escapeHtml(action)}</span><span>${episodes.length} retained</span></span>`;
+function renderWorkerThreadTile(tile, snapshot, liveThread) {
+  const sessionId = snapshot.metadata.session_id;
+  const expanded = expandedThreadCards(sessionId).has(tile.key);
+  const detailId = `${threadCardDomId(sessionId, tile.key)}-details`;
+  const classes = ["thread-tile-cell", expanded ? "is-expanded" : ""].filter(Boolean).join(" ");
+  const episodeCount = tile.persisted?.episode_count ?? tile.episodes.length;
+  const preview = tile.retained?.content || "No retained output.";
+  const action = tile.action === "No action available" && liveThread?.action
+    ? liveThread.action
+    : tile.action;
+  return `
+    <li class="${classes}">
+      <article class="thread-pulse-card thread-tone-${tile.classification.tone}" aria-labelledby="${detailId}-title">
+        <header class="thread-card-header">
+          <h4 id="${detailId}-title" title="${escapeAttr(tile.name)}">${escapeHtml(tile.name)}</h4>
+          <span class="thread-card-status">${escapeHtml(tile.classification.label)}</span>
+        </header>
+        <div class="thread-card-action">${escapeHtml(action)}</div>
+        <div class="thread-card-operation">${escapeHtml(tile.currentOperation)}</div>
+        <div class="thread-response-preview">
+          <div class="thread-response-label">Latest retained output · ${episodeCount} episode${episodeCount === 1 ? "" : "s"}</div>
+          <div class="thread-response-excerpt">${escapeHtml(preview)}</div>
+        </div>
+        <footer class="thread-card-footer">
+          <span>${tile.sources.length > 0 ? `${tile.sources.length} source${tile.sources.length === 1 ? "" : "s"}` : tile.persisted ? "Stored thread" : "Observed thread"}</span>
+          ${renderThreadDisclosure(tile.key, expanded, detailId)}
+        </footer>
+        ${expanded ? renderWorkerThreadDetails(tile, liveThread, detailId, sessionId) : ""}
+      </article>
+    </li>`;
+}
 
-    const detail = isExpanded ? `
-        <div class="thread-detail">
-          ${renderDetailRows([
-            ["session", thread?.session_id || sessionId],
-            ["created", thread?.created_at],
-            ["updated", thread?.updated_at],
-            ["latest action", thread?.latest_action],
-            ["live action", liveThread?.action],
-            ["sources", liveThread?.source_threads],
-            ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence],
-            ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence],
-            ["exit code", liveThread?.exit_code],
-            ["timed out", liveThread?.timed_out],
-            ["last log", liveThread?.last_log],
-          ])}
-          <div class="dense-section-title">retained episodes</div>
-          ${episodes.length === 0
-            ? `<div class="dense-body muted">No retained episodes.</div>`
-            : `<div class="dense-sublist">${episodes.map(renderThreadEpisode).join("")}</div>`}
-        </div>` : "";
+function renderWorkerThreadDetails(tile, liveThread, detailId, sessionId) {
+  const finish = tile.dispatch.finish?.event;
+  const metadataRows = [
+    ["session", tile.persisted?.session_id || sessionId],
+    ["created", tile.persisted?.created_at],
+    ["updated", tile.persisted?.updated_at],
+    ["latest action", tile.persisted?.latest_action],
+    ["live action", liveThread?.action || tile.dispatch.start?.event?.action],
+    ["sources", liveThread?.source_threads || tile.sources],
+    ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence ?? tile.dispatch.start?.envelope?.sequence_id],
+    ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence ?? tile.dispatch.finish?.envelope?.sequence_id],
+    ["exit code", liveThread?.exit_code ?? finish?.exit_code],
+    ["timed out", liveThread?.timed_out ?? finish?.timed_out],
+    ["timeout reason", finish?.timeout_reason],
+    ["error", tile.classification.error?.event?.message],
+    ["usage", finish?.usage ? tokenUsageSummary(finish.usage) : null],
+    ["last log", liveThread?.last_log],
+  ];
+  return `
+    <div id="${detailId}" class="thread-card-details">
+      <section aria-label="Thread metadata">
+        <h5>Metadata and outcome</h5>
+        ${renderDetailRows(metadataRows)}
+      </section>
+      <section aria-label="Observed thread activity">
+        <h5>Observed activity</h5>
+        ${renderThreadActivity(tile.activity)}
+      </section>
+      <section class="thread-retained-section" aria-label="Retained episodes">
+        <h5>Retained episodes (${tile.episodes.length})</h5>
+        ${tile.episodes.length === 0
+          ? `<div class="thread-detail-empty">No retained episodes.</div>`
+          : `<div class="dense-sublist">${tile.episodes.map(renderThreadEpisode).join("")}</div>`}
+      </section>
+    </div>`;
+}
 
-    return `
-      <div class="thread-block">
-        <button type="button" class="${classes}" data-thread-name="${escapeAttr(name)}" aria-expanded="${isExpanded ? "true" : "false"}">
-          ${header}
-        </button>
-        ${detail}
-      </div>`;
-  }).join("");
+function renderOrchestratorThreadTile(tile, snapshot) {
+  const sessionId = snapshot.metadata.session_id;
+  const expanded = expandedThreadCards(sessionId).has(tile.key);
+  const detailId = `${threadCardDomId(sessionId, tile.key)}-details`;
+  return `
+    <li class="thread-tile-cell thread-orchestrator-cell ${expanded ? "is-expanded" : ""}">
+      <article class="thread-pulse-card thread-orchestrator-card thread-tone-${tile.tone}" aria-labelledby="${detailId}-title">
+        <header class="thread-card-header">
+          <h4 id="${detailId}-title">Orchestrator</h4>
+          <span class="thread-card-status">${escapeHtml(tile.label)}</span>
+        </header>
+        <div class="thread-orchestrator-summary">
+          <span class="thread-card-action">${escapeHtml(tile.prompt)}</span>
+          <span class="thread-card-operation">${escapeHtml(tile.currentOperation)}</span>
+        </div>
+        <footer class="thread-card-footer">
+          <span>${tile.response ? "Response available" : "No orchestrator response observed"}</span>
+          ${renderThreadDisclosure(tile.key, expanded, detailId)}
+        </footer>
+        ${expanded ? `
+          <div id="${detailId}" class="thread-card-details">
+            ${tile.response ? `<section aria-label="Orchestrator response"><h5>Response</h5><pre>${escapeHtml(tile.response)}</pre></section>` : ""}
+            ${tile.lifecycle?.type === "run_failed" ? `<section aria-label="Run failure"><h5>Failure</h5><pre>${escapeHtml(tile.lifecycle.message || "Run failed")}</pre></section>` : ""}
+            <section aria-label="Orchestrator activity"><h5>Observed activity</h5>${renderThreadActivity(tile.activity)}</section>
+          </div>` : ""}
+      </article>
+    </li>`;
 }
 
 function renderWorksets(snapshot) {
