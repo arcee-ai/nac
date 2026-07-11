@@ -30,6 +30,14 @@ pub struct SessionSummarySnapshot {
     pub sandboxed: bool,
     /// OpenSSH/freeform target the session runs on; `None` = local session.
     pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub sort_order: i64,
+    #[serde(default)]
+    pub presentation_version: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -144,6 +152,10 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             last_user_prompt: summary.last_user_prompt,
             sandboxed: summary.sandboxed,
             ssh_host: summary.ssh_host,
+            title: summary.title,
+            pinned: summary.pinned,
+            sort_order: summary.sort_order,
+            presentation_version: summary.presentation_version,
             created_at: summary.created_at,
             updated_at: summary.updated_at,
         }
@@ -591,6 +603,28 @@ pub fn parse_numstat_pairs(raw: &str, cached_raw: &str) -> NumstatSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_summary_snapshot_defaults_legacy_presentation_fields() {
+        let snapshot: SessionSummarySnapshot = serde_json::from_value(serde_json::json!({
+            "session_id": "legacy",
+            "cwd": "/repo",
+            "model": "model-a",
+            "backend": "openai-responses",
+            "visible_message_count": 0,
+            "last_user_prompt": null,
+            "sandboxed": false,
+            "ssh_host": null,
+            "created_at": "2026-01-01 00:00:00.000000000",
+            "updated_at": "2026-01-01 00:00:00.000000000"
+        }))
+        .unwrap();
+
+        assert_eq!(snapshot.title, None);
+        assert!(!snapshot.pinned);
+        assert_eq!(snapshot.sort_order, 0);
+        assert_eq!(snapshot.presentation_version, 0);
+    }
 
     #[test]
     fn workspace_without_host_path_is_unavailable() {

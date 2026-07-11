@@ -373,6 +373,16 @@ pub(crate) fn model_overrides(model: &ModelOptions, config: &NacConfig) -> Resul
     })
 }
 
+fn managed_worker_model_overrides(
+    model: &ModelOptions,
+    config: &NacConfig,
+) -> Result<ClientOverrides> {
+    let mut overrides = model_overrides(model, config)?;
+    overrides.reasoning_effort = model.reasoning_effort;
+    overrides.api_key_env = model.api_key_env.clone();
+    Ok(overrides)
+}
+
 /// Parse a JSON object string into a `BTreeMap<String, String>`.
 /// Returns `None` for empty or invalid input.
 pub fn parse_extra_headers_json(json: &str) -> Option<BTreeMap<String, String>> {
@@ -577,7 +587,10 @@ pub async fn build_managed_worker_config(
     options: ManagedWorkerOptions,
     config: &NacConfig,
 ) -> Result<ManagedWorkerRunConfig> {
-    let client = ModelClient::from_env_with_overrides(model_overrides(&options.model, config)?)?;
+    let client = ModelClient::from_env_with_overrides(managed_worker_model_overrides(
+        &options.model,
+        config,
+    )?)?;
     let ssh_host = trim_ssh_host(options.ssh_host.clone());
     let config_cwd = options
         .config_cwd
@@ -1140,6 +1153,64 @@ mod tests {
 
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);
+    }
+
+    #[test]
+    fn managed_worker_model_values_are_session_authoritative() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_together_api_key = std::env::var_os("TOGETHER_API_KEY");
+        unsafe {
+            std::env::set_var("TOGETHER_API_KEY", "test_dummy_key");
+        }
+
+        let mut config = NacConfig::default();
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+        config.model.api_key_env = Some("LATER_CONFIG_API_KEY".to_string());
+
+        let session_without_optional_values = ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            ..ModelOptions::default()
+        };
+        let absent = managed_worker_model_overrides(&session_without_optional_values, &config)
+            .unwrap();
+        assert_eq!(absent.reasoning_effort, None);
+        assert_eq!(absent.api_key_env, None);
+
+        let client = ModelClient::from_env_with_overrides(absent).unwrap();
+        assert_eq!(client.reasoning_effort(), None);
+        assert_eq!(client.api_key_env(), None);
+
+        let session_with_optional_values = ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            reasoning_effort: Some(ReasoningEffort::Low),
+            api_key_env: Some("SESSION_API_KEY".to_string()),
+            ..ModelOptions::default()
+        };
+        let concrete = managed_worker_model_overrides(&session_with_optional_values, &config)
+            .unwrap();
+        assert_eq!(concrete.reasoning_effort, Some(ReasoningEffort::Low));
+        assert_eq!(concrete.api_key_env.as_deref(), Some("SESSION_API_KEY"));
+
+        restore_env("TOGETHER_API_KEY", original_together_api_key);
+    }
+
+    #[test]
+    fn fresh_model_resolution_still_inherits_optional_config_values() {
+        let mut config = NacConfig::default();
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+
+        let fresh = model_overrides(
+            &ModelOptions {
+                backend: Some(BackendKind::TogetherChat),
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+
+        assert_eq!(fresh.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(fresh.api_key_env.as_deref(), Some("CONFIG_API_KEY"));
     }
 
     #[test]

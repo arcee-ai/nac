@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +15,10 @@ mod db;
 mod snapshot;
 mod summary;
 
-pub use db::{create_session, delete_session, list_sessions, load_last_session, load_session, save_session};
+pub use db::{
+    create_session, delete_session, list_sessions, load_last_session, load_session,
+    reorder_sessions, save_session, update_session_presentation,
+};
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
@@ -60,8 +64,76 @@ pub struct SessionSummary {
     pub sandboxed: bool,
     /// OpenSSH target for remote sessions.
     pub ssh_host: Option<String>,
+    pub title: Option<String>,
+    pub pinned: bool,
+    pub sort_order: i64,
+    pub presentation_version: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug)]
+pub enum SessionPresentationError {
+    InvalidInput(String),
+    NotFound(String),
+    Conflict(String),
+    Busy(String),
+    Store(anyhow::Error),
+}
+
+impl fmt::Display for SessionPresentationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidInput(message)
+            | Self::NotFound(message)
+            | Self::Conflict(message)
+            | Self::Busy(message) => formatter.write_str(message),
+            Self::Store(error) => write!(formatter, "session presentation storage failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for SessionPresentationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl From<rusqlite::Error> for SessionPresentationError {
+    fn from(error: rusqlite::Error) -> Self {
+        if matches!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+        ) {
+            return Self::Busy("session presentation store is busy".to_string());
+        }
+        Self::Store(error.into())
+    }
+}
+
+impl From<anyhow::Error> for SessionPresentationError {
+    fn from(error: anyhow::Error) -> Self {
+        let busy = error.chain().any(|cause| {
+            cause
+                .downcast_ref::<rusqlite::Error>()
+                .is_some_and(|sqlite_error| {
+                    matches!(
+                        sqlite_error.sqlite_error_code(),
+                        Some(
+                            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                    )
+                })
+        });
+        if busy {
+            Self::Busy("session presentation store is busy".to_string())
+        } else {
+            Self::Store(error)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -78,6 +150,32 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac_sessions_test_{}_{}", label, unique))
             .join("store.db")
+    }
+
+    fn test_snapshot(session_id: &str, created_at: &str, updated_at: &str) -> SessionSnapshot {
+        let mut snapshot = new_snapshot(
+            session_id.to_string(),
+            PathBuf::from(format!("/repo/{session_id}")),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.created_at = created_at.to_string();
+        snapshot.updated_at = updated_at.to_string();
+        snapshot
+    }
+
+    fn expected_versions(entries: &[(&str, i64)]) -> BTreeMap<String, i64> {
+        entries
+            .iter()
+            .map(|(session_id, version)| ((*session_id).to_string(), *version))
+            .collect()
     }
 
     #[test]
@@ -97,8 +195,8 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
@@ -137,7 +235,13 @@ mod tests {
         assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 100);
         assert_eq!(loaded.token_usages[0].as_ref().unwrap().output_tokens, 50);
         assert!(loaded.token_usages[1].is_none());
-        assert_eq!(loaded.token_usages[2].as_ref().unwrap().orchestrator_context_tokens, 330);
+        assert_eq!(
+            loaded.token_usages[2]
+                .as_ref()
+                .unwrap()
+                .orchestrator_context_tokens,
+            330
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -304,15 +408,22 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         create_session(&store_path, &snapshot).unwrap();
 
         let loaded = load_session(&store_path, "session-remote").unwrap();
         assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
 
-        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
+        let refreshed = refresh_snapshot(
+            &loaded,
+            loaded.messages.clone(),
+            None,
+            None,
+            None,
+            loaded.token_usages.clone(),
+        );
         assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
         save_session(&store_path, &refreshed).unwrap();
         assert_eq!(
@@ -349,8 +460,8 @@ mod tests {
             None,
             None,
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         create_session(&store_path, &first).unwrap();
 
@@ -366,8 +477,8 @@ mod tests {
             vec![Message::User {
                 content: "latest".to_string(),
             }],
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         save_session(&store_path, &second).unwrap();
 
@@ -378,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn list_sessions_returns_summaries_in_updated_order() {
+    fn list_sessions_returns_summaries_in_presentation_order() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("list");
 
@@ -399,8 +510,8 @@ mod tests {
                     content: "first prompt".to_string(),
                 },
             ],
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         create_session(&store_path, &first).unwrap();
 
@@ -436,8 +547,8 @@ mod tests {
                     tool_calls: None,
                 },
             ],
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         save_session(&store_path, &second).unwrap();
 
@@ -492,7 +603,14 @@ mod tests {
         );
 
         // refresh_snapshot must preserve api_key_env and extra_headers
-        let refreshed = refresh_snapshot(&loaded, loaded.messages.clone(), None, None, None, loaded.token_usages.clone());
+        let refreshed = refresh_snapshot(
+            &loaded,
+            loaded.messages.clone(),
+            None,
+            None,
+            None,
+            loaded.token_usages.clone(),
+        );
         assert_eq!(refreshed.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
         assert_eq!(refreshed.extra_headers, headers);
         save_session(&store_path, &refreshed).unwrap();
@@ -605,14 +723,8 @@ mod tests {
             "auth episode",
         )
         .unwrap();
-        crate::store::append_episode(
-            &store_path,
-            "session-del",
-            "tests",
-            "scan",
-            "test episode",
-        )
-        .unwrap();
+        crate::store::append_episode(&store_path, "session-del", "tests", "scan", "test episode")
+            .unwrap();
 
         // Add a workset with items
         let workset = crate::store::WorksetDefinition {
@@ -634,22 +746,451 @@ mod tests {
         crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
 
         // Verify data exists
-        assert!(!crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
-        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().len() == 1);
+        assert!(!crate::store::list_threads(&store_path, "session-del")
+            .unwrap()
+            .is_empty());
+        assert!(
+            crate::store::list_worksets(&store_path, "session-del")
+                .unwrap()
+                .len()
+                == 1
+        );
         assert!(list_sessions(&store_path).unwrap().len() == 1);
 
         // Delete the session
         let deleted = delete_session(&store_path, "session-del").unwrap();
-        assert!(deleted, "delete_session should return true for existing session");
+        assert!(
+            deleted,
+            "delete_session should return true for existing session"
+        );
 
         // Verify all related rows are gone
-        assert!(crate::store::list_threads(&store_path, "session-del").unwrap().is_empty());
-        assert!(crate::store::list_worksets(&store_path, "session-del").unwrap().is_empty());
+        assert!(crate::store::list_threads(&store_path, "session-del")
+            .unwrap()
+            .is_empty());
+        assert!(crate::store::list_worksets(&store_path, "session-del")
+            .unwrap()
+            .is_empty());
         assert!(list_sessions(&store_path).unwrap().is_empty());
 
         // Deleting a non-existent session returns false
         let deleted_again = delete_session(&store_path, "session-del").unwrap();
-        assert!(!deleted_again, "delete_session should return false for missing session");
+        assert!(
+            !deleted_again,
+            "delete_session should return false for missing session"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_store_migrates_presentation_table_and_lists_defaults() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_migration");
+        std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
+        let messages_json = serde_json::to_string(&Vec::<Message>::new()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(&store_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                    session_id TEXT PRIMARY KEY,
+                    cwd TEXT NOT NULL,
+                    store_path TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    backend TEXT,
+                    reasoning_effort TEXT,
+                    sandbox_json TEXT,
+                    messages_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (
+                    session_id, cwd, store_path, model, base_url, messages_json,
+                    created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    "legacy-session",
+                    "/repo",
+                    store_path.display().to_string(),
+                    "model-a",
+                    "https://api.openai.com/v1",
+                    messages_json,
+                    "2026-01-01 00:00:00.000000000",
+                    "2026-01-02 00:00:00.000000000",
+                ],
+            )
+            .unwrap();
+        }
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].title, None);
+        assert!(!summaries[0].pinned);
+        assert_eq!(summaries[0].sort_order, 0);
+        assert_eq!(summaries[0].presentation_version, 0);
+
+        let conn = crate::store::open_connection(&store_path).unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name = 'session_presentations'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_exists);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn presentation_order_uses_creation_fallback_and_new_sessions_lead_unpinned() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_default_order");
+        let old = test_snapshot(
+            "old",
+            "2026-01-01 00:00:00.000000000",
+            "2026-12-01 00:00:00.000000000",
+        );
+        let same_a = test_snapshot(
+            "same-a",
+            "2026-02-01 00:00:00.000000000",
+            "2026-02-01 00:00:00.000000000",
+        );
+        let same_b = test_snapshot(
+            "same-b",
+            "2026-02-01 00:00:00.000000000",
+            "2026-02-01 00:00:00.000000000",
+        );
+        create_session(&store_path, &old).unwrap();
+        create_session(&store_path, &same_a).unwrap();
+        create_session(&store_path, &same_b).unwrap();
+
+        let initial_ids: Vec<_> = list_sessions(&store_path)
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.session_id)
+            .collect();
+        assert_eq!(initial_ids, ["same-b", "same-a", "old"]);
+        reorder_sessions(
+            &store_path,
+            false,
+            &[
+                "old".to_string(),
+                "same-a".to_string(),
+                "same-b".to_string(),
+            ],
+            &expected_versions(&[("old", 0), ("same-a", 0), ("same-b", 0)]),
+        )
+        .unwrap();
+
+        let newest = test_snapshot(
+            "newest",
+            "2026-03-01 00:00:00.000000000",
+            "2026-03-01 00:00:00.000000000",
+        );
+        create_session(&store_path, &newest).unwrap();
+        let ids: Vec<_> = list_sessions(&store_path)
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.session_id)
+            .collect();
+        assert_eq!(ids, ["newest", "old", "same-a", "same-b"]);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn presentation_titles_are_normalized_validated_and_clearable() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_titles");
+        create_session(
+            &store_path,
+            &test_snapshot(
+                "session-title",
+                "2026-01-01 00:00:00.000000000",
+                "2026-01-01 00:00:00.000000000",
+            ),
+        )
+        .unwrap();
+
+        let titled = update_session_presentation(
+            &store_path,
+            "session-title",
+            "  Custom  title  ",
+            false,
+            0,
+        )
+        .unwrap();
+        assert_eq!(titled.title.as_deref(), Some("Custom  title"));
+        assert_eq!(titled.presentation_version, 1);
+
+        let cleared =
+            update_session_presentation(&store_path, "session-title", " \u{2003} ", false, 1)
+                .unwrap();
+        assert_eq!(cleared.title, None);
+        assert_eq!(cleared.presentation_version, 2);
+
+        assert!(matches!(
+            update_session_presentation(&store_path, "session-title", "bad\ttitle", false, 2),
+            Err(SessionPresentationError::InvalidInput(_))
+        ));
+        let unicode_title = "🦀".repeat(120);
+        let unicode =
+            update_session_presentation(&store_path, "session-title", &unicode_title, false, 2)
+                .unwrap();
+        assert_eq!(unicode.title.as_deref(), Some(unicode_title.as_str()));
+        assert_eq!(unicode.presentation_version, 3);
+
+        let no_op =
+            update_session_presentation(&store_path, "session-title", &unicode_title, false, 3)
+                .unwrap();
+        assert_eq!(no_op.presentation_version, 4);
+        assert!(matches!(
+            update_session_presentation(&store_path, "session-title", &unicode_title, false, 3),
+            Err(SessionPresentationError::Conflict(_))
+        ));
+        assert!(matches!(
+            update_session_presentation(&store_path, "session-title", &"🦀".repeat(121), false, 4),
+            Err(SessionPresentationError::InvalidInput(_))
+        ));
+        let unchanged = list_sessions(&store_path).unwrap().remove(0);
+        assert_eq!(unchanged.title.as_deref(), Some(unicode_title.as_str()));
+        assert_eq!(unchanged.presentation_version, 4);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn pin_moves_append_to_destination_without_disturbing_groups() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_pin_append");
+        for (index, session_id) in ["a", "b", "c"].iter().enumerate() {
+            create_session(
+                &store_path,
+                &test_snapshot(
+                    session_id,
+                    &format!("2026-01-0{} 00:00:00.000000000", index + 1),
+                    "2026-01-01 00:00:00.000000000",
+                ),
+            )
+            .unwrap();
+        }
+
+        let a = update_session_presentation(&store_path, "a", "Alpha", true, 0).unwrap();
+        let b = update_session_presentation(&store_path, "b", "", true, 0).unwrap();
+        assert_eq!((a.sort_order, b.sort_order), (0, 1));
+        let b = update_session_presentation(&store_path, "b", "", false, 1).unwrap();
+        assert_eq!(b.sort_order, 1, "unpin appends after legacy order zero");
+
+        let summaries = list_sessions(&store_path).unwrap();
+        let state: Vec<_> = summaries
+            .iter()
+            .map(|summary| {
+                (
+                    summary.session_id.as_str(),
+                    summary.pinned,
+                    summary.sort_order,
+                    summary.title.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("a", true, 0, Some("Alpha")),
+                ("c", false, 0, None),
+                ("b", false, 1, None),
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn reorders_groups_independently_and_rejects_conflicts_without_partial_writes() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_reorder");
+        for session_id in ["a", "b", "c"] {
+            create_session(
+                &store_path,
+                &test_snapshot(
+                    session_id,
+                    "2026-01-01 00:00:00.000000000",
+                    "2026-01-01 00:00:00.000000000",
+                ),
+            )
+            .unwrap();
+        }
+        update_session_presentation(&store_path, "a", "Alpha", true, 0).unwrap();
+        update_session_presentation(&store_path, "b", "", true, 0).unwrap();
+
+        let pinned = reorder_sessions(
+            &store_path,
+            true,
+            &["b".to_string(), "a".to_string()],
+            &expected_versions(&[("a", 1), ("b", 1)]),
+        )
+        .unwrap();
+        assert_eq!(
+            pinned
+                .iter()
+                .map(|summary| (summary.session_id.as_str(), summary.sort_order))
+                .collect::<Vec<_>>(),
+            [("b", 0), ("a", 1)]
+        );
+        assert!(pinned
+            .iter()
+            .all(|summary| summary.presentation_version == 2));
+        assert_eq!(pinned[1].title.as_deref(), Some("Alpha"));
+
+        let unpinned = reorder_sessions(
+            &store_path,
+            false,
+            &["c".to_string()],
+            &expected_versions(&[("c", 0)]),
+        )
+        .unwrap();
+        assert_eq!(unpinned[0].presentation_version, 1);
+        assert_eq!(unpinned[0].sort_order, 0);
+
+        let stale = reorder_sessions(
+            &store_path,
+            true,
+            &["a".to_string(), "b".to_string()],
+            &expected_versions(&[("a", 2), ("b", 1)]),
+        );
+        assert!(matches!(stale, Err(SessionPresentationError::Conflict(_))));
+        let after_stale: Vec<_> = list_sessions(&store_path)
+            .unwrap()
+            .into_iter()
+            .filter(|summary| summary.pinned)
+            .map(|summary| (summary.session_id, summary.presentation_version))
+            .collect();
+        assert_eq!(after_stale, [("b".to_string(), 2), ("a".to_string(), 2)]);
+
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &["a".to_string()],
+                &expected_versions(&[("a", 2)])
+            ),
+            Err(SessionPresentationError::Conflict(_))
+        ));
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &["a".to_string(), "a".to_string()],
+                &expected_versions(&[("a", 2)])
+            ),
+            Err(SessionPresentationError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &["missing".to_string(), "a".to_string(), "b".to_string()],
+                &expected_versions(&[("missing", 0), ("a", 2), ("b", 2)])
+            ),
+            Err(SessionPresentationError::NotFound(_))
+        ));
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &["a".to_string(), "b".to_string()],
+                &expected_versions(&[("a", 2)])
+            ),
+            Err(SessionPresentationError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &[" ".to_string()],
+                &expected_versions(&[(" ", -1)])
+            ),
+            Err(SessionPresentationError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            reorder_sessions(
+                &store_path,
+                true,
+                &["c".to_string(), "a".to_string(), "b".to_string()],
+                &expected_versions(&[("c", 1), ("a", 2), ("b", 2)])
+            ),
+            Err(SessionPresentationError::Conflict(_))
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn presentation_survives_snapshot_save_and_cascades_on_delete() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_snapshot_isolation");
+        let mut stale_snapshot = test_snapshot(
+            "session-presentation",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        create_session(&store_path, &stale_snapshot).unwrap();
+        update_session_presentation(
+            &store_path,
+            "session-presentation",
+            "Persisted title",
+            true,
+            0,
+        )
+        .unwrap();
+
+        stale_snapshot.updated_at = "2026-02-01 00:00:00.000000000".to_string();
+        save_session(&store_path, &stale_snapshot).unwrap();
+        let summary = list_sessions(&store_path).unwrap().remove(0);
+        assert_eq!(summary.title.as_deref(), Some("Persisted title"));
+        assert!(summary.pinned);
+        assert_eq!(summary.presentation_version, 1);
+
+        assert!(delete_session(&store_path, "session-presentation").unwrap());
+        let conn = crate::store::open_connection(&store_path).unwrap();
+        let presentation_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_presentations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(presentation_count, 0);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn presentation_writes_do_not_change_load_last_activity_order() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("presentation_load_last");
+        let active = test_snapshot(
+            "active",
+            "2026-01-01 00:00:00.000000000",
+            "2026-03-01 00:00:00.000000000",
+        );
+        let newer_created = test_snapshot(
+            "newer-created",
+            "2026-02-01 00:00:00.000000000",
+            "2026-02-01 00:00:00.000000000",
+        );
+        create_session(&store_path, &active).unwrap();
+        create_session(&store_path, &newer_created).unwrap();
+
+        update_session_presentation(&store_path, "newer-created", "Renamed and pinned", true, 0)
+            .unwrap();
+        assert_eq!(load_last_session(&store_path).unwrap().session_id, "active");
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
