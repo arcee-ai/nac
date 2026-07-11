@@ -1,6 +1,14 @@
 use super::*;
 use anyhow::Context;
 
+fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
 #[derive(Clone)]
 pub struct ModelClient {
     client: Client,
@@ -348,7 +356,7 @@ impl ModelClient {
                         "Failed to parse response from {}: {}\nBody: {}",
                         url,
                         e,
-                        &body[..body.len().min(500)]
+                        truncate_utf8(&body, 500)
                     )
                 });
             }
@@ -358,7 +366,7 @@ impl ModelClient {
                     "HTTP {} from {}: {}",
                     status.as_u16(),
                     url,
-                    &body[..body.len().min(500)]
+                    truncate_utf8(&body, 500)
                 );
                 continue;
             }
@@ -367,7 +375,7 @@ impl ModelClient {
                 "HTTP {} from {}: {}",
                 status.as_u16(),
                 url,
-                &body[..body.len().min(500)]
+                truncate_utf8(&body, 500)
             ));
         }
 
@@ -409,5 +417,84 @@ impl ModelClient {
             extra_headers: std::collections::BTreeMap::new(),
             cache_ttl: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn truncate_utf8_backs_up_to_character_boundary() {
+        assert_eq!(truncate_utf8("é", 0), "");
+        assert_eq!(truncate_utf8("é", 1), "");
+        assert_eq!(truncate_utf8("é", 2), "é");
+
+        let body = format!("{}é", "a".repeat(499));
+        assert_eq!(truncate_utf8(&body, 500), "a".repeat(499));
+    }
+
+    #[test]
+    fn truncate_utf8_preserves_exact_boundary_and_short_values() {
+        let exact = format!("{}é", "a".repeat(498));
+        assert_eq!(exact.len(), 500);
+        assert_eq!(truncate_utf8(&exact, 500), exact);
+        assert_eq!(truncate_utf8("short", 500), "short");
+    }
+
+    #[tokio::test]
+    async fn arcee_multibyte_error_body_does_not_panic() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind mock server");
+        let address = listener.local_addr().expect("mock server address");
+        let response_body = format!("{}é", "a".repeat(499));
+        let expected_prefix = "a".repeat(499);
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set request timeout");
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).expect("read request");
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+
+        let client = ModelClient {
+            client: Client::new(),
+            base_url: format!("http://{address}"),
+            api_key: "rcai-test".to_string(),
+            model: "test-model".to_string(),
+            backend: BackendKind::Arcee,
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: std::collections::BTreeMap::new(),
+            cache_ttl: None,
+        };
+
+        let error = client
+            .send_arcee_chat(Vec::new(), Vec::new())
+            .await
+            .expect_err("HTTP 400 should return an error")
+            .to_string();
+        server.join().expect("mock server thread");
+
+        assert!(error.contains("HTTP 400"), "unexpected error: {error}");
+        assert!(
+            error.contains(&expected_prefix),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !error.contains('é'),
+            "body should be capped safely: {error}"
+        );
     }
 }
