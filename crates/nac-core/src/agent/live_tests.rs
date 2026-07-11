@@ -1,10 +1,14 @@
 use super::Agent;
-use crate::model::ModelClient;
+use crate::model::{ClientOverrides, ModelClient};
 
 #[tokio::test]
 #[ignore = "requires OPENAI_API_KEY"]
 async fn test_simple_prompt() {
-    let client = ModelClient::from_env().expect("Need OPENAI_API_KEY");
+    let client = ModelClient::from_env_with_overrides(ClientOverrides {
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        ..ClientOverrides::default()
+    })
+    .expect("Need OPENAI_API_KEY selected through api_key_env");
     let mut agent = Agent::default(client);
     let result = agent.send("What is 2+2? Reply with just the number.").await;
 
@@ -27,7 +31,11 @@ async fn test_tool_usage() {
     let path = std::env::temp_dir().join(format!("agent_task5_test_{}.txt", unique));
     std::fs::write(&path, "hello from test file").expect("failed to create temp file");
 
-    let client = ModelClient::from_env().expect("Need OPENAI_API_KEY");
+    let client = ModelClient::from_env_with_overrides(ClientOverrides {
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        ..ClientOverrides::default()
+    })
+    .expect("Need OPENAI_API_KEY selected through api_key_env");
     let mut agent = Agent::default(client);
     let result = agent
         .send(&format!(

@@ -1171,14 +1171,21 @@ mod tests {
             backend: Some(BackendKind::TogetherChat),
             ..ModelOptions::default()
         };
-        let absent = managed_worker_model_overrides(&session_without_optional_values, &config)
-            .unwrap();
+        let absent =
+            managed_worker_model_overrides(&session_without_optional_values, &config).unwrap();
         assert_eq!(absent.reasoning_effort, None);
         assert_eq!(absent.api_key_env, None);
 
-        let client = ModelClient::from_env_with_overrides(absent).unwrap();
-        assert_eq!(client.reasoning_effort(), None);
-        assert_eq!(client.api_key_env(), None);
+        let error = match ModelClient::from_env_with_overrides(absent) {
+            Ok(_) => panic!("a worker snapshot without an API-key selector must fail"),
+            Err(error) => error,
+        };
+        assert!(error
+            .downcast_ref::<crate::model::ModelConfigurationError>()
+            .is_some());
+        assert!(error
+            .to_string()
+            .contains("requires a nonblank api_key_env"));
 
         let session_with_optional_values = ModelOptions {
             backend: Some(BackendKind::TogetherChat),
@@ -1186,8 +1193,8 @@ mod tests {
             api_key_env: Some("SESSION_API_KEY".to_string()),
             ..ModelOptions::default()
         };
-        let concrete = managed_worker_model_overrides(&session_with_optional_values, &config)
-            .unwrap();
+        let concrete =
+            managed_worker_model_overrides(&session_with_optional_values, &config).unwrap();
         assert_eq!(concrete.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(concrete.api_key_env.as_deref(), Some("SESSION_API_KEY"));
 
@@ -1533,8 +1540,7 @@ url = "https://mcp.context7.com/mcp"
             .unwrap()
             .to_path_buf();
         std::fs::create_dir_all(&root).unwrap();
-        let expected =
-            "invalid model configuration: api_key_env is not supported for backend 'arcee-auth'";
+        let expected = "is not supported for backend 'arcee-auth'";
 
         let snapshot = sessions::new_snapshot(
             "invalid-arcee-resume".to_string(),
@@ -1665,7 +1671,10 @@ url = "https://mcp.context7.com/mcp"
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: ModelOptions::default(),
+            model: ModelOptions {
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
+                ..ModelOptions::default()
+            },
             sandbox: SandboxOptions::default(),
             ssh_host: None,
         };
@@ -1755,8 +1764,8 @@ url = "https://mcp.context7.com/mcp"
                     tool_calls: None,
                 },
             ],
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
@@ -1828,8 +1837,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let normalized =
@@ -1849,8 +1858,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         let normalized =
             normalize_snapshot_paths(relative, Path::new("/local/resume/base")).unwrap();
@@ -1878,8 +1887,8 @@ url = "https://mcp.context7.com/mcp"
             }),
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let error = match build_resume_config_from_snapshot(
@@ -1920,8 +1929,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             None,
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let error = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap_err();
@@ -1967,8 +1976,8 @@ url = "https://mcp.context7.com/mcp"
                     content: "hello".to_string(),
                 },
             ],
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
@@ -2042,7 +2051,10 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2113,7 +2125,10 @@ url = "https://mcp.context7.com/mcp"
                 config_cwd: Some(config_cwd.clone()),
                 worker_executable: None,
                 store: StoreOptions::default(),
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2190,7 +2205,10 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(run_store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions {
                     sandbox: true,
                     ..SandboxOptions::default()
@@ -2231,7 +2249,10 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(worker_store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions {
                     sandbox: true,
                     ..SandboxOptions::default()
@@ -2277,7 +2298,10 @@ url = "https://mcp.context7.com/mcp"
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: ModelOptions::default(),
+            model: ModelOptions {
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
+                ..ModelOptions::default()
+            },
             sandbox,
             ssh_host: Some("build-box".to_string()),
         };
@@ -2352,7 +2376,10 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2425,7 +2452,10 @@ args = ["-c", {}]
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2513,7 +2543,10 @@ args = ["-c", {}]
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: ModelOptions {
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },

@@ -1790,13 +1790,15 @@ mod tests {
         seed_session(&root, "attach-invalid", "2026-01-01 00:00:00.000000000");
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
         attach_snapshot.backend = BackendKind::ArceeApi;
-        attach_snapshot.base_url = "https://custom.example/v1".to_string();
+        attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
         sessions::save_session(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
-            Ok(_) => panic!("custom Arcee attach without OPENAI_API_KEY must fail"),
+            Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
         };
-        assert!(attach_error.to_string().contains("OPENAI_API_KEY"));
+        assert!(attach_error
+            .to_string()
+            .contains("requires a nonblank api_key_env"));
         assert!(attach_error
             .downcast_ref::<ModelConfigurationError>()
             .is_some());
@@ -1855,32 +1857,33 @@ mod tests {
                 "update",
                 UpdateConfigRequest {
                     model: None,
-                    base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+                    base_url: Some("https://api.arcee.ai/api".to_string()),
                     backend: Some("arcee-api".to_string()),
                     reasoning_effort: None,
-                    api_key_env: None,
+                    api_key_env: Some("OPENAI_API_KEY".to_string()),
                     extra_headers: None,
                 },
             )
             .await
-            .expect("custom Arcee configuration with a separate key should persist");
-        let custom = sessions::load_session(&store_path, "update").unwrap();
-        assert_eq!(custom.base_url, "http://127.0.0.1:12345/dev");
+            .expect("approved arcee-api configuration with an explicit selector should persist");
+        let api_mode = sessions::load_session(&store_path, "update").unwrap();
+        assert_eq!(api_mode.base_url, "https://api.arcee.ai/api");
+        assert_eq!(api_mode.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
 
         let created = manager
             .create_session(CreateSessionRequest {
                 cwd: None,
                 model: None,
-                base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+                base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
                 backend: Some("arcee-api".to_string()),
                 reasoning_effort: None,
-                api_key_env: None,
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
                 extra_headers: None,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
             .await
-            .expect("valid custom Arcee create should succeed");
+            .expect("valid approved arcee-api create should succeed");
         assert!(created.metadata.session_id.is_some());
 
         let _ = std::fs::remove_dir_all(&root);

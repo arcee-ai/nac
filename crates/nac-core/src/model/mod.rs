@@ -119,10 +119,7 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use std::ffi::OsString;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::path::PathBuf;
-    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct IsolatedModelEnv {
@@ -213,44 +210,115 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_api_key_error() {
+    fn api_key_backends_require_explicit_valid_selectors_and_ignore_canonical_vars() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let names = [
+            "OPENAI_API_KEY",
+            "TOGETHER_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "NAC_EXPLICIT_TEST_KEY",
+        ];
+        let original = names.map(|name| (name, std::env::var_os(name)));
+        set_env("OPENAI_API_KEY", Some("openai-selected"));
+        set_env("TOGETHER_API_KEY", Some("together-selected"));
+        set_env("ANTHROPIC_API_KEY", Some("anthropic-selected"));
+        set_env("NAC_EXPLICIT_TEST_KEY", Some("selected-secret"));
 
-        let original = std::env::var("OPENAI_API_KEY").ok();
-        let original_nac_home = std::env::var_os("NAC_HOME");
-        let empty_home = std::env::temp_dir().join("nac-missing-api-key-test-home");
-        unsafe {
-            std::env::remove_var("OPENAI_API_KEY");
-            std::env::set_var("NAC_HOME", &empty_home);
+        let backends = [
+            BackendKind::OpenAiResponses,
+            BackendKind::TogetherChat,
+            BackendKind::AnthropicMessages,
+            BackendKind::DeepSeekChat,
+            BackendKind::FireworksChat,
+            BackendKind::ArceeApi,
+        ];
+        for backend in backends {
+            let missing = api_key_for_backend(backend, None)
+                .expect_err("canonical variables must not act as implicit selectors");
+            assert!(missing.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(missing
+                .to_string()
+                .contains("requires a nonblank api_key_env"));
+
+            let selected = api_key_for_backend(backend, Some("NAC_EXPLICIT_TEST_KEY"))
+                .expect("explicit selector should be authoritative");
+            assert_eq!(selected, "selected-secret");
         }
 
-        let result = ModelClient::from_env();
-        assert!(result.is_err(), "Expected error when API key missing");
-        let err_msg = result
-            .err()
-            .expect("Expected missing-key error")
-            .to_string();
-        assert!(
-            err_msg.contains("OPENAI_API_KEY"),
-            "Error should mention OPENAI_API_KEY, got: {}",
-            err_msg
-        );
-
-        if let Some(key) = original {
-            unsafe {
-                std::env::set_var("OPENAI_API_KEY", key);
-            }
-        } else {
-            unsafe {
-                std::env::remove_var("OPENAI_API_KEY");
-            }
+        for (selector, expected) in [
+            ("OPENAI_API_KEY", "openai-selected"),
+            ("TOGETHER_API_KEY", "together-selected"),
+            ("ANTHROPIC_API_KEY", "anthropic-selected"),
+        ] {
+            let selected = api_key_for_backend(BackendKind::OpenAiResponses, Some(selector))
+                .expect("canonical variable names remain valid explicit selectors");
+            assert_eq!(selected, expected);
         }
-        restore_env("NAC_HOME", original_nac_home);
+
+        for (name, value) in original {
+            restore_env(name, value);
+        }
+    }
+
+    #[test]
+    fn api_key_selector_validation_and_values_are_typed_configuration_errors() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let names = [
+            "NAC_MISSING_TEST_KEY",
+            "NAC_EMPTY_TEST_KEY",
+            "NAC_SPACE_TEST_KEY",
+        ];
+        let original = names.map(|name| (name, std::env::var_os(name)));
+        set_env("NAC_MISSING_TEST_KEY", None);
+        set_env("NAC_EMPTY_TEST_KEY", Some(""));
+        set_env("NAC_SPACE_TEST_KEY", Some("  \t "));
+
+        for selector in [None, Some(""), Some("   ")] {
+            let error = api_key_for_backend(BackendKind::OpenAiResponses, selector).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("nonblank api_key_env"));
+        }
+        for selector in ["9INVALID", "HAS-DASH", " HAS_SPACE"] {
+            let error =
+                api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(selector));
+            assert!(error.to_string().contains("[A-Za-z_][A-Za-z0-9_]*"));
+        }
+        for selector in names {
+            let error =
+                api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(selector));
+            assert!(!error.to_string().contains("ambient-must-not-win"));
+        }
+
+        for (name, value) in original {
+            restore_env(name, value);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_selected_api_key_is_a_typed_configuration_error() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let name = "NAC_NON_UNICODE_TEST_KEY";
+        let original = std::env::var_os(name);
+        unsafe { std::env::set_var(name, OsString::from_vec(vec![0xff, 0xfe])) };
+
+        let error = api_key_for_backend(BackendKind::OpenAiResponses, Some(name)).unwrap_err();
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains(name));
+        assert!(error.to_string().contains("non-Unicode"));
+
+        restore_env(name, original);
     }
 
     #[test]
     fn arcee_auth_rejects_nonempty_api_key_env_before_credentials() {
-        let expected = "invalid model configuration: api_key_env is not supported for backend 'arcee-auth'; managed Arcee auth uses arcee_auth.json";
+        let expected = "invalid model configuration: api_key_env 'ARCEE_API_KEY' is not supported for backend 'arcee-auth'; managed Arcee auth uses arcee_auth.json";
         let error = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::ArceeAuth),
             api_key_env: Some("ARCEE_API_KEY".to_string()),
@@ -289,14 +357,33 @@ mod tests {
     }
 
     #[test]
-    fn resolved_arcee_allows_absent_or_empty_api_key_env() {
-        for api_key_env in [None, Some(""), Some("   ")] {
-            validate_backend_api_key_env(
-                BackendKind::ArceeAuth,
-                Some("https://api.arcee.ai"),
-                api_key_env,
+    fn managed_backends_reject_any_api_key_selector() {
+        for (backend, selector, source) in [
+            (BackendKind::ArceeAuth, "ARCEE_KEY", "arcee_auth.json"),
+            (
+                BackendKind::ChatGptCodexResponses,
+                "CODEX_KEY",
+                "stored OAuth from auth.json",
+            ),
+        ] {
+            let error = validate_backend_api_key_env(
+                backend,
+                Some(default_base_url_for_backend_hint(backend)),
+                Some(selector),
             )
-            .expect("empty api_key_env must be treated as absent");
+            .expect_err("managed credentials must reject api_key_env");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(selector));
+            assert!(error.to_string().contains(source));
+        }
+
+        for backend in [BackendKind::ArceeAuth, BackendKind::ChatGptCodexResponses] {
+            validate_backend_api_key_env(
+                backend,
+                Some(default_base_url_for_backend_hint(backend)),
+                None,
+            )
+            .expect("managed credentials should allow an absent selector");
         }
     }
 
@@ -316,6 +403,7 @@ mod tests {
 
         let client = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::DeepSeekChat),
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
             ..ClientOverrides::default()
         })
         .unwrap();
@@ -346,10 +434,13 @@ mod tests {
         for (label, auth_contents) in cases {
             let _env =
                 IsolatedModelEnv::new(label, Some(auth_contents), Some("test_openai_key"), None);
-            let client = ModelClient::from_env_with_overrides(ClientOverrides::default())
-                .unwrap_or_else(|error| {
-                    panic!("{label} Arcee auth changed omitted-backend resolution: {error:#}")
-                });
+            let client = ModelClient::from_env_with_overrides(ClientOverrides {
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
+                ..ClientOverrides::default()
+            })
+            .unwrap_or_else(|error| {
+                panic!("{label} Arcee auth changed omitted-backend resolution: {error:#}")
+            });
 
             assert_eq!(client.backend(), BackendKind::OpenAiResponses, "{label}");
             assert_eq!(client.base_url(), "https://api.openai.com/v1", "{label}");
@@ -362,11 +453,12 @@ mod tests {
         let stale_auth = stored_arcee_auth("rcai-expired", "https://api.arcee.ai");
         let _env = IsolatedModelEnv::new("no-openai-key", Some(&stale_auth), None, None);
 
-        let error = ModelClient::from_env_with_overrides(ClientOverrides::default())
-            .err()
-            .expect(
-                "omitted backend must require OpenAI credentials without an explicit Arcee URL",
-            );
+        let error = ModelClient::from_env_with_overrides(ClientOverrides {
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
+            ..ClientOverrides::default()
+        })
+        .err()
+        .expect("omitted backend must require OpenAI credentials without an explicit Arcee URL");
         assert!(
             error.to_string().contains("OPENAI_API_KEY"),
             "unexpected error: {error:#}"
@@ -483,89 +575,89 @@ mod tests {
     }
 
     #[test]
-    fn custom_arcee_endpoint_requires_openai_api_key_without_reading_stored_auth() {
+    fn arcee_api_requires_approved_service_and_never_reads_stored_auth() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let tampered = stored_arcee_auth("rcai-never-use", "http://api.arcee.ai/steal");
-        let _env = IsolatedModelEnv::new("custom-key", Some(&tampered), None, None);
-        let overrides = ClientOverrides {
+        let selector = "NAC_ARCEE_API_TEST_KEY";
+        let original = std::env::var_os(selector);
+        set_env(selector, Some("arcee-api-selected-secret"));
+        let env = IsolatedModelEnv::new("arcee-api", None, None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), "{not-json}").unwrap();
+
+        let custom_error = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::ArceeApi),
-            base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+            base_url: Some("https://gateway.example.com/v1".to_string()),
+            api_key_env: Some(selector.to_string()),
             ..ClientOverrides::default()
-        };
-
-        let error = ModelClient::from_env_with_overrides(overrides.clone())
-            .err()
-            .expect("a custom endpoint without OPENAI_API_KEY must fail");
-        assert!(
-            error.to_string().contains("backend 'arcee-api'"),
-            "unexpected error: {error:#}"
-        );
-        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-
-        set_env("OPENAI_API_KEY", Some("custom-separate-key"));
-        let client = ModelClient::from_env_with_overrides(overrides)
-            .expect("custom endpoint should use OPENAI_API_KEY without loading stored auth");
-        assert_eq!(client.base_url(), "http://127.0.0.1:12345/dev");
-    }
-
-    #[tokio::test]
-    async fn custom_arcee_request_never_leaks_stored_key_to_hostile_endpoint() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let stored_key = "rcai-stored-secret";
-        let custom_key = "custom-separate-secret";
-        let auth = stored_arcee_auth(stored_key, "https://api.arcee.ai/stored/path");
-        let _env = IsolatedModelEnv::new("custom-no-leak", Some(&auth), Some(custom_key), None);
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile endpoint");
-        let address = listener.local_addr().expect("hostile endpoint address");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept Arcee request");
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .expect("set request timeout");
-            let mut request = [0; 8192];
-            let read = stream.read(&mut request).expect("read Arcee request");
-            let request = String::from_utf8_lossy(&request[..read]).into_owned();
-            stream
-                .write_all(
-                    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 7\r\nConnection: close\r\n\r\ndenied!",
-                )
-                .expect("write hostile response");
-            request
-        });
+        })
+        .err()
+        .expect("arcee-api must reject non-Arcee hosts");
+        assert!(custom_error
+            .downcast_ref::<ModelConfigurationError>()
+            .is_some());
+        assert!(custom_error
+            .to_string()
+            .contains("not an approved Arcee origin"));
 
         let client = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::ArceeApi),
-            base_url: Some(format!("http://{address}/hostile/base")),
-            extra_headers: std::collections::BTreeMap::from([(
-                "Host".to_string(),
-                "custom.virtual.test".to_string(),
-            )]),
+            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+            api_key_env: Some(selector.to_string()),
             ..ClientOverrides::default()
         })
-        .expect("custom endpoint should use its separate key");
-        client
-            .send_turn(Vec::new(), Vec::new())
-            .await
-            .expect_err("hostile endpoint should return HTTP 400");
-        let request = server.join().expect("hostile endpoint thread");
+        .expect("arcee-api should use only the selected variable, not malformed stored auth");
+        assert_eq!(client.backend(), BackendKind::ArceeApi);
+        assert_eq!(client.base_url(), "https://api.arcee.ai/api/v1");
 
-        let request_lower = request.to_ascii_lowercase();
-        assert!(
-            request_lower.contains(&format!("authorization: bearer {custom_key}")),
-            "custom key missing from request: {request}"
-        );
-        assert!(
-            !request.contains(stored_key),
-            "stored key leaked to custom endpoint: {request}"
-        );
-        assert!(
-            request.starts_with("POST /hostile/base/v1/chat/completions "),
-            "selected URL path was not preserved: {request}"
-        );
-        assert!(
-            request_lower.contains("host: custom.virtual.test"),
-            "custom endpoint Host override was not preserved: {request}"
-        );
+        restore_env(selector, original);
+    }
+
+    #[test]
+    fn both_arcee_modes_reject_non_arcee_hosts_and_sensitive_headers() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let auth = stored_arcee_auth("stored-arcee-secret", "https://api.arcee.ai");
+        let _env = IsolatedModelEnv::new("canonical-modes", Some(&auth), None, None);
+        let selector = "NAC_ARCEE_CANONICAL_TEST_KEY";
+        let original = std::env::var_os(selector);
+        set_env(selector, Some("api-arcee-secret"));
+
+        for (backend, api_key_env) in [
+            (BackendKind::ArceeAuth, None),
+            (BackendKind::ArceeApi, Some(selector.to_string())),
+        ] {
+            let endpoint_error = ModelClient::from_env_with_overrides(ClientOverrides {
+                backend: Some(backend),
+                base_url: Some("https://not-arcee.example/v1".to_string()),
+                api_key_env: api_key_env.clone(),
+                ..ClientOverrides::default()
+            })
+            .err()
+            .expect("both Arcee modes must reject non-Arcee hosts");
+            assert!(endpoint_error
+                .downcast_ref::<ModelConfigurationError>()
+                .is_some());
+            assert!(endpoint_error
+                .to_string()
+                .contains("not an approved Arcee origin"));
+
+            let header_error = ModelClient::from_env_with_overrides(ClientOverrides {
+                backend: Some(backend),
+                base_url: Some("https://api.arcee.ai".to_string()),
+                api_key_env,
+                extra_headers: std::collections::BTreeMap::from([(
+                    "Authorization".to_string(),
+                    "must-not-override".to_string(),
+                )]),
+                ..ClientOverrides::default()
+            })
+            .err()
+            .expect("both Arcee modes must reject sensitive headers");
+            assert!(header_error
+                .downcast_ref::<ModelConfigurationError>()
+                .is_some());
+            assert!(header_error.to_string().contains("Authorization"));
+        }
+
+        restore_env(selector, original);
     }
 
     #[test]

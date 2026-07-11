@@ -16,7 +16,7 @@ The installer places two binaries in `$HOME/.local/bin` by default:
 - `nac-web`: the web dashboard for managing multiple sessions.
 - `nac`: the terminal UI and utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 
-Set `OPENAI_API_KEY`, then run `nac-web -C /path/to/project` and open the printed local URL.
+Set an API key variable and configure its name explicitly before launching. For example, export `OPENAI_API_KEY`, set `api_key_env = "OPENAI_API_KEY"` under `[model]` as shown below, then run `nac-web -C /path/to/project` and open the printed local URL. Provider-style variables are never probed implicitly; `OPENAI_API_KEY`, `TOGETHER_API_KEY`, and `ANTHROPIC_API_KEY` are read only when selected by `api_key_env`.
 
 To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. In `nac-web`, choose `chatgpt-codex-responses` in the launch modal, or configure `backend = "chatgpt-codex-responses"` under `[model]`. For the TUI, launch with `nac --backend chatgpt-codex-responses`.
 
@@ -95,7 +95,7 @@ smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mou
 
 Optional config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit CLI args and environment variables override TOML defaults. Resumed sessions continue using the model and sandbox settings stored in their session snapshot.
 
-For backends that use environment API keys, including `arcee-api`, the `api_key_env` setting names the variable to read when that backend's standard variable is not set. Managed `arcee-auth` does not support `api_key_env`; see [Arcee auth](#arcee-auth). Store paths remain relative to the launch working directory.
+For every API-key backend (`openai-responses`, `together-chat`, `anthropic-messages`, `deepseek-chat`, `fireworks-chat`, and `arcee-api`), `api_key_env` is required and names the only environment variable read for credentials. The selector must match `[A-Za-z_][A-Za-z0-9_]*`, and its value must be nonempty. Managed `arcee-auth` and `chatgpt-codex-responses` reject `api_key_env` and use their respective stored credentials. Store paths remain relative to the launch working directory.
 
 ```toml
 [agents_md]
@@ -158,8 +158,9 @@ Credential selection follows the explicit backend mode:
 
 - `backend = "arcee-auth"` uses the managed API key and base URL saved by `arcee-auth login` when no base URL is configured.
 - An explicit Arcee-owned URL with `arcee-auth` (`arcee.ai` or a subdomain) must use HTTPS on effective port 443. Its origin must match the origin saved at login; changing only the path does not change the credential origin.
-- `backend = "arcee-api"` uses API-key mode and never reads `arcee_auth.json`. During the current compatibility transition it follows the existing OpenAI-compatible key lookup (`OPENAI_API_KEY`, then configured `api_key_env`); the next strict resolver change will make the configured selector authoritative.
-- Both Arcee modes preserve Arcee chat-completions URL normalization and no-redirect request handling. `arcee-auth` additionally rejects sensitive `Host`, `Authorization`, and `Proxy-Authorization` header overrides.
+- `backend = "arcee-api"` uses only the environment variable explicitly selected by `api_key_env` and never reads `arcee_auth.json`.
+- Both Arcee modes accept only approved Arcee-owned HTTPS origins on effective port 443 and the canonical production path forms. Non-Arcee hosts are not supported as custom Arcee endpoints.
+- Both Arcee modes preserve Arcee chat-completions URL normalization, no-redirect request handling, and rejection of sensitive `Host`, `Authorization`, and `Proxy-Authorization` header overrides.
 - The old `backend = "arcee"` and `backend = "auto"` values are unsupported. Existing config and stored sessions using either value require explicit settings repair; they are not silently migrated.
 
 For example, a stored login needs only the managed backend and model:
@@ -170,17 +171,18 @@ backend = "arcee-auth"
 model = "trinity-large-thinking"
 ```
 
-An API-key endpoint instead selects `arcee-api`:
+An API-key Arcee session instead selects `arcee-api` and an explicit selector:
 
 ```sh
-export OPENAI_API_KEY="..."
+export ARCEE_API_KEY="..."
 ```
 
 ```toml
 [model]
 backend = "arcee-api"
 model = "trinity-large-thinking"
-base_url = "https://gateway.example.com"
+base_url = "https://api.arcee.ai"
+api_key_env = "ARCEE_API_KEY"
 ```
 
-For safety, credential reads and legacy migration reject symlinks and non-regular files. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target. It refuses to classify or remove a symlink at the shared legacy `auth.json` path; remove that symlink manually and retry. Stored-login requests also reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.
+For safety, credential reads and legacy migration reject symlinks and non-regular files. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target. It refuses to classify or remove a symlink at the shared legacy `auth.json` path; remove that symlink manually and retry. All Arcee requests reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.

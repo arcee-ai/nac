@@ -27,7 +27,7 @@ pub(super) fn no_redirect_client() -> Result<Client> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArceeEndpointKind {
     Approved,
-    Custom,
+    Unapproved,
 }
 
 /// Marks stored-auth content and policy failures that a caller can fix.
@@ -101,7 +101,7 @@ pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKi
 
     let arcee_owned = host == "arcee.ai" || host.ends_with(".arcee.ai");
     if !arcee_owned {
-        return Ok((ArceeEndpointKind::Custom, parsed));
+        return Ok((ArceeEndpointKind::Unapproved, parsed));
     }
     if parsed.scheme() != "https" {
         return Err(anyhow!(
@@ -117,6 +117,18 @@ pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKi
     }
 
     Ok((ArceeEndpointKind::Approved, parsed))
+}
+
+pub(super) fn validate_approved_base_url(base_url: &str) -> Result<Url> {
+    let (kind, parsed) = validate_arcee_base_url(base_url)?;
+    if kind != ArceeEndpointKind::Approved {
+        return Err(anyhow!(
+            "Arcee base URL '{}' is not an approved Arcee origin",
+            base_url
+        ));
+    }
+    chat_completions_url(base_url)?;
+    Ok(parsed)
 }
 
 pub(super) fn validate_stored_base_url(base_url: &str) -> Result<Url> {
@@ -213,8 +225,10 @@ fn validate_unambiguous_path(base_url: &str) -> Result<()> {
 ///
 /// Approved Arcee endpoints accept only the production root, `/api`, `/api/v1`,
 /// or the complete production route and canonicalize all four forms to
-/// `/api/v1/chat/completions`. Custom endpoints retain ordinary path prefixes,
-/// but ambiguous path-control encodings are rejected.
+/// `/api/v1/chat/completions`. Unapproved non-Arcee URLs retain ordinary path
+/// prefixes only for low-level URL normalization, but ambiguous path-control
+/// encodings are rejected. Both ModelClient Arcee modes reject these URLs
+/// before client construction.
 pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
     validate_unambiguous_path(base_url)?;
     let (kind, mut parsed) = validate_arcee_base_url(base_url)?;
@@ -1190,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn arcee_url_policy_allows_custom_http_and_https_endpoints() {
+    fn arcee_url_policy_classifies_non_arcee_origins_as_unapproved() {
         for base_url in [
             "http://127.0.0.1:8080/dev/path",
             "http://localhost:3000",
@@ -1198,7 +1212,7 @@ mod tests {
             "https://arcee.ai.attacker.example/v1",
         ] {
             let (kind, _) = validate_arcee_base_url(base_url).unwrap();
-            assert_eq!(kind, ArceeEndpointKind::Custom, "{base_url}");
+            assert_eq!(kind, ArceeEndpointKind::Unapproved, "{base_url}");
         }
     }
 
@@ -1279,7 +1293,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_arcee_chat_completions_url_matrix_preserves_prefixes() {
+    fn unapproved_url_normalization_matrix_preserves_prefixes() {
         let cases = [
             (
                 "http://localhost:8080",

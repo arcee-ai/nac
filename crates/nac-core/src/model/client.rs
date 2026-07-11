@@ -21,7 +21,7 @@ fn is_sensitive_arcee_header(name: &str) -> bool {
         .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
 }
 
-fn validate_stored_arcee_extra_headers(
+fn validate_arcee_extra_headers(
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     if let Some(name) = extra_headers
@@ -29,7 +29,7 @@ fn validate_stored_arcee_extra_headers(
         .find(|name| is_sensitive_arcee_header(name))
     {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: extra_headers cannot override sensitive header '{}' when using stored Arcee login credentials",
+            "invalid model configuration: extra_headers cannot override sensitive header '{}' for an Arcee backend",
             name
         )));
     }
@@ -49,14 +49,8 @@ fn resolve_arcee_auth_credentials(
             ))
         }
         Some(base_url) => {
-            arcee::chat_completions_url(base_url).map_err(classify_model_configuration_error)?;
-            let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)
+            let requested_url = arcee::validate_approved_base_url(base_url)
                 .map_err(classify_model_configuration_error)?;
-            if kind != arcee::ArceeEndpointKind::Approved {
-                return Err(model_configuration_error(
-                    "invalid model configuration: backend 'arcee-auth' requires an approved Arcee endpoint; select 'arcee-api' for a custom API-key endpoint",
-                ));
-            }
             let record = arcee::read_stored_auth().map_err(classify_stored_arcee_auth_error)?;
             let stored_url = arcee::validate_stored_base_url(&record.base_url)
                 .map_err(classify_model_configuration_error)?;
@@ -82,18 +76,8 @@ fn resolve_arcee_api_credentials(
 ) -> Result<(String, String, ArceeCredentialSource)> {
     let base_url = explicit_base_url
         .unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::ArceeApi));
-    arcee::chat_completions_url(base_url).map_err(classify_model_configuration_error)?;
-    arcee::validate_arcee_base_url(base_url).map_err(classify_model_configuration_error)?;
-    let api_key = api_key_for_backend(BackendKind::ArceeApi, api_key_env).map_err(|error| {
-        model_configuration_error(format!(
-            "invalid model configuration: backend 'arcee-api' requires API-key credentials: {error}"
-        ))
-    })?;
-    if api_key.trim().is_empty() {
-        return Err(model_configuration_error(
-            "invalid model configuration: backend 'arcee-api' requires a nonempty API key",
-        ));
-    }
+    arcee::validate_approved_base_url(base_url).map_err(classify_model_configuration_error)?;
+    let api_key = api_key_for_backend(BackendKind::ArceeApi, api_key_env)?;
     Ok((base_url.to_string(), api_key, ArceeCredentialSource::ApiKey))
 }
 
@@ -106,8 +90,9 @@ fn resolve_configured_backend(
     }
 
     // Temporary compatibility: omission still infers from the selected ambient
-    // or explicit base URL. The strict resolver commit will require config-first
-    // selection and remove this fallback; there is no public `auto` backend.
+    // or explicit base URL. A following config-first resolver will require
+    // explicit/configured selection and remove this model/base fallback; there
+    // is no public `auto` backend.
     let probe = explicit_base_url
         .unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::OpenAiResponses));
     detect_backend(probe).map_err(classify_model_configuration_error)
@@ -124,12 +109,20 @@ pub fn validate_model_configuration(
     match backend {
         BackendKind::ArceeAuth => {
             resolve_arcee_auth_credentials(base_url)?;
-            validate_stored_arcee_extra_headers(extra_headers)?;
+            validate_arcee_extra_headers(extra_headers)?;
         }
         BackendKind::ArceeApi => {
             resolve_arcee_api_credentials(base_url, api_key_env)?;
+            validate_arcee_extra_headers(extra_headers)?;
         }
-        _ => {}
+        BackendKind::ChatGptCodexResponses => {}
+        BackendKind::DeepSeekChat
+        | BackendKind::FireworksChat
+        | BackendKind::TogetherChat
+        | BackendKind::OpenAiResponses
+        | BackendKind::AnthropicMessages => {
+            api_key_for_backend(backend, api_key_env)?;
+        }
     }
     Ok(())
 }
@@ -159,11 +152,6 @@ pub struct ModelClient {
 }
 
 impl ModelClient {
-    #[cfg(test)]
-    pub fn from_env() -> Result<Self> {
-        Self::from_env_with_overrides(ClientOverrides::default())
-    }
-
     pub fn from_env_with_overrides(overrides: ClientOverrides) -> Result<Self> {
         let explicit_base_url = overrides
             .base_url
@@ -179,7 +167,7 @@ impl ModelClient {
                 )?;
                 let (base_url, api_key, source) =
                     resolve_arcee_auth_credentials(explicit_base_url.as_deref())?;
-                validate_stored_arcee_extra_headers(&overrides.extra_headers)?;
+                validate_arcee_extra_headers(&overrides.extra_headers)?;
                 (base_url, api_key, Some(source))
             }
             BackendKind::ArceeApi => {
@@ -187,6 +175,7 @@ impl ModelClient {
                     explicit_base_url.as_deref(),
                     overrides.api_key_env.as_deref(),
                 )?;
+                validate_arcee_extra_headers(&overrides.extra_headers)?;
                 (base_url, api_key, Some(source))
             }
             _ => {
@@ -446,9 +435,8 @@ impl ModelClient {
     }
 
     async fn post_arcee_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
-        if self.arcee_credential_source == Some(ArceeCredentialSource::StoredLogin) {
-            validate_stored_arcee_extra_headers(&self.extra_headers)?;
-        }
+        debug_assert!(self.arcee_credential_source.is_some());
+        validate_arcee_extra_headers(&self.extra_headers)?;
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
             request
@@ -878,7 +866,7 @@ mod tests {
         ] {
             let headers =
                 std::collections::BTreeMap::from([(name.to_string(), "hostile-value".to_string())]);
-            let error = validate_stored_arcee_extra_headers(&headers)
+            let error = validate_arcee_extra_headers(&headers)
                 .expect_err("authority and credential headers must be rejected");
             assert!(
                 error.to_string().contains(name),
@@ -893,7 +881,7 @@ mod tests {
             ),
             ("X-Arcee-Tenant".to_string(), "tenant-test".to_string()),
         ]);
-        validate_stored_arcee_extra_headers(&benign)
+        validate_arcee_extra_headers(&benign)
             .expect("benign stored-credential headers should remain supported");
     }
 
