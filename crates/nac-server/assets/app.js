@@ -729,8 +729,9 @@ function showSettingsOverlay() {
     el.settingsBaseUrl.value = metadata.base_url || "";
     el.settingsBackend.value = metadata.backend || "";
     el.settingsEffort.value = metadata.reasoning_effort || "__clear__";
-    el.settingsCredentialMode.value = metadata.api_key_env ? "variable" : "none";
-    el.settingsApiKeyEnv.value = metadata.api_key_env || "";
+    const hasApiKeyEnv = metadata.api_key_env !== null && metadata.api_key_env !== undefined;
+    el.settingsCredentialMode.value = hasApiKeyEnv ? "variable" : "none";
+    el.settingsApiKeyEnv.value = metadata.api_key_env ?? "";
     el.settingsExtraHeaders.value = metadata.extra_headers
       && Object.keys(metadata.extra_headers).length > 0
       ? JSON.stringify(metadata.extra_headers, null, 2)
@@ -4440,8 +4441,11 @@ function selectedApiKeyEnv(mode, value) {
   if (mode === "inherit") return undefined;
   if (mode === "none") return null;
   if (mode !== "variable") throw new Error("Choose how credentials are selected");
-  const selected = String(value ?? "").trim();
+  const selected = String(value ?? "");
   if (!selected) throw new Error("API key environment variable is required when Environment variable is selected");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(selected)) {
+    throw new Error("API key environment variable must match [A-Za-z_][A-Za-z0-9_]* exactly (no whitespace)");
+  }
   return selected;
 }
 
@@ -4488,7 +4492,7 @@ function settingsValuesFromMetadata(metadata) {
     base_url: String(metadata?.base_url || "").trim(),
     backend: String(metadata?.backend || "").trim(),
     reasoning_effort: metadata?.reasoning_effort || null,
-    api_key_env: metadata?.api_key_env || null,
+    api_key_env: metadata?.api_key_env ?? null,
     extra_headers: metadata?.extra_headers || {},
   };
 }

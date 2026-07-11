@@ -341,12 +341,7 @@ fn validate_sandbox_options(options: &EffectiveSandboxOptions) -> Result<()> {
 }
 
 pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
-    config
-        .model
-        .api_key_env
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_string)
+    config.model.api_key_env.clone()
 }
 
 /// Merge explicit new-session model options over `config.toml` settings.
@@ -1157,6 +1152,32 @@ mod tests {
     }
 
     #[test]
+    fn configured_api_key_selectors_are_preserved_and_validated_exactly() {
+        for selector in ["", "   ", " SURROUNDED_KEY "] {
+            let mut config = complete_model_config();
+            config.model.api_key_env = Some(selector.to_string());
+
+            let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+            assert_eq!(settings.api_key_env.as_deref(), Some(selector));
+            let error = ModelClient::from_effective_settings(settings)
+                .expect_err("invalid configured selector must not be normalized or ignored");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("api_key_env"), "{error:#}");
+        }
+
+        let mut managed = complete_model_config();
+        managed.model.backend = Some(BackendKind::ArceeAuth);
+        managed.model.base_url = Some("https://api.arcee.ai".to_string());
+        managed.model.api_key_env = Some("   ".to_string());
+        let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
+        assert_eq!(settings.api_key_env.as_deref(), Some("   "));
+        let error = ModelClient::from_effective_settings(settings)
+            .expect_err("managed backend must reject even a blank present selector");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("is not supported"), "{error:#}");
+    }
+
+    #[test]
     fn required_model_settings_are_rejected_without_defaults() {
         for (config, expected) in [
             (NacConfig::default(), "backend"),
@@ -1203,6 +1224,21 @@ mod tests {
         assert_eq!(settings.reasoning_effort, None);
         assert_eq!(settings.api_key_env.as_deref(), Some("SESSION_API_KEY"));
         assert!(settings.extra_headers.is_empty());
+
+        let raw_selector = " WORKER_KEY ";
+        let invalid = managed_worker_effective_model_settings(&ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            api_base_url: Some("https://worker.example/v1".to_string()),
+            api_model: Some("worker-model".to_string()),
+            api_key_env: Some(raw_selector.to_string()),
+            extra_headers: Some(BTreeMap::new()),
+            ..ModelOptions::default()
+        })
+        .unwrap();
+        assert_eq!(invalid.api_key_env.as_deref(), Some(raw_selector));
+        let error = ModelClient::from_effective_settings(invalid)
+            .expect_err("worker selector must be validated without normalization");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
 
         let error = managed_worker_effective_model_settings(&ModelOptions {
             backend: Some(BackendKind::TogetherChat),
@@ -1417,7 +1453,7 @@ backend = "openai-responses"
 model = "config-model"
 base_url = "https://config.example/v1"
 reasoning_effort = "high"
-api_key_env = "NAC_TEST_API_KEY"
+api_key_env = " NAC_TEST_API_KEY "
 
 [sandbox]
 image = "config-image"
@@ -1450,7 +1486,7 @@ url = "https://mcp.context7.com/mcp"
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(
             config.model.api_key_env.as_deref(),
-            Some("NAC_TEST_API_KEY")
+            Some(" NAC_TEST_API_KEY ")
         );
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));

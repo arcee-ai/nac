@@ -569,6 +569,47 @@ mod tests {
     }
 
     #[test]
+    fn public_api_key_selector_preserves_raw_input_and_rejects_surrounding_whitespace() {
+        let raw_selector = " SURROUNDED_KEY ";
+        let cli = RunCli::try_parse_from([
+            "nac",
+            "--backend",
+            "openai-responses",
+            "--model",
+            "test-model",
+            "--base-url",
+            "https://api.openai.com/v1",
+            "--api-key-env",
+            raw_selector,
+        ])
+        .unwrap();
+        assert_eq!(cli.model.api_key_env.as_deref(), Some(raw_selector));
+
+        let options = model_options(cli.model);
+        let actual =
+            runtime::effective_model_settings(&options, &runtime::NacConfig::default()).unwrap();
+        let expected = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::OpenAiResponses,
+            "test-model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            None,
+            Some(raw_selector.to_string()),
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+
+        let error = nac_core::model::validate_backend_api_key_env(
+            BackendKind::OpenAiResponses,
+            Some("https://api.openai.com/v1"),
+            Some(raw_selector),
+        )
+        .expect_err("surrounding whitespace must be rejected rather than trimmed");
+        assert!(error.to_string().contains(raw_selector));
+        assert!(error.to_string().contains("[A-Za-z_][A-Za-z0-9_]*"));
+    }
+
+    #[test]
     fn public_extra_headers_reject_malformed_json_and_accept_empty_object() {
         let error = RunCli::try_parse_from(["nac", "--extra-headers", "not-json"])
             .err()

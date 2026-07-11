@@ -387,24 +387,25 @@ mod tests {
     }
 
     #[test]
-    fn managed_backends_reject_any_api_key_selector() {
-        for (backend, selector, source) in [
-            (BackendKind::ArceeAuth, "ARCEE_KEY", "arcee_auth.json"),
+    fn managed_backends_reject_any_present_api_key_selector() {
+        for (backend, source) in [
+            (BackendKind::ArceeAuth, "arcee_auth.json"),
             (
                 BackendKind::ChatGptCodexResponses,
-                "CODEX_KEY",
                 "stored OAuth from auth.json",
             ),
         ] {
-            let error = validate_backend_api_key_env(
-                backend,
-                Some("https://service.example"),
-                Some(selector),
-            )
-            .expect_err("managed credentials must reject api_key_env");
-            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-            assert!(error.to_string().contains(selector));
-            assert!(error.to_string().contains(source));
+            for selector in ["MANAGED_KEY", "", "   ", " SURROUNDED_KEY "] {
+                let error = validate_backend_api_key_env(
+                    backend,
+                    Some("https://service.example"),
+                    Some(selector),
+                )
+                .expect_err("managed credentials must reject every present api_key_env");
+                assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                assert!(error.to_string().contains(source));
+                assert!(error.to_string().contains("is not supported"));
+            }
         }
     }
 

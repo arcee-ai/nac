@@ -1086,7 +1086,7 @@ fn model_options(
             config.model.api_key_env = None;
             None
         }
-        RequestField::Value(value) => Some(nonblank_request_string(value, "api_key_env")?),
+        RequestField::Value(value) => Some(value),
     };
     let extra_headers = match extra_headers {
         RequestField::Omitted => None,
@@ -1155,7 +1155,7 @@ fn apply_config_patch(
         RequestField::Omitted => {}
         RequestField::Null => snapshot.api_key_env = None,
         RequestField::Value(value) => {
-            snapshot.api_key_env = Some(nonblank_request_string(value, "api_key_env")?);
+            snapshot.api_key_env = Some(value);
         }
     }
     match request.extra_headers {
@@ -1464,6 +1464,19 @@ mod tests {
         assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Xhigh));
         assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
         assert_eq!(config.model.api_key_env, None);
+
+        let raw_selector = " SELECTED_KEY ";
+        let selected = model_options(
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Value(raw_selector.to_string()),
+            RequestField::Omitted,
+            &mut config,
+        )
+        .unwrap();
+        assert_eq!(selected.api_key_env.as_deref(), Some(raw_selector));
     }
 
     #[test]
@@ -1485,19 +1498,6 @@ mod tests {
             assert!(error.downcast_ref::<RequestConfigurationError>().is_some());
             assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
         }
-
-        let mut config = NacConfig::default();
-        let error = model_options(
-            RequestField::Omitted,
-            RequestField::Omitted,
-            RequestField::Omitted,
-            RequestField::Omitted,
-            RequestField::Value("   ".to_string()),
-            RequestField::Omitted,
-            &mut config,
-        )
-        .unwrap_err();
-        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -2007,6 +2007,48 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
+    async fn create_rejects_raw_invalid_selectors_without_persisting() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_invalid_selectors");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        for (backend, base_url, selector) in [
+            ("openai-responses", "https://api.openai.com/v1", ""),
+            ("openai-responses", "https://api.openai.com/v1", "   "),
+            (
+                "openai-responses",
+                "https://api.openai.com/v1",
+                " SURROUNDED_KEY ",
+            ),
+            ("arcee-auth", "https://api.arcee.ai", ""),
+            ("arcee-auth", "https://api.arcee.ai", "   "),
+        ] {
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("test-model".to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    api_key_env: RequestField::Value(selector.to_string()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("invalid selector must fail creation");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            assert!(
+                !store_path.exists(),
+                "invalid selector {selector:?} must fail before persistence"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
     async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("patch_tristate");
@@ -2171,6 +2213,20 @@ extra_headers = { X-Config = "yes" }
             },
             UpdateConfigRequest {
                 api_key_env: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value("   ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value(" SURROUNDED_KEY ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Value("arcee-auth".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                api_key_env: RequestField::Value("   ".to_string()),
                 ..UpdateConfigRequest::default()
             },
             UpdateConfigRequest {

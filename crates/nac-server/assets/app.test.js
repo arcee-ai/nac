@@ -160,8 +160,43 @@ test("launch rejects whitespace concrete values and enforces explicit credential
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "arcee-api",
     credential_mode: "variable",
-    api_key_env: " ARCEE_CUSTOM_KEY ",
+    api_key_env: "ARCEE_CUSTOM_KEY",
   }))), { backend: "arcee-api", api_key_env: "ARCEE_CUSTOM_KEY" });
+  for (const api_key_env of ["   ", " ARCEE_CUSTOM_KEY ", "ARCEE-CUSTOM-KEY"]) {
+    assert.throws(
+      () => buildLaunchModelPayload(launchValues({
+        backend: "arcee-api",
+        credential_mode: "variable",
+        api_key_env,
+      })),
+      /must match \[A-Za-z_\]\[A-Za-z0-9_\]\* exactly/,
+    );
+  }
+});
+
+test("settings metadata and payload validation preserve selectors exactly", () => {
+  for (const api_key_env of ["", " SURROUNDED_KEY "]) {
+    const metadata = settingsValuesFromMetadata({
+      model: "gpt-5",
+      base_url: "https://api.example.test/v1",
+      backend: "openai-responses",
+      api_key_env,
+      extra_headers: {},
+    });
+    assert.equal(metadata.api_key_env, api_key_env);
+  }
+
+  assert.throws(
+    () => buildSettingsPatch(
+      settingsFixture({ api_key_env: " CUSTOM_API_KEY " }),
+      initialSettings,
+    ),
+    /must match \[A-Za-z_\]\[A-Za-z0-9_\]\* exactly/,
+  );
+  assert.deepEqual(
+    plain(buildSettingsPatch(settingsFixture({ api_key_env: "EXACT_API_KEY" }), initialSettings)),
+    { api_key_env: "EXACT_API_KEY" },
+  );
 });
 
 test("settings PATCH contains changed fields only", () => {

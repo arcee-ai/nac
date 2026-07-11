@@ -575,6 +575,7 @@ mod tests {
         headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
         headers.insert("X-Org".to_string(), "my-org".to_string());
 
+        let raw_selector = " MY_CUSTOM_API_KEY ";
         let snapshot = new_snapshot(
             "session-config".to_string(),
             PathBuf::from("/repo"),
@@ -587,7 +588,7 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
-            Some("MY_CUSTOM_API_KEY".to_string()),
+            Some(raw_selector.to_string()),
             headers.clone(),
         );
         create_session(&store_path, &snapshot).unwrap();
@@ -595,8 +596,8 @@ mod tests {
         let loaded = load_session(&store_path, "session-config").unwrap();
         assert_eq!(
             loaded.api_key_env.as_deref(),
-            Some("MY_CUSTOM_API_KEY"),
-            "api_key_env must round-trip through the DB"
+            Some(raw_selector),
+            "api_key_env must round-trip through the DB byte-for-byte"
         );
         assert_eq!(
             loaded.extra_headers, headers,
@@ -612,12 +613,12 @@ mod tests {
             None,
             loaded.token_usages.clone(),
         );
-        assert_eq!(refreshed.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(refreshed.api_key_env.as_deref(), Some(raw_selector));
         assert_eq!(refreshed.extra_headers, headers);
         save_session(&store_path, &refreshed).unwrap();
 
         let reloaded = load_session(&store_path, "session-config").unwrap();
-        assert_eq!(reloaded.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(reloaded.api_key_env.as_deref(), Some(raw_selector));
         assert_eq!(reloaded.extra_headers, headers);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
