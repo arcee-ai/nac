@@ -78,6 +78,17 @@ fn classify_stored_arcee_auth_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+fn classify_stored_codex_auth_error(error: anyhow::Error) -> anyhow::Error {
+    if error
+        .downcast_ref::<chatgpt_codex::StoredCodexAuthConfigurationError>()
+        .is_some()
+    {
+        model_configuration_error(error.to_string())
+    } else {
+        error.context("failed to load stored Codex credentials")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAuthAction {
     Login,
@@ -536,6 +547,102 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn stored_codex_auth_config_and_store_failures_remain_distinct() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let settings = effective_settings(
+            BackendKind::ChatGptCodexResponses,
+            "https://chatgpt.com/backend-api",
+            None,
+        );
+
+        for (label, contents, expected) in [
+            ("missing-codex-auth", None, "not configured"),
+            (
+                "malformed-codex-auth",
+                Some("{not-json}"),
+                "failed to parse",
+            ),
+            (
+                "wrong-provider-codex-auth",
+                Some(r#"{"type":"other"}"#),
+                "provider type",
+            ),
+            (
+                "blank-codex-auth",
+                Some(
+                    r#"{"type":"chatgpt-codex","access":"secret-not-for-errors","refresh":" ","expires_at_ms":1,"account_id":"account"}"#,
+                ),
+                "nonblank field 'refresh'",
+            ),
+        ] {
+            let _env = IsolatedModelEnv::new(label, contents, None, None);
+            let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(!error.to_string().contains("secret-not-for-errors"));
+        }
+
+        {
+            let env = IsolatedModelEnv::new("codex-auth-path-io", None, None, None);
+            std::fs::create_dir(env.home.join("auth.json")).unwrap();
+            let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(error.to_string(), "failed to load stored Codex credentials");
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let env =
+                IsolatedModelEnv::new("codex-lock-symlink", Some(&stored_codex_auth()), None, None);
+            let target = env.home.join("lock-target");
+            std::fs::write(&target, "unchanged").unwrap();
+            symlink(&target, env.home.join("auth.auth.json.lock")).unwrap();
+            let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(error.to_string(), "failed to load stored Codex credentials");
+            assert!(format!("{error:#}").contains("symlink auth lock"));
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "unchanged");
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let env = IsolatedModelEnv::new("codex-auth-symlink", None, None, None);
+            let target = env.home.join("target.json");
+            std::fs::write(&target, stored_codex_auth()).unwrap();
+            symlink(&target, env.home.join("auth.json")).unwrap();
+            let error = ModelClient::from_effective_settings(settings).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(error.to_string(), "failed to load stored Codex credentials");
+            assert!(format!("{error:#}").contains("symlink credential path"));
+        }
+    }
+
+    #[test]
+    fn invalid_codex_endpoint_fails_before_credentials_or_connection() {
+        use std::net::TcpListener;
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/backend-api", listener.local_addr().unwrap());
+        let _env = IsolatedModelEnv::new("codex-no-connection", None, None, None);
+
+        let error = ModelClient::from_effective_settings(effective_settings(
+            BackendKind::ChatGptCodexResponses,
+            &endpoint,
+            None,
+        ))
+        .unwrap_err();
+
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("requires HTTPS"));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(listener.accept().is_err(), "invalid endpoint was contacted");
     }
 
     #[test]

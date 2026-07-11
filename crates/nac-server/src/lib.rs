@@ -1706,6 +1706,22 @@ mod tests {
         }
     }
 
+    fn write_codex_auth(nac_home: &std::path::Path) {
+        std::fs::create_dir_all(nac_home).expect("create NAC home");
+        std::fs::write(
+            nac_home.join("auth.json"),
+            serde_json::json!({
+                "type": "chatgpt-codex",
+                "access": "codex-server-access",
+                "refresh": "codex-server-refresh",
+                "expires_at_ms": u64::MAX,
+                "account_id": "codex-server-account"
+            })
+            .to_string(),
+        )
+        .expect("write Codex auth");
+    }
+
     fn write_arcee_auth(nac_home: &std::path::Path, base_url: &str) {
         std::fs::create_dir_all(nac_home).expect("create NAC home");
         std::fs::write(
@@ -2008,6 +2024,226 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
+    async fn codex_create_preflights_endpoint_and_managed_credentials_before_persistence() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        for (label, base_url, auth, expected_status, expected) in [
+            (
+                "codex-create-missing",
+                "https://chatgpt.com/backend-api",
+                None,
+                StatusCode::BAD_REQUEST,
+                "not configured",
+            ),
+            (
+                "codex-create-malformed",
+                "https://chatgpt.com/backend-api",
+                Some("{not-json}"),
+                StatusCode::BAD_REQUEST,
+                "failed to parse",
+            ),
+            (
+                "codex-create-blank",
+                "https://chatgpt.com/backend-api",
+                Some(
+                    r#"{"type":"chatgpt-codex","access":"secret-must-not-leak","refresh":"","expires_at_ms":1,"account_id":"account"}"#,
+                ),
+                StatusCode::BAD_REQUEST,
+                "nonblank field 'refresh'",
+            ),
+            (
+                "codex-create-endpoint",
+                "http://chatgpt.com/backend-api",
+                Some(
+                    r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":"account"}"#,
+                ),
+                StatusCode::BAD_REQUEST,
+                "requires HTTPS",
+            ),
+        ] {
+            let root = temp_root(label);
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            if let Some(auth) = auth {
+                std::fs::write(nac_home.join("auth.json"), auth).unwrap();
+            }
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            let manager = test_manager(&root);
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("gpt-test".to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("invalid Codex setup must fail creation");
+            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(!format!("{error:#}").contains("secret-must-not-leak"));
+            assert_eq!(ApiError::from(error).status, expected_status);
+            assert!(!root.join("store.db").exists());
+            drop(_env);
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let root = temp_root("codex-create-symlink");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            let target = nac_home.join("target.json");
+            std::fs::write(&target, "secret-target").unwrap();
+            symlink(&target, nac_home.join("auth.json")).unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            let manager = test_manager(&root);
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("gpt-test".to_string()),
+                    base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(
+                ApiError::from(error).status,
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+            assert!(!root.join("store.db").exists());
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "secret-target");
+            drop(_env);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_resume_preflights_missing_credentials() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("codex-resume-missing");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let mut stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        stored.backend = BackendKind::ChatGptCodexResponses;
+        stored.base_url = "https://chatgpt.com/backend-api".to_string();
+        stored.api_key_env = None;
+        sessions::save_session(&root.join("store.db"), &stored).unwrap();
+        let manager = test_manager(&root);
+
+        let error = manager
+            .attach_session("session")
+            .await
+            .err()
+            .expect("resume without Codex auth must fail");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("not configured"));
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn codex_patch_failures_roll_back_database_and_active_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("codex-patch-rollback");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        manager.attach_session("session").await.unwrap();
+        let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
+
+        for (auth, base_url, expected_status) in [
+            (
+                "{not-json}",
+                "https://chatgpt.com/backend-api",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+                "https://attacker.example/backend-api",
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            std::fs::write(nac_home.join("auth.json"), auth).unwrap();
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(base_url.to_string()),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(ApiError::from(error).status, expected_status);
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert_eq!(after.api_key_env, before.api_key_env);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            std::fs::remove_file(nac_home.join("auth.json")).unwrap();
+            let target = nac_home.join("patch-target.json");
+            std::fs::write(&target, "secret-target").unwrap();
+            symlink(&target, nac_home.join("auth.json")).unwrap();
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(
+                            "https://chatgpt.com/backend-api".to_string(),
+                        ),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(
+                ApiError::from(error).status,
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "secret-target");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn create_rejects_raw_invalid_selectors_without_persisting() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("create_invalid_selectors");
@@ -2078,6 +2314,7 @@ extra_headers = { X-Config = "yes" }
         let root = temp_root("patch_tristate");
         let nac_home = root.join("nac-home");
         write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        write_codex_auth(&nac_home);
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
         seed_editable_session(&root, "session");
         let manager = test_manager(&root);

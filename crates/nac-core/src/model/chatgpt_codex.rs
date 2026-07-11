@@ -16,7 +16,7 @@ const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/
 const DEVICE_VERIFICATION_URL: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
+const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const ORIGINATOR: &str = "nac";
 const AUTH_TYPE: &str = "chatgpt-codex";
 const DEFAULT_EXPIRES_IN_SECS: u64 = 3600;
@@ -31,6 +31,27 @@ struct StoredCodexAuth {
     refresh: String,
     expires_at_ms: u64,
     account_id: String,
+}
+
+/// Marks missing or invalid managed Codex credential content. Credential-store
+/// access and safety failures intentionally remain untyped operational errors.
+#[derive(Debug)]
+pub(super) struct StoredCodexAuthConfigurationError {
+    message: String,
+}
+
+impl fmt::Display for StoredCodexAuthConfigurationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StoredCodexAuthConfigurationError {}
+
+fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(StoredCodexAuthConfigurationError {
+        message: message.into(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +88,60 @@ impl fmt::Display for CodexRequestError {
 }
 
 impl std::error::Error for CodexRequestError {}
+
+pub(super) fn no_redirect_client() -> Result<Client> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build Codex HTTP client")
+}
+
+pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
+    let parsed = Url::parse(base_url)
+        .map_err(|error| anyhow!("invalid Codex base URL '{}': {}", base_url, error))?;
+    if parsed.scheme() != "https" {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires HTTPS",
+            base_url
+        ));
+    }
+    if parsed.host_str() != Some("chatgpt.com") {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires the approved ChatGPT origin",
+            base_url
+        ));
+    }
+    if parsed.port_or_known_default() != Some(443) {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires effective port 443",
+            base_url
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': userinfo is not allowed",
+            base_url
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': query parameters and fragments are not allowed",
+            base_url
+        ));
+    }
+    if !matches!(parsed.path(), "/backend-api" | "/backend-api/") {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires path '/backend-api'",
+            base_url
+        ));
+    }
+    Ok(parsed)
+}
+
+pub(super) fn preflight_stored_auth() -> Result<()> {
+    let _lock = acquire_auth_lock()?;
+    read_auth_file().map(|_| ())
+}
 
 pub async fn codex_auth_login() -> Result<()> {
     let client = Client::new();
@@ -164,7 +239,7 @@ fn remove_auth_path(path: &Path) -> Result<bool> {
 
 pub fn codex_auth_status() -> Result<()> {
     let path = auth_file_path()?;
-    let auth = read_auth_file_optional()?;
+    let auth = read_auth_file_optional_for_status()?;
     match auth {
         Some(auth) => {
             println!("Codex auth: signed in");
@@ -188,7 +263,7 @@ pub async fn send_responses(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
 ) -> Result<ModelTurnResponse> {
-    let url = codex_responses_url(base_url);
+    let url = codex_responses_url(base_url)?;
     let request = codex_responses_request(model, reasoning_effort, &messages, &tools);
     let auth = fresh_auth(client).await?;
 
@@ -674,20 +749,9 @@ fn codex_event_error_message(event: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn codex_responses_url(base_url: &str) -> String {
-    let raw = if base_url.trim().is_empty() {
-        DEFAULT_CODEX_BASE_URL
-    } else {
-        base_url.trim()
-    };
-    let normalized = raw.trim_end_matches('/');
-    if normalized.ends_with("/codex/responses") {
-        normalized.to_string()
-    } else if normalized.ends_with("/codex") {
-        format!("{normalized}/responses")
-    } else {
-        format!("{normalized}/codex/responses")
-    }
+fn codex_responses_url(base_url: &str) -> Result<String> {
+    validate_base_url(base_url)?;
+    Ok(CODEX_RESPONSES_URL.to_string())
 }
 
 fn auth_file_path() -> Result<PathBuf> {
@@ -720,28 +784,69 @@ fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
     read_auth_file_optional_from_path(&auth_file_path()?)
 }
 
+fn read_auth_file_optional_for_status() -> Result<Option<StoredCodexAuth>> {
+    read_auth_file_optional_from_path_with_policy(&auth_file_path()?, true)
+}
+
 fn read_auth_file_optional_from_path(path: &Path) -> Result<Option<StoredCodexAuth>> {
-    let raw = match read_auth_string_from_path(path)? {
+    read_auth_file_optional_from_path_with_policy(path, false)
+}
+
+fn read_auth_file_optional_from_path_with_policy(
+    path: &Path,
+    foreign_provider_is_missing: bool,
+) -> Result<Option<StoredCodexAuth>> {
+    let raw = match read_auth_bytes_from_path(path)? {
         Some(raw) => raw,
         None => return Ok(None),
     };
-    let value: Value = serde_json::from_str(&raw)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    if value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
-        return Ok(None);
+    let raw = String::from_utf8(raw).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "Codex credential file {} is not valid UTF-8",
+            path.display()
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&raw).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "failed to parse Codex credentials in {}",
+            path.display()
+        ))
+    })?;
+    let provider = value.get("type").and_then(Value::as_str);
+    if provider != Some(AUTH_TYPE) {
+        if foreign_provider_is_missing {
+            return Ok(None);
+        }
+        return Err(stored_auth_configuration_error(format!(
+            "Codex credentials in {} have an invalid or unsupported provider type",
+            path.display()
+        )));
     }
-    let auth: StoredCodexAuth = serde_json::from_value(value)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let auth: StoredCodexAuth = serde_json::from_value(value).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "Codex credentials in {} do not match the required schema",
+            path.display()
+        ))
+    })?;
+    validate_stored_auth(&auth, path)?;
     Ok(Some(auth))
 }
 
-fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
-    let Some(raw) = read_auth_bytes_from_path(path)? else {
-        return Ok(None);
-    };
-    String::from_utf8(raw)
-        .map(Some)
-        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+fn validate_stored_auth(auth: &StoredCodexAuth, path: &Path) -> Result<()> {
+    for (field, value) in [
+        ("access", auth.access.as_str()),
+        ("refresh", auth.refresh.as_str()),
+        ("account_id", auth.account_id.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(stored_auth_configuration_error(format!(
+                "Codex credentials in {} require nonblank field '{}'",
+                path.display(),
+                field
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -791,12 +896,16 @@ fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
 
 fn read_auth_file() -> Result<StoredCodexAuth> {
     read_auth_file_optional()?.ok_or_else(|| {
-        anyhow!("Codex auth is not configured. Run `nac codex-auth` to sign in with ChatGPT.")
+        stored_auth_configuration_error(
+            "Codex auth is not configured. Run `nac codex-auth` to sign in with ChatGPT.",
+        )
     })
 }
 
 fn write_auth_file(auth: &StoredCodexAuth) -> Result<()> {
-    write_auth_file_to_path(&auth_file_path()?, auth)
+    let path = auth_file_path()?;
+    validate_stored_auth(auth, &path)?;
+    write_auth_file_to_path(&path, auth)
 }
 
 fn write_auth_file_to_path(path: &Path, auth: &StoredCodexAuth) -> Result<()> {
@@ -1176,6 +1285,29 @@ mod tests {
     }
 
     #[test]
+    fn codex_secure_read_rejects_invalid_provider_schema_and_blank_fields() {
+        let dir = TestDir::new("read-invalid-content");
+        let path = dir.path("auth.json");
+        for invalid in [
+            r#"{"type":"other","access":"a","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":7}"#,
+            r#"{"type":"chatgpt-codex","access":" ","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":"a","refresh":"\t","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":""}"#,
+        ] {
+            fs::write(&path, invalid).unwrap();
+            let error = read_auth_file_optional_from_path(&path).unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<StoredCodexAuthConfigurationError>()
+                    .is_some(),
+                "content error was not typed: {error:#}"
+            );
+            assert!(!error.to_string().contains("access-test"));
+        }
+    }
+
+    #[test]
     fn codex_secure_read_accepts_valid_regular_file() {
         let dir = TestDir::new("read-regular");
         let path = dir.path("auth.json");
@@ -1382,18 +1514,75 @@ mod tests {
     }
 
     #[test]
-    fn resolves_codex_responses_urls() {
+    fn codex_endpoint_matrix_accepts_only_canonical_chatgpt_base() {
+        for accepted in [
+            "https://chatgpt.com/backend-api",
+            "https://chatgpt.com/backend-api/",
+            "https://chatgpt.com:443/backend-api",
+        ] {
+            let parsed = validate_base_url(accepted)
+                .unwrap_or_else(|error| panic!("rejected {accepted}: {error:#}"));
+            assert_eq!(parsed.host_str(), Some("chatgpt.com"));
+            assert_eq!(parsed.port_or_known_default(), Some(443));
+            assert_eq!(codex_responses_url(accepted).unwrap(), CODEX_RESPONSES_URL);
+        }
+
+        for rejected in [
+            "http://chatgpt.com/backend-api",
+            "https://chatgpt.com:444/backend-api",
+            "https://api.chatgpt.com/backend-api",
+            "https://chatgpt.com.evil.example/backend-api",
+            "https://chatgpt.com/",
+            "https://chatgpt.com/backend-api/codex",
+            "https://chatgpt.com/backend-api/codex/responses",
+            "https://chatgpt.com/backend-api?next=https://evil.example",
+            "https://chatgpt.com/backend-api#fragment",
+            "https://user@chatgpt.com/backend-api",
+            "https://chatgpt.com/%62ackend-api",
+        ] {
+            assert!(
+                validate_base_url(rejected).is_err(),
+                "accepted unapproved Codex base {rejected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_model_http_client_does_not_follow_or_replay_redirects() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+        use std::net::TcpListener;
+
+        let destination = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        destination.set_nonblocking(true).unwrap();
+        let destination_url = format!("http://{}", destination.local_addr().unwrap());
+        let source = ScriptedServer::start(vec![ScriptedResponse::redirect(
+            "307 Temporary Redirect",
+            format!("{destination_url}/capture"),
+            "blocked",
+        )]);
+        let secret = "codex-secret-must-not-replay";
+
+        let response = no_redirect_client()
+            .unwrap()
+            .post(format!("{}/backend-api/codex/responses", source.base_url))
+            .bearer_auth(secret)
+            .body("prompt-must-not-replay")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        let requests = source.finish();
+        assert_eq!(requests.len(), 1);
         assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api"),
-            "https://chatgpt.com/backend-api/codex/responses"
+            requests[0].headers.get("authorization").map(String::as_str),
+            Some("Bearer codex-secret-must-not-replay")
         );
-        assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api/codex"),
-            "https://chatgpt.com/backend-api/codex/responses"
-        );
-        assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api/codex/responses"),
-            "https://chatgpt.com/backend-api/codex/responses"
+        assert_eq!(requests[0].body, b"prompt-must-not-replay");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            destination.accept().is_err(),
+            "redirect destination received replay"
         );
     }
 

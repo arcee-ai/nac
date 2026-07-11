@@ -122,7 +122,16 @@ pub fn validate_model_configuration(
             resolve_arcee_api_credentials(base_url, api_key_env)?;
             validate_arcee_extra_headers(extra_headers)?;
         }
-        BackendKind::ChatGptCodexResponses => {}
+        BackendKind::ChatGptCodexResponses => {
+            let base_url = base_url.ok_or_else(|| {
+                model_configuration_error(
+                    "invalid model configuration: backend 'chatgpt-codex-responses' requires base_url",
+                )
+            })?;
+            chatgpt_codex::validate_base_url(base_url)
+                .map_err(classify_model_configuration_error)?;
+            chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
+        }
         BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
@@ -135,10 +144,10 @@ pub fn validate_model_configuration(
 }
 
 fn http_client_for_backend(backend: BackendKind) -> Result<Client> {
-    if backend.is_arcee() {
-        arcee::no_redirect_client()
-    } else {
-        Ok(Client::new())
+    match backend {
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => arcee::no_redirect_client(),
+        BackendKind::ChatGptCodexResponses => chatgpt_codex::no_redirect_client(),
+        _ => Ok(Client::new()),
     }
 }
 
@@ -181,6 +190,17 @@ impl ModelClient {
                 )?;
                 validate_arcee_extra_headers(&settings.extra_headers)?;
                 (api_key, Some(source))
+            }
+            BackendKind::ChatGptCodexResponses => {
+                validate_backend_api_key_env(
+                    backend,
+                    Some(&settings.base_url),
+                    settings.api_key_env.as_deref(),
+                )?;
+                chatgpt_codex::validate_base_url(&settings.base_url)
+                    .map_err(classify_model_configuration_error)?;
+                chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
+                (String::new(), None)
             }
             _ => {
                 validate_backend_api_key_env(
