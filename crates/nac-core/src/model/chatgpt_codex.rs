@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -142,7 +142,12 @@ fn remove_codex_auth_file_for_logout(path: &Path) -> Result<bool> {
         ));
     }
 
-    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let raw = read_auth_bytes_from_path(path)?.ok_or_else(|| {
+        anyhow!(
+            "credential path {} disappeared while preparing logout; retry the operation",
+            path.display()
+        )
+    })?;
     let value: Value = match serde_json::from_slice(&raw) {
         Ok(value) => value,
         Err(_) => return remove_auth_path(path),
@@ -722,13 +727,13 @@ fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
 }
 
 fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
-    let path = auth_file_path()?;
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", path.display()))
-        }
+    read_auth_file_optional_from_path(&auth_file_path()?)
+}
+
+fn read_auth_file_optional_from_path(path: &Path) -> Result<Option<StoredCodexAuth>> {
+    let raw = match read_auth_string_from_path(path)? {
+        Some(raw) => raw,
+        None => return Ok(None),
     };
     let value: Value = serde_json::from_str(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
@@ -738,6 +743,60 @@ fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
     let auth: StoredCodexAuth = serde_json::from_value(value)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(auth))
+}
+
+fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
+    let Some(raw) = read_auth_bytes_from_path(path)? else {
+        return Ok(None);
+    };
+    String::from_utf8(raw)
+        .map(Some)
+        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+}
+
+fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "refusing to read symlink credential path {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow!(
+                "refusing to read non-regular credential path {}",
+                path.display()
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to securely open credential file {}", path.display())
+            })
+        }
+    };
+    ensure_open_file_is_regular(&file, path, "credential file")?;
+
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw)
+        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    Ok(Some(raw))
 }
 
 fn read_auth_file() -> Result<StoredCodexAuth> {
@@ -1124,6 +1183,49 @@ mod tests {
             expires_at_ms: 123_456,
             account_id: "account-1".to_string(),
         }
+    }
+
+    #[test]
+    fn codex_secure_read_accepts_valid_regular_file() {
+        let dir = TestDir::new("read-regular");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(&path, &stored_codex_auth("regular-access")).unwrap();
+
+        let auth = read_auth_file_optional_from_path(&path).unwrap().unwrap();
+
+        assert_eq!(auth.access, "regular-access");
+        assert_eq!(auth.refresh, "refresh-token");
+    }
+
+    #[test]
+    fn codex_secure_read_rejects_non_regular_path() {
+        let dir = TestDir::new("read-directory");
+        let path = dir.path("auth.json");
+        fs::create_dir(&path).unwrap();
+
+        let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("non-regular credential path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_secure_read_rejects_symlink_without_reading_target() {
+        let dir = TestDir::new("read-symlink");
+        let target = dir.path("target.json");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(&target, &stored_codex_auth("target-access")).unwrap();
+        let target_before = fs::read(&target).unwrap();
+        symlink(&target, &path).unwrap();
+
+        let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert_eq!(fs::read(&target).unwrap(), target_before);
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[cfg(unix)]

@@ -1,6 +1,7 @@
 use super::auth_store::{
-    arcee_auth_file_path, legacy_auth_file_path, read_arcee_auth_string, with_arcee_auth_lock,
-    with_arcee_migration_locks, write_arcee_auth_string, write_auth_string_to_path,
+    arcee_auth_file_path, legacy_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path,
+    read_auth_string_from_path, with_arcee_auth_lock, with_arcee_migration_locks,
+    write_arcee_auth_string, write_auth_string_to_path,
 };
 use super::*;
 use anyhow::Context;
@@ -205,8 +206,14 @@ fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
 
     if metadata.file_type().is_symlink() {
         // The canonical path belongs to Arcee, so unlink it without following it.
-        // A legacy auth.json symlink is Codex-owned and cannot be safely classified.
-        return Ok(malformed_is_owned);
+        // A legacy auth.json symlink is shared with Codex and cannot be safely classified.
+        if malformed_is_owned {
+            return Ok(true);
+        }
+        return Err(anyhow!(
+            "refusing to inspect shared legacy credential symlink {}; remove the symlink manually before retrying logout",
+            path.display()
+        ));
     }
     if !metadata.file_type().is_file() {
         return Err(anyhow!(
@@ -215,7 +222,12 @@ fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
         ));
     }
 
-    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let raw = read_auth_bytes_from_path(path)?.ok_or_else(|| {
+        anyhow!(
+            "credential path {} disappeared while preparing logout; retry the operation",
+            path.display()
+        )
+    })?;
     let value: Value = match serde_json::from_slice(&raw) {
         Ok(value) => value,
         Err(_) => return Ok(malformed_is_owned),
@@ -297,12 +309,9 @@ fn migrate_legacy_auth_unlocked() -> Result<()> {
 }
 
 fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()> {
-    let legacy_raw = match fs::read_to_string(legacy_path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", legacy_path.display()))
-        }
+    let legacy_raw = match read_auth_string_from_path(legacy_path)? {
+        Some(raw) => raw,
+        None => return Ok(()),
     };
 
     // Malformed pre-split auth.json cannot safely be attributed to Arcee. Leave
@@ -327,8 +336,8 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
         )
     })?;
 
-    match fs::read_to_string(arcee_path) {
-        Ok(arcee_raw) => {
+    match read_auth_string_from_path(arcee_path)? {
+        Some(arcee_raw) => {
             let arcee_auth = parse_stored_auth(&arcee_raw, arcee_path)
                 .with_context(|| {
                     format!(
@@ -350,12 +359,16 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
                 ));
             }
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        None => {
             let raw = serde_json::to_string_pretty(&legacy_auth)
                 .context("failed to serialize legacy Arcee auth")?;
             write_auth_string_to_path(arcee_path, &raw)?;
-            let migrated_raw = fs::read_to_string(arcee_path)
-                .with_context(|| format!("failed to verify {}", arcee_path.display()))?;
+            let migrated_raw = read_auth_string_from_path(arcee_path)?.ok_or_else(|| {
+                anyhow!(
+                    "failed to verify migrated Arcee auth in {} because it disappeared",
+                    arcee_path.display()
+                )
+            })?;
             let migrated = parse_stored_auth(&migrated_raw, arcee_path)?.ok_or_else(|| {
                 anyhow!(
                     "failed to verify migrated Arcee auth in {}",
@@ -369,9 +382,6 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
                     legacy_path.display()
                 ));
             }
-        }
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", arcee_path.display()))
         }
     }
 
@@ -965,6 +975,50 @@ mod tests {
         assert!(!canonical.exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn migration_rejects_legacy_symlink_without_reading_or_moving_target() {
+        let dir = TestDir::new("legacy-symlink-migration");
+        let (legacy, canonical) = dir.paths();
+        let target = dir.0.join("legacy-target.json");
+        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
+        fs::write(&target, &target_raw).unwrap();
+        symlink(&target, &legacy).unwrap();
+
+        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
+        assert!(fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!canonical.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migration_rejects_canonical_symlink_and_preserves_all_files() {
+        let dir = TestDir::new("canonical-symlink-migration");
+        let (legacy, canonical) = dir.paths();
+        let target = dir.0.join("canonical-target.json");
+        let legacy_raw = serde_json::to_string_pretty(&stored_auth("rcai-legacy")).unwrap();
+        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
+        fs::write(&legacy, &legacy_raw).unwrap();
+        fs::write(&target, &target_raw).unwrap();
+        symlink(&target, &canonical).unwrap();
+
+        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert_eq!(fs::read_to_string(&legacy).unwrap(), legacy_raw);
+        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
+        assert!(fs::symlink_metadata(&canonical)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
     #[test]
     fn identical_legacy_and_canonical_auth_remove_only_legacy_copy() {
         let dir = TestDir::new("identical");
@@ -1069,6 +1123,29 @@ mod tests {
         assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
         assert_eq!(fs::read_to_string(legacy).unwrap(), unknown_legacy);
         assert_eq!(fs::read_to_string(canonical).unwrap(), unknown_canonical);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn arcee_logout_rejects_shared_legacy_symlink_without_touching_target() {
+        let dir = TestDir::new("logout-legacy-symlink");
+        let (legacy, canonical) = dir.paths();
+        let target = dir.0.join("legacy-target.json");
+        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
+        fs::write(&target, &target_raw).unwrap();
+        symlink(&target, &legacy).unwrap();
+
+        let error = remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("shared legacy credential symlink"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
+        assert!(fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!canonical.exists());
     }
 
     #[cfg(unix)]

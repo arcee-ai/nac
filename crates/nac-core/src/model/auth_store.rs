@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -63,12 +63,61 @@ pub(super) fn with_arcee_migration_locks<T>(operation: impl FnOnce() -> Result<T
 }
 
 pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
-    let path = arcee_auth_file_path()?;
-    match fs::read_to_string(&path) {
-        Ok(raw) => Ok(Some(raw)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    read_auth_string_from_path(&arcee_auth_file_path()?)
+}
+
+pub(super) fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
+    let Some(raw) = read_auth_bytes_from_path(path)? else {
+        return Ok(None);
+    };
+    String::from_utf8(raw)
+        .map(Some)
+        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+}
+
+pub(super) fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "refusing to read symlink credential path {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow!(
+                "refusing to read non-regular credential path {}",
+                path.display()
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
     }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to securely open credential file {}", path.display())
+            })
+        }
+    };
+    ensure_open_file_is_regular(&file, path, "credential file")?;
+
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw)
+        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    Ok(Some(raw))
 }
 
 pub(super) fn write_arcee_auth_string(raw: &str) -> Result<()> {
@@ -399,6 +448,50 @@ mod tests {
             .file_type()
             .is_symlink());
         dir.assert_no_temp_files();
+    }
+
+    #[test]
+    fn secure_credential_read_accepts_regular_file() {
+        let dir = TestDir::new("arcee-read-regular");
+        let path = dir.path("arcee_auth.json");
+        fs::write(&path, "regular-credential-content").unwrap();
+
+        assert_eq!(
+            read_auth_string_from_path(&path).unwrap().as_deref(),
+            Some("regular-credential-content")
+        );
+    }
+
+    #[test]
+    fn secure_credential_read_rejects_non_regular_path() {
+        let dir = TestDir::new("arcee-read-directory");
+        let path = dir.path("arcee_auth.json");
+        fs::create_dir(&path).unwrap();
+
+        let error = read_auth_string_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("non-regular credential path"));
+    }
+
+    #[test]
+    fn secure_credential_read_rejects_symlink_without_reading_target() {
+        let dir = TestDir::new("arcee-read-symlink");
+        let target = dir.path("target.json");
+        let path = dir.path("arcee_auth.json");
+        fs::write(&target, "target-credential-content").unwrap();
+        symlink(&target, &path).unwrap();
+
+        let error = read_auth_string_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "target-credential-content"
+        );
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]
