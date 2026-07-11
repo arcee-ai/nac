@@ -184,4 +184,4 @@ base_url = "https://api.arcee.ai"
 api_key_env = "ARCEE_API_KEY"
 ```
 
-For safety, credential reads reject symlinks and non-regular files, and writes use atomic replacement. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target; it never inspects or removes `auth.json`. All Arcee requests reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.
+For safety, credential reads reject symlinks and non-regular files, and writes use atomic replacement. On Unix, reads also reject credential files with any group/other permission bits (for example, mode `0644` or `0660`); set the file to owner-only mode such as `0600`. Writes create mode-`0600` files. Non-Unix platforms retain the existing symlink/non-regular checks and atomic writes but do not apply this Unix mode-bit policy. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target; it never inspects or removes `auth.json`. All Arcee requests reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -48,6 +49,30 @@ pub(super) fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> 
         .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
 }
 
+/// A managed credential file whose Unix mode permits group or other access.
+///
+/// This is a caller-actionable safety/configuration failure rather than a
+/// credential-store I/O failure. The server maps it to HTTP 400 without ever
+/// including credential contents in the diagnostic.
+#[derive(Debug)]
+pub(super) struct UnsafeCredentialPermissionsError {
+    path: PathBuf,
+    mode: u32,
+}
+
+impl fmt::Display for UnsafeCredentialPermissionsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "refusing to read credential file {} with unsafe permissions {:04o}; managed credential files must not be accessible by group or other users (set the file mode to 0600)",
+            self.path.display(),
+            self.mode
+        )
+    }
+}
+
+impl std::error::Error for UnsafeCredentialPermissionsError {}
+
 pub(super) fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -85,7 +110,7 @@ pub(super) fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> 
             })
         }
     };
-    ensure_open_file_is_regular(&file, path, "credential file")?;
+    ensure_open_credential_file_is_safe(&file, path)?;
 
     let mut raw = Vec::new();
     file.read_to_end(&mut raw)
@@ -197,6 +222,38 @@ fn make_file_private(file: &File, path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn make_file_private(_file: &File, _path: &Path) -> Result<()> {
+    Ok(())
+}
+
+pub(super) fn ensure_open_credential_file_is_safe(file: &File, path: &Path) -> Result<()> {
+    ensure_open_file_is_regular(file, path, "credential file")?;
+    ensure_private_credential_permissions(file, path)
+}
+
+#[cfg(unix)]
+fn ensure_private_credential_permissions(file: &File, path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = file
+        .metadata()
+        .with_context(|| format!("failed to inspect open credential file {}", path.display()))?
+        .permissions()
+        .mode()
+        & 0o777;
+    if mode & 0o077 == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!(UnsafeCredentialPermissionsError {
+            path: path.to_path_buf(),
+            mode,
+        }))
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_private_credential_permissions(_file: &File, _path: &Path) -> Result<()> {
+    // Unix mode bits have no portable equivalent. Existing non-Unix read
+    // behavior remains unchanged; platform ACL hardening is out of scope.
     Ok(())
 }
 
@@ -367,6 +424,10 @@ mod tests {
         }
     }
 
+    fn set_mode(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
     #[test]
     fn arcee_atomic_write_creates_mode_0600_and_replaces_by_rename() {
         let dir = TestDir::new("arcee-replace");
@@ -424,15 +485,39 @@ mod tests {
     }
 
     #[test]
-    fn secure_credential_read_accepts_regular_file() {
+    fn secure_credential_read_accepts_mode_0600_regular_file() {
         let dir = TestDir::new("arcee-read-regular");
         let path = dir.path("arcee_auth.json");
         fs::write(&path, "regular-credential-content").unwrap();
+        set_mode(&path, 0o600);
 
         assert_eq!(
             read_auth_string_from_path(&path).unwrap().as_deref(),
             Some("regular-credential-content")
         );
+    }
+
+    #[test]
+    fn secure_credential_read_rejects_group_or_other_permissions_without_reading() {
+        let dir = TestDir::new("arcee-read-permissions");
+        let path = dir.path("arcee_auth.json");
+
+        for mode in [0o644, 0o660] {
+            fs::write(&path, "secret-must-not-appear-in-errors").unwrap();
+            set_mode(&path, mode);
+
+            let error = read_auth_string_from_path(&path).unwrap_err();
+
+            assert!(
+                error
+                    .downcast_ref::<UnsafeCredentialPermissionsError>()
+                    .is_some(),
+                "mode {mode:04o} did not produce the safety error: {error:#}"
+            );
+            assert!(error.to_string().contains(&format!("{mode:04o}")));
+            assert!(error.to_string().contains("mode to 0600"));
+            assert!(!error.to_string().contains("secret-must-not-appear"));
+        }
     }
 
     #[test]

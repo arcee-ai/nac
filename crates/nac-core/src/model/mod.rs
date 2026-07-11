@@ -71,6 +71,9 @@ fn classify_stored_arcee_auth_error(error: anyhow::Error) -> anyhow::Error {
     if error
         .downcast_ref::<arcee::StoredArceeAuthConfigurationError>()
         .is_some()
+        || error
+            .downcast_ref::<auth_store::UnsafeCredentialPermissionsError>()
+            .is_some()
     {
         model_configuration_error(error.to_string())
     } else {
@@ -82,6 +85,9 @@ fn classify_stored_codex_auth_error(error: anyhow::Error) -> anyhow::Error {
     if error
         .downcast_ref::<chatgpt_codex::StoredCodexAuthConfigurationError>()
         .is_some()
+        || error
+            .downcast_ref::<auth_store::UnsafeCredentialPermissionsError>()
+            .is_some()
     {
         model_configuration_error(error.to_string())
     } else {
@@ -153,7 +159,7 @@ mod tests {
                 .join(format!("nac-model-{label}-{}-{unique}", std::process::id()));
             std::fs::create_dir_all(&home).unwrap();
             if let Some(contents) = auth_contents {
-                std::fs::write(home.join("auth.json"), contents).unwrap();
+                write_test_credential(&home.join("auth.json"), contents);
             }
 
             let names = [
@@ -181,6 +187,15 @@ mod tests {
                 restore_env(name, value);
             }
             let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
+    fn write_test_credential(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+        std::fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
 
@@ -585,6 +600,27 @@ mod tests {
             assert!(!error.to_string().contains("secret-not-for-errors"));
         }
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let env = IsolatedModelEnv::new(
+                "codex-auth-unsafe-permissions",
+                Some(&stored_codex_auth()),
+                None,
+                None,
+            );
+            std::fs::set_permissions(
+                env.home.join("auth.json"),
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+            let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0644"));
+            assert!(error.to_string().contains("mode to 0600"));
+            assert!(!format!("{error:#}").contains("access-test"));
+        }
+
         {
             let env = IsolatedModelEnv::new("codex-auth-path-io", None, None, None);
             std::fs::create_dir(env.home.join("auth.json")).unwrap();
@@ -658,12 +694,31 @@ mod tests {
         }
         {
             let env = IsolatedModelEnv::new("malformed-stored-auth", None, None, None);
-            std::fs::write(env.home.join("arcee_auth.json"), "{not-json}").unwrap();
+            write_test_credential(&env.home.join("arcee_auth.json"), "{not-json}");
             let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             assert!(error
                 .to_string()
                 .contains("failed to parse stored Arcee auth"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let env = IsolatedModelEnv::new("arcee-auth-unsafe-permissions", None, None, None);
+            write_test_credential(
+                &env.home.join("arcee_auth.json"),
+                stored_arcee_auth("secret-not-for-errors", "https://api.arcee.ai"),
+            );
+            std::fs::set_permissions(
+                env.home.join("arcee_auth.json"),
+                std::fs::Permissions::from_mode(0o660),
+            )
+            .unwrap();
+            let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0660"));
+            assert!(error.to_string().contains("mode to 0600"));
+            assert!(!format!("{error:#}").contains("secret-not-for-errors"));
         }
         {
             let env = IsolatedModelEnv::new("stored-auth-path-io", None, None, None);
@@ -679,7 +734,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai");
         let env = IsolatedModelEnv::new("explicit-arcee", None, None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), &auth).unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), &auth);
 
         let requested_base = "https://stored.arcee.ai:443/api/v1/";
         let client = ModelClient::from_effective_settings(effective_settings(
@@ -706,7 +761,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let auth = stored_arcee_auth("stored-arcee-secret", "https://api.arcee.ai");
         let env = IsolatedModelEnv::new("canonical-modes", None, None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), &auth).unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), &auth);
         let selector = "NAC_ARCEE_CANONICAL_TEST_KEY";
         let original = std::env::var_os(selector);
         set_env(selector, Some("api-arcee-secret"));
@@ -742,7 +797,7 @@ mod tests {
         let original = std::env::var_os(selector);
         set_env(selector, Some("arcee-api-selected-secret"));
         let env = IsolatedModelEnv::new("arcee-api", None, None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), "{not-json}").unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), "{not-json}");
 
         let client = ModelClient::from_effective_settings(effective_settings(
             BackendKind::ArceeApi,
@@ -759,7 +814,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let tampered = stored_arcee_auth("rcai-never-use", "https://attacker.example/steal");
         let env = IsolatedModelEnv::new("tampered-stored-url", None, None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), tampered).unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), tampered);
 
         let error = ModelClient::from_effective_settings(effective_settings(
             BackendKind::ArceeAuth,
@@ -776,7 +831,7 @@ mod tests {
         let codex = stored_codex_auth();
         let arcee = stored_arcee_auth("rcai-test", "https://api.arcee.ai");
         let env = IsolatedModelEnv::new("coexist", Some(&codex), None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), &arcee).unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), &arcee);
 
         let loaded = arcee::read_stored_auth().unwrap();
         assert_eq!(loaded.api_key, "rcai-test");
@@ -789,7 +844,7 @@ mod tests {
             codex
         );
 
-        std::fs::write(env.home.join("arcee_auth.json"), &arcee).unwrap();
+        write_test_credential(&env.home.join("arcee_auth.json"), &arcee);
         codex_auth_logout().unwrap();
         assert!(!env.home.join("auth.json").exists());
         assert_eq!(

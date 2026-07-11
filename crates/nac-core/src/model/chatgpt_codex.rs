@@ -1,3 +1,4 @@
+use super::auth_store::ensure_open_credential_file_is_safe;
 use super::*;
 use anyhow::Context;
 use reqwest::header;
@@ -34,7 +35,8 @@ struct StoredCodexAuth {
 }
 
 /// Marks missing or invalid managed Codex credential content. Credential-store
-/// access and safety failures intentionally remain untyped operational errors.
+/// access failures intentionally remain untyped operational errors. Unsafe Unix
+/// permissions use a shared actionable safety marker in `auth_store`.
 #[derive(Debug)]
 pub(super) struct StoredCodexAuthConfigurationError {
     message: String,
@@ -879,7 +881,7 @@ fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
             })
         }
     };
-    ensure_open_file_is_regular(&file, path, "credential file")?;
+    ensure_open_credential_file_is_safe(&file, path)?;
 
     let mut raw = Vec::new();
     file.read_to_end(&mut raw)
@@ -1267,6 +1269,12 @@ mod tests {
         }
     }
 
+    fn write_credential(path: &Path, contents: impl AsRef<[u8]>) {
+        fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
     fn stored_codex_auth(access: &str) -> StoredCodexAuth {
         StoredCodexAuth {
             auth_type: AUTH_TYPE.to_string(),
@@ -1288,7 +1296,7 @@ mod tests {
             r#"{"type":"chatgpt-codex","access":"a","refresh":"\t","expires_at_ms":1,"account_id":"id"}"#,
             r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":""}"#,
         ] {
-            fs::write(&path, invalid).unwrap();
+            write_credential(&path, invalid);
             let error = read_auth_file_optional_from_path(&path).unwrap_err();
             assert!(
                 error
@@ -1301,15 +1309,48 @@ mod tests {
     }
 
     #[test]
-    fn codex_secure_read_accepts_valid_regular_file() {
+    fn codex_secure_read_accepts_mode_0600_regular_file() {
         let dir = TestDir::new("read-regular");
         let path = dir.path("auth.json");
         write_auth_file_to_path(&path, &stored_codex_auth("regular-access")).unwrap();
 
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let auth = read_auth_file_optional_from_path(&path).unwrap().unwrap();
 
         assert_eq!(auth.access, "regular-access");
         assert_eq!(auth.refresh, "refresh-token");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_secure_read_rejects_group_or_other_permissions_without_reading() {
+        let dir = TestDir::new("read-permissions");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(
+            &path,
+            &stored_codex_auth("secret-must-not-appear-in-errors"),
+        )
+        .unwrap();
+
+        for mode in [0o644, 0o660] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+
+            let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+            assert!(
+                error
+                    .downcast_ref::<super::super::auth_store::UnsafeCredentialPermissionsError>()
+                    .is_some(),
+                "mode {mode:04o} did not produce the safety error: {error:#}"
+            );
+            assert!(error.to_string().contains(&format!("{mode:04o}")));
+            assert!(error.to_string().contains("mode to 0600"));
+            assert!(!error.to_string().contains("secret-must-not-appear"));
+        }
     }
 
     #[test]
@@ -1433,7 +1474,7 @@ mod tests {
         let codex_path = dir.path("auth.json");
         let arcee_path = dir.path("arcee_auth.json");
         let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
-        fs::write(&codex_path, "{ malformed").unwrap();
+        write_credential(&codex_path, "{ malformed");
         fs::write(&arcee_path, arcee).unwrap();
 
         assert!(remove_codex_auth_file_for_logout(&codex_path).unwrap());
@@ -1470,7 +1511,7 @@ mod tests {
     fn codex_logout_removes_typed_malformed_codex_auth() {
         let dir = TestDir::new("logout-typed-codex");
         let path = dir.path("auth.json");
-        fs::write(&path, r#"{"type":"chatgpt-codex","access":7}"#).unwrap();
+        write_credential(&path, r#"{"type":"chatgpt-codex","access":7}"#);
 
         assert!(remove_codex_auth_file_for_logout(&path).unwrap());
         assert!(!path.exists());
@@ -1481,7 +1522,7 @@ mod tests {
         let dir = TestDir::new("logout-foreign");
         let path = dir.path("auth.json");
         let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
-        fs::write(&path, arcee).unwrap();
+        write_credential(&path, arcee);
         assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), arcee);
 

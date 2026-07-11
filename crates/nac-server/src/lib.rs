@@ -1807,10 +1807,20 @@ mod tests {
         }
     }
 
+    fn write_managed_credential(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+        std::fs::write(path, contents).expect("write managed credential");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("set managed credential permissions");
+        }
+    }
+
     fn write_codex_auth(nac_home: &std::path::Path) {
         std::fs::create_dir_all(nac_home).expect("create NAC home");
-        std::fs::write(
-            nac_home.join("auth.json"),
+        write_managed_credential(
+            &nac_home.join("auth.json"),
             serde_json::json!({
                 "type": "chatgpt-codex",
                 "access": "codex-server-access",
@@ -1819,14 +1829,13 @@ mod tests {
                 "account_id": "codex-server-account"
             })
             .to_string(),
-        )
-        .expect("write Codex auth");
+        );
     }
 
     fn write_arcee_auth(nac_home: &std::path::Path, base_url: &str) {
         std::fs::create_dir_all(nac_home).expect("create NAC home");
-        std::fs::write(
-            nac_home.join("arcee_auth.json"),
+        write_managed_credential(
+            &nac_home.join("arcee_auth.json"),
             serde_json::json!({
                 "type": "arcee_api_key",
                 "api_key": "rcai-server-test",
@@ -1835,8 +1844,7 @@ mod tests {
                 "workspace_name": "server-test"
             })
             .to_string(),
-        )
-        .expect("write Arcee auth");
+        );
     }
 
     fn temp_root(label: &str) -> PathBuf {
@@ -1961,7 +1969,7 @@ mod tests {
             let root = temp_root("arcee_malformed_auth_status");
             let nac_home = root.join("nac-home");
             std::fs::create_dir_all(&nac_home).unwrap();
-            std::fs::write(nac_home.join("arcee_auth.json"), "{not-json}").unwrap();
+            write_managed_credential(&nac_home.join("arcee_auth.json"), "{not-json}");
             let _env = ScopedModelEnv::isolated(&nac_home, None);
             seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
             let manager = test_manager(&root);
@@ -1986,6 +1994,47 @@ mod tests {
             assert!(response
                 .message
                 .contains("failed to parse stored Arcee auth"));
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let root = temp_root("arcee_unsafe_auth_permissions");
+            let nac_home = root.join("nac-home");
+            write_arcee_auth(&nac_home, "https://api.arcee.ai");
+            std::fs::set_permissions(
+                nac_home.join("arcee_auth.json"),
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0644"));
+            assert!(!format!("{error:#}").contains("rcai-server-test"));
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+            assert!(response.message.contains("mode to 0600"));
             let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(stored.backend, BackendKind::OpenAiResponses);
             assert_eq!(stored.base_url, "https://api.openai.com/v1");
@@ -2656,7 +2705,7 @@ extra_headers = { X-Config = "yes" }
             let nac_home = root.join("nac-home");
             std::fs::create_dir_all(&nac_home).unwrap();
             if let Some(auth) = auth {
-                std::fs::write(nac_home.join("auth.json"), auth).unwrap();
+                write_managed_credential(&nac_home.join("auth.json"), auth);
             }
             let _env = ScopedModelEnv::isolated(&nac_home, None);
             let manager = test_manager(&root);
@@ -2767,7 +2816,7 @@ extra_headers = { X-Config = "yes" }
                 StatusCode::BAD_REQUEST,
             ),
         ] {
-            std::fs::write(nac_home.join("auth.json"), auth).unwrap();
+            write_managed_credential(&nac_home.join("auth.json"), auth);
             let error = manager
                 .update_session_config(
                     "session",
@@ -2781,6 +2830,45 @@ extra_headers = { X-Config = "yes" }
                 .await
                 .unwrap_err();
             assert_eq!(ApiError::from(error).status, expected_status);
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert_eq!(after.api_key_env, before.api_key_env);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            write_codex_auth(&nac_home);
+            std::fs::set_permissions(
+                nac_home.join("auth.json"),
+                std::fs::Permissions::from_mode(0o660),
+            )
+            .unwrap();
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(
+                            "https://chatgpt.com/backend-api".to_string(),
+                        ),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0660"));
+            assert!(!format!("{error:#}").contains("codex-server-access"));
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
             let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(after.backend, before.backend);
             assert_eq!(after.base_url, before.base_url);

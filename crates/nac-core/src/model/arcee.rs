@@ -30,8 +30,9 @@ pub(super) enum ArceeEndpointKind {
 }
 
 /// Marks stored-auth content and policy failures that a caller can fix.
-/// Credential-store access and safety failures deliberately do not use this
-/// marker so server callers preserve them as internal errors.
+/// Credential-store access failures deliberately do not use this marker so
+/// server callers preserve them as internal errors. Unsafe Unix permissions
+/// use a shared actionable safety marker in `auth_store`.
 #[derive(Debug)]
 pub(super) struct StoredArceeAuthConfigurationError {
     message: String,
@@ -788,8 +789,17 @@ mod tests {
         }
     }
 
+    fn write_credential(path: &Path, contents: impl AsRef<[u8]>) {
+        fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+
     fn write_json(path: &Path, auth: &StoredArceeAuth) {
-        fs::write(path, serde_json::to_string_pretty(auth).unwrap()).unwrap();
+        write_credential(path, serde_json::to_string_pretty(auth).unwrap());
     }
 
     fn assert_device_request(request: &super::super::test_http::CapturedRequest, path: &str) {
@@ -1443,7 +1453,7 @@ mod tests {
         let (auth_path, arcee_path) = dir.paths();
         let auth_json = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
         fs::write(&auth_path, auth_json).unwrap();
-        fs::write(&arcee_path, "{ malformed").unwrap();
+        write_credential(&arcee_path, "{ malformed");
 
         assert!(remove_arcee_auth_file_for_logout(&arcee_path).unwrap());
 
@@ -1481,7 +1491,7 @@ mod tests {
         let legacy_shaped = serde_json::to_string(&stored_auth("rcai-legacy")).unwrap();
         let unknown = r#"{"type":"future-provider","token":"canonical"}"#;
         fs::write(&auth_path, &legacy_shaped).unwrap();
-        fs::write(&canonical, unknown).unwrap();
+        write_credential(&canonical, unknown);
 
         assert!(!remove_arcee_auth_file_for_logout(&canonical).unwrap());
         assert_eq!(fs::read_to_string(auth_path).unwrap(), legacy_shaped);
