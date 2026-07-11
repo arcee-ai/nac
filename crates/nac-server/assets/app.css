@@ -869,6 +869,7 @@ button.session-card {
 
 .session-card h2 .status-dot {
   flex: 0 0 auto;
+  margin-inline: 1.6px 0.8px;
 }
 
 .session-card-title-text {
