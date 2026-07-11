@@ -351,10 +351,8 @@ impl ModelClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
-        let url = format!(
-            "{}/v1/chat/completions",
-            self.base_url.trim_end_matches('/')
-        );
+        let url = arcee::chat_completions_url(&self.base_url)
+            .map_err(classify_model_configuration_error)?;
         let mut request = json!({
             "model": self.model,
             "messages": messages
@@ -369,8 +367,10 @@ impl ModelClient {
                 serde_json::to_value(&tools).unwrap_or_else(|_| Value::Array(Vec::new()));
         }
 
-        let value = self.post_arcee_json_with_retry(&url, &request).await?;
-        parse_chat_completions_response(&value, &url)
+        let value = self
+            .post_arcee_json_with_retry(url.as_str(), &request)
+            .await?;
+        parse_chat_completions_response(&value, url.as_str())
     }
 
     async fn send_deepseek_chat(
@@ -708,6 +708,54 @@ mod tests {
             body["tools"],
             serde_json::to_value(&tools).expect("tool definitions serialize")
         );
+    }
+
+    #[tokio::test]
+    async fn arcee_production_form_and_custom_routes_are_exact_on_wire() {
+        let cases = [
+            ("/api", "/api/v1/chat/completions"),
+            ("/custom/prefix", "/custom/prefix/v1/chat/completions"),
+            ("/custom/prefix/v1", "/custom/prefix/v1/chat/completions"),
+            (
+                "/custom/prefix/v1/chat/completions/",
+                "/custom/prefix/v1/chat/completions",
+            ),
+        ];
+
+        for (configured_path, expected_path) in cases {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(
+                "200 OK",
+                json!({
+                    "choices": [{
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop"
+                    }]
+                })
+                .to_string(),
+            )]);
+            let client = ModelClient {
+                client: arcee::no_redirect_client().unwrap(),
+                base_url: format!("{}{configured_path}", server.base_url),
+                api_key: "custom-endpoint-key".to_string(),
+                model: "arcee-test-model".to_string(),
+                backend: BackendKind::Arcee,
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: std::collections::BTreeMap::new(),
+                arcee_credential_source: Some(ArceeCredentialSource::CustomEndpoint),
+                cache_ttl: None,
+            };
+
+            client
+                .send_arcee_chat(Vec::new(), Vec::new())
+                .await
+                .unwrap_or_else(|error| panic!("{configured_path}: {error:#}"));
+            let requests = server.finish();
+
+            assert_eq!(requests.len(), 1, "{configured_path}");
+            assert_eq!(requests[0].method, "POST", "{configured_path}");
+            assert_eq!(requests[0].path, expected_path, "{configured_path}");
+        }
     }
 
     #[tokio::test]

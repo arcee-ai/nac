@@ -130,6 +130,56 @@ pub(super) fn validate_stored_base_url(base_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Resolves an Arcee/OpenAI-compatible base URL to its chat-completions route.
+///
+/// Arcee-owned roots use the production `/api/v1/chat/completions` route. Custom
+/// endpoints retain any path prefix and use the conventional `/v1` route. In
+/// either case, versioned and already-complete bases are left unduplicated.
+pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
+    let (kind, mut parsed) = validate_arcee_base_url(base_url)?;
+    let mut path_segments = parsed
+        .path_segments()
+        .ok_or_else(|| {
+            anyhow!(
+                "invalid Arcee base URL '{}': URL cannot be a base",
+                base_url
+            )
+        })?
+        .collect::<Vec<_>>();
+    let mut trailing_empty_segments = 0;
+    while path_segments.last() == Some(&"") {
+        path_segments.pop();
+        trailing_empty_segments += 1;
+    }
+
+    let additions: &[&str] = if path_segments.ends_with(&["chat", "completions"]) {
+        &[]
+    } else if path_segments.last() == Some(&"v1") {
+        &["chat", "completions"]
+    } else if kind == ArceeEndpointKind::Approved && path_segments.last() == Some(&"api") {
+        &["v1", "chat", "completions"]
+    } else if kind == ArceeEndpointKind::Approved {
+        &["api", "v1", "chat", "completions"]
+    } else {
+        &["v1", "chat", "completions"]
+    };
+
+    {
+        let mut segments = parsed.path_segments_mut().map_err(|_| {
+            anyhow!(
+                "invalid Arcee base URL '{}': URL cannot be a base",
+                base_url
+            )
+        })?;
+        for _ in 0..trailing_empty_segments {
+            segments.pop_if_empty();
+        }
+        segments.extend(additions);
+    }
+
+    Ok(parsed)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]
@@ -1060,6 +1110,116 @@ mod tests {
         ] {
             let (kind, _) = validate_arcee_base_url(base_url).unwrap();
             assert_eq!(kind, ArceeEndpointKind::Custom, "{base_url}");
+        }
+    }
+
+    #[test]
+    fn approved_arcee_chat_completions_url_matrix_uses_api_v1_once() {
+        let cases = [
+            (
+                "https://api.arcee.ai",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai///",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api/",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api/v1",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api/v1/",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api/v1/chat/completions",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://api.arcee.ai/api/v1/chat/completions/",
+                "https://api.arcee.ai/api/v1/chat/completions",
+            ),
+            (
+                "https://tenant.arcee.ai/prefix/api",
+                "https://tenant.arcee.ai/prefix/api/v1/chat/completions",
+            ),
+            (
+                "https://tenant.arcee.ai/prefix/api/v1",
+                "https://tenant.arcee.ai/prefix/api/v1/chat/completions",
+            ),
+        ];
+
+        for (base_url, expected) in cases {
+            assert_eq!(
+                chat_completions_url(base_url).unwrap().as_str(),
+                expected,
+                "{base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_arcee_chat_completions_url_matrix_preserves_prefixes() {
+        let cases = [
+            (
+                "http://localhost:8080",
+                "http://localhost:8080/v1/chat/completions",
+            ),
+            (
+                "http://localhost:8080/",
+                "http://localhost:8080/v1/chat/completions",
+            ),
+            (
+                "https://gateway.example.com/prefix",
+                "https://gateway.example.com/prefix/v1/chat/completions",
+            ),
+            (
+                "https://gateway.example.com/prefix/v1",
+                "https://gateway.example.com/prefix/v1/chat/completions",
+            ),
+            (
+                "https://gateway.example.com/prefix/v1/",
+                "https://gateway.example.com/prefix/v1/chat/completions",
+            ),
+            (
+                "https://gateway.example.com/prefix/v1/chat/completions",
+                "https://gateway.example.com/prefix/v1/chat/completions",
+            ),
+            (
+                "https://gateway.example.com/prefix/v1/chat/completions/",
+                "https://gateway.example.com/prefix/v1/chat/completions",
+            ),
+        ];
+
+        for (base_url, expected) in cases {
+            assert_eq!(
+                chat_completions_url(base_url).unwrap().as_str(),
+                expected,
+                "{base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn chat_completions_url_preserves_origin_policy_rejections() {
+        for base_url in [
+            "https://api.arcee.ai?tenant=one",
+            "https://gateway.example.com/v1#fragment",
+        ] {
+            assert!(chat_completions_url(base_url).is_err(), "{base_url}");
         }
     }
 
