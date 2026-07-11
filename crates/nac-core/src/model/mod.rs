@@ -25,9 +25,47 @@ use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub(crate) use backend::detect_backend;
 pub use backend::validate_backend_api_key_env;
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
+pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
 pub(crate) use types::{AssistantTurn, ClientOverrides, ModelTurnResponse, TokenUsage};
 pub use types::{BackendKind, ReasoningEffort};
+
+/// Identifies model setup failures caused by a caller-controlled configuration.
+///
+/// The server uses this typed boundary to return HTTP 400 without relying on
+/// message matching. The inner message remains the user-facing diagnostic.
+#[derive(Debug)]
+pub struct ModelConfigurationError {
+    message: String,
+}
+
+impl ModelConfigurationError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ModelConfigurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ModelConfigurationError {}
+
+fn model_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(ModelConfigurationError::new(message))
+}
+
+fn classify_model_configuration_error(error: anyhow::Error) -> anyhow::Error {
+    if error.downcast_ref::<ModelConfigurationError>().is_some() {
+        error
+    } else {
+        model_configuration_error(error.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAuthAction {
@@ -338,6 +376,7 @@ mod tests {
                 .contains("does not match the stored credential origin"),
             "unexpected error: {mismatch:#}"
         );
+        assert!(mismatch.downcast_ref::<ModelConfigurationError>().is_some());
 
         let from_backend = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::Arcee),
@@ -393,6 +432,7 @@ mod tests {
             error.to_string().contains("custom Arcee endpoint"),
             "unexpected error: {error:#}"
         );
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
 
         set_env("OPENAI_API_KEY", Some("custom-separate-key"));
         let client = ModelClient::from_env_with_overrides(overrides)

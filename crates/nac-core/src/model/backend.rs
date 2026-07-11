@@ -53,16 +53,17 @@ pub fn validate_backend_api_key_env(
         BackendKind::Auto => {
             let base_url =
                 base_url.unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::Auto));
-            detect_backend(base_url)
-                .map_err(|error| anyhow!("invalid model configuration: {error}"))?
+            detect_backend(base_url).map_err(|error| {
+                model_configuration_error(format!("invalid model configuration: {error}"))
+            })?
         }
         backend => backend,
     };
 
     if resolved_backend == BackendKind::Arcee {
-        anyhow::bail!(
-            "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY"
-        );
+        return Err(model_configuration_error(
+            "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY",
+        ));
     }
 
     Ok(())

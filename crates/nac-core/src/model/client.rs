@@ -28,10 +28,10 @@ fn validate_stored_arcee_extra_headers(
         .keys()
         .find(|name| is_sensitive_arcee_header(name))
     {
-        return Err(anyhow!(
+        return Err(model_configuration_error(format!(
             "invalid model configuration: extra_headers cannot override sensitive header '{}' when using stored Arcee login credentials",
             name
-        ));
+        )));
     }
     Ok(())
 }
@@ -41,7 +41,7 @@ fn resolve_arcee_credentials(
 ) -> Result<(String, String, ArceeCredentialSource)> {
     match explicit_base_url {
         None => {
-            let record = arcee::read_stored_auth()?;
+            let record = arcee::read_stored_auth().map_err(classify_model_configuration_error)?;
             Ok((
                 record.base_url,
                 record.api_key,
@@ -49,17 +49,20 @@ fn resolve_arcee_credentials(
             ))
         }
         Some(base_url) => {
-            let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)?;
+            let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)
+                .map_err(classify_model_configuration_error)?;
             match kind {
                 arcee::ArceeEndpointKind::Approved => {
-                    let record = arcee::read_stored_auth()?;
-                    let stored_url = arcee::validate_stored_base_url(&record.base_url)?;
+                    let record =
+                        arcee::read_stored_auth().map_err(classify_model_configuration_error)?;
+                    let stored_url = arcee::validate_stored_base_url(&record.base_url)
+                        .map_err(classify_model_configuration_error)?;
                     if requested_url.origin() != stored_url.origin() {
-                        return Err(anyhow!(
+                        return Err(model_configuration_error(format!(
                             "Arcee endpoint origin '{}' does not match the stored credential origin '{}'; log in for the selected origin or use a custom non-Arcee endpoint with OPENAI_API_KEY",
                             requested_url.origin().ascii_serialization(),
                             stored_url.origin().ascii_serialization()
-                        ));
+                        )));
                     }
                     Ok((
                         base_url.to_string(),
@@ -72,10 +75,10 @@ fn resolve_arcee_credentials(
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                         .ok_or_else(|| {
-                            anyhow!(
+                            model_configuration_error(format!(
                                 "OPENAI_API_KEY is not set; custom Arcee endpoint '{}' requires a separately supplied API key",
                                 base_url
-                            )
+                            ))
                         })?;
                     Ok((
                         base_url.to_string(),
@@ -86,6 +89,52 @@ fn resolve_arcee_credentials(
             }
         }
     }
+}
+
+fn resolve_configured_backend(
+    requested_backend: BackendKind,
+    explicit_base_url: Option<&str>,
+) -> Result<BackendKind> {
+    match requested_backend {
+        BackendKind::Auto => {
+            let probe = explicit_base_url
+                .unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::Auto));
+            detect_backend(probe).map_err(classify_model_configuration_error)
+        }
+        explicit => Ok(explicit),
+    }
+}
+
+fn resolve_validated_arcee_configuration(
+    explicit_base_url: Option<&str>,
+    api_key_env: Option<&str>,
+    extra_headers: &std::collections::BTreeMap<String, String>,
+) -> Result<(String, String, ArceeCredentialSource)> {
+    validate_backend_api_key_env(BackendKind::Arcee, explicit_base_url, api_key_env)?;
+    let resolved = resolve_arcee_credentials(explicit_base_url)?;
+    if resolved.2 == ArceeCredentialSource::StoredLogin {
+        validate_stored_arcee_extra_headers(extra_headers)?;
+    }
+    Ok(resolved)
+}
+
+/// Validates the effective model configuration without issuing a model request.
+///
+/// Arcee validation includes URL policy, credential-source selection, stored
+/// origin binding, custom endpoint credentials, and protected extra headers.
+pub fn validate_model_configuration(
+    backend: BackendKind,
+    base_url: Option<&str>,
+    api_key_env: Option<&str>,
+    extra_headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let resolved_backend = resolve_configured_backend(backend, base_url)?;
+    if resolved_backend == BackendKind::Arcee {
+        resolve_validated_arcee_configuration(base_url, api_key_env, extra_headers)?;
+    } else {
+        validate_backend_api_key_env(resolved_backend, base_url, api_key_env)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -116,28 +165,20 @@ impl ModelClient {
             .base_url
             .clone()
             .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
-        let backend = match requested_backend {
-            BackendKind::Auto => {
-                let probe = explicit_base_url.clone().unwrap_or_else(|| {
-                    default_base_url_for_backend_hint(BackendKind::Auto).to_string()
-                });
-                detect_backend(&probe)?
-            }
-            explicit => explicit,
-        };
-        validate_backend_api_key_env(
-            backend,
-            explicit_base_url.as_deref(),
-            overrides.api_key_env.as_deref(),
-        )?;
+        let backend = resolve_configured_backend(requested_backend, explicit_base_url.as_deref())?;
         let (base_url, api_key, arcee_credential_source) = if backend == BackendKind::Arcee {
-            let (base_url, api_key, source) =
-                resolve_arcee_credentials(explicit_base_url.as_deref())?;
-            if source == ArceeCredentialSource::StoredLogin {
-                validate_stored_arcee_extra_headers(&overrides.extra_headers)?;
-            }
+            let (base_url, api_key, source) = resolve_validated_arcee_configuration(
+                explicit_base_url.as_deref(),
+                overrides.api_key_env.as_deref(),
+                &overrides.extra_headers,
+            )?;
             (base_url, api_key, Some(source))
         } else {
+            validate_backend_api_key_env(
+                backend,
+                explicit_base_url.as_deref(),
+                overrides.api_key_env.as_deref(),
+            )?;
             (
                 explicit_base_url
                     .clone()

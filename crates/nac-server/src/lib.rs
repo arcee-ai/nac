@@ -22,7 +22,7 @@ use axum::{
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{SessionEventEnvelope, SessionReplayGap},
-    model::{validate_backend_api_key_env, BackendKind, ReasoningEffort},
+    model::{validate_model_configuration, BackendKind, ModelConfigurationError, ReasoningEffort},
     runtime::{self, ModelOptions, NacConfig, RunOptions, SandboxOptions, StoreOptions},
     session_service::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
@@ -676,10 +676,11 @@ impl SessionManager {
             }
         }
 
-        validate_backend_api_key_env(
+        validate_model_configuration(
             snapshot.backend,
             Some(&snapshot.base_url),
             snapshot.api_key_env.as_deref(),
+            &snapshot.extra_headers,
         )?;
 
         // 4. Save the updated snapshot to DB.
@@ -1194,7 +1195,9 @@ impl From<sessions::SessionPresentationError> for ApiError {
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
-        let status = if message.contains("invalid model configuration") {
+        let status = if error.downcast_ref::<ModelConfigurationError>().is_some()
+            || message.contains("invalid model configuration")
+        {
             StatusCode::BAD_REQUEST
         } else if message.contains("was not found")
             || message.contains("not found")
@@ -1459,6 +1462,60 @@ mod tests {
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
     }
 
+    static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct ScopedModelEnv {
+        original: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl ScopedModelEnv {
+        fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
+            let names = ["NAC_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"];
+            let original = names
+                .into_iter()
+                .map(|name| (name, std::env::var_os(name)))
+                .collect();
+            unsafe {
+                std::env::set_var("NAC_HOME", nac_home);
+                match openai_api_key {
+                    Some(value) => std::env::set_var("OPENAI_API_KEY", value),
+                    None => std::env::remove_var("OPENAI_API_KEY"),
+                }
+                std::env::remove_var("OPENAI_BASE_URL");
+            }
+            Self { original }
+        }
+    }
+
+    impl Drop for ScopedModelEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.original.drain(..) {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+
+    fn write_arcee_auth(nac_home: &std::path::Path, base_url: &str) {
+        std::fs::create_dir_all(nac_home).expect("create NAC home");
+        std::fs::write(
+            nac_home.join("arcee_auth.json"),
+            serde_json::json!({
+                "type": "arcee_api_key",
+                "api_key": "rcai-server-test",
+                "base_url": base_url,
+                "organization_id": "org-server-test",
+                "workspace_name": "server-test"
+            })
+            .to_string(),
+        )
+        .expect("write Arcee auth");
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1628,8 +1685,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_arcee_configuration_status_and_persistence_are_consistent() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("arcee_config_status");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://tenant.arcee.ai/login/path");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        let create_error = manager
+            .create_session(CreateSessionRequest {
+                cwd: None,
+                model: None,
+                base_url: Some("http://api.arcee.ai/insecure".to_string()),
+                backend: Some("arcee".to_string()),
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: None,
+                ssh_host: None,
+                sandbox: SandboxRequest::default(),
+            })
+            .await
+            .unwrap_err();
+        assert!(create_error
+            .downcast_ref::<ModelConfigurationError>()
+            .is_some());
+        assert_eq!(ApiError::from(create_error).status, StatusCode::BAD_REQUEST);
+        assert!(
+            !store_path.exists(),
+            "invalid create must fail before initializing session storage"
+        );
+
+        seed_session(&root, "attach-invalid", "2026-01-01 00:00:00.000000000");
+        let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
+        attach_snapshot.backend = BackendKind::Arcee;
+        attach_snapshot.base_url = "https://custom.example/v1".to_string();
+        sessions::save_session(&store_path, &attach_snapshot).unwrap();
+        let attach_error = match manager.attach_session("attach-invalid").await {
+            Ok(_) => panic!("custom Arcee attach without OPENAI_API_KEY must fail"),
+            Err(error) => error,
+        };
+        assert!(attach_error.to_string().contains("OPENAI_API_KEY"));
+        assert!(attach_error
+            .downcast_ref::<ModelConfigurationError>()
+            .is_some());
+        assert_eq!(ApiError::from(attach_error).status, StatusCode::BAD_REQUEST);
+
+        seed_session(&root, "update", "2026-01-02 00:00:00.000000000");
+        for invalid_base_url in ["https://api.arcee.ai/v1", "not a URL"] {
+            let update_error = manager
+                .update_session_config(
+                    "update",
+                    UpdateConfigRequest {
+                        model: None,
+                        base_url: Some(invalid_base_url.to_string()),
+                        backend: Some("arcee".to_string()),
+                        reasoning_effort: None,
+                        api_key_env: None,
+                        extra_headers: None,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                update_error
+                    .downcast_ref::<ModelConfigurationError>()
+                    .is_some(),
+                "unclassified configuration error: {update_error:#}"
+            );
+            assert_eq!(ApiError::from(update_error).status, StatusCode::BAD_REQUEST);
+
+            let stored = sessions::load_session(&store_path, "update").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        }
+
+        manager
+            .update_session_config(
+                "update",
+                UpdateConfigRequest {
+                    model: None,
+                    base_url: Some("https://tenant.arcee.ai/approved/path".to_string()),
+                    backend: Some("arcee".to_string()),
+                    reasoning_effort: None,
+                    api_key_env: None,
+                    extra_headers: None,
+                },
+            )
+            .await
+            .expect("same-origin approved Arcee configuration should persist");
+        let approved = sessions::load_session(&store_path, "update").unwrap();
+        assert_eq!(approved.backend, BackendKind::Arcee);
+        assert_eq!(approved.base_url, "https://tenant.arcee.ai/approved/path");
+
+        unsafe { std::env::set_var("OPENAI_API_KEY", "custom-server-key") };
+        manager
+            .update_session_config(
+                "update",
+                UpdateConfigRequest {
+                    model: None,
+                    base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+                    backend: Some("arcee".to_string()),
+                    reasoning_effort: None,
+                    api_key_env: None,
+                    extra_headers: None,
+                },
+            )
+            .await
+            .expect("custom Arcee configuration with a separate key should persist");
+        let custom = sessions::load_session(&store_path, "update").unwrap();
+        assert_eq!(custom.base_url, "http://127.0.0.1:12345/dev");
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: None,
+                model: None,
+                base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+                backend: Some("arcee".to_string()),
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: None,
+                ssh_host: None,
+                sandbox: SandboxRequest::default(),
+            })
+            .await
+            .expect("valid custom Arcee create should succeed");
+        assert!(created.metadata.session_id.is_some());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
     async fn blank_update_clears_legacy_arcee_api_key_env() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("clear_arcee_api_key_env");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
         let snapshot = sessions::new_snapshot(
             "legacy-arcee".to_string(),
             root.clone(),
