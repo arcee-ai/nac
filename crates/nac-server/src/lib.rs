@@ -22,7 +22,10 @@ use axum::{
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{SessionEventEnvelope, SessionReplayGap},
-    model::{validate_model_configuration, BackendKind, ModelConfigurationError, ReasoningEffort},
+    model::{
+        validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
+        ReasoningEffort,
+    },
     runtime::{self, ModelOptions, NacConfig, RunOptions, SandboxOptions, StoreOptions},
     session_service::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
@@ -86,16 +89,85 @@ pub struct ListSessionsQuery {
     pub workspace_stats: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestField<T> {
+    Omitted,
+    Null,
+    Value(T),
+}
+
+impl<T> Default for RequestField<T> {
+    fn default() -> Self {
+        Self::Omitted
+    }
+}
+
+impl<'de, T> Deserialize<'de> for RequestField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|value| match value {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadersRequest(pub BTreeMap<String, String>);
+
+impl<'de> Deserialize<'de> for HeadersRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Representation {
+            Object(BTreeMap<String, String>),
+            LegacyJson(String),
+        }
+
+        match Representation::deserialize(deserializer)? {
+            Representation::Object(headers) => Ok(Self(headers)),
+            Representation::LegacyJson(json) => {
+                if json.trim().is_empty() {
+                    return Err(serde::de::Error::custom(
+                        "extra_headers compatibility string must not be blank",
+                    ));
+                }
+                serde_json::from_str::<BTreeMap<String, String>>(&json)
+                    .map(Self)
+                    .map_err(|error| {
+                        serde::de::Error::custom(format!(
+                            "extra_headers compatibility string must contain a JSON object with string values: {error}"
+                        ))
+                    })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct CreateSessionRequest {
     pub cwd: Option<PathBuf>,
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-    pub backend: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub api_key_env: Option<String>,
-    /// JSON string containing an object whose keys and values are strings.
-    pub extra_headers: Option<String>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<String>,
+    #[serde(default)]
+    pub api_key_env: RequestField<String>,
+    /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
+    #[serde(default)]
+    pub extra_headers: RequestField<HeadersRequest>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -124,15 +196,21 @@ pub struct SandboxRequest {
     pub memory_mib: Option<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateConfigRequest {
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-    pub backend: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub api_key_env: Option<String>,
-    /// JSON string of `BTreeMap<String, String>`. An empty string clears the map.
-    pub extra_headers: Option<String>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<String>,
+    #[serde(default)]
+    pub api_key_env: RequestField<String>,
+    /// Prefer a JSON object. Null or an empty object clears the persisted map.
+    #[serde(default)]
+    pub extra_headers: RequestField<HeadersRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -416,7 +494,16 @@ impl SessionManager {
             };
             (local_cwd.clone(), local_cwd)
         };
-        let config = NacConfig::load_from_cwd(&config_cwd)?;
+        let mut config = NacConfig::load_from_cwd(&config_cwd)?;
+        let model = model_options(
+            request.model,
+            request.base_url,
+            request.backend,
+            request.reasoning_effort,
+            request.api_key_env,
+            request.extra_headers,
+            &mut config,
+        )?;
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd,
@@ -425,14 +512,7 @@ impl SessionManager {
                 store: StoreOptions {
                     store_path: Some(self.inner.store_path.clone()),
                 },
-                model: model_options(
-                    request.model,
-                    request.base_url,
-                    request.backend,
-                    request.reasoning_effort,
-                    request.api_key_env,
-                    request.extra_headers,
-                )?,
+                model,
                 sandbox: sandbox_options(request.sandbox),
                 ssh_host,
             },
@@ -603,92 +683,48 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Updates the model configuration of an existing session in the DB,
-    /// then removes it from the in-memory `active_sessions` map so that the
-    /// next `attach_session` call re-resumes it with the new config.
-    /// Returns an error if a run is currently active.
+    /// Transactionally updates persisted model settings for an inactive session.
+    /// The prospective snapshot and credentials are fully validated before the
+    /// database or in-memory service map is changed.
     pub async fn update_session_config(
         &self,
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // 1. Check that no run is active.
-        {
-            let active = self.inner.active_sessions.read().await;
-            if let Some(service) = active.get(session_id) {
-                if service.active_run().is_some() {
-                    return Err(anyhow!(
-                        "session is busy with an active run; cancel it before updating config"
-                    ));
-                }
+        // Hold the write lock through validation and persistence so an inactive
+        // service cannot start a run between the busy check and eviction.
+        let mut active = self.inner.active_sessions.write().await;
+        if let Some(service) = active.get(session_id) {
+            if service.active_run().is_some() {
+                return Err(anyhow!(
+                    "session is busy with an active run; cancel it before updating config"
+                ));
             }
         }
 
-        // 2. Load the current snapshot from DB.
-        let mut snapshot = sessions::load_session(&self.inner.store_path, session_id)?;
+        let current = sessions::load_session(&self.inner.store_path, session_id)?;
+        let mut prospective = current.clone();
+        apply_config_patch(&mut prospective, request)?;
 
-        // 3. Apply overrides.
-        if let Some(model) = request.model {
-            let trimmed = model.trim().to_string();
-            snapshot.model = if trimmed.is_empty() {
-                // Fall back to a sensible default — keep current if empty.
-                snapshot.model
-            } else {
-                trimmed
-            };
-        }
-        if let Some(base_url) = request.base_url {
-            let trimmed = base_url.trim().to_string();
-            if !trimmed.is_empty() {
-                snapshot.base_url = trimmed;
-            }
-        }
-        if let Some(backend) = request.backend {
-            let trimmed = backend.trim();
-            if !trimmed.is_empty() {
-                snapshot.backend = parse_json_string_enum::<BackendKind>(trimmed)?;
-            }
-        }
-        if let Some(effort) = request.reasoning_effort {
-            let trimmed = effort.trim();
-            if trimmed.is_empty() {
-                snapshot.reasoning_effort = None;
-            } else {
-                snapshot.reasoning_effort =
-                    Some(parse_json_string_enum::<ReasoningEffort>(trimmed)?);
-            }
-        }
-        if let Some(api_key_env) = request.api_key_env {
-            let trimmed = api_key_env.trim();
-            snapshot.api_key_env = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            };
-        }
-        if let Some(extra_headers_json) = request.extra_headers {
-            let trimmed = extra_headers_json.trim();
-            if trimmed.is_empty() {
-                snapshot.extra_headers = BTreeMap::new();
-            } else {
-                snapshot.extra_headers = serde_json::from_str::<BTreeMap<String, String>>(trimmed)
-                    .context("failed to parse extra_headers as JSON object")?;
-            }
-        }
-
+        let _settings = EffectiveModelSettings::new(
+            prospective.backend,
+            prospective.model.clone(),
+            prospective.base_url.clone(),
+            prospective.reasoning_effort,
+            prospective.api_key_env.clone(),
+            prospective.extra_headers.clone(),
+        )?;
         validate_model_configuration(
-            snapshot.backend,
-            Some(&snapshot.base_url),
-            snapshot.api_key_env.as_deref(),
-            &snapshot.extra_headers,
+            prospective.backend,
+            Some(&prospective.base_url),
+            prospective.api_key_env.as_deref(),
+            &prospective.extra_headers,
         )?;
 
-        // 4. Save the updated snapshot to DB.
-        sessions::save_session(&self.inner.store_path, &snapshot)?;
-
-        // 5. Remove from active_sessions so the next attach re-resumes.
-        self.inner.active_sessions.write().await.remove(session_id);
-
+        // Save only after all caller-controlled configuration and credential
+        // checks succeed. A store failure leaves the active map untouched.
+        sessions::save_session(&self.inner.store_path, &prospective)?;
+        active.remove(session_id);
         Ok(())
     }
 
@@ -878,8 +914,9 @@ async fn reorder_sessions_handler(
 
 async fn create_session(
     State(manager): State<SessionManager>,
-    Json(request): Json<CreateSessionRequest>,
+    payload: std::result::Result<Json<CreateSessionRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<SessionFrontendSnapshot>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
     Ok((
         StatusCode::CREATED,
         Json(manager.create_session(request).await?),
@@ -975,52 +1012,169 @@ async fn delete_session_handler(
 async fn update_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-    Json(request): Json<UpdateConfigRequest>,
+    payload: std::result::Result<Json<UpdateConfigRequest>, JsonRejection>,
 ) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
     manager.update_session_config(&session_id, request).await?;
     Ok(StatusCode::OK)
 }
 
+#[derive(Debug)]
+struct RequestConfigurationError(String);
+
+impl std::fmt::Display for RequestConfigurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RequestConfigurationError {}
+
+fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(RequestConfigurationError(message.into()))
+}
+
+fn nonblank_request_string(value: String, field: &str) -> Result<String> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(request_configuration_error(format!(
+            "invalid model configuration: field '{field}' must not be empty or whitespace-only"
+        )));
+    }
+    Ok(normalized.to_string())
+}
+
+fn required_create_string(field: RequestField<String>, name: &str) -> Result<Option<String>> {
+    match field {
+        RequestField::Omitted => Ok(None),
+        RequestField::Null => Err(request_configuration_error(format!(
+            "invalid model configuration: required field '{name}' cannot be null"
+        ))),
+        RequestField::Value(value) => nonblank_request_string(value, name).map(Some),
+    }
+}
+
 fn model_options(
-    model: Option<String>,
-    base_url: Option<String>,
-    backend: Option<String>,
-    reasoning_effort: Option<String>,
-    api_key_env: Option<String>,
-    extra_headers: Option<String>,
+    model: RequestField<String>,
+    base_url: RequestField<String>,
+    backend: RequestField<String>,
+    reasoning_effort: RequestField<String>,
+    api_key_env: RequestField<String>,
+    extra_headers: RequestField<HeadersRequest>,
+    config: &mut NacConfig,
 ) -> Result<ModelOptions> {
+    let backend = required_create_string(backend, "backend")?
+        .map(|value| parse_request_enum::<BackendKind>(&value, "backend"))
+        .transpose()?;
+    let reasoning_effort = match reasoning_effort {
+        RequestField::Omitted => None,
+        RequestField::Null => {
+            config.model.reasoning_effort = None;
+            None
+        }
+        RequestField::Value(value) => {
+            let value = nonblank_request_string(value, "reasoning_effort")?;
+            Some(parse_request_enum::<ReasoningEffort>(
+                &value,
+                "reasoning_effort",
+            )?)
+        }
+    };
+    let api_key_env = match api_key_env {
+        RequestField::Omitted => None,
+        RequestField::Null => {
+            config.model.api_key_env = None;
+            None
+        }
+        RequestField::Value(value) => Some(nonblank_request_string(value, "api_key_env")?),
+    };
+    let extra_headers = match extra_headers {
+        RequestField::Omitted => None,
+        RequestField::Null => Some(BTreeMap::new()),
+        RequestField::Value(HeadersRequest(headers)) => Some(headers),
+    };
+
     Ok(ModelOptions {
-        backend: backend
-            .map(|value| parse_json_string_enum::<BackendKind>(&value))
-            .transpose()?,
-        reasoning_effort: reasoning_effort
-            .map(|value| parse_json_string_enum::<ReasoningEffort>(&value))
-            .transpose()?,
-        api_base_url: base_url,
-        api_model: model,
-        api_key_env: api_key_env.and_then(|value| {
-            let trimmed = value.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        }),
-        extra_headers: parse_extra_headers(extra_headers)?,
+        backend,
+        reasoning_effort,
+        api_base_url: required_create_string(base_url, "base_url")?,
+        api_model: required_create_string(model, "model")?,
+        api_key_env,
+        extra_headers,
     })
 }
 
-fn parse_extra_headers(extra_headers: Option<String>) -> Result<Option<BTreeMap<String, String>>> {
-    let Some(extra_headers) = extra_headers else {
-        return Ok(None);
-    };
-    let trimmed = extra_headers.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
+fn apply_config_patch(
+    snapshot: &mut sessions::SessionSnapshot,
+    request: UpdateConfigRequest,
+) -> Result<()> {
+    match request.model {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'model' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => snapshot.model = nonblank_request_string(value, "model")?,
     }
-    serde_json::from_str::<BTreeMap<String, String>>(trimmed)
-        .map(Some)
-        .map_err(|error| {
-            anyhow!(
-                "invalid extra_headers: expected a JSON object with string keys and string values: {error}"
-            )
-        })
+    match request.base_url {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'base_url' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => {
+            snapshot.base_url = nonblank_request_string(value, "base_url")?;
+        }
+    }
+    match request.backend {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'backend' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => {
+            let value = nonblank_request_string(value, "backend")?;
+            snapshot.backend = parse_request_enum::<BackendKind>(&value, "backend")?;
+        }
+    }
+    match request.reasoning_effort {
+        RequestField::Omitted => {}
+        RequestField::Null => snapshot.reasoning_effort = None,
+        RequestField::Value(value) => {
+            let value = nonblank_request_string(value, "reasoning_effort")?;
+            snapshot.reasoning_effort = Some(parse_request_enum::<ReasoningEffort>(
+                &value,
+                "reasoning_effort",
+            )?);
+        }
+    }
+    match request.api_key_env {
+        RequestField::Omitted => {}
+        RequestField::Null => snapshot.api_key_env = None,
+        RequestField::Value(value) => {
+            snapshot.api_key_env = Some(nonblank_request_string(value, "api_key_env")?);
+        }
+    }
+    match request.extra_headers {
+        RequestField::Omitted => {}
+        RequestField::Null => snapshot.extra_headers.clear(),
+        RequestField::Value(HeadersRequest(headers)) => snapshot.extra_headers = headers,
+    }
+    Ok(())
+}
+
+fn parse_request_enum<T>(value: &str, field: &str) -> Result<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|error| {
+        request_configuration_error(format!(
+            "invalid model configuration: invalid '{field}' value '{value}': {error}"
+        ))
+    })
 }
 
 fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
@@ -1050,14 +1204,6 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
         || request.shm_size.is_some()
         || request.session_key.is_some()
         || request.workdir.is_some()
-}
-
-fn parse_json_string_enum<T>(value: &str) -> Result<T>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .map_err(|error| anyhow!("invalid enum value '{}': {}", value, error))
 }
 
 fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
@@ -1196,6 +1342,7 @@ impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
         let status = if error.downcast_ref::<ModelConfigurationError>().is_some()
+            || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")
         {
             StatusCode::BAD_REQUEST
@@ -1239,77 +1386,134 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_model_option_enums_from_api_strings() {
-        let options = model_options(
-            Some("model-a".to_string()),
-            Some("https://example.com/v1".to_string()),
-            Some("openai-responses".to_string()),
-            Some("xhigh".to_string()),
-            None,
-            None,
+    fn model_request_fields_distinguish_omitted_null_and_values() {
+        let request: CreateSessionRequest = serde_json::from_str(
+            r#"{
+                "model":" model-a ",
+                "base_url":null,
+                "backend":"openai-responses",
+                "reasoning_effort":"xhigh",
+                "api_key_env":null,
+                "extra_headers":{"X-Trace":"launch"}
+            }"#,
         )
         .unwrap();
 
-        assert_eq!(options.backend, Some(BackendKind::OpenAiResponses));
-        assert_eq!(options.reasoning_effort, Some(ReasoningEffort::Xhigh));
-        assert_eq!(options.api_model.as_deref(), Some("model-a"));
+        assert_eq!(request.model, RequestField::Value(" model-a ".to_string()));
+        assert_eq!(request.base_url, RequestField::Null);
         assert_eq!(
-            options.api_base_url.as_deref(),
-            Some("https://example.com/v1")
+            request.backend,
+            RequestField::Value("openai-responses".to_string())
         );
+        assert_eq!(
+            request.reasoning_effort,
+            RequestField::Value("xhigh".to_string())
+        );
+        assert_eq!(request.api_key_env, RequestField::Null);
+        assert_eq!(
+            request.extra_headers,
+            RequestField::Value(HeadersRequest(BTreeMap::from([(
+                "X-Trace".to_string(),
+                "launch".to_string()
+            )])))
+        );
+        assert_eq!(request.cwd, None);
     }
 
     #[test]
-    fn parses_together_launch_options_with_api_key_env_and_headers() {
-        let options = model_options(
-            None,
-            None,
-            Some("together-chat".to_string()),
-            None,
-            Some("  CUSTOM_TOGETHER_KEY  ".to_string()),
-            Some(r#"{"X-Trace":"launch","X-Mode":"test"}"#.to_string()),
+    fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() {
+        let mut config = NacConfig::default();
+        config.model.reasoning_effort = Some(ReasoningEffort::Medium);
+        config.model.api_key_env = Some("CONFIG_KEY".to_string());
+        config
+            .model
+            .extra_headers
+            .insert("X-Config".to_string(), "yes".to_string());
+
+        let inherited = model_options(
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            &mut config,
         )
         .unwrap();
-
-        assert_eq!(options.backend, Some(BackendKind::TogetherChat));
-        assert_eq!(options.api_key_env.as_deref(), Some("CUSTOM_TOGETHER_KEY"));
-        assert_eq!(
-            options.extra_headers,
-            Some(BTreeMap::from([
-                ("X-Mode".to_string(), "test".to_string()),
-                ("X-Trace".to_string(), "launch".to_string()),
-            ]))
-        );
-    }
-
-    #[test]
-    fn launch_header_options_distinguish_inherit_from_explicit_empty_map() {
-        let inherited = model_options(None, None, None, None, None, None).unwrap();
-        let blank = model_options(
-            None,
-            None,
-            None,
-            None,
-            Some("   ".to_string()),
-            Some("   ".to_string()),
-        )
-        .unwrap();
-        let cleared = model_options(None, None, None, None, None, Some("{}".to_string())).unwrap();
-
+        assert_eq!(inherited.reasoning_effort, None);
         assert_eq!(inherited.api_key_env, None);
         assert_eq!(inherited.extra_headers, None);
-        assert_eq!(blank.api_key_env, None);
-        assert_eq!(blank.extra_headers, None);
-        assert_eq!(cleared.extra_headers, Some(BTreeMap::new()));
+        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
+
+        let explicit = model_options(
+            RequestField::Value(" model-a ".to_string()),
+            RequestField::Value(" https://example.com/v1 ".to_string()),
+            RequestField::Value("openai-responses".to_string()),
+            RequestField::Value("xhigh".to_string()),
+            RequestField::Null,
+            RequestField::Null,
+            &mut config,
+        )
+        .unwrap();
+        assert_eq!(explicit.api_model.as_deref(), Some("model-a"));
+        assert_eq!(
+            explicit.api_base_url.as_deref(),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(explicit.backend, Some(BackendKind::OpenAiResponses));
+        assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
+        assert_eq!(config.model.api_key_env, None);
     }
 
     #[test]
-    fn invalid_launch_headers_map_to_bad_request() {
-        for invalid in ["{not-json}", r#"["value"]"#, r#"{"X-Count":3}"#] {
-            let error =
-                model_options(None, None, None, None, None, Some(invalid.to_string())).unwrap_err();
-            assert!(error.to_string().contains("invalid extra_headers"));
+    fn null_required_and_blank_concrete_create_fields_are_bad_requests() {
+        for field in ["model", "base_url", "backend"] {
+            let json = format!(r#"{{"{field}":null}}"#);
+            let request: CreateSessionRequest = serde_json::from_str(&json).unwrap();
+            let mut config = NacConfig::default();
+            let error = model_options(
+                request.model,
+                request.base_url,
+                request.backend,
+                request.reasoning_effort,
+                request.api_key_env,
+                request.extra_headers,
+                &mut config,
+            )
+            .unwrap_err();
+            assert!(error.downcast_ref::<RequestConfigurationError>().is_some());
             assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
+
+        let mut config = NacConfig::default();
+        let error = model_options(
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Value("   ".to_string()),
+            RequestField::Omitted,
+            &mut config,
+        )
+        .unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn headers_prefer_objects_and_accept_only_valid_legacy_object_strings() {
+        let object: CreateSessionRequest =
+            serde_json::from_str(r#"{"extra_headers":{"X-Test":"yes"}}"#).unwrap();
+        let legacy: CreateSessionRequest =
+            serde_json::from_str(r#"{"extra_headers":"{\"X-Test\":\"yes\"}"}"#).unwrap();
+        assert_eq!(object.extra_headers, legacy.extra_headers);
+
+        for invalid in [
+            r#"{"extra_headers":"   "}"#,
+            r#"{"extra_headers":"[1]"}"#,
+            r#"{"extra_headers":{"X-Count":3}}"#,
+        ] {
+            assert!(serde_json::from_str::<CreateSessionRequest>(invalid).is_err());
         }
     }
 
@@ -1542,14 +1746,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
-        assert_eq!(with_host.backend.as_deref(), Some("together-chat"));
         assert_eq!(
-            with_host.api_key_env.as_deref(),
-            Some("TOGETHER_CUSTOM_KEY")
+            with_host.backend,
+            RequestField::Value("together-chat".to_string())
         );
         assert_eq!(
-            with_host.extra_headers.as_deref(),
-            Some(r#"{"X-Launch":"yes"}"#)
+            with_host.api_key_env,
+            RequestField::Value("TOGETHER_CUSTOM_KEY".to_string())
+        );
+        assert_eq!(
+            with_host.extra_headers,
+            RequestField::Value(HeadersRequest(BTreeMap::from([(
+                "X-Launch".to_string(),
+                "yes".to_string()
+            )])))
         );
 
         let alias_host: CreateSessionRequest =
@@ -1571,12 +1781,12 @@ mod tests {
 
         let request = CreateSessionRequest {
             cwd: None,
-            model: None,
-            base_url: None,
-            backend: None,
-            reasoning_effort: None,
-            api_key_env: None,
-            extra_headers: None,
+            model: RequestField::Omitted,
+            base_url: RequestField::Omitted,
+            backend: RequestField::Omitted,
+            reasoning_effort: RequestField::Omitted,
+            api_key_env: RequestField::Omitted,
+            extra_headers: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,
@@ -1599,12 +1809,12 @@ mod tests {
             let error = manager
                 .create_session(CreateSessionRequest {
                     cwd: None,
-                    model: None,
-                    base_url: Some("https://api.arcee.ai".to_string()),
-                    backend: Some(backend.to_string()),
-                    reasoning_effort: None,
-                    api_key_env: None,
-                    extra_headers: None,
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Omitted,
+                    extra_headers: RequestField::Omitted,
                     ssh_host: None,
                     sandbox: SandboxRequest::default(),
                 })
@@ -1641,12 +1851,12 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: None,
-                        base_url: Some("https://api.arcee.ai".to_string()),
-                        backend: Some("arcee-auth".to_string()),
-                        reasoning_effort: None,
-                        api_key_env: None,
-                        extra_headers: None,
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
                     },
                 )
                 .await
@@ -1675,12 +1885,12 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: None,
-                        base_url: Some("https://api.arcee.ai".to_string()),
-                        backend: Some("arcee-auth".to_string()),
-                        reasoning_effort: None,
-                        api_key_env: None,
-                        extra_headers: None,
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
                     },
                 )
                 .await
@@ -1716,6 +1926,289 @@ mod tests {
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
     }
 
+    fn seed_editable_session(root: &std::path::Path, session_id: &str) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::from([("X-Original".to_string(), "yes".to_string())]),
+        );
+        snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
+        snapshot.updated_at = snapshot.created_at.clone();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn create_inherits_overrides_and_null_clears_optional_config() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_tristate");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"[model]
+backend = "openai-responses"
+model = "config-model"
+base_url = "https://api.openai.com/v1"
+reasoning_effort = "medium"
+api_key_env = "OPENAI_API_KEY"
+extra_headers = { X-Config = "yes" }
+"#,
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+
+        let inherited = manager
+            .create_session(CreateSessionRequest::default())
+            .await
+            .expect("omitted fields should inherit config");
+        let inherited_id = inherited.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.model, "config-model");
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(
+            stored.extra_headers,
+            BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
+        );
+
+        let cleared = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("explicit-model".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Null,
+                api_key_env: RequestField::Null,
+                extra_headers: RequestField::Null,
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("explicit values and null optional fields should override config");
+        let cleared_id = cleared.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &cleared_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(stored.model, "explicit-model");
+        assert_eq!(stored.reasoning_effort, None);
+        assert_eq!(stored.api_key_env, None);
+        assert!(stored.extra_headers.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_tristate");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+
+        manager.attach_session("session").await.unwrap();
+        assert!(manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value(" replacement-model ".to_string()),
+                    base_url: RequestField::Value(" https://api.openai.com/v1 ".to_string()),
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                        "X-Replaced".to_string(),
+                        "true".to_string(),
+                    )]))),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+        let replaced = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(replaced.model, "replacement-model");
+        assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
+
+        manager.attach_session("session").await.unwrap();
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                    reasoning_effort: RequestField::Null,
+                    api_key_env: RequestField::Null,
+                    extra_headers: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to stored Arcee auth");
+        let arcee_auth = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(arcee_auth.backend, BackendKind::ArceeAuth);
+        assert_eq!(arcee_auth.reasoning_effort, None);
+        assert_eq!(arcee_auth.api_key_env, None);
+        assert!(arcee_auth.extra_headers.is_empty());
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to Arcee API key mode");
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .backend,
+            BackendKind::ArceeApi
+        );
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to Codex stored OAuth mode");
+        let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
+        assert_eq!(codex.api_key_env, None);
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::new())),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch back to API-key mode");
+        let api_key = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(api_key.backend, BackendKind::OpenAiResponses);
+        assert_eq!(api_key.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert!(api_key.extra_headers.is_empty());
+
+        let before_omitted = api_key;
+        manager
+            .update_session_config("session", UpdateConfigRequest::default())
+            .await
+            .expect("omitted fields preserve snapshot");
+        let after_omitted = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(after_omitted.model, before_omitted.model);
+        assert_eq!(after_omitted.base_url, before_omitted.base_url);
+        assert_eq!(after_omitted.backend, before_omitted.backend);
+        assert_eq!(after_omitted.api_key_env, before_omitted.api_key_env);
+        assert_eq!(after_omitted.extra_headers, before_omitted.extra_headers);
+
+        manager.attach_session("session").await.unwrap();
+        let rebuilt = manager.snapshot("session").await.unwrap();
+        assert_eq!(rebuilt.metadata.model, "replacement-model");
+        assert_eq!(rebuilt.metadata.backend, "openai-responses");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn invalid_patches_preserve_database_and_active_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_rollback");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        manager.attach_session("session").await.unwrap();
+
+        let invalid = [
+            UpdateConfigRequest {
+                model: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                base_url: RequestField::Value("   ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value("MISSING_SERVER_KEY".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "bad header".to_string(),
+                    "value".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+        ];
+
+        for request in invalid {
+            let error = manager
+                .update_session_config("session", request)
+                .await
+                .unwrap_err();
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.model, "model-a");
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
+            assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+            assert_eq!(stored.extra_headers.get("X-Original").unwrap(), "yes");
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[tokio::test]
     async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
         let root = temp_root("removed_backend_update");
@@ -1727,12 +2220,12 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: None,
-                        base_url: Some("https://api.arcee.ai".to_string()),
-                        backend: Some(backend.to_string()),
-                        reasoning_effort: None,
-                        api_key_env: None,
-                        extra_headers: None,
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value(backend.to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
                     },
                 )
                 .await
@@ -1767,12 +2260,12 @@ mod tests {
         let create_error = manager
             .create_session(CreateSessionRequest {
                 cwd: None,
-                model: None,
-                base_url: Some("http://api.arcee.ai/insecure".to_string()),
-                backend: Some("arcee-auth".to_string()),
-                reasoning_effort: None,
-                api_key_env: None,
-                extra_headers: None,
+                model: RequestField::Omitted,
+                base_url: RequestField::Value("http://api.arcee.ai/insecure".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Omitted,
+                api_key_env: RequestField::Omitted,
+                extra_headers: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -1810,12 +2303,12 @@ mod tests {
                 .update_session_config(
                     "update",
                     UpdateConfigRequest {
-                        model: None,
-                        base_url: Some(invalid_base_url.to_string()),
-                        backend: Some("arcee-auth".to_string()),
-                        reasoning_effort: None,
-                        api_key_env: None,
-                        extra_headers: None,
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value(invalid_base_url.to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
                     },
                 )
                 .await
@@ -1837,12 +2330,12 @@ mod tests {
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: None,
-                    base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
-                    backend: Some("arcee-auth".to_string()),
-                    reasoning_effort: None,
-                    api_key_env: None,
-                    extra_headers: None,
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Omitted,
+                    extra_headers: RequestField::Omitted,
                 },
             )
             .await
@@ -1856,12 +2349,12 @@ mod tests {
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: None,
-                    base_url: Some("https://api.arcee.ai/api".to_string()),
-                    backend: Some("arcee-api".to_string()),
-                    reasoning_effort: None,
-                    api_key_env: Some("OPENAI_API_KEY".to_string()),
-                    extra_headers: None,
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Omitted,
                 },
             )
             .await
@@ -1873,12 +2366,12 @@ mod tests {
         let created = manager
             .create_session(CreateSessionRequest {
                 cwd: None,
-                model: Some("test-model".to_string()),
-                base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
-                backend: Some("arcee-api".to_string()),
-                reasoning_effort: None,
-                api_key_env: Some("OPENAI_API_KEY".to_string()),
-                extra_headers: None,
+                model: RequestField::Value("test-model".to_string()),
+                base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
+                backend: RequestField::Value("arcee-api".to_string()),
+                reasoning_effort: RequestField::Omitted,
+                api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                extra_headers: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -1890,7 +2383,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn blank_update_clears_legacy_arcee_api_key_env() {
+    async fn null_update_clears_legacy_arcee_api_key_env() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("clear_arcee_api_key_env");
         let nac_home = root.join("nac-home");
@@ -1916,16 +2409,16 @@ mod tests {
             .update_session_config(
                 "legacy-arcee",
                 UpdateConfigRequest {
-                    model: None,
-                    base_url: None,
-                    backend: None,
-                    reasoning_effort: None,
-                    api_key_env: Some("   ".to_string()),
-                    extra_headers: None,
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Omitted,
+                    backend: RequestField::Omitted,
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Null,
+                    extra_headers: RequestField::Omitted,
                 },
             )
             .await
-            .expect("blank api_key_env should clear the invalid legacy value");
+            .expect("null api_key_env should clear the invalid legacy value");
 
         let stored = sessions::load_session(&root.join("store.db"), "legacy-arcee").unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);

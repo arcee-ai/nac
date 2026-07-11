@@ -21,6 +21,24 @@ fn is_sensitive_arcee_header(name: &str) -> bool {
         .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
 }
 
+fn validate_extra_headers(
+    extra_headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    for (name, value) in extra_headers {
+        reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+            model_configuration_error(format!(
+                "invalid model configuration: extra_headers name '{name}' is invalid: {error}"
+            ))
+        })?;
+        reqwest::header::HeaderValue::from_str(value).map_err(|error| {
+            model_configuration_error(format!(
+                "invalid model configuration: extra_headers value for '{name}' is invalid: {error}"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 fn validate_arcee_extra_headers(
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
@@ -86,6 +104,7 @@ pub fn validate_model_configuration(
     api_key_env: Option<&str>,
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
+    validate_extra_headers(extra_headers)?;
     validate_backend_api_key_env(backend, base_url, api_key_env)?;
     match backend {
         BackendKind::ArceeAuth => {
@@ -139,6 +158,7 @@ pub struct ModelClient {
 
 impl ModelClient {
     pub fn from_effective_settings(settings: EffectiveModelSettings) -> Result<Self> {
+        validate_extra_headers(&settings.extra_headers)?;
         let backend = settings.backend;
         let (api_key, arcee_credential_source) = match backend {
             BackendKind::ArceeAuth => {
