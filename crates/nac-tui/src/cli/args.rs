@@ -5,7 +5,7 @@ use super::*;
     name = "nac",
     about = "agent",
     after_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release",
-    after_long_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release\n\nModel configuration:\n  New sessions require backend, model, and base URL, supplied here or in config.toml.\n  API-key backends use exactly the environment variable named by --api-key-env;\n  no provider key variable is selected implicitly. arcee-auth uses the stored Arcee\n  login and accepts no key selector. arcee-api requires --api-key-env.\n  chatgpt-codex-responses uses stored Codex OAuth and accepts no key selector."
+    after_long_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release\n\nModel configuration:\n  New sessions require backend, model, and base URL, supplied here or in config.toml.\n  API-key backends use exactly the environment variable named by --api-key-env;\n  OPENAI_MODEL and OPENAI_BASE_URL are ignored; no provider key variable is selected.\n  arcee-auth uses the stored Arcee\n  login and accepts no key selector. arcee-api requires --api-key-env.\n  chatgpt-codex-responses uses stored Codex OAuth and accepts no key selector."
 )]
 pub(super) struct RunCli {
     /// Working directory (default: current directory)
@@ -33,7 +33,7 @@ pub(super) struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     pub(super) workspace_cwd: Option<PathBuf>,
 
-    /// Internal local cwd used to resolve nac config for managed workers.
+    /// Internal local cwd used to resolve non-model runtime config for managed workers.
     #[arg(long, hide = true)]
     pub(super) config_cwd: Option<PathBuf>,
 
@@ -768,6 +768,7 @@ mod tests {
             "--extra-headers",
             "required here or in config.toml",
             "exactly the environment variable",
+            "OPENAI_MODEL and OPENAI_BASE_URL are ignored",
             "arcee-auth uses the stored Arcee login",
             "arcee-api requires --api-key-env",
             "stored Codex OAuth",

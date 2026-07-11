@@ -47,7 +47,7 @@ struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
 
-    /// Internal local cwd used to resolve nac config for managed workers.
+    /// Internal local cwd used to resolve non-model runtime config for managed workers.
     #[arg(long, hide = true)]
     config_cwd: Option<PathBuf>,
 
@@ -141,23 +141,23 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
 
 #[derive(clap::Args, Default)]
 struct ModelArgs {
-    /// Backend wire shape to use for model requests.
+    /// Persisted backend snapshot transported to a managed worker.
     #[arg(long, value_enum)]
     backend: Option<BackendArg>,
 
-    /// Reasoning effort to request when supported by the selected backend.
+    /// Persisted reasoning-effort snapshot transported to a managed worker.
     #[arg(long = "effort", value_enum)]
     reasoning_effort: Option<ReasoningEffortArg>,
 
-    /// Internal API base URL override used by managed workers.
+    /// Persisted API base URL snapshot transported to a managed worker.
     #[arg(long, hide = true)]
     api_base_url: Option<String>,
 
-    /// Internal model override used by managed workers.
+    /// Persisted model identifier snapshot transported to a managed worker.
     #[arg(long, hide = true)]
     api_model: Option<String>,
 
-    /// Internal api_key_env override used by managed workers to inherit session config.
+    /// Persisted api_key_env selector snapshot transported to a managed worker.
     #[arg(long = "api-key-env", hide = true)]
     api_key_env: Option<String>,
 

@@ -417,9 +417,9 @@ pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
 
 /// Merge explicit new-session model options over `config.toml` settings.
 ///
-/// This resolution never consults ambient model, base URL, backend, or
-/// provider-key defaults. Credential values are read later when constructing
-/// the model client.
+/// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
+/// ambient backend/model/base selector. Credential values are read only from
+/// the configured `api_key_env` later when constructing the model client.
 pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
