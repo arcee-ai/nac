@@ -1762,7 +1762,7 @@ mod tests {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("arcee_config_status");
         let nac_home = root.join("nac-home");
-        write_arcee_auth(&nac_home, "https://tenant.arcee.ai/login/path");
+        write_arcee_auth(&nac_home, "https://tenant.arcee.ai");
         let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
         let store_path = root.join("store.db");
@@ -1839,7 +1839,7 @@ mod tests {
                 "update",
                 UpdateConfigRequest {
                     model: None,
-                    base_url: Some("https://tenant.arcee.ai/approved/path".to_string()),
+                    base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
                     backend: Some("arcee".to_string()),
                     reasoning_effort: None,
                     api_key_env: None,
@@ -1850,7 +1850,7 @@ mod tests {
             .expect("same-origin approved Arcee configuration should persist");
         let approved = sessions::load_session(&store_path, "update").unwrap();
         assert_eq!(approved.backend, BackendKind::Arcee);
-        assert_eq!(approved.base_url, "https://tenant.arcee.ai/approved/path");
+        assert_eq!(approved.base_url, "https://tenant.arcee.ai/api/v1");
 
         unsafe { std::env::set_var("OPENAI_API_KEY", "custom-server-key") };
         manager

@@ -127,15 +127,96 @@ pub(super) fn validate_stored_base_url(base_url: &str) -> Result<Url> {
             base_url
         ));
     }
+    chat_completions_url(base_url)?;
     Ok(parsed)
+}
+
+fn raw_url_path(base_url: &str) -> &str {
+    let Some((_, after_scheme)) = base_url.split_once("://") else {
+        return "";
+    };
+    let Some(path_start) = after_scheme.find('/') else {
+        return "";
+    };
+    after_scheme[path_start..]
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn validate_unambiguous_path(base_url: &str) -> Result<()> {
+    for segment in raw_url_path(base_url).split('/') {
+        let bytes = segment.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut had_percent_encoding = false;
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != b'%' {
+                decoded.push(bytes[index]);
+                index += 1;
+                continue;
+            }
+
+            had_percent_encoding = true;
+            let high = bytes.get(index + 1).and_then(|byte| hex_value(*byte));
+            let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte));
+            let (Some(high), Some(low)) = (high, low) else {
+                return Err(anyhow!(
+                    "invalid Arcee base URL '{}': path contains malformed percent encoding",
+                    base_url
+                ));
+            };
+            decoded.push((high << 4) | low);
+            index += 3;
+        }
+
+        if decoded == b"." || decoded == b".." {
+            return Err(anyhow!(
+                "invalid Arcee base URL '{}': dot path segments, including percent-encoded forms, are not allowed",
+                base_url
+            ));
+        }
+        if had_percent_encoding
+            && [b"api".as_slice(), b"v1", b"chat", b"completions"]
+                .iter()
+                .any(|control| decoded.eq_ignore_ascii_case(control))
+        {
+            return Err(anyhow!(
+                "invalid Arcee base URL '{}': percent-encoded route-control segments are not allowed; use literal path segments",
+                base_url
+            ));
+        }
+        if had_percent_encoding
+            && decoded
+                .iter()
+                .any(|byte| matches!(byte, b'/' | b'\\' | b'?' | b'#'))
+        {
+            return Err(anyhow!(
+                "invalid Arcee base URL '{}': percent-encoded path delimiters are not allowed",
+                base_url
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Resolves an Arcee/OpenAI-compatible base URL to its chat-completions route.
 ///
-/// Arcee-owned roots use the production `/api/v1/chat/completions` route. Custom
-/// endpoints retain any path prefix and use the conventional `/v1` route. In
-/// either case, versioned and already-complete bases are left unduplicated.
+/// Approved Arcee endpoints accept only the production root, `/api`, `/api/v1`,
+/// or the complete production route and canonicalize all four forms to
+/// `/api/v1/chat/completions`. Custom endpoints retain ordinary path prefixes,
+/// but ambiguous path-control encodings are rejected.
 pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
+    validate_unambiguous_path(base_url)?;
     let (kind, mut parsed) = validate_arcee_base_url(base_url)?;
     let mut path_segments = parsed
         .path_segments()
@@ -146,24 +227,34 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
             )
         })?
         .collect::<Vec<_>>();
-    let mut trailing_empty_segments = 0;
     while path_segments.last() == Some(&"") {
         path_segments.pop();
-        trailing_empty_segments += 1;
+    }
+
+    if kind == ArceeEndpointKind::Approved {
+        let accepted = path_segments.is_empty()
+            || path_segments == ["api"]
+            || path_segments == ["api", "v1"]
+            || path_segments == ["api", "v1", "chat", "completions"];
+        if !accepted {
+            return Err(anyhow!(
+                "invalid approved Arcee inference path '{}': expected /, /api, /api/v1, or /api/v1/chat/completions",
+                parsed.path()
+            ));
+        }
+        parsed.set_path("/api/v1/chat/completions");
+        return Ok(parsed);
     }
 
     let additions: &[&str] = if path_segments.ends_with(&["chat", "completions"]) {
         &[]
     } else if path_segments.last() == Some(&"v1") {
         &["chat", "completions"]
-    } else if kind == ArceeEndpointKind::Approved && path_segments.last() == Some(&"api") {
-        &["v1", "chat", "completions"]
-    } else if kind == ArceeEndpointKind::Approved {
-        &["api", "v1", "chat", "completions"]
     } else {
         &["v1", "chat", "completions"]
     };
 
+    parsed.set_path(&format!("/{}", path_segments.join("/")));
     {
         let mut segments = parsed.path_segments_mut().map_err(|_| {
             anyhow!(
@@ -171,9 +262,7 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
                 base_url
             )
         })?;
-        for _ in 0..trailing_empty_segments {
-            segments.pop_if_empty();
-        }
+        segments.pop_if_empty();
         segments.extend(additions);
     }
 
@@ -1114,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn approved_arcee_chat_completions_url_matrix_uses_api_v1_once() {
+    fn approved_arcee_chat_completions_url_matrix_is_canonical() {
         let cases = [
             (
                 "https://api.arcee.ai",
@@ -1153,12 +1242,8 @@ mod tests {
                 "https://api.arcee.ai/api/v1/chat/completions",
             ),
             (
-                "https://tenant.arcee.ai/prefix/api",
-                "https://tenant.arcee.ai/prefix/api/v1/chat/completions",
-            ),
-            (
-                "https://tenant.arcee.ai/prefix/api/v1",
-                "https://tenant.arcee.ai/prefix/api/v1/chat/completions",
+                "https://tenant.arcee.ai/api/v1/",
+                "https://tenant.arcee.ai/api/v1/chat/completions",
             ),
         ];
 
@@ -1167,6 +1252,28 @@ mod tests {
                 chat_completions_url(base_url).unwrap().as_str(),
                 expected,
                 "{base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn approved_arcee_chat_completions_url_rejects_noncanonical_paths() {
+        for base_url in [
+            "https://api.arcee.ai/v1",
+            "https://api.arcee.ai/v1/",
+            "https://api.arcee.ai/other",
+            "https://api.arcee.ai/other/api",
+            "https://api.arcee.ai/other/api/v1",
+            "https://api.arcee.ai/other/chat/completions",
+            "https://api.arcee.ai/v1/chat/completions",
+            "https://tenant.arcee.ai/prefix/api/v1",
+        ] {
+            let error = chat_completions_url(base_url)
+                .expect_err("approved noncanonical path must be rejected")
+                .to_string();
+            assert!(
+                error.contains("invalid approved Arcee inference path"),
+                "{base_url}: {error}"
             );
         }
     }
@@ -1202,6 +1309,10 @@ mod tests {
                 "https://gateway.example.com/prefix/v1/chat/completions/",
                 "https://gateway.example.com/prefix/v1/chat/completions",
             ),
+            (
+                "https://gateway.example.com/tenant%20one",
+                "https://gateway.example.com/tenant%20one/v1/chat/completions",
+            ),
         ];
 
         for (base_url, expected) in cases {
@@ -1210,6 +1321,58 @@ mod tests {
                 expected,
                 "{base_url}"
             );
+        }
+    }
+
+    #[test]
+    fn chat_completions_url_rejects_literal_and_encoded_dot_segments() {
+        for base_url in [
+            "https://gateway.example.com/prefix/../tenant",
+            "https://gateway.example.com/prefix/./tenant",
+            "https://gateway.example.com/prefix/%2e%2e/tenant",
+            "https://gateway.example.com/prefix/%2E/tenant",
+            "https://gateway.example.com/prefix/.%2e/tenant",
+            "https://api.arcee.ai/api/%2e%2e/api/v1",
+        ] {
+            let error = chat_completions_url(base_url)
+                .expect_err("ambiguous dot path must be rejected")
+                .to_string();
+            assert!(error.contains("dot path segments"), "{base_url}: {error}");
+        }
+    }
+
+    #[test]
+    fn chat_completions_url_rejects_encoded_route_controls_and_delimiters() {
+        let cases = [
+            ("https://gateway.example.com/%76%31", "route-control"),
+            (
+                "https://gateway.example.com/%63hat/completions",
+                "route-control",
+            ),
+            (
+                "https://gateway.example.com/v1/%63ompletions",
+                "route-control",
+            ),
+            ("https://api.arcee.ai/%61pi/v1", "route-control"),
+            (
+                "https://gateway.example.com/prefix%2Ftenant",
+                "path delimiters",
+            ),
+            (
+                "https://gateway.example.com/prefix%5ctenant",
+                "path delimiters",
+            ),
+            (
+                "https://gateway.example.com/prefix%",
+                "malformed percent encoding",
+            ),
+        ];
+
+        for (base_url, expected) in cases {
+            let error = chat_completions_url(base_url)
+                .expect_err("encoded path control must be rejected")
+                .to_string();
+            assert!(error.contains(expected), "{base_url}: {error}");
         }
     }
 

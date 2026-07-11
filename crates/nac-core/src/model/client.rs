@@ -49,6 +49,7 @@ fn resolve_arcee_credentials(
             ))
         }
         Some(base_url) => {
+            arcee::chat_completions_url(base_url).map_err(classify_model_configuration_error)?;
             let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)
                 .map_err(classify_model_configuration_error)?;
             match kind {
@@ -711,7 +712,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn arcee_production_form_and_custom_routes_are_exact_on_wire() {
+    async fn custom_arcee_routes_are_exact_on_wire() {
         let cases = [
             ("/api", "/api/v1/chat/completions"),
             ("/custom/prefix", "/custom/prefix/v1/chat/completions"),

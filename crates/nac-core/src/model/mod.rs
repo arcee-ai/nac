@@ -410,10 +410,10 @@ mod tests {
     #[test]
     fn explicit_arcee_backend_binds_stored_key_to_its_origin() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai/login/path");
+        let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai");
         let _env = IsolatedModelEnv::new("explicit-arcee", Some(&auth), None, None);
 
-        let requested_base = "https://stored.arcee.ai:443/custom/path/";
+        let requested_base = "https://stored.arcee.ai:443/api/v1/";
         let from_base = ModelClient::from_env_with_overrides(ClientOverrides {
             base_url: Some(requested_base.to_string()),
             ..ClientOverrides::default()
@@ -423,7 +423,7 @@ mod tests {
         assert_eq!(from_base.base_url(), requested_base);
 
         let mismatch = ModelClient::from_env_with_overrides(ClientOverrides {
-            base_url: Some("https://api.internal.arcee.ai/custom".to_string()),
+            base_url: Some("https://api.internal.arcee.ai/api".to_string()),
             ..ClientOverrides::default()
         })
         .err()
@@ -442,10 +442,7 @@ mod tests {
         })
         .expect("an explicit Arcee backend should use its stored base URL");
         assert_eq!(from_backend.backend(), BackendKind::Arcee);
-        assert_eq!(
-            from_backend.base_url(),
-            "https://stored.arcee.ai/login/path"
-        );
+        assert_eq!(from_backend.base_url(), "https://stored.arcee.ai");
     }
 
     #[test]
