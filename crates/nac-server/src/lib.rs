@@ -26,7 +26,10 @@ use nac_core::{
         validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
         ReasoningEffort,
     },
-    runtime::{self, ModelOptions, NacConfig, RunOptions, SandboxOptions, StoreOptions},
+    runtime::{
+        self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
+        StoreOptions,
+    },
     session_service::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
         SessionService, SessionSubmitError,
@@ -494,7 +497,7 @@ impl SessionManager {
             };
             (local_cwd.clone(), local_cwd)
         };
-        let mut config = NacConfig::load_from_cwd(&config_cwd)?;
+        let config = NacConfig::load_from_cwd(&config_cwd)?;
         let model = model_options(
             request.model,
             request.base_url,
@@ -502,7 +505,6 @@ impl SessionManager {
             request.reasoning_effort,
             request.api_key_env,
             request.extra_headers,
-            &mut config,
         )?;
         let run_config = runtime::build_run_config(
             RunOptions {
@@ -1062,32 +1064,25 @@ fn model_options(
     reasoning_effort: RequestField<String>,
     api_key_env: RequestField<String>,
     extra_headers: RequestField<HeadersRequest>,
-    config: &mut NacConfig,
 ) -> Result<ModelOptions> {
     let backend = required_create_string(backend, "backend")?
         .map(|value| parse_request_enum::<BackendKind>(&value, "backend"))
         .transpose()?;
     let reasoning_effort = match reasoning_effort {
-        RequestField::Omitted => None,
-        RequestField::Null => {
-            config.model.reasoning_effort = None;
-            None
-        }
+        RequestField::Omitted => OptionalModelOption::Inherit,
+        RequestField::Null => OptionalModelOption::Clear,
         RequestField::Value(value) => {
             let value = nonblank_request_string(value, "reasoning_effort")?;
-            Some(parse_request_enum::<ReasoningEffort>(
+            OptionalModelOption::Value(parse_request_enum::<ReasoningEffort>(
                 &value,
                 "reasoning_effort",
             )?)
         }
     };
     let api_key_env = match api_key_env {
-        RequestField::Omitted => None,
-        RequestField::Null => {
-            config.model.api_key_env = None;
-            None
-        }
-        RequestField::Value(value) => Some(value),
+        RequestField::Omitted => OptionalModelOption::Inherit,
+        RequestField::Null => OptionalModelOption::Clear,
+        RequestField::Value(value) => OptionalModelOption::Value(value),
     };
     let extra_headers = match extra_headers {
         RequestField::Omitted => None,
@@ -1438,11 +1433,10 @@ mod tests {
             RequestField::Omitted,
             RequestField::Omitted,
             RequestField::Omitted,
-            &mut config,
         )
         .unwrap();
-        assert_eq!(inherited.reasoning_effort, None);
-        assert_eq!(inherited.api_key_env, None);
+        assert_eq!(inherited.reasoning_effort, OptionalModelOption::Inherit);
+        assert_eq!(inherited.api_key_env, OptionalModelOption::Inherit);
         assert_eq!(inherited.extra_headers, None);
         assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
@@ -1453,7 +1447,6 @@ mod tests {
             RequestField::Value("xhigh".to_string()),
             RequestField::Null,
             RequestField::Null,
-            &mut config,
         )
         .unwrap();
         assert_eq!(explicit.api_model.as_deref(), Some("model-a"));
@@ -1462,9 +1455,13 @@ mod tests {
             Some("https://example.com/v1")
         );
         assert_eq!(explicit.backend, Some(BackendKind::OpenAiResponses));
-        assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(
+            explicit.reasoning_effort,
+            OptionalModelOption::Value(ReasoningEffort::Xhigh)
+        );
+        assert_eq!(explicit.api_key_env, OptionalModelOption::Clear);
         assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
-        assert_eq!(config.model.api_key_env, None);
+        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
         let raw_selector = " SELECTED_KEY ";
         let selected = model_options(
@@ -1474,10 +1471,12 @@ mod tests {
             RequestField::Omitted,
             RequestField::Value(raw_selector.to_string()),
             RequestField::Omitted,
-            &mut config,
         )
         .unwrap();
-        assert_eq!(selected.api_key_env.as_deref(), Some(raw_selector));
+        assert_eq!(
+            selected.api_key_env,
+            OptionalModelOption::Value(raw_selector.to_string())
+        );
     }
 
     #[test]
@@ -1485,7 +1484,6 @@ mod tests {
         for field in ["model", "base_url", "backend"] {
             let json = format!(r#"{{"{field}":null}}"#);
             let request: CreateSessionRequest = serde_json::from_str(&json).unwrap();
-            let mut config = NacConfig::default();
             let error = model_options(
                 request.model,
                 request.base_url,
@@ -1493,7 +1491,6 @@ mod tests {
                 request.reasoning_effort,
                 request.api_key_env,
                 request.extra_headers,
-                &mut config,
             )
             .unwrap_err();
             assert!(error.downcast_ref::<RequestConfigurationError>().is_some());

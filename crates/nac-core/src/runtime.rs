@@ -101,13 +101,41 @@ pub struct StoreOptions {
     pub store_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OptionalModelOption<T> {
+    /// No CLI/API override was supplied; inherit `config.toml`.
+    #[default]
+    Inherit,
+    /// Use the explicitly supplied value.
+    Value(T),
+    /// Explicitly select absence instead of inheriting a configured value.
+    Clear,
+}
+
+impl<T: Clone> OptionalModelOption<T> {
+    fn resolve(&self, configured: Option<T>) -> Option<T> {
+        match self {
+            Self::Inherit => configured,
+            Self::Value(value) => Some(value.clone()),
+            Self::Clear => None,
+        }
+    }
+
+    fn snapshot_value(&self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value.clone()),
+            Self::Inherit | Self::Clear => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ModelOptions {
     pub backend: Option<BackendKind>,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning_effort: OptionalModelOption<ReasoningEffort>,
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
-    pub api_key_env: Option<String>,
+    pub api_key_env: OptionalModelOption<String>,
     pub extra_headers: Option<BTreeMap<String, String>>,
 }
 
@@ -363,11 +391,10 @@ pub fn effective_model_settings(
             .api_base_url
             .clone()
             .or_else(|| config.model.base_url.clone()),
-        model.reasoning_effort.or(config.model.reasoning_effort),
         model
-            .api_key_env
-            .clone()
-            .or_else(|| configured_api_key_env(config)),
+            .reasoning_effort
+            .resolve(config.model.reasoning_effort),
+        model.api_key_env.resolve(configured_api_key_env(config)),
         model
             .extra_headers
             .clone()
@@ -380,8 +407,8 @@ fn managed_worker_effective_model_settings(model: &ModelOptions) -> Result<Effec
         model.backend,
         model.api_model.clone(),
         model.api_base_url.clone(),
-        model.reasoning_effort,
-        model.api_key_env.clone(),
+        model.reasoning_effort.snapshot_value(),
+        model.api_key_env.snapshot_value(),
         model.extra_headers.clone().unwrap_or_default(),
     )
 }
@@ -1064,7 +1091,7 @@ mod tests {
             backend: Some(BackendKind::OpenAiResponses),
             api_base_url: Some(" https://api.openai.com/v1 ".to_string()),
             api_model: Some(" test-model ".to_string()),
-            api_key_env: Some("OPENAI_API_KEY".to_string()),
+            api_key_env: OptionalModelOption::Value("OPENAI_API_KEY".to_string()),
             ..ModelOptions::default()
         }
     }
@@ -1134,10 +1161,10 @@ mod tests {
         let explicit = effective_model_settings(
             &ModelOptions {
                 backend: Some(BackendKind::TogetherChat),
-                reasoning_effort: Some(ReasoningEffort::Low),
+                reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Low),
                 api_base_url: Some(" https://explicit.example/v1 ".to_string()),
                 api_model: Some(" explicit-model ".to_string()),
-                api_key_env: Some("EXPLICIT_API_KEY".to_string()),
+                api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
                 extra_headers: Some(headers.clone()),
             },
             &config,
@@ -1149,6 +1176,40 @@ mod tests {
         assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(explicit.api_key_env.as_deref(), Some("EXPLICIT_API_KEY"));
         assert_eq!(explicit.extra_headers, headers);
+    }
+
+    #[test]
+    fn optional_model_overrides_distinguish_inherit_value_and_clear() {
+        let mut config = complete_model_config();
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+
+        let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
+
+        let valued = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
+                reasoning_effort: OptionalModelOption::Value(ReasoningEffort::None),
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(valued.api_key_env.as_deref(), Some("CLI_API_KEY"));
+        assert_eq!(valued.reasoning_effort, Some(ReasoningEffort::None));
+
+        let cleared = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Clear,
+                reasoning_effort: OptionalModelOption::Clear,
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(cleared.api_key_env, None);
+        assert_eq!(cleared.reasoning_effort, None);
     }
 
     #[test]
@@ -1216,7 +1277,7 @@ mod tests {
             backend: Some(BackendKind::TogetherChat),
             api_base_url: Some("https://worker.example/v1".to_string()),
             api_model: Some("worker-model".to_string()),
-            api_key_env: Some("SESSION_API_KEY".to_string()),
+            api_key_env: OptionalModelOption::Value("SESSION_API_KEY".to_string()),
             extra_headers: Some(BTreeMap::new()),
             ..ModelOptions::default()
         })
@@ -1230,7 +1291,7 @@ mod tests {
             backend: Some(BackendKind::TogetherChat),
             api_base_url: Some("https://worker.example/v1".to_string()),
             api_model: Some("worker-model".to_string()),
-            api_key_env: Some(raw_selector.to_string()),
+            api_key_env: OptionalModelOption::Value(raw_selector.to_string()),
             extra_headers: Some(BTreeMap::new()),
             ..ModelOptions::default()
         })
@@ -1720,7 +1781,7 @@ url = "https://mcp.context7.com/mcp"
                     backend: Some(BackendKind::ArceeAuth),
                     api_base_url: Some("https://api.arcee.ai".to_string()),
                     api_model: Some("model".to_string()),
-                    api_key_env: Some("DELEGATED_ARCEE_KEY".to_string()),
+                    api_key_env: OptionalModelOption::Value("DELEGATED_ARCEE_KEY".to_string()),
                     ..ModelOptions::default()
                 },
                 sandbox: SandboxOptions::default(),
@@ -1869,10 +1930,10 @@ url = "https://mcp.context7.com/mcp"
                 },
                 model: ModelOptions {
                     backend: Some(BackendKind::OpenAiResponses),
-                    reasoning_effort: Some(ReasoningEffort::Xhigh),
+                    reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Xhigh),
                     api_base_url: Some("https://snapshot.example/v1".to_string()),
                     api_model: Some("snapshot-model".to_string()),
-                    api_key_env: Some(key_name.to_string()),
+                    api_key_env: OptionalModelOption::Value(key_name.to_string()),
                     extra_headers: Some(headers.clone()),
                 },
                 sandbox: SandboxOptions::default(),

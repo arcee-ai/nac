@@ -157,17 +157,30 @@ pub(super) struct ModelArgs {
     ///
     /// No provider variable is chosen implicitly. Required by API-key backends,
     /// including arcee-api; rejected by arcee-auth and
-    /// chatgpt-codex-responses, which use stored credentials.
+    /// chatgpt-codex-responses, which use stored credentials. Omit both selector
+    /// flags to inherit config.toml, or use --clear-api-key-env to select none.
     #[arg(
         long = "api-key-env",
         value_name = "ENV_VAR",
-        value_parser = nonblank_api_key_env_value
+        value_parser = nonblank_api_key_env_value,
+        conflicts_with = "clear_api_key_env"
     )]
     pub(super) api_key_env: Option<String>,
 
+    /// Clear a configured API-key environment selector instead of inheriting it
+    #[arg(long, conflicts_with = "api_key_env")]
+    pub(super) clear_api_key_env: bool,
+
     /// Reasoning effort to request when supported by the selected backend
-    #[arg(long = "effort", value_enum)]
+    ///
+    /// Omit both effort flags to inherit config.toml. --effort none is a
+    /// concrete protocol value; use --clear-effort to select no effort setting.
+    #[arg(long = "effort", value_enum, conflicts_with = "clear_effort")]
     pub(super) reasoning_effort: Option<ReasoningEffortArg>,
+
+    /// Clear configured reasoning effort instead of inheriting it
+    #[arg(long, conflicts_with = "reasoning_effort")]
+    pub(super) clear_effort: bool,
 
     /// Extra request headers as a JSON object with string values
     ///
@@ -471,6 +484,123 @@ mod tests {
     }
 
     #[test]
+    fn public_optional_model_options_support_inherit_value_and_clear() {
+        let mut config = runtime::NacConfig::default();
+        config.model.backend = Some(BackendKind::OpenAiResponses);
+        config.model.model = Some("config-model".to_string());
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+
+        let inherited = RunCli::try_parse_from(["nac"]).unwrap();
+        let inherited =
+            runtime::effective_model_settings(&model_options(inherited.model), &config).unwrap();
+        let expected_inherited = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::OpenAiResponses,
+            "config-model".to_string(),
+            "https://config.example/v1".to_string(),
+            Some(ReasoningEffort::High),
+            Some("CONFIG_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(inherited, expected_inherited);
+
+        let valued =
+            RunCli::try_parse_from(["nac", "--api-key-env", "CLI_API_KEY", "--effort", "none"])
+                .unwrap();
+        let valued =
+            runtime::effective_model_settings(&model_options(valued.model), &config).unwrap();
+        let expected_valued = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::OpenAiResponses,
+            "config-model".to_string(),
+            "https://config.example/v1".to_string(),
+            Some(ReasoningEffort::None),
+            Some("CLI_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            valued, expected_valued,
+            "--effort none is a concrete protocol value, not a clear operation"
+        );
+
+        let cleared =
+            RunCli::try_parse_from(["nac", "--clear-api-key-env", "--clear-effort"]).unwrap();
+        let cleared =
+            runtime::effective_model_settings(&model_options(cleared.model), &config).unwrap();
+        let expected_cleared = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::OpenAiResponses,
+            "config-model".to_string(),
+            "https://config.example/v1".to_string(),
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(cleared, expected_cleared);
+    }
+
+    #[test]
+    fn clear_flags_conflict_with_concrete_value_flags() {
+        for args in [
+            vec!["nac", "--api-key-env", "CLI_API_KEY", "--clear-api-key-env"],
+            vec!["nac", "--effort", "none", "--clear-effort"],
+        ] {
+            let error = RunCli::try_parse_from(args)
+                .err()
+                .expect("value and clear forms must conflict")
+                .to_string();
+            assert!(error.contains("cannot be used with"), "{error}");
+        }
+    }
+
+    #[test]
+    fn clear_flags_allow_switching_configured_api_backend_to_managed_backends() {
+        let mut config = runtime::NacConfig::default();
+        config.model.backend = Some(BackendKind::OpenAiResponses);
+        config.model.model = Some("config-model".to_string());
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+
+        for (backend, expected_backend) in [
+            ("arcee-auth", BackendKind::ArceeAuth),
+            (
+                "chatgpt-codex-responses",
+                BackendKind::ChatGptCodexResponses,
+            ),
+        ] {
+            let cli = RunCli::try_parse_from([
+                "nac",
+                "--backend",
+                backend,
+                "--clear-api-key-env",
+                "--clear-effort",
+            ])
+            .unwrap();
+            let settings =
+                runtime::effective_model_settings(&model_options(cli.model), &config).unwrap();
+            let expected = nac_core::model::EffectiveModelSettings::new(
+                expected_backend,
+                "config-model".to_string(),
+                "https://config.example/v1".to_string(),
+                None,
+                None,
+                std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+            assert_eq!(settings, expected, "backend {backend}");
+            nac_core::model::validate_backend_api_key_env(
+                expected_backend,
+                Some("https://config.example/v1"),
+                None,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn public_model_options_resolve_each_credential_mode() {
         for (backend, selector) in [
             ("openai-responses", Some("OPENAI_SELECTED_KEY")),
@@ -632,13 +762,17 @@ mod tests {
             "--model",
             "--base-url",
             "--api-key-env",
+            "--clear-api-key-env",
             "--effort",
+            "--clear-effort",
             "--extra-headers",
             "required here or in config.toml",
             "exactly the environment variable",
             "arcee-auth uses the stored Arcee login",
             "arcee-api requires --api-key-env",
             "stored Codex OAuth",
+            "concrete protocol value",
+            "instead of inheriting",
         ] {
             assert!(help.contains(expected), "missing {expected:?} in:\n{help}");
         }
@@ -672,6 +806,8 @@ mod tests {
             Some("https://snapshot.example/v1")
         );
         assert_eq!(cli.model.api_key_env.as_deref(), Some("SNAPSHOT_API_KEY"));
+        assert!(!cli.model.clear_api_key_env);
+        assert!(!cli.model.clear_effort);
         assert_eq!(
             cli.model.extra_headers,
             Some(std::collections::BTreeMap::new())

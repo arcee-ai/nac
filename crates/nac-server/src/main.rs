@@ -10,8 +10,8 @@ use clap::Parser;
 use nac_core::{
     model::{BackendKind, ReasoningEffort},
     runtime::{
-        self, ManagedWorkerOptions, ModelOptions, SandboxOptions, StoreOptions,
-        WorkerDispatchOptions,
+        self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
+        StoreOptions, WorkerDispatchOptions,
     },
 };
 use nac_server::{serve, ServerOptions, SessionManager};
@@ -327,10 +327,19 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         },
         model: ModelOptions {
             backend: cli.model.backend.map(Into::into),
-            reasoning_effort: cli.model.reasoning_effort.map(Into::into),
+            reasoning_effort: cli
+                .model
+                .reasoning_effort
+                .map(Into::into)
+                .map(OptionalModelOption::Value)
+                .unwrap_or_default(),
             api_base_url: cli.model.api_base_url,
             api_model: cli.model.api_model,
-            api_key_env: cli.model.api_key_env,
+            api_key_env: cli
+                .model
+                .api_key_env
+                .map(OptionalModelOption::Value)
+                .unwrap_or_default(),
             extra_headers: cli.model.extra_headers,
         },
         sandbox: SandboxOptions {

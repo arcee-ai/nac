@@ -10,8 +10,8 @@ use nac_core::model::{
     ReasoningEffort,
 };
 use nac_core::runtime::{
-    self, run_managed_worker, ManagedWorkerOptions, ModelOptions, ResumeOptions, RunOptions,
-    RunState, SandboxOptions, StoreOptions, WorkerDispatchOptions,
+    self, run_managed_worker, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
+    ResumeOptions, RunOptions, RunState, SandboxOptions, StoreOptions, WorkerDispatchOptions,
 };
 use nac_core::session_service::SessionService;
 use nac_core::upgrade::{run_upgrade, UpgradeRequest};
@@ -280,12 +280,27 @@ fn store_options(cli: StoreArgs) -> StoreOptions {
 }
 
 fn model_options(cli: ModelArgs) -> ModelOptions {
+    let reasoning_effort = if cli.clear_effort {
+        OptionalModelOption::Clear
+    } else {
+        cli.reasoning_effort
+            .map(Into::into)
+            .map(OptionalModelOption::Value)
+            .unwrap_or_default()
+    };
+    let api_key_env = if cli.clear_api_key_env {
+        OptionalModelOption::Clear
+    } else {
+        cli.api_key_env
+            .map(OptionalModelOption::Value)
+            .unwrap_or_default()
+    };
     ModelOptions {
         backend: cli.backend.map(Into::into),
-        reasoning_effort: cli.reasoning_effort.map(Into::into),
+        reasoning_effort,
         api_base_url: cli.api_base_url,
         api_model: cli.api_model,
-        api_key_env: cli.api_key_env,
+        api_key_env,
         extra_headers: cli.extra_headers,
     }
 }
