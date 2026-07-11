@@ -17,12 +17,23 @@ mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    reorder_sessions, save_session, update_session_presentation,
+    load_session_model_config, reorder_sessions, save_session, update_session_presentation,
 };
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
 use summary::*;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionModelConfig {
+    pub session_id: String,
+    pub model: String,
+    pub base_url: String,
+    pub backend: BackendKind,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub api_key_env: Option<String>,
+    pub extra_headers: BTreeMap<String, String>,
+}
 
 /// In-memory session state; persistence uses the store path passed by the caller.
 #[derive(Debug, Clone)]

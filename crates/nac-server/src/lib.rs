@@ -16,7 +16,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
     },
-    routing::{get, patch, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use nac_core::{
@@ -591,6 +591,10 @@ impl SessionManager {
         Ok(service)
     }
 
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::SessionModelConfig> {
+        sessions::load_session_model_config(&self.inner.store_path, session_id)
+    }
+
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
         self.attach_session(session_id)
             .await?
@@ -842,7 +846,7 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route(
             "/sessions/{session_id}/config",
-            patch(update_config_handler),
+            get(session_config_handler).patch(update_config_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
@@ -1064,6 +1068,13 @@ async fn delete_session_handler(
 ) -> std::result::Result<StatusCode, ApiError> {
     manager.delete_session(&session_id).await?;
     Ok(StatusCode::OK)
+}
+
+async fn session_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<sessions::SessionModelConfig>, ApiError> {
+    Ok(Json(manager.session_config(&session_id)?))
 }
 
 async fn update_config_handler(
@@ -2012,6 +2023,154 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionally_repairable() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("repair_incomplete_settings");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
+        let store_path = root.join("store.db");
+
+        seed_editable_session(&root, "complete");
+        seed_session(&root, "missing-selector", "2026-01-02 00:00:00.000000000");
+        seed_session(
+            &root,
+            "missing-environment-value",
+            "2026-01-03 00:00:00.000000000",
+        );
+        let mut missing_value =
+            sessions::load_session(&store_path, "missing-environment-value").unwrap();
+        missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
+        sessions::save_session(&store_path, &missing_value).unwrap();
+
+        seed_session(
+            &root,
+            "unavailable-managed-auth",
+            "2026-01-04 00:00:00.000000000",
+        );
+        let mut unavailable_auth =
+            sessions::load_session(&store_path, "unavailable-managed-auth").unwrap();
+        unavailable_auth.backend = BackendKind::ArceeAuth;
+        unavailable_auth.base_url = "https://api.arcee.ai".to_string();
+        unavailable_auth.api_key_env = None;
+        sessions::save_session(&store_path, &unavailable_auth).unwrap();
+
+        let manager = test_manager(&root);
+        let Json(endpoint_config) = session_config_handler(
+            State(manager.clone()),
+            AxumPath("missing-selector".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(endpoint_config.session_id, "missing-selector");
+        assert!(!serde_json::to_string(&endpoint_config)
+            .unwrap()
+            .contains("server-repair-key"));
+
+        let listed = manager.list_sessions(false).await.unwrap();
+        let listed_ids = listed
+            .iter()
+            .map(|entry| entry.summary.session_id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(listed_ids.len(), 4);
+        for expected in [
+            "complete",
+            "missing-selector",
+            "missing-environment-value",
+            "unavailable-managed-auth",
+        ] {
+            assert!(
+                listed_ids.contains(expected),
+                "missing listed session {expected}"
+            );
+        }
+
+        let missing_selector = manager.session_config("missing-selector").unwrap();
+        assert_eq!(missing_selector.backend, BackendKind::OpenAiResponses);
+        assert_eq!(missing_selector.api_key_env, None);
+        let missing_environment = manager.session_config("missing-environment-value").unwrap();
+        assert_eq!(
+            missing_environment.api_key_env.as_deref(),
+            Some("MISSING_SERVER_REPAIR_KEY")
+        );
+        let unavailable_managed = manager.session_config("unavailable-managed-auth").unwrap();
+        assert_eq!(unavailable_managed.backend, BackendKind::ArceeAuth);
+        assert_eq!(unavailable_managed.api_key_env, None);
+        assert!(
+            manager.inner.active_sessions.read().await.is_empty(),
+            "reading persisted settings must not attach any session"
+        );
+
+        for session_id in [
+            "missing-selector",
+            "missing-environment-value",
+            "unavailable-managed-auth",
+        ] {
+            let error = manager.snapshot(session_id).await.unwrap_err();
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
+        assert!(manager.inner.active_sessions.read().await.is_empty());
+
+        for session_id in ["missing-selector", "missing-environment-value"] {
+            manager
+                .update_session_config(
+                    session_id,
+                    UpdateConfigRequest {
+                        api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .expect("API-key session should be repairable with an available selector");
+            assert_eq!(
+                manager
+                    .session_config(session_id)
+                    .unwrap()
+                    .api_key_env
+                    .as_deref(),
+                Some("OPENAI_API_KEY")
+            );
+        }
+
+        manager
+            .update_session_config(
+                "unavailable-managed-auth",
+                UpdateConfigRequest {
+                    base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("unavailable managed auth should be repairable by switching credential mode");
+        let repaired_auth = manager.session_config("unavailable-managed-auth").unwrap();
+        assert_eq!(repaired_auth.backend, BackendKind::ArceeApi);
+        assert_eq!(repaired_auth.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+
+        let before_failed_repair = manager.session_config("missing-selector").unwrap();
+        let error = manager
+            .update_session_config(
+                "missing-selector",
+                UpdateConfigRequest {
+                    api_key_env: RequestField::Value("MISSING_SERVER_REPAIR_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            manager.session_config("missing-selector").unwrap(),
+            before_failed_repair,
+            "failed repair must leave persisted settings unchanged"
+        );
+
+        let listed_after_repairs = manager.list_sessions(false).await.unwrap();
+        assert_eq!(listed_after_repairs.len(), 4);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     async fn point_session_at_hanging_endpoint(

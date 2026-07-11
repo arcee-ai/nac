@@ -51,6 +51,46 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
+pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<SessionModelConfig> {
+    let conn = crate::store::open_connection(path)?;
+    let row = conn
+        .query_row(
+            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json
+             FROM sessions
+             WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((session_id, model, base_url, backend, reasoning_effort, api_key_env, headers_json)) =
+        row
+    else {
+        return Err(anyhow!("session '{}' was not found", session_id));
+    };
+    let extra_headers = parse_extra_headers(headers_json.as_deref())?;
+
+    Ok(SessionModelConfig {
+        session_id,
+        model,
+        base_url,
+        backend: parse_backend(backend)?,
+        reasoning_effort: parse_reasoning_effort(reasoning_effort)?,
+        api_key_env,
+        extra_headers,
+    })
+}
+
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
@@ -596,16 +636,7 @@ impl SessionRow {
             .transpose()?;
         let base_url = self.base_url;
         let backend = parse_backend(self.backend)?;
-        let extra_headers = self
-            .extra_headers_json
-            .as_deref()
-            .filter(|json| !json.is_empty())
-            .map(|json| {
-                serde_json::from_str::<BTreeMap<String, String>>(json)
-                    .context("failed to parse stored session extra_headers")
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
         let token_usages = self
             .token_usages_json
             .as_deref()
@@ -636,6 +667,16 @@ impl SessionRow {
             updated_at: self.updated_at,
         })
     }
+}
+
+fn parse_extra_headers(raw: Option<&str>) -> Result<BTreeMap<String, String>> {
+    raw.filter(|json| !json.is_empty())
+        .map(|json| {
+            serde_json::from_str::<BTreeMap<String, String>>(json)
+                .context("failed to parse stored session extra_headers")
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 fn parse_backend(raw: Option<String>) -> Result<BackendKind> {

@@ -719,28 +719,45 @@ function setDeleteStatus(message, error) {
   el.deleteStatus.classList.toggle("error", Boolean(error));
 }
 
-function showSettingsOverlay() {
+async function settingsMetadataForSession(sessionId, snapshot, fetchConfig = apiGet) {
+  if (snapshot?.metadata) return snapshot.metadata;
+  return fetchConfig(`/sessions/${encodeURIComponent(sessionId)}/config`);
+}
+
+function populateSettingsForm(metadata) {
+  el.settingsModel.value = metadata.model || "";
+  el.settingsBaseUrl.value = metadata.base_url || "";
+  el.settingsBackend.value = metadata.backend || "";
+  el.settingsEffort.value = metadata.reasoning_effort || "__clear__";
+  const hasApiKeyEnv = metadata.api_key_env !== null && metadata.api_key_env !== undefined;
+  el.settingsCredentialMode.value = hasApiKeyEnv ? "variable" : "none";
+  el.settingsApiKeyEnv.value = metadata.api_key_env ?? "";
+  el.settingsExtraHeaders.value = metadata.extra_headers
+    && Object.keys(metadata.extra_headers).length > 0
+    ? JSON.stringify(metadata.extra_headers, null, 2)
+    : "";
+  state.settingsInitial = settingsValuesFromMetadata(metadata);
+  renderCredentialControls();
+}
+
+async function showSettingsOverlay() {
   const sessionId = state.selectedId;
   if (!sessionId) return;
-  const snapshot = state.snapshots.get(sessionId);
-  const metadata = snapshot?.metadata;
-  if (metadata) {
-    el.settingsModel.value = metadata.model || "";
-    el.settingsBaseUrl.value = metadata.base_url || "";
-    el.settingsBackend.value = metadata.backend || "";
-    el.settingsEffort.value = metadata.reasoning_effort || "__clear__";
-    const hasApiKeyEnv = metadata.api_key_env !== null && metadata.api_key_env !== undefined;
-    el.settingsCredentialMode.value = hasApiKeyEnv ? "variable" : "none";
-    el.settingsApiKeyEnv.value = metadata.api_key_env ?? "";
-    el.settingsExtraHeaders.value = metadata.extra_headers
-      && Object.keys(metadata.extra_headers).length > 0
-      ? JSON.stringify(metadata.extra_headers, null, 2)
-      : "";
-    state.settingsInitial = settingsValuesFromMetadata(metadata);
-  }
-  renderCredentialControls();
-  setSettingsStatus("", false);
+  state.settingsInitial = null;
   el.settingsOverlay.hidden = false;
+  setSettingsStatus("loading persisted settings", false);
+
+  try {
+    const snapshot = state.snapshots.get(sessionId);
+    const metadata = await settingsMetadataForSession(sessionId, snapshot);
+    if (state.selectedId !== sessionId || el.settingsOverlay.hidden) return;
+    populateSettingsForm(metadata);
+    setSettingsStatus(snapshot?.metadata ? "" : "Loaded persisted settings for repair", false);
+  } catch (error) {
+    if (state.selectedId === sessionId && !el.settingsOverlay.hidden) {
+      setSettingsStatus(error.message, true);
+    }
+  }
 }
 
 function hideSettingsOverlay() {
@@ -2263,7 +2280,9 @@ function renderInspector() {
   if (!sessionId || !snapshot) {
     el.inspectorTitle.textContent = selectedTitle || "No session selected";
     el.inspectorTitle.title = sessionId || "";
-    el.inspectorMeta.textContent = sessionId ? "Loading snapshot." : "Launch or select a session.";
+    el.inspectorMeta.textContent = sessionId
+      ? "Snapshot unavailable. Open settings to repair the persisted model configuration."
+      : "Launch or select a session.";
     el.snapModel.textContent = "--";
     el.snapBackend.textContent = "--";
     el.snapMessages.textContent = "0";
@@ -2274,7 +2293,7 @@ function renderInspector() {
     el.deleteSessionBtn.disabled = !selectedEntry;
     el.renameSessionBtn.disabled = !selectedEntry;
     el.fullscreenBtn.disabled = true;
-    el.settingsBtn.disabled = true;
+    el.settingsBtn.disabled = !selectedEntry;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
     state.transcriptRenderedSessionId = null;
     el.threadsView.innerHTML = "";

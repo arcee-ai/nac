@@ -10,7 +10,7 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, serializeExtraHeaders };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders };`,
   context,
   { filename: "app.js" },
 );
@@ -20,6 +20,7 @@ const {
   buildLaunchModelPayload,
   buildSettingsPatch,
   settingsValuesFromMetadata,
+  settingsMetadataForSession,
   serializeExtraHeaders,
 } = context.module.exports;
 
@@ -272,4 +273,50 @@ test("settings rejects required clearing and stale selectors across backend tran
     }), authInitial),
     /requires an API key environment variable/,
   );
+});
+
+test("settings metadata falls back to persisted config when no resumed snapshot exists", async () => {
+  const persisted = {
+    session_id: "incomplete-session",
+    model: "repair-model",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: null,
+    api_key_env: null,
+    extra_headers: {},
+  };
+  const requests = [];
+  const metadata = await settingsMetadataForSession(
+    persisted.session_id,
+    undefined,
+    async (path) => {
+      requests.push(path);
+      return persisted;
+    },
+  );
+
+  assert.equal(metadata, persisted);
+  assert.deepEqual(requests, ["/sessions/incomplete-session/config"]);
+  assert.deepEqual(plain(settingsValuesFromMetadata(metadata)), {
+    model: "repair-model",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: null,
+    api_key_env: null,
+    extra_headers: {},
+  });
+  assert.match(appSource, /Snapshot unavailable\. Open settings to repair/);
+  assert.match(appSource, /el\.settingsBtn\.disabled = !selectedEntry/);
+});
+
+test("settings metadata uses an available snapshot without fetching persisted config", async () => {
+  const metadata = { model: "ready-model", api_key_env: "MISSING_CURRENT_VALUE" };
+  const loaded = await settingsMetadataForSession(
+    "ready-session",
+    { metadata },
+    async () => {
+      throw new Error("persisted endpoint should not be requested");
+    },
+  );
+  assert.equal(loaded, metadata);
 });
