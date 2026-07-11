@@ -62,8 +62,6 @@ pub(super) struct StoreArgs {
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub(super) enum BackendArg {
-    #[value(name = "auto")]
-    Auto,
     #[value(name = "deepseek-chat")]
     DeepSeekChat,
     #[value(name = "fireworks-chat")]
@@ -76,21 +74,23 @@ pub(super) enum BackendArg {
     ChatGptCodexResponses,
     #[value(name = "anthropic-messages")]
     AnthropicMessages,
-    #[value(name = "arcee")]
-    Arcee,
+    #[value(name = "arcee-auth")]
+    ArceeAuth,
+    #[value(name = "arcee-api")]
+    ArceeApi,
 }
 
 impl From<BackendArg> for BackendKind {
     fn from(value: BackendArg) -> Self {
         match value {
-            BackendArg::Auto => Self::Auto,
             BackendArg::DeepSeekChat => Self::DeepSeekChat,
             BackendArg::FireworksChat => Self::FireworksChat,
             BackendArg::TogetherChat => Self::TogetherChat,
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
-            BackendArg::Arcee => Self::Arcee,
+            BackendArg::ArceeAuth => Self::ArceeAuth,
+            BackendArg::ArceeApi => Self::ArceeApi,
         }
     }
 }
@@ -344,4 +344,30 @@ fn subcommand_args(args: Vec<OsString>, name: &str) -> Vec<OsString> {
     parsed.push(OsString::from(name));
     parsed.extend(args.into_iter().skip(2));
     parsed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_cli_accepts_explicit_arcee_modes_and_rejects_removed_names() {
+        for (raw, expected) in [
+            ("arcee-auth", BackendKind::ArceeAuth),
+            ("arcee-api", BackendKind::ArceeApi),
+        ] {
+            let cli = RunCli::try_parse_from(["nac", "--backend", raw]).unwrap();
+            assert_eq!(cli.model.backend.map(BackendKind::from), Some(expected));
+        }
+
+        for raw in ["arcee", "auto"] {
+            let error = RunCli::try_parse_from(["nac", "--backend", raw])
+                .err()
+                .expect("removed backend must be rejected")
+                .to_string();
+            assert!(error.contains("invalid value"), "{error}");
+            assert!(error.contains("arcee-auth"), "{error}");
+            assert!(error.contains("arcee-api"), "{error}");
+        }
+    }
 }

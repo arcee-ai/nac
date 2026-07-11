@@ -641,15 +641,14 @@ impl SessionRow {
 }
 
 fn parse_backend(raw: Option<String>, base_url: &str) -> Result<BackendKind> {
-    match raw.as_deref() {
-        Some("deepseek-chat") => Ok(BackendKind::DeepSeekChat),
-        Some("fireworks-chat") => Ok(BackendKind::FireworksChat),
-        Some("together-chat") => Ok(BackendKind::TogetherChat),
-        Some("openai-responses") => Ok(BackendKind::OpenAiResponses),
-        Some("chatgpt-codex-responses") => Ok(BackendKind::ChatGptCodexResponses),
-        Some("anthropic-messages") => Ok(BackendKind::AnthropicMessages),
-        Some("arcee") => Ok(BackendKind::Arcee),
-        Some(other) => Err(anyhow!("unsupported stored backend '{}'", other)),
+    match raw {
+        Some(raw) => raw.parse::<BackendKind>().map_err(|error| {
+            anyhow!(
+                "unsupported stored backend '{}'; session settings repair required: {}",
+                raw,
+                error
+            )
+        }),
         None => detect_backend(base_url),
     }
 }
@@ -664,5 +663,33 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some("xhigh") => Ok(Some(ReasoningEffort::Xhigh)),
         Some(other) => Err(anyhow!("unsupported stored reasoning effort '{}'", other)),
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod backend_tests {
+    use super::*;
+
+    #[test]
+    fn stored_backend_parser_accepts_explicit_arcee_modes() {
+        assert_eq!(
+            parse_backend(Some("arcee-auth".to_string()), "https://ignored.example").unwrap(),
+            BackendKind::ArceeAuth
+        );
+        assert_eq!(
+            parse_backend(Some("arcee-api".to_string()), "https://ignored.example").unwrap(),
+            BackendKind::ArceeApi
+        );
+    }
+
+    #[test]
+    fn stored_backend_parser_rejects_removed_names_without_migration() {
+        for raw in ["arcee", "auto"] {
+            let error = parse_backend(Some(raw.to_string()), "https://api.arcee.ai")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unsupported stored backend"), "{error}");
+            assert!(error.contains("settings repair required"), "{error}");
+        }
     }
 }

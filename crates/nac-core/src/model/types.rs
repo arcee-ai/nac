@@ -1,9 +1,8 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendKind {
-    Auto,
     #[serde(rename = "deepseek-chat")]
     DeepSeekChat,
     FireworksChat,
@@ -14,21 +13,72 @@ pub enum BackendKind {
     ChatGptCodexResponses,
     #[serde(rename = "anthropic-messages")]
     AnthropicMessages,
-    Arcee,
+    ArceeAuth,
+    ArceeApi,
 }
 
 impl BackendKind {
+    pub const SUPPORTED: &'static str = "deepseek-chat, fireworks-chat, together-chat, openai-responses, chatgpt-codex-responses, anthropic-messages, arcee-auth, arcee-api";
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Auto => "auto",
             Self::DeepSeekChat => "deepseek-chat",
             Self::FireworksChat => "fireworks-chat",
             Self::TogetherChat => "together-chat",
             Self::OpenAiResponses => "openai-responses",
             Self::ChatGptCodexResponses => "chatgpt-codex-responses",
             Self::AnthropicMessages => "anthropic-messages",
-            Self::Arcee => "arcee",
+            Self::ArceeAuth => "arcee-auth",
+            Self::ArceeApi => "arcee-api",
         }
+    }
+
+    pub fn is_arcee(self) -> bool {
+        matches!(self, Self::ArceeAuth | Self::ArceeApi)
+    }
+}
+
+impl std::fmt::Display for BackendKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for BackendKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "deepseek-chat" => Ok(Self::DeepSeekChat),
+            "fireworks-chat" => Ok(Self::FireworksChat),
+            "together-chat" => Ok(Self::TogetherChat),
+            "openai-responses" => Ok(Self::OpenAiResponses),
+            "chatgpt-codex-responses" => Ok(Self::ChatGptCodexResponses),
+            "anthropic-messages" => Ok(Self::AnthropicMessages),
+            "arcee-auth" => Ok(Self::ArceeAuth),
+            "arcee-api" => Ok(Self::ArceeApi),
+            "arcee" => Err(format!(
+                "unsupported backend 'arcee'; settings repair required: select 'arcee-auth' for managed arcee_auth.json credentials or 'arcee-api' for API-key credentials"
+            )),
+            "auto" => Err(format!(
+                "unsupported backend 'auto'; settings repair required: select an explicit backend ({})",
+                Self::SUPPORTED
+            )),
+            other => Err(format!(
+                "unsupported backend '{other}'; select one of: {}",
+                Self::SUPPORTED
+            )),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BackendKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
     }
 }
 

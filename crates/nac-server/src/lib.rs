@@ -1057,7 +1057,7 @@ where
     T: for<'de> Deserialize<'de>,
 {
     serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .with_context(|| format!("invalid enum value '{}'", value))
+        .map_err(|error| anyhow!("invalid enum value '{}': {}", value, error))
 }
 
 fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
@@ -1591,38 +1591,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_create_rejects_explicit_and_auto_arcee_api_key_env_as_bad_requests() {
-        let root = temp_root("arcee_api_key_env_create");
+    async fn server_create_rejects_removed_backend_names_as_bad_requests() {
+        let root = temp_root("removed_backend_create");
         let manager = test_manager(&root);
-        let expected =
-            "invalid model configuration: api_key_env is not supported for backend 'arcee'";
-        let cases = [
-            (Some("arcee".to_string()), None),
-            (
-                Some("auto".to_string()),
-                Some("https://api.arcee.ai/custom".to_string()),
-            ),
-        ];
 
-        for (backend, base_url) in cases {
+        for backend in ["arcee", "auto"] {
             let error = manager
                 .create_session(CreateSessionRequest {
                     cwd: None,
                     model: None,
-                    base_url,
-                    backend,
+                    base_url: Some("https://api.arcee.ai".to_string()),
+                    backend: Some(backend.to_string()),
                     reasoning_effort: None,
-                    api_key_env: Some("ARCEE_KEY_ENV".to_string()),
+                    api_key_env: None,
                     extra_headers: None,
                     ssh_host: None,
                     sandbox: SandboxRequest::default(),
                 })
                 .await
                 .unwrap_err();
-            assert!(error.to_string().contains(expected), "got: {error:#}");
+            assert!(
+                error.to_string().contains("unsupported backend"),
+                "{error:#}"
+            );
+            assert!(
+                error.to_string().contains("settings repair required"),
+                "{error:#}"
+            );
             assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
         }
-
+        assert!(!root.join("store.db").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1645,7 +1643,7 @@ mod tests {
                     UpdateConfigRequest {
                         model: None,
                         base_url: Some("https://api.arcee.ai".to_string()),
-                        backend: Some("arcee".to_string()),
+                        backend: Some("arcee-auth".to_string()),
                         reasoning_effort: None,
                         api_key_env: None,
                         extra_headers: None,
@@ -1679,7 +1677,7 @@ mod tests {
                     UpdateConfigRequest {
                         model: None,
                         base_url: Some("https://api.arcee.ai".to_string()),
-                        backend: Some("arcee".to_string()),
+                        backend: Some("arcee-auth".to_string()),
                         reasoning_effort: None,
                         api_key_env: None,
                         extra_headers: None,
@@ -1719,41 +1717,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_arcee_updates_are_bad_requests_and_are_not_persisted() {
-        let root = temp_root("arcee_api_key_env_update");
+    async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
+        let root = temp_root("removed_backend_update");
         seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
         let manager = test_manager(&root);
-        let expected =
-            "invalid model configuration: api_key_env is not supported for backend 'arcee'";
-        let cases = [
-            ("arcee", "https://api.arcee.ai"),
-            ("auto", "https://api.arcee.ai/custom"),
-        ];
 
-        for (backend, base_url) in cases {
+        for backend in ["arcee", "auto"] {
             let error = manager
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
                         model: None,
-                        base_url: Some(base_url.to_string()),
+                        base_url: Some("https://api.arcee.ai".to_string()),
                         backend: Some(backend.to_string()),
                         reasoning_effort: None,
-                        api_key_env: Some("ARCEE_KEY_ENV".to_string()),
+                        api_key_env: None,
                         extra_headers: None,
                     },
                 )
                 .await
                 .unwrap_err();
-            assert!(error.to_string().contains(expected), "got: {error:#}");
+            assert!(
+                error.to_string().contains("unsupported backend"),
+                "{error:#}"
+            );
+            assert!(
+                error.to_string().contains("settings repair required"),
+                "{error:#}"
+            );
             assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
 
             let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(stored.backend, BackendKind::OpenAiResponses);
             assert_eq!(stored.base_url, "https://api.openai.com/v1");
-            assert_eq!(stored.api_key_env, None);
         }
-
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1772,7 +1769,7 @@ mod tests {
                 cwd: None,
                 model: None,
                 base_url: Some("http://api.arcee.ai/insecure".to_string()),
-                backend: Some("arcee".to_string()),
+                backend: Some("arcee-auth".to_string()),
                 reasoning_effort: None,
                 api_key_env: None,
                 extra_headers: None,
@@ -1792,7 +1789,7 @@ mod tests {
 
         seed_session(&root, "attach-invalid", "2026-01-01 00:00:00.000000000");
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
-        attach_snapshot.backend = BackendKind::Arcee;
+        attach_snapshot.backend = BackendKind::ArceeApi;
         attach_snapshot.base_url = "https://custom.example/v1".to_string();
         sessions::save_session(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
@@ -1813,7 +1810,7 @@ mod tests {
                     UpdateConfigRequest {
                         model: None,
                         base_url: Some(invalid_base_url.to_string()),
-                        backend: Some("arcee".to_string()),
+                        backend: Some("arcee-auth".to_string()),
                         reasoning_effort: None,
                         api_key_env: None,
                         extra_headers: None,
@@ -1840,7 +1837,7 @@ mod tests {
                 UpdateConfigRequest {
                     model: None,
                     base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
-                    backend: Some("arcee".to_string()),
+                    backend: Some("arcee-auth".to_string()),
                     reasoning_effort: None,
                     api_key_env: None,
                     extra_headers: None,
@@ -1849,7 +1846,7 @@ mod tests {
             .await
             .expect("same-origin approved Arcee configuration should persist");
         let approved = sessions::load_session(&store_path, "update").unwrap();
-        assert_eq!(approved.backend, BackendKind::Arcee);
+        assert_eq!(approved.backend, BackendKind::ArceeAuth);
         assert_eq!(approved.base_url, "https://tenant.arcee.ai/api/v1");
 
         unsafe { std::env::set_var("OPENAI_API_KEY", "custom-server-key") };
@@ -1859,7 +1856,7 @@ mod tests {
                 UpdateConfigRequest {
                     model: None,
                     base_url: Some("http://127.0.0.1:12345/dev".to_string()),
-                    backend: Some("arcee".to_string()),
+                    backend: Some("arcee-api".to_string()),
                     reasoning_effort: None,
                     api_key_env: None,
                     extra_headers: None,
@@ -1875,7 +1872,7 @@ mod tests {
                 cwd: None,
                 model: None,
                 base_url: Some("http://127.0.0.1:12345/dev".to_string()),
-                backend: Some("arcee".to_string()),
+                backend: Some("arcee-api".to_string()),
                 reasoning_effort: None,
                 api_key_env: None,
                 extra_headers: None,
@@ -1901,7 +1898,7 @@ mod tests {
             root.clone(),
             "model".to_string(),
             "https://api.arcee.ai".to_string(),
-            BackendKind::Arcee,
+            BackendKind::ArceeAuth,
             None,
             None,
             None,
@@ -1928,7 +1925,7 @@ mod tests {
             .expect("blank api_key_env should clear the invalid legacy value");
 
         let stored = sessions::load_session(&root.join("store.db"), "legacy-arcee").unwrap();
-        assert_eq!(stored.backend, BackendKind::Arcee);
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
         assert_eq!(stored.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(&root);

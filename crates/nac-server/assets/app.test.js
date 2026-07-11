@@ -4,6 +4,7 @@ const { test } = require("node:test");
 const vm = require("node:vm");
 
 const appSource = readFileSync(require.resolve("./app.js"), "utf8");
+const indexSource = readFileSync(require.resolve("./index.html"), "utf8");
 const context = {
   document: { addEventListener() {} },
   module: { exports: {} },
@@ -62,5 +63,16 @@ test("Events worker groups sort each lifecycle section without reordering their 
   );
   for (const group of sections.flat()) {
     assert.deepEqual(group.items, beforeItems.get(group));
+  }
+});
+
+
+test("launch and settings backend selectors expose explicit Arcee modes only", () => {
+  for (const id of ["launchBackend", "settingsBackend"]) {
+    const select = indexSource.match(new RegExp(`<select id="${id}"[\\s\\S]*?</select>`))[0];
+    assert.match(select, /value="arcee-auth">arcee-auth</);
+    assert.match(select, /value="arcee-api">arcee-api</);
+    assert.doesNotMatch(select, /value="arcee"/);
+    assert.doesNotMatch(select, /value="auto"/);
   }
 });

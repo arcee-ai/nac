@@ -1534,14 +1534,14 @@ url = "https://mcp.context7.com/mcp"
             .to_path_buf();
         std::fs::create_dir_all(&root).unwrap();
         let expected =
-            "invalid model configuration: api_key_env is not supported for backend 'arcee'";
+            "invalid model configuration: api_key_env is not supported for backend 'arcee-auth'";
 
         let snapshot = sessions::new_snapshot(
             "invalid-arcee-resume".to_string(),
             root.clone(),
             "model".to_string(),
             "https://api.arcee.ai".to_string(),
-            BackendKind::Arcee,
+            BackendKind::ArceeAuth,
             None,
             None,
             None,
@@ -1587,7 +1587,7 @@ url = "https://mcp.context7.com/mcp"
                     store_path: Some(worker_store.clone()),
                 },
                 model: ModelOptions {
-                    backend: Some(BackendKind::Arcee),
+                    backend: Some(BackendKind::ArceeAuth),
                     api_key_env: Some("DELEGATED_ARCEE_KEY".to_string()),
                     ..ModelOptions::default()
                 },

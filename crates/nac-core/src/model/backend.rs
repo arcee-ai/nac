@@ -8,8 +8,7 @@ pub(super) fn default_model_for_backend(backend: BackendKind) -> String {
         BackendKind::FireworksChat => "gpt-5.5".to_string(),
         BackendKind::TogetherChat => "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string(),
         BackendKind::AnthropicMessages => "claude-opus-4-6".to_string(),
-        BackendKind::Arcee => "trinity-large-thinking".to_string(),
-        BackendKind::Auto => unreachable!("auto backend does not have a default model"),
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => "trinity-large-thinking".to_string(),
     }
 }
 
@@ -18,12 +17,12 @@ pub(super) fn default_reasoning_effort(backend: BackendKind) -> Option<Reasoning
         BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
             Some(ReasoningEffort::Xhigh)
         }
-        BackendKind::DeepSeekChat => None,
-        BackendKind::FireworksChat => None,
-        BackendKind::TogetherChat => None,
-        BackendKind::AnthropicMessages => None,
-        BackendKind::Arcee => None,
-        BackendKind::Auto => None,
+        BackendKind::DeepSeekChat
+        | BackendKind::FireworksChat
+        | BackendKind::TogetherChat
+        | BackendKind::AnthropicMessages
+        | BackendKind::ArceeAuth
+        | BackendKind::ArceeApi => None,
     }
 }
 
@@ -33,36 +32,23 @@ pub(super) fn default_base_url_for_backend_hint(backend: BackendKind) -> &'stati
         BackendKind::ChatGptCodexResponses => "https://chatgpt.com/backend-api",
         BackendKind::AnthropicMessages => "https://api.anthropic.com",
         BackendKind::TogetherChat => "https://api.together.ai/v1",
-        BackendKind::Arcee => "https://api.arcee.ai",
-        BackendKind::Auto | BackendKind::FireworksChat | BackendKind::OpenAiResponses => {
-            "https://api.openai.com/v1"
-        }
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => "https://api.arcee.ai",
+        BackendKind::FireworksChat | BackendKind::OpenAiResponses => "https://api.openai.com/v1",
     }
 }
 
 pub fn validate_backend_api_key_env(
     backend: BackendKind,
-    base_url: Option<&str>,
+    _base_url: Option<&str>,
     api_key_env: Option<&str>,
 ) -> Result<()> {
     let Some(_) = api_key_env.filter(|name| !name.trim().is_empty()) else {
         return Ok(());
     };
 
-    let resolved_backend = match backend {
-        BackendKind::Auto => {
-            let base_url =
-                base_url.unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::Auto));
-            detect_backend(base_url).map_err(|error| {
-                model_configuration_error(format!("invalid model configuration: {error}"))
-            })?
-        }
-        backend => backend,
-    };
-
-    if resolved_backend == BackendKind::Arcee {
+    if backend == BackendKind::ArceeAuth {
         return Err(model_configuration_error(
-            "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY",
+            "invalid model configuration: api_key_env is not supported for backend 'arcee-auth'; managed Arcee auth uses arcee_auth.json",
         ));
     }
 
@@ -74,7 +60,7 @@ pub(super) fn api_key_for_backend(
     configured_env: Option<&str>,
 ) -> Result<String> {
     match backend {
-        BackendKind::ChatGptCodexResponses | BackendKind::Arcee => Ok(String::new()),
+        BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => Ok(String::new()),
         BackendKind::TogetherChat => {
             if let Ok(api_key) = std::env::var("TOGETHER_API_KEY") {
                 return Ok(api_key);
@@ -103,10 +89,12 @@ pub(super) fn api_key_for_backend(
             }
             Err(anyhow!("ANTHROPIC_API_KEY environment variable is not set"))
         }
-        BackendKind::Auto
-        | BackendKind::DeepSeekChat
+        BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
-        | BackendKind::OpenAiResponses => {
+        | BackendKind::OpenAiResponses
+        | BackendKind::ArceeApi => {
+            // Temporary compatibility: the strict resolver commit will make the
+            // configured selector authoritative and remove OPENAI_API_KEY fallback.
             if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
                 return Ok(api_key);
             }
@@ -131,7 +119,7 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
         .ok_or_else(|| anyhow!("OPENAI_BASE_URL '{}' does not include a host", base_url))?;
 
     if host == "arcee.ai" || host.ends_with(".arcee.ai") {
-        return Ok(BackendKind::Arcee);
+        return Ok(BackendKind::ArceeAuth);
     }
     if host.contains("together.ai") {
         return Ok(BackendKind::TogetherChat);
@@ -153,7 +141,8 @@ pub fn detect_backend(base_url: &str) -> Result<BackendKind> {
     }
 
     Err(anyhow!(
-        "could not infer backend from '{}'; pass --backend deepseek-chat, --backend fireworks-chat, --backend together-chat, --backend openai-responses, --backend chatgpt-codex-responses, --backend anthropic-messages, or --backend arcee",
-        base_url
+        "could not infer backend from '{}'; select an explicit backend ({})",
+        base_url,
+        BackendKind::SUPPORTED
     ))
 }

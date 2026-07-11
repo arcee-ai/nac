@@ -249,33 +249,42 @@ mod tests {
     }
 
     #[test]
-    fn resolved_arcee_rejects_nonempty_api_key_env_before_credentials() {
-        let expected = "invalid model configuration: api_key_env is not supported for backend 'arcee'; approved Arcee endpoints use stored login credentials and custom endpoints use OPENAI_API_KEY";
-        let cases = [
-            ClientOverrides {
-                backend: Some(BackendKind::Arcee),
-                api_key_env: Some("ARCEE_API_KEY".to_string()),
-                ..ClientOverrides::default()
-            },
-            ClientOverrides {
-                backend: Some(BackendKind::Arcee),
-                base_url: Some("http://127.0.0.1:8080".to_string()),
-                api_key_env: Some("CUSTOM_KEY".to_string()),
-                ..ClientOverrides::default()
-            },
-            ClientOverrides {
-                backend: Some(BackendKind::Auto),
-                base_url: Some("https://api.arcee.ai/custom".to_string()),
-                api_key_env: Some("AUTO_KEY".to_string()),
-                ..ClientOverrides::default()
-            },
-        ];
+    fn arcee_auth_rejects_nonempty_api_key_env_before_credentials() {
+        let expected = "invalid model configuration: api_key_env is not supported for backend 'arcee-auth'; managed Arcee auth uses arcee_auth.json";
+        let error = ModelClient::from_env_with_overrides(ClientOverrides {
+            backend: Some(BackendKind::ArceeAuth),
+            api_key_env: Some("ARCEE_API_KEY".to_string()),
+            ..ClientOverrides::default()
+        })
+        .err()
+        .expect("managed Arcee configuration must reject api_key_env");
+        assert_eq!(error.to_string(), expected);
+    }
 
-        for overrides in cases {
-            let error = ModelClient::from_env_with_overrides(overrides)
-                .err()
-                .expect("resolved Arcee configuration must reject api_key_env");
-            assert_eq!(error.to_string(), expected);
+    #[test]
+    fn backend_kind_parses_and_serializes_explicit_arcee_modes() {
+        for (raw, expected) in [
+            ("arcee-auth", BackendKind::ArceeAuth),
+            ("arcee-api", BackendKind::ArceeApi),
+        ] {
+            let parsed: BackendKind = serde_json::from_str(&format!("\"{raw}\"")).unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.to_string(), raw);
+            assert_eq!(
+                serde_json::to_string(&parsed).unwrap(),
+                format!("\"{raw}\"")
+            );
+        }
+    }
+
+    #[test]
+    fn removed_backend_names_require_settings_repair() {
+        for raw in ["arcee", "auto"] {
+            let error = serde_json::from_str::<BackendKind>(&format!("\"{raw}\""))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unsupported backend"), "{error}");
+            assert!(error.contains("settings repair required"), "{error}");
         }
     }
 
@@ -283,7 +292,7 @@ mod tests {
     fn resolved_arcee_allows_absent_or_empty_api_key_env() {
         for api_key_env in [None, Some(""), Some("   ")] {
             validate_backend_api_key_env(
-                BackendKind::Arcee,
+                BackendKind::ArceeAuth,
                 Some("https://api.arcee.ai"),
                 api_key_env,
             )
@@ -322,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_backend_ignores_stored_arcee_auth_state() {
+    fn omitted_backend_ignores_stored_arcee_auth_state() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let current_auth = stored_arcee_auth("rcai-current", "https://api.arcee.ai");
         // Credential freshness cannot be checked locally. A structurally valid but
@@ -338,7 +347,9 @@ mod tests {
             let _env =
                 IsolatedModelEnv::new(label, Some(auth_contents), Some("test_openai_key"), None);
             let client = ModelClient::from_env_with_overrides(ClientOverrides::default())
-                .unwrap_or_else(|error| panic!("{label} Arcee auth changed Auto: {error:#}"));
+                .unwrap_or_else(|error| {
+                    panic!("{label} Arcee auth changed omitted-backend resolution: {error:#}")
+                });
 
             assert_eq!(client.backend(), BackendKind::OpenAiResponses, "{label}");
             assert_eq!(client.base_url(), "https://api.openai.com/v1", "{label}");
@@ -346,14 +357,16 @@ mod tests {
     }
 
     #[test]
-    fn automatic_backend_does_not_fall_back_to_stored_arcee_auth() {
+    fn omitted_backend_does_not_fall_back_to_stored_arcee_auth() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let stale_auth = stored_arcee_auth("rcai-expired", "https://api.arcee.ai");
         let _env = IsolatedModelEnv::new("no-openai-key", Some(&stale_auth), None, None);
 
         let error = ModelClient::from_env_with_overrides(ClientOverrides::default())
             .err()
-            .expect("Auto must require OpenAI credentials without an explicit Arcee URL");
+            .expect(
+                "omitted backend must require OpenAI credentials without an explicit Arcee URL",
+            );
         assert!(
             error.to_string().contains("OPENAI_API_KEY"),
             "unexpected error: {error:#}"
@@ -364,7 +377,7 @@ mod tests {
     fn stored_arcee_auth_config_and_store_failures_remain_distinct() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let overrides = ClientOverrides {
-            backend: Some(BackendKind::Arcee),
+            backend: Some(BackendKind::ArceeAuth),
             ..ClientOverrides::default()
         };
 
@@ -419,7 +432,7 @@ mod tests {
             ..ClientOverrides::default()
         })
         .expect("the stored credential should work on the same approved origin");
-        assert_eq!(from_base.backend(), BackendKind::Arcee);
+        assert_eq!(from_base.backend(), BackendKind::ArceeAuth);
         assert_eq!(from_base.base_url(), requested_base);
 
         let mismatch = ModelClient::from_env_with_overrides(ClientOverrides {
@@ -437,11 +450,11 @@ mod tests {
         assert!(mismatch.downcast_ref::<ModelConfigurationError>().is_some());
 
         let from_backend = ModelClient::from_env_with_overrides(ClientOverrides {
-            backend: Some(BackendKind::Arcee),
+            backend: Some(BackendKind::ArceeAuth),
             ..ClientOverrides::default()
         })
         .expect("an explicit Arcee backend should use its stored base URL");
-        assert_eq!(from_backend.backend(), BackendKind::Arcee);
+        assert_eq!(from_backend.backend(), BackendKind::ArceeAuth);
         assert_eq!(from_backend.base_url(), "https://stored.arcee.ai");
     }
 
@@ -453,7 +466,7 @@ mod tests {
 
         for name in ["Host", "hOsT", "Authorization", "PROXY-AUTHORIZATION"] {
             let error = ModelClient::from_env_with_overrides(ClientOverrides {
-                backend: Some(BackendKind::Arcee),
+                backend: Some(BackendKind::ArceeAuth),
                 extra_headers: std::collections::BTreeMap::from([(
                     name.to_string(),
                     "hostile-value".to_string(),
@@ -475,7 +488,7 @@ mod tests {
         let tampered = stored_arcee_auth("rcai-never-use", "http://api.arcee.ai/steal");
         let _env = IsolatedModelEnv::new("custom-key", Some(&tampered), None, None);
         let overrides = ClientOverrides {
-            backend: Some(BackendKind::Arcee),
+            backend: Some(BackendKind::ArceeApi),
             base_url: Some("http://127.0.0.1:12345/dev".to_string()),
             ..ClientOverrides::default()
         };
@@ -484,7 +497,7 @@ mod tests {
             .err()
             .expect("a custom endpoint without OPENAI_API_KEY must fail");
         assert!(
-            error.to_string().contains("custom Arcee endpoint"),
+            error.to_string().contains("backend 'arcee-api'"),
             "unexpected error: {error:#}"
         );
         assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
@@ -521,7 +534,7 @@ mod tests {
         });
 
         let client = ModelClient::from_env_with_overrides(ClientOverrides {
-            backend: Some(BackendKind::Arcee),
+            backend: Some(BackendKind::ArceeApi),
             base_url: Some(format!("http://{address}/hostile/base")),
             extra_headers: std::collections::BTreeMap::from([(
                 "Host".to_string(),
@@ -563,7 +576,7 @@ mod tests {
         std::fs::write(env.home.join("arcee_auth.json"), tampered).unwrap();
 
         let error = ModelClient::from_env_with_overrides(ClientOverrides {
-            backend: Some(BackendKind::Arcee),
+            backend: Some(BackendKind::ArceeAuth),
             ..ClientOverrides::default()
         })
         .err()
@@ -663,15 +676,15 @@ mod tests {
         );
         assert_eq!(
             detect_backend("https://api.arcee.ai").unwrap(),
-            BackendKind::Arcee
+            BackendKind::ArceeAuth
         );
         assert_eq!(
             detect_backend("https://api.internal.arcee.ai").unwrap(),
-            BackendKind::Arcee
+            BackendKind::ArceeAuth
         );
         assert_eq!(
             detect_backend("https://arcee.ai").unwrap(),
-            BackendKind::Arcee
+            BackendKind::ArceeAuth
         );
         assert!(detect_backend("https://arcee.ai.evil.com/v1").is_err());
         assert!(detect_backend("https://evil-arcee.ai.attacker.com/v1").is_err());
@@ -1090,7 +1103,7 @@ mod tests {
         .unwrap();
 
         let usage = parsed.usage.expect("usage should be parsed");
-        assert_eq!(usage.input_tokens, 20);   // 100 - 80 cached
+        assert_eq!(usage.input_tokens, 20); // 100 - 80 cached
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 80);
         assert_eq!(usage.cache_write_tokens, 0);
@@ -1119,7 +1132,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 200);
         assert_eq!(usage.cache_write_tokens, 30);
-        assert_eq!(usage.orchestrator_context_tokens, 380);  // 100 + 50 + 200 + 30
+        assert_eq!(usage.orchestrator_context_tokens, 380); // 100 + 50 + 200 + 30
     }
 
     #[test]
@@ -1143,7 +1156,7 @@ mod tests {
         .unwrap();
 
         let usage = parsed.usage.expect("usage should be parsed");
-        assert_eq!(usage.input_tokens, 40);   // 100 - 60 cached
+        assert_eq!(usage.input_tokens, 40); // 100 - 60 cached
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 60);
         assert_eq!(usage.cache_write_tokens, 0);
@@ -1192,14 +1205,17 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(parsed.assistant.content.as_deref(), Some("The answer is 42."));
+        assert_eq!(
+            parsed.assistant.content.as_deref(),
+            Some("The answer is 42.")
+        );
         assert_eq!(
             parsed.assistant.reasoning_text.as_deref(),
             Some("I need to think about this carefully...")
         );
         assert!(parsed.assistant.tool_calls.is_none());
         let usage = parsed.usage.expect("usage should be parsed");
-        assert_eq!(usage.input_tokens, 40);   // 100 - 60 cached
+        assert_eq!(usage.input_tokens, 40); // 100 - 60 cached
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.cache_read_tokens, 60);
         assert_eq!(usage.cache_write_tokens, 0);
@@ -1231,14 +1247,17 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(parsed.assistant.content.as_deref(), Some("The answer is 4."));
+        assert_eq!(
+            parsed.assistant.content.as_deref(),
+            Some("The answer is 4.")
+        );
         assert_eq!(
             parsed.assistant.reasoning_text.as_deref(),
             Some("We need to calculate 2+2. That equals 4.")
         );
         assert!(parsed.assistant.tool_calls.is_none());
         let usage = parsed.usage.expect("usage should be parsed");
-        assert_eq!(usage.input_tokens, 58);      // 2618 - 2560 cached
+        assert_eq!(usage.input_tokens, 58); // 2618 - 2560 cached
         assert_eq!(usage.output_tokens, 74);
         assert_eq!(usage.cache_read_tokens, 2560);
         assert_eq!(usage.cache_write_tokens, 0);

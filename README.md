@@ -95,7 +95,7 @@ smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mou
 
 Optional config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit CLI args and environment variables override TOML defaults. Resumed sessions continue using the model and sandbox settings stored in their session snapshot.
 
-For backends that use environment API keys, the `api_key_env` setting names the variable to read when that backend's standard variable is not set. Arcee does not support `api_key_env`; see [Arcee auth](#arcee-auth). Store paths remain relative to the launch working directory.
+For backends that use environment API keys, including `arcee-api`, the `api_key_env` setting names the variable to read when that backend's standard variable is not set. Managed `arcee-auth` does not support `api_key_env`; see [Arcee auth](#arcee-auth). Store paths remain relative to the launch working directory.
 
 ```toml
 [agents_md]
@@ -154,23 +154,23 @@ nac arcee-auth logout
 
 Credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee uses the canonical `arcee_auth.json`; ChatGPT Codex continues to use `auth.json`. A recognized legacy Arcee record in `auth.json` is migrated to `arcee_auth.json` without overwriting conflicting credentials. If migration reports a conflict, both files are preserved so one can be moved aside before retrying.
 
-Credential selection follows these rules:
+Credential selection follows the explicit backend mode:
 
-- With `backend = "arcee"` and no configured base URL, NAC uses both the base URL and API key saved by `arcee-auth login`.
-- An explicit Arcee-owned URL (`arcee.ai` or a subdomain) must use HTTPS on effective port 443. Its origin must match the origin saved at login; changing only the path does not change the credential origin.
-- A custom, non-Arcee endpoint uses `OPENAI_API_KEY`, not the stored Arcee login. Set `backend = "arcee"` explicitly because `auto` cannot infer Arcee from an arbitrary custom hostname.
-- `backend = "auto"` infers Arcee when the configured `base_url` or `OPENAI_BASE_URL` has an Arcee-owned hostname. With no base URL, `auto` follows the default OpenAI route.
-- `api_key_env` is rejected whenever the resolved backend is Arcee, including Arcee selected by `auto`. Remove it from that model configuration; use stored login credentials for Arcee-owned endpoints or `OPENAI_API_KEY` for custom endpoints.
+- `backend = "arcee-auth"` uses the managed API key and base URL saved by `arcee-auth login` when no base URL is configured.
+- An explicit Arcee-owned URL with `arcee-auth` (`arcee.ai` or a subdomain) must use HTTPS on effective port 443. Its origin must match the origin saved at login; changing only the path does not change the credential origin.
+- `backend = "arcee-api"` uses API-key mode and never reads `arcee_auth.json`. During the current compatibility transition it follows the existing OpenAI-compatible key lookup (`OPENAI_API_KEY`, then configured `api_key_env`); the next strict resolver change will make the configured selector authoritative.
+- Both Arcee modes preserve Arcee chat-completions URL normalization and no-redirect request handling. `arcee-auth` additionally rejects sensitive `Host`, `Authorization`, and `Proxy-Authorization` header overrides.
+- The old `backend = "arcee"` and `backend = "auto"` values are unsupported. Existing config and stored sessions using either value require explicit settings repair; they are not silently migrated.
 
-For example, a stored login needs only the backend and model:
+For example, a stored login needs only the managed backend and model:
 
 ```toml
 [model]
-backend = "arcee"
+backend = "arcee-auth"
 model = "trinity-large-thinking"
 ```
 
-A custom endpoint instead uses an environment key:
+An API-key endpoint instead selects `arcee-api`:
 
 ```sh
 export OPENAI_API_KEY="..."
@@ -178,7 +178,7 @@ export OPENAI_API_KEY="..."
 
 ```toml
 [model]
-backend = "arcee"
+backend = "arcee-api"
 model = "trinity-large-thinking"
 base_url = "https://gateway.example.com"
 ```

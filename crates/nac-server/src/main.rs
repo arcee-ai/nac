@@ -77,8 +77,6 @@ struct StoreArgs {
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum BackendArg {
-    #[value(name = "auto")]
-    Auto,
     #[value(name = "deepseek-chat")]
     DeepSeekChat,
     #[value(name = "fireworks-chat")]
@@ -91,21 +89,23 @@ enum BackendArg {
     ChatGptCodexResponses,
     #[value(name = "anthropic-messages")]
     AnthropicMessages,
-    #[value(name = "arcee")]
-    Arcee,
+    #[value(name = "arcee-auth")]
+    ArceeAuth,
+    #[value(name = "arcee-api")]
+    ArceeApi,
 }
 
 impl From<BackendArg> for BackendKind {
     fn from(value: BackendArg) -> Self {
         match value {
-            BackendArg::Auto => Self::Auto,
             BackendArg::DeepSeekChat => Self::DeepSeekChat,
             BackendArg::FireworksChat => Self::FireworksChat,
             BackendArg::TogetherChat => Self::TogetherChat,
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
-            BackendArg::Arcee => Self::Arcee,
+            BackendArg::ArceeAuth => Self::ArceeAuth,
+            BackendArg::ArceeApi => Self::ArceeApi,
         }
     }
 }
@@ -364,4 +364,42 @@ fn resolve_cli_cwd(
     target
         .canonicalize()
         .with_context(|| format!("failed to resolve working directory {}", target.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_cli_accepts_explicit_arcee_modes_and_rejects_removed_names() {
+        let required = [
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "work",
+        ];
+        for (raw, expected) in [
+            ("arcee-auth", BackendKind::ArceeAuth),
+            ("arcee-api", BackendKind::ArceeApi),
+        ] {
+            let mut args = vec!["nac-web __worker", "--backend", raw];
+            args.extend(required);
+            let cli = ManagedWorkerCli::try_parse_from(args).unwrap();
+            assert_eq!(cli.model.backend.map(BackendKind::from), Some(expected));
+        }
+
+        for raw in ["arcee", "auto"] {
+            let mut args = vec!["nac-web __worker", "--backend", raw];
+            args.extend(required);
+            let error = ManagedWorkerCli::try_parse_from(args)
+                .err()
+                .expect("removed backend must be rejected")
+                .to_string();
+            assert!(error.contains("invalid value"), "{error}");
+            assert!(error.contains("arcee-auth"), "{error}");
+            assert!(error.contains("arcee-api"), "{error}");
+        }
+    }
 }
