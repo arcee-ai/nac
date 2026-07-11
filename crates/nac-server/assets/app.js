@@ -3329,9 +3329,10 @@ function renderGroupedEventStreams(snapshot, events) {
 }
 
 function renderEventStreamArea(title, streams, area) {
-  const count = area === "orchestrator" ? "" : `<span>${streams.length}</span>`;
-  const content = streams.length > 0
-    ? `<div class="event-stream-tile-grid">${streams.map((stream) => area === "orchestrator"
+  const orderedStreams = area === "orchestrator" ? [...streams] : orderedThreadsByName(streams);
+  const count = area === "orchestrator" ? "" : `<span>${orderedStreams.length}</span>`;
+  const content = orderedStreams.length > 0
+    ? `<div class="event-stream-tile-grid">${orderedStreams.map((stream) => area === "orchestrator"
       ? renderDenseEventStream("Orchestrator", stream.label, stream.activity, stream.tone, "No orchestrator events captured.")
       : renderDenseEventStream(stream.name, stream.classification.label, stream.items, stream.classification.tone,
         stream.classification.area === "queued" ? stream.currentOperation : "No captured lifecycle events for this thread."))
@@ -3472,8 +3473,12 @@ function compareThreadTilesByName(left, right) {
   return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
 }
 
+function orderedThreadsByName(threads) {
+  return [...threads].sort(compareThreadTilesByName);
+}
+
 function orderedThreadTiles(tiles) {
-  return [...tiles].sort(compareThreadTilesByName);
+  return orderedThreadsByName(tiles);
 }
 
 function renderThreadTileArea(title, tiles, area, snapshot, live) {

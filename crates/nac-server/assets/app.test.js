@@ -9,11 +9,11 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadTiles };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles };`,
   context,
   { filename: "app.js" },
 );
-const { orderedThreadTiles } = context.module.exports;
+const { orderedThreadsByName, orderedThreadTiles } = context.module.exports;
 
 test("thread tiles use raw case-sensitive name order independently without mutating inputs", () => {
   const sections = [
@@ -34,4 +34,33 @@ test("thread tiles use raw case-sensitive name order independently without mutat
     sections.map((tiles) => tiles.map(({ name }) => name)),
     before,
   );
+});
+
+test("Events worker groups sort each lifecycle section without reordering their entries", () => {
+  const sections = [
+    ["runner-z", "Runner-A", "runner-a"],
+    ["queued-2", "queued-10"],
+    ["finished/ä", "finished/a", "Finished"],
+  ].map((names, sectionIndex) => names.map((name, groupIndex) => ({
+    name,
+    items: [
+      `newest-${sectionIndex}-${groupIndex}`,
+      `middle-${sectionIndex}-${groupIndex}`,
+      `oldest-${sectionIndex}-${groupIndex}`,
+    ],
+  })));
+  const beforeNames = sections.map((groups) => groups.map(({ name }) => name));
+  const beforeItems = new Map(sections.flat().map((group) => [group, [...group.items]]));
+  const ordered = sections.map((groups) => orderedThreadsByName(groups));
+
+  assert.deepEqual(Array.from(ordered[0], ({ name }) => name), ["Runner-A", "runner-a", "runner-z"]);
+  assert.deepEqual(Array.from(ordered[1], ({ name }) => name), ["queued-10", "queued-2"]);
+  assert.deepEqual(Array.from(ordered[2], ({ name }) => name), ["Finished", "finished/a", "finished/ä"]);
+  assert.deepEqual(
+    sections.map((groups) => groups.map(({ name }) => name)),
+    beforeNames,
+  );
+  for (const group of sections.flat()) {
+    assert.deepEqual(group.items, beforeItems.get(group));
+  }
 });

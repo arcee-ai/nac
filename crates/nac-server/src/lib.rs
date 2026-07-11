@@ -1355,6 +1355,10 @@ mod tests {
             .collect();
         assert!(thread_positions.windows(2).all(|pair| pair[0] < pair[1]));
 
+        assert!(app.contains(
+            "const orderedStreams = area === \"orchestrator\" ? [...streams] : orderedThreadsByName(streams);"
+        ));
+        assert!(app.contains("orderedStreams.map((stream) => area === \"orchestrator\""));
         assert!(app.contains("const orderedTiles = orderedThreadTiles(tiles);"));
 
         assert!(!app.contains("renderThreadTileArea(\"Orchestrator\""));
