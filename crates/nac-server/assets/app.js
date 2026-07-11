@@ -3468,13 +3468,22 @@ function renderThreads(snapshot) {
   }
 }
 
+function compareThreadTilesByName(left, right) {
+  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+}
+
+function orderedThreadTiles(tiles) {
+  return [...tiles].sort(compareThreadTilesByName);
+}
+
 function renderThreadTileArea(title, tiles, area, snapshot, live) {
-  const content = tiles.length > 0
-    ? `<ol class="thread-tile-grid">${tiles.map((tile) => renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
+  const orderedTiles = orderedThreadTiles(tiles);
+  const content = orderedTiles.length > 0
+    ? `<ol class="thread-tile-grid">${orderedTiles.map((tile) => renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
     : `<div class="thread-area-empty">None</div>`;
   return `
     <section class="thread-lifecycle-area thread-area-${area}" aria-labelledby="thread-area-${area}-title">
-      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span><span>${tiles.length}</span></h3>
+      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span><span>${orderedTiles.length}</span></h3>
       ${content}
     </section>`;
 }

@@ -15,6 +15,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check web assets
+        run: |
+          node --check crates/nac-server/assets/app.js
+          node --test crates/nac-server/assets/app.test.js
+
       - name: Run tests
         run: cargo test --workspace --locked
 
