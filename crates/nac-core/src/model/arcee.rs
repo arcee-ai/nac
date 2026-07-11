@@ -1,7 +1,6 @@
 use super::auth_store::{
-    arcee_auth_file_path, legacy_auth_file_path, read_arcee_auth_string, remove_arcee_auth_file,
-    with_arcee_auth_lock, with_arcee_migration_locks, write_arcee_auth_string,
-    write_auth_string_to_path,
+    arcee_auth_file_path, legacy_auth_file_path, read_arcee_auth_string, with_arcee_auth_lock,
+    with_arcee_migration_locks, write_arcee_auth_string, write_auth_string_to_path,
 };
 use super::*;
 use anyhow::Context;
@@ -101,13 +100,9 @@ pub(super) fn arcee_auth_status() -> Result<()> {
 
 pub(super) fn arcee_auth_logout() -> Result<()> {
     let path = arcee_auth_file_path()?;
-    let removed = with_arcee_migration_locks(|| {
-        migrate_legacy_auth_unlocked()?;
-        match read_stored_auth_optional()? {
-            Some(_) => remove_arcee_auth_file(),
-            None => Ok(false),
-        }
-    })?;
+    let legacy_path = legacy_auth_file_path()?;
+    let removed =
+        with_arcee_migration_locks(|| remove_arcee_auth_files_for_logout(&legacy_path, &path))?;
     if removed {
         println!("Arcee auth removed.");
     } else {
@@ -115,6 +110,60 @@ pub(super) fn arcee_auth_logout() -> Result<()> {
     }
     println!("path: {}", path.display());
     Ok(())
+}
+
+fn remove_arcee_auth_files_for_logout(legacy_path: &Path, canonical_path: &Path) -> Result<bool> {
+    let remove_canonical = logout_disposition(canonical_path, true)?;
+    let remove_legacy = logout_disposition(legacy_path, false)?;
+
+    let canonical_removed = if remove_canonical {
+        remove_auth_path(canonical_path)?
+    } else {
+        false
+    };
+    let legacy_removed = if remove_legacy {
+        remove_auth_path(legacy_path)?
+    } else {
+        false
+    };
+    Ok(canonical_removed || legacy_removed)
+}
+
+fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        // The canonical path belongs to Arcee, so unlink it without following it.
+        // A legacy auth.json symlink is Codex-owned and cannot be safely classified.
+        return Ok(malformed_is_owned);
+    }
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "refusing to remove non-regular credential path {}",
+            path.display()
+        ));
+    }
+
+    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: Value = match serde_json::from_slice(&raw) {
+        Ok(value) => value,
+        Err(_) => return Ok(malformed_is_owned),
+    };
+    Ok(value.get("type").and_then(Value::as_str) == Some(AUTH_TYPE))
+}
+
+fn remove_auth_path(path: &Path) -> Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
+    }
 }
 
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
@@ -399,6 +448,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     struct TestDir(PathBuf);
 
     impl TestDir {
@@ -524,5 +576,81 @@ mod tests {
         assert!(migrate_legacy_auth_files(&legacy, &canonical).is_err());
         assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
         assert_eq!(fs::read(&canonical).unwrap(), canonical_before);
+    }
+
+    #[test]
+    fn arcee_logout_removes_malformed_canonical_and_preserves_codex() {
+        let dir = TestDir::new("logout-malformed");
+        let (codex_path, arcee_path) = dir.paths();
+        let codex = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
+        fs::write(&codex_path, codex).unwrap();
+        fs::write(&arcee_path, "{ malformed").unwrap();
+
+        assert!(remove_arcee_auth_files_for_logout(&codex_path, &arcee_path).unwrap());
+
+        assert!(!arcee_path.exists());
+        assert_eq!(fs::read_to_string(codex_path).unwrap(), codex);
+    }
+
+    #[test]
+    fn arcee_logout_preserves_coexisting_codex_auth() {
+        let dir = TestDir::new("logout-coexistence");
+        let (codex_path, arcee_path) = dir.paths();
+        let codex = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
+        fs::write(&codex_path, codex).unwrap();
+        write_json(&arcee_path, &stored_auth("rcai-canonical"));
+
+        assert!(remove_arcee_auth_files_for_logout(&codex_path, &arcee_path).unwrap());
+
+        assert!(!arcee_path.exists());
+        assert_eq!(fs::read_to_string(codex_path).unwrap(), codex);
+    }
+
+    #[test]
+    fn arcee_logout_is_idempotent_when_files_are_missing() {
+        let dir = TestDir::new("logout-missing");
+        let (legacy, canonical) = dir.paths();
+
+        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+    }
+
+    #[test]
+    fn arcee_logout_removes_typed_malformed_legacy_auth() {
+        let dir = TestDir::new("logout-typed-legacy");
+        let (legacy, canonical) = dir.paths();
+        fs::write(&legacy, r#"{"type":"arcee_api_key","api_key":7}"#).unwrap();
+
+        assert!(remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+        assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn arcee_logout_preserves_valid_unknown_records() {
+        let dir = TestDir::new("logout-unknown");
+        let (legacy, canonical) = dir.paths();
+        let unknown_legacy = r#"{"type":"future-provider","token":"legacy"}"#;
+        let unknown_canonical = r#"{"type":"future-provider","token":"canonical"}"#;
+        fs::write(&legacy, unknown_legacy).unwrap();
+        fs::write(&canonical, unknown_canonical).unwrap();
+
+        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+        assert_eq!(fs::read_to_string(legacy).unwrap(), unknown_legacy);
+        assert_eq!(fs::read_to_string(canonical).unwrap(), unknown_canonical);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn arcee_logout_unlinks_symlink_without_touching_target() {
+        let dir = TestDir::new("logout-symlink");
+        let (legacy, canonical) = dir.paths();
+        let target = dir.0.join("target.json");
+        fs::write(&target, "target-credentials").unwrap();
+        symlink(&target, &canonical).unwrap();
+
+        assert!(remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+
+        assert!(fs::symlink_metadata(&canonical).is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "target-credentials");
     }
 }

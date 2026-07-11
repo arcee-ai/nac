@@ -225,15 +225,6 @@ impl Drop for TempFileCleanup {
     }
 }
 
-pub(super) fn remove_arcee_auth_file() -> Result<bool> {
-    let path = arcee_auth_file_path()?;
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
-    }
-}
-
 pub(super) struct FileLock {
     file: File,
 }

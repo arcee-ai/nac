@@ -99,17 +99,11 @@ pub async fn codex_auth_login() -> Result<()> {
 pub fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
     let removed = with_auth_lock(|| {
-        migrate_legacy_auth_with_codex_lock()?;
-        match read_auth_file_optional()? {
-            Some(_) => match fs::remove_file(&path) {
-                Ok(()) => Ok(true),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-                Err(error) => {
-                    Err(error).with_context(|| format!("failed to remove {}", path.display()))
-                }
-            },
-            None => Ok(false),
+        if auth_path_is_symlink(&path)? {
+            return remove_auth_path(&path);
         }
+        migrate_legacy_auth_with_codex_lock()?;
+        remove_codex_auth_file_for_logout(&path)
     })?;
 
     if removed {
@@ -119,6 +113,53 @@ pub fn codex_auth_logout() -> Result<()> {
     }
     println!("path: {}", path.display());
     Ok(())
+}
+
+fn auth_path_is_symlink(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn remove_codex_auth_file_for_logout(path: &Path) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        return remove_auth_path(path);
+    }
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "refusing to remove non-regular credential path {}",
+            path.display()
+        ));
+    }
+
+    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: Value = match serde_json::from_slice(&raw) {
+        Ok(value) => value,
+        Err(_) => return remove_auth_path(path),
+    };
+    if value.get("type").and_then(Value::as_str) == Some(AUTH_TYPE) {
+        remove_auth_path(path)
+    } else {
+        Ok(false)
+    }
+}
+
+fn remove_auth_path(path: &Path) -> Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
+    }
 }
 
 pub fn codex_auth_status() -> Result<()> {
@@ -1043,10 +1084,8 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
 
-    #[cfg(unix)]
     struct TestDir(PathBuf);
 
-    #[cfg(unix)]
     impl TestDir {
         fn new(label: &str) -> Self {
             let path = std::env::temp_dir().join(format!(
@@ -1071,14 +1110,12 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
     }
 
-    #[cfg(unix)]
     fn stored_codex_auth(access: &str) -> StoredCodexAuth {
         StoredCodexAuth {
             auth_type: AUTH_TYPE.to_string(),
@@ -1171,6 +1208,85 @@ mod tests {
             .expect("symlink lock accepted");
         assert!(error.to_string().contains("symlink auth lock"));
         assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn codex_logout_removes_malformed_auth_and_preserves_arcee() {
+        let dir = TestDir::new("logout-malformed");
+        let codex_path = dir.path("auth.json");
+        let arcee_path = dir.path("arcee_auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        fs::write(&codex_path, "{ malformed").unwrap();
+        fs::write(&arcee_path, arcee).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&codex_path).unwrap());
+
+        assert!(!codex_path.exists());
+        assert_eq!(fs::read_to_string(arcee_path).unwrap(), arcee);
+    }
+
+    #[test]
+    fn codex_logout_preserves_coexisting_arcee_auth() {
+        let dir = TestDir::new("logout-coexistence");
+        let codex_path = dir.path("auth.json");
+        let arcee_path = dir.path("arcee_auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        fs::write(&arcee_path, arcee).unwrap();
+        write_auth_file_to_path(&codex_path, &stored_codex_auth("access-token")).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&codex_path).unwrap());
+
+        assert!(!codex_path.exists());
+        assert_eq!(fs::read_to_string(arcee_path).unwrap(), arcee);
+    }
+
+    #[test]
+    fn codex_logout_is_idempotent_when_auth_is_missing() {
+        let dir = TestDir::new("logout-missing");
+        let path = dir.path("auth.json");
+
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+    }
+
+    #[test]
+    fn codex_logout_removes_typed_malformed_codex_auth() {
+        let dir = TestDir::new("logout-typed-codex");
+        let path = dir.path("auth.json");
+        fs::write(&path, r#"{"type":"chatgpt-codex","access":7}"#).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&path).unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn codex_logout_preserves_valid_foreign_and_unknown_records() {
+        let dir = TestDir::new("logout-foreign");
+        let path = dir.path("auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        fs::write(&path, arcee).unwrap();
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), arcee);
+
+        let unknown = r#"{"type":"future-provider","token":"keep-me"}"#;
+        fs::write(&path, unknown).unwrap();
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert_eq!(fs::read_to_string(path).unwrap(), unknown);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_logout_unlinks_symlink_without_touching_target() {
+        let dir = TestDir::new("logout-symlink");
+        let target = dir.path("target.json");
+        let path = dir.path("auth.json");
+        fs::write(&target, "target-credentials").unwrap();
+        symlink(&target, &path).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&path).unwrap());
+
+        assert!(fs::symlink_metadata(&path).is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "target-credentials");
     }
 
     #[test]
