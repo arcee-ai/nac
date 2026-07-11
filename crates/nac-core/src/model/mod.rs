@@ -139,6 +139,17 @@ mod tests {
         .to_string()
     }
 
+    fn stored_codex_auth() -> String {
+        json!({
+            "type": "chatgpt-codex",
+            "access": "access-test",
+            "refresh": "refresh-test",
+            "expires_at_ms": u64::MAX,
+            "account_id": "account-test"
+        })
+        .to_string()
+    }
+
     fn restore_env(name: &str, value: Option<OsString>) {
         match value {
             Some(value) => unsafe { std::env::set_var(name, value) },
@@ -272,6 +283,71 @@ mod tests {
         .expect("an explicit Arcee backend should use stored auth");
         assert_eq!(from_backend.backend(), BackendKind::Arcee);
         assert_eq!(from_backend.base_url(), "https://stored.arcee.ai");
+    }
+
+    #[test]
+    fn arcee_and_codex_auth_coexist_and_logout_independently() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let codex = stored_codex_auth();
+        let arcee = stored_arcee_auth("rcai-test", "https://api.arcee.ai");
+        let env = IsolatedModelEnv::new("coexist", Some(&codex), None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), &arcee).unwrap();
+
+        let loaded = arcee::read_stored_auth().unwrap();
+        assert_eq!(loaded.api_key, "rcai-test");
+        codex_auth_status().unwrap();
+
+        arcee_auth_logout().unwrap();
+        assert!(!env.home.join("arcee_auth.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(env.home.join("auth.json")).unwrap(),
+            codex
+        );
+
+        std::fs::write(env.home.join("arcee_auth.json"), &arcee).unwrap();
+        codex_auth_logout().unwrap();
+        assert!(!env.home.join("auth.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap(),
+            arcee
+        );
+    }
+
+    #[test]
+    fn codex_logout_migrates_legacy_arcee_auth_before_touching_auth_json() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let legacy = stored_arcee_auth("rcai-legacy", "https://api.arcee.ai");
+        let env = IsolatedModelEnv::new("codex-migrates", Some(&legacy), None, None);
+
+        codex_auth_logout().unwrap();
+
+        assert!(!env.home.join("auth.json").exists());
+        let canonical = std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&canonical).unwrap(),
+            serde_json::from_str::<Value>(&legacy).unwrap()
+        );
+    }
+
+    #[test]
+    fn codex_operation_preserves_conflicting_arcee_files() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let legacy = stored_arcee_auth("rcai-legacy", "https://api.arcee.ai");
+        let canonical = stored_arcee_auth("rcai-canonical", "https://api.arcee.ai");
+        let env = IsolatedModelEnv::new("codex-conflict", Some(&legacy), None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), &canonical).unwrap();
+
+        let error = codex_auth_logout().unwrap_err();
+
+        assert!(error.to_string().contains("conflicting Arcee credentials"));
+        assert_eq!(
+            std::fs::read_to_string(env.home.join("auth.json")).unwrap(),
+            legacy
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap(),
+            canonical
+        );
     }
 
     #[test]

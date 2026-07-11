@@ -1,3 +1,4 @@
+use super::arcee::migrate_legacy_auth_with_codex_lock;
 use super::*;
 use anyhow::Context;
 use reqwest::header;
@@ -82,7 +83,10 @@ pub async fn codex_auth_login() -> Result<()> {
     let code = poll_device_code(&client, &device).await?;
     let tokens = exchange_authorization_code(&client, &code).await?;
     let auth = auth_from_token_response(tokens, None)?;
-    with_auth_lock(|| write_auth_file(&auth))?;
+    with_auth_lock(|| {
+        migrate_legacy_auth_with_codex_lock()?;
+        write_auth_file(&auth)
+    })?;
 
     println!("Codex auth saved.");
     println!("account: {}", auth.account_id);
@@ -93,15 +97,18 @@ pub async fn codex_auth_login() -> Result<()> {
 
 pub fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
-    let removed = with_auth_lock(|| match read_auth_file_optional()? {
-        Some(_) => match fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(error) => {
-                Err(error).with_context(|| format!("failed to remove {}", path.display()))
-            }
-        },
-        None => Ok(false),
+    let removed = with_auth_lock(|| {
+        migrate_legacy_auth_with_codex_lock()?;
+        match read_auth_file_optional()? {
+            Some(_) => match fs::remove_file(&path) {
+                Ok(()) => Ok(true),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) => {
+                    Err(error).with_context(|| format!("failed to remove {}", path.display()))
+                }
+            },
+            None => Ok(false),
+        }
     })?;
 
     if removed {
@@ -115,7 +122,10 @@ pub fn codex_auth_logout() -> Result<()> {
 
 pub fn codex_auth_status() -> Result<()> {
     let path = auth_file_path()?;
-    let auth = with_auth_lock(read_auth_file_optional)?;
+    let auth = with_auth_lock(|| {
+        migrate_legacy_auth_with_codex_lock()?;
+        read_auth_file_optional()
+    })?;
     match auth {
         Some(auth) => {
             println!("Codex auth: signed in");
@@ -317,6 +327,7 @@ async fn parse_token_response(response: reqwest::Response, label: &str) -> Resul
 
 async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
     let _lock = acquire_auth_lock()?;
+    migrate_legacy_auth_with_codex_lock()?;
     let auth = read_auth_file()?;
     if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
         return Ok(auth);
@@ -326,6 +337,7 @@ async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
 
 async fn force_refresh_auth(client: &Client) -> Result<StoredCodexAuth> {
     let _lock = acquire_auth_lock()?;
+    migrate_legacy_auth_with_codex_lock()?;
     let auth = read_auth_file()?;
     refresh_and_store_auth(client, auth).await
 }

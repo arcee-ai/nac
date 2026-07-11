@@ -3,34 +3,66 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub(super) fn auth_file_path() -> Result<PathBuf> {
+pub(super) fn arcee_auth_file_path() -> Result<PathBuf> {
+    crate::paths::nac_home_dir()
+        .map(|dir| dir.join("arcee_auth.json"))
+        .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
+}
+
+pub(super) fn legacy_auth_file_path() -> Result<PathBuf> {
     crate::paths::nac_home_dir()
         .map(|dir| dir.join("auth.json"))
-        .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for auth storage"))
+        .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for legacy auth storage"))
 }
 
-fn auth_lock_path() -> Result<PathBuf> {
-    Ok(auth_file_path()?.with_extension("auth.json.lock"))
+fn arcee_auth_lock_path() -> Result<PathBuf> {
+    crate::paths::nac_home_dir()
+        .map(|dir| dir.join("arcee_auth.json.lock"))
+        .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-pub(super) fn acquire_auth_lock() -> Result<FileLock> {
-    let path = auth_lock_path()?;
+fn legacy_auth_lock_path() -> Result<PathBuf> {
+    // Preserve the historical lock name used for auth.json so migration
+    // coordinates with Codex and older NAC versions.
+    Ok(legacy_auth_file_path()?.with_extension("auth.json.lock"))
+}
+
+fn acquire_arcee_auth_lock() -> Result<FileLock> {
+    acquire_lock(&arcee_auth_lock_path()?)
+}
+
+fn acquire_legacy_auth_lock() -> Result<FileLock> {
+    acquire_lock(&legacy_auth_lock_path()?)
+}
+
+fn acquire_lock(path: &Path) -> Result<FileLock> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    FileLock::acquire(&path)
+    FileLock::acquire(path)
 }
 
-pub(super) fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
-    let lock = acquire_auth_lock()?;
+pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    let lock = acquire_arcee_auth_lock()?;
     let result = operation();
     drop(lock);
     result
 }
 
-pub(super) fn read_auth_string() -> Result<Option<String>> {
-    let path = auth_file_path()?;
+pub(super) fn with_arcee_migration_locks<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    // All dual-file operations lock auth.json first and arcee_auth.json second.
+    // Codex uses the same auth.json lock path and follows this order.
+    let legacy_lock = acquire_legacy_auth_lock()?;
+    let arcee_lock = acquire_arcee_auth_lock()?;
+    let result = operation();
+    drop(arcee_lock);
+    drop(legacy_lock);
+    result
+}
+
+pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
+    let path = arcee_auth_file_path()?;
     match fs::read_to_string(&path) {
         Ok(raw) => Ok(Some(raw)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -38,8 +70,11 @@ pub(super) fn read_auth_string() -> Result<Option<String>> {
     }
 }
 
-pub(super) fn write_auth_string(raw: &str) -> Result<()> {
-    let path = auth_file_path()?;
+pub(super) fn write_arcee_auth_string(raw: &str) -> Result<()> {
+    write_auth_string_to_path(&arcee_auth_file_path()?, raw)
+}
+
+pub(super) fn write_auth_string_to_path(path: &Path, raw: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -68,8 +103,8 @@ pub(super) fn write_auth_string(raw: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn remove_auth_file() -> Result<bool> {
-    let path = auth_file_path()?;
+pub(super) fn remove_arcee_auth_file() -> Result<bool> {
+    let path = arcee_auth_file_path()?;
     match fs::remove_file(&path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
