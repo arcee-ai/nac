@@ -22,7 +22,7 @@ mod test_http;
 mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
-pub use backend::{validate_backend_api_key_env, validate_backend_reasoning_effort};
+pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
@@ -487,9 +487,10 @@ mod tests {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ];
-        let cases: &[(BackendKind, &[ReasoningEffort])] = &[
+        let cases: &[(BackendKind, &str, &[ReasoningEffort])] = &[
             (
                 BackendKind::DeepSeekChat,
+                "model",
                 &[
                     ReasoningEffort::None,
                     ReasoningEffort::High,
@@ -498,6 +499,7 @@ mod tests {
             ),
             (
                 BackendKind::FireworksChat,
+                "model",
                 &[
                     ReasoningEffort::None,
                     ReasoningEffort::Low,
@@ -507,6 +509,7 @@ mod tests {
             ),
             (
                 BackendKind::TogetherChat,
+                "model",
                 &[
                     ReasoningEffort::None,
                     ReasoningEffort::Low,
@@ -514,10 +517,11 @@ mod tests {
                     ReasoningEffort::High,
                 ],
             ),
-            (BackendKind::OpenAiResponses, &all),
-            (BackendKind::ChatGptCodexResponses, &all),
+            (BackendKind::OpenAiResponses, "model", &all),
+            (BackendKind::ChatGptCodexResponses, "model", &all),
             (
                 BackendKind::AnthropicMessages,
+                "claude-opus-4-6",
                 &[
                     ReasoningEffort::None,
                     ReasoningEffort::Low,
@@ -526,14 +530,14 @@ mod tests {
                     ReasoningEffort::Xhigh,
                 ],
             ),
-            (BackendKind::ArceeAuth, &[]),
-            (BackendKind::ArceeApi, &[]),
+            (BackendKind::ArceeAuth, "model", &[]),
+            (BackendKind::ArceeApi, "model", &[]),
         ];
 
-        for (backend, supported) in cases {
+        for (backend, model, supported) in cases {
             EffectiveModelSettings::new(
                 *backend,
-                "model".into(),
+                (*model).into(),
                 "https://example.com/v1".into(),
                 None,
                 None,
@@ -543,7 +547,7 @@ mod tests {
             for effort in all {
                 let result = EffectiveModelSettings::new(
                     *backend,
-                    "model".into(),
+                    (*model).into(),
                     "https://example.com/v1".into(),
                     Some(effort),
                     None,
@@ -559,6 +563,67 @@ mod tests {
                     assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
                     assert!(error.to_string().contains(effort.as_str()), "{error:#}");
                     assert!(error.to_string().contains(backend.as_str()), "{error:#}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn anthropic_reasoning_capability_matrix_is_model_dependent_and_conservative() {
+        let all = [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ];
+        let standard = [
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ];
+        let with_max = [
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ];
+        let none_only = [ReasoningEffort::None];
+        let cases: &[(&str, &[ReasoningEffort])] = &[
+            ("claude-opus-4-6", &with_max),
+            ("claude-opus-4-6-20260205", &with_max),
+            ("claude-sonnet-4-6", &standard),
+            ("claude-sonnet-4-6-20260217", &standard),
+            ("claude-opus-4-5", &none_only),
+            ("claude-sonnet-4-5", &none_only),
+            ("claude-opus-4-6-latest", &none_only),
+            ("claude-always-on-future", &none_only),
+        ];
+
+        for (model, supported) in cases {
+            validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, None)
+                .expect("absent effort must never select Anthropic thinking controls");
+            for effort in all {
+                let result = validate_model_reasoning_effort(
+                    BackendKind::AnthropicMessages,
+                    model,
+                    Some(effort),
+                );
+                if supported.contains(&effort) {
+                    result.unwrap_or_else(|error| {
+                        panic!(
+                            "Anthropic model {model} rejected {}: {error:#}",
+                            effort.as_str()
+                        )
+                    });
+                } else {
+                    let error = result.expect_err("unsupported model/effort pair must fail");
+                    assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                    assert!(error.to_string().contains(model), "{error:#}");
+                    assert!(error.to_string().contains(effort.as_str()), "{error:#}");
                 }
             }
         }
@@ -897,38 +962,31 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_request_reasoning_is_driven_only_by_explicit_effort() {
+    fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
         let messages = [Message::User {
             content: "read a file".to_string(),
         }];
-        let absent =
-            anthropic_messages_request("claude-opus-4-6", None, &messages, &[], None).unwrap();
-        assert_eq!(absent["max_tokens"], 128000);
-        assert!(absent.get("thinking").is_none());
-        assert!(absent.get("output_config").is_none());
+        for effort in [None, Some(ReasoningEffort::None)] {
+            let request =
+                anthropic_messages_request("claude-always-on-future", effort, &messages, &[], None)
+                    .unwrap();
+            assert_eq!(request["max_tokens"], 128000);
+            assert!(request.get("thinking").is_none());
+            assert!(request.get("output_config").is_none());
+            assert!(!request.to_string().contains("disabled"));
+        }
 
-        let disabled = anthropic_messages_request(
-            "claude-opus-4-6",
-            Some(ReasoningEffort::None),
-            &messages,
-            &[],
-            None,
-        )
-        .unwrap();
-        assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
-        assert!(disabled.get("output_config").is_none());
-
-        for effort in [
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-            ReasoningEffort::Xhigh,
+        for (effort, wire_effort) in [
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Xhigh, "max"),
         ] {
             let request =
                 anthropic_messages_request("claude-opus-4-6", Some(effort), &messages, &[], None)
                     .unwrap();
             assert_eq!(request["thinking"], json!({"type": "adaptive"}));
-            assert_eq!(request["output_config"]["effort"], effort.as_str());
+            assert_eq!(request["output_config"], json!({"effort": wire_effort}));
         }
     }
 

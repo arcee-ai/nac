@@ -18,13 +18,51 @@ fn api_key_backend(backend: BackendKind) -> bool {
     )
 }
 
-/// Validate effort values against each backend's request schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnthropicReasoningCapabilities {
+    /// Model family supports adaptive thinking and low/medium/high effort.
+    Adaptive,
+    /// Model family additionally supports Anthropic's wire-level `max` effort.
+    AdaptiveWithMax,
+    /// The configured model is not known to support this request schema.
+    NoneOnly,
+}
+
+/// Match a documented Anthropic family name or one of its dated snapshots.
 ///
-/// This is intentionally backend-level rather than model-level: OpenAI and
-/// Anthropic expose model-dependent subsets, while the remaining adapters have
-/// fixed wire-level sets. No backend receives an application-selected default.
-pub fn validate_backend_reasoning_effort(
+/// Deliberately do not treat arbitrary suffixes (including `-latest`) as known:
+/// new aliases and older models must be reviewed before NAC emits thinking
+/// controls for them.
+fn anthropic_model_family(model: &str, family: &str) -> bool {
+    model == family
+        || model
+            .strip_prefix(family)
+            .and_then(|suffix| suffix.strip_prefix('-'))
+            .is_some_and(|snapshot| {
+                snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())
+            })
+}
+
+fn anthropic_reasoning_capabilities(model: &str) -> AnthropicReasoningCapabilities {
+    if anthropic_model_family(model, "claude-opus-4-6") {
+        AnthropicReasoningCapabilities::AdaptiveWithMax
+    } else if anthropic_model_family(model, "claude-sonnet-4-6") {
+        AnthropicReasoningCapabilities::Adaptive
+    } else {
+        // Older and unknown models may use a different thinking schema (for
+        // example, manual budget_tokens) or may keep thinking always on.
+        AnthropicReasoningCapabilities::NoneOnly
+    }
+}
+
+/// Validate effort values against the selected backend and model request schema.
+///
+/// No backend receives an application-selected default. Anthropic is checked at
+/// model-family granularity because adaptive thinking and effort tiers are not
+/// portable across Claude generations.
+pub fn validate_model_reasoning_effort(
     backend: BackendKind,
+    model: &str,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<()> {
     let Some(effort) = reasoning_effort else {
@@ -44,26 +82,48 @@ pub fn validate_backend_reasoning_effort(
                 | ReasoningEffort::High
         ),
         BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
-        BackendKind::AnthropicMessages => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-                | ReasoningEffort::Xhigh
-        ),
+        BackendKind::AnthropicMessages => match anthropic_reasoning_capabilities(model) {
+            // `none` means omission on Anthropic. It is safe for every family,
+            // including models whose adaptive thinking is always on.
+            _ if effort == ReasoningEffort::None => true,
+            AnthropicReasoningCapabilities::AdaptiveWithMax => matches!(
+                effort,
+                ReasoningEffort::Low
+                    | ReasoningEffort::Medium
+                    | ReasoningEffort::High
+                    | ReasoningEffort::Xhigh
+            ),
+            AnthropicReasoningCapabilities::Adaptive => matches!(
+                effort,
+                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
+            ),
+            AnthropicReasoningCapabilities::NoneOnly => false,
+        },
         BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
     };
     if supported {
         return Ok(());
     }
 
+    if backend == BackendKind::AnthropicMessages {
+        let allowed = match anthropic_reasoning_capabilities(model) {
+            AnthropicReasoningCapabilities::AdaptiveWithMax => "none, low, medium, high, or xhigh",
+            AnthropicReasoningCapabilities::Adaptive => "none, low, medium, or high",
+            AnthropicReasoningCapabilities::NoneOnly => "none only",
+        };
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: reasoning effort '{}' is not supported by backend '{}' for Anthropic model '{}'; supported values: {}",
+            effort.as_str(), backend, model, allowed
+        )));
+    }
+
     let allowed = match backend {
         BackendKind::DeepSeekChat => "none, high, or xhigh",
         BackendKind::FireworksChat | BackendKind::TogetherChat => "none, low, medium, or high",
-        BackendKind::AnthropicMessages => "none, low, medium, high, or xhigh",
         BackendKind::ArceeAuth | BackendKind::ArceeApi => "no explicit effort levels",
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => unreachable!(),
+        BackendKind::OpenAiResponses
+        | BackendKind::ChatGptCodexResponses
+        | BackendKind::AnthropicMessages => unreachable!(),
     };
     Err(model_configuration_error(format!(
         "invalid model configuration: reasoning effort '{}' is not supported by backend '{}'; supported values: {}",

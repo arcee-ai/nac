@@ -792,6 +792,7 @@ impl SessionManager {
         )?;
         validate_model_configuration(
             prospective.backend,
+            &prospective.model,
             Some(&prospective.base_url),
             prospective.reasoning_effort,
             prospective.api_key_env.as_deref(),
@@ -2965,25 +2966,63 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
-    async fn create_rejects_unsupported_reasoning_before_persisting() {
+    async fn create_rejects_unsupported_backend_and_anthropic_model_efforts_before_persisting() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("create_invalid_reasoning");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
         let manager = test_manager(&root);
-        let error = manager
-            .create_session(CreateSessionRequest {
-                model: RequestField::Value("test-model".to_string()),
-                base_url: RequestField::Value("https://api.together.xyz/v1".to_string()),
-                backend: RequestField::Value("together-chat".to_string()),
-                reasoning_effort: RequestField::Value("minimal".to_string()),
-                api_key_env: RequestField::Value("UNREAD_REASONING_TEST_KEY".to_string()),
-                ..CreateSessionRequest::default()
-            })
-            .await
-            .expect_err("unsupported effort must fail creation");
-        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-        assert!(error.to_string().contains("minimal"), "{error:#}");
-        assert!(error.to_string().contains("together-chat"), "{error:#}");
-        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
-        assert!(!root.join("store.db").exists());
+        let cases = [
+            (
+                "together-chat",
+                "test-model",
+                "https://api.together.xyz/v1",
+                "minimal",
+            ),
+            (
+                "anthropic-messages",
+                "claude-sonnet-4-6",
+                "https://api.anthropic.com/v1",
+                "xhigh",
+            ),
+            (
+                "anthropic-messages",
+                "claude-opus-4-5",
+                "https://api.anthropic.com/v1",
+                "high",
+            ),
+            (
+                "anthropic-messages",
+                "claude-always-on-future",
+                "https://api.anthropic.com/v1",
+                "low",
+            ),
+        ];
+
+        for (backend, model, base_url, effort) in cases {
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value(model.to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    reasoning_effort: RequestField::Value(effort.to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("unsupported effort must fail creation");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(effort), "{error:#}");
+            assert!(error.to_string().contains(backend), "{error:#}");
+            if backend == "anthropic-messages" {
+                assert!(error.to_string().contains(model), "{error:#}");
+            }
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            assert!(
+                !root.join("store.db").exists(),
+                "invalid {model}/{effort} must fail before persistence"
+            );
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3199,13 +3238,46 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Value("xhigh".to_string()),
                 ..UpdateConfigRequest::default()
             },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-sonnet-4-6".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("xhigh".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-opus-4-5".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("high".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-always-on-future".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("low".to_string()),
+                ..UpdateConfigRequest::default()
+            },
         ];
 
         for request in invalid {
+            let anthropic_model = match (&request.backend, &request.model) {
+                (RequestField::Value(backend), RequestField::Value(model))
+                    if backend == "anthropic-messages" =>
+                {
+                    Some(model.clone())
+                }
+                _ => None,
+            };
             let error = manager
                 .update_session_config("session", request)
                 .await
                 .unwrap_err();
+            if let Some(model) = anthropic_model {
+                assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                assert!(error.to_string().contains(&model), "{error:#}");
+            }
             assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
             let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(stored.model, "model-a");

@@ -90,13 +90,14 @@ fn resolve_arcee_api_credentials(
 /// Validates the effective model configuration without issuing a model request.
 pub fn validate_model_configuration(
     backend: BackendKind,
+    model: &str,
     base_url: Option<&str>,
     reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<&str>,
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     validate_extra_headers(extra_headers)?;
-    validate_backend_reasoning_effort(backend, reasoning_effort)?;
+    validate_model_reasoning_effort(backend, model, reasoning_effort)?;
     validate_backend_api_key_env(backend, base_url, api_key_env)?;
     match backend {
         BackendKind::ArceeAuth => {

@@ -461,7 +461,7 @@ mod tests {
         let cli = RunCli::try_parse_from(["nac"]).unwrap();
         let mut config = runtime::NacConfig::default();
         config.model.backend = Some(BackendKind::AnthropicMessages);
-        config.model.model = Some("config-model".to_string());
+        config.model.model = Some("claude-sonnet-4-6".to_string());
         config.model.base_url = Some("https://config.example/v1".to_string());
         config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
         config.model.reasoning_effort = Some(ReasoningEffort::Medium);
@@ -473,7 +473,7 @@ mod tests {
         let actual = runtime::effective_model_settings(&model_options(cli.model), &config).unwrap();
         let expected = nac_core::model::EffectiveModelSettings::new(
             BackendKind::AnthropicMessages,
-            "config-model".to_string(),
+            "claude-sonnet-4-6".to_string(),
             "https://config.example/v1".to_string(),
             Some(ReasoningEffort::Medium),
             Some("CONFIG_API_KEY".to_string()),

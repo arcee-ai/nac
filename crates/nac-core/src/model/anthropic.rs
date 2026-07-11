@@ -10,6 +10,7 @@ pub(super) fn anthropic_messages_request(
     tools: &[ToolDefinition],
     cache_ttl: Option<&str>,
 ) -> Result<Value> {
+    validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, reasoning_effort)?;
     let (system, mut messages) = anthropic_messages_from_internal(messages)?;
     let mut request = json!({
         "model": model,
@@ -17,9 +18,10 @@ pub(super) fn anthropic_messages_request(
         "messages": &messages,
     });
     match reasoning_effort {
-        None => {}
-        Some(ReasoningEffort::None) => {
-            request["thinking"] = json!({"type": "disabled"});
+        None | Some(ReasoningEffort::None) => {}
+        Some(ReasoningEffort::Xhigh) => {
+            request["thinking"] = json!({"type": "adaptive"});
+            request["output_config"] = json!({"effort": "max"});
         }
         Some(effort) => {
             request["thinking"] = json!({"type": "adaptive"});

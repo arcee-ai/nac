@@ -95,6 +95,8 @@ Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when 
 
 For every API-key backend (`openai-responses`, `together-chat`, `anthropic-messages`, `deepseek-chat`, `fireworks-chat`, and `arcee-api`), `api_key_env` is required and names the only environment variable read for credentials. The selector must match `[A-Za-z_][A-Za-z0-9_]*`, and its value must be nonempty. Managed `arcee-auth` and `chatgpt-codex-responses` reject `api_key_env` and use their respective stored credentials. Store paths remain relative to the launch working directory.
 
+Reasoning effort is never defaulted by NAC. For `anthropic-messages`, `none` (and an omitted effort) sends no thinking controls. `low`, `medium`, and `high` are accepted for Claude Opus 4.6 and Sonnet 4.6 families (including dated snapshots); `xhigh` maps to Anthropic `max` only for Opus 4.6. Unknown and older Claude models reject explicit non-`none` effort during configuration validation.
+
 ```toml
 [agents_md]
 fallback_filenames = []

@@ -144,7 +144,7 @@ impl EffectiveModelSettings {
                 base_url
             )));
         }
-        validate_backend_reasoning_effort(backend, reasoning_effort)?;
+        validate_model_reasoning_effort(backend, &model, reasoning_effort)?;
 
         Ok(Self {
             backend,
