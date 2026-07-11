@@ -209,6 +209,15 @@ mod tests {
         }
     }
 
+    fn directory_names(path: &std::path::Path) -> Vec<String> {
+        let mut names = std::fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
     #[test]
     fn api_key_backends_require_explicit_valid_selectors_and_ignore_canonical_vars() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -462,8 +471,8 @@ mod tests {
                 .contains("failed to parse stored Arcee auth"));
         }
         {
-            let env = IsolatedModelEnv::new("stored-auth-lock-io", None, None, None);
-            std::fs::create_dir(env.home.join("arcee_auth.json.lock")).unwrap();
+            let env = IsolatedModelEnv::new("stored-auth-path-io", None, None, None);
+            std::fs::create_dir(env.home.join("arcee_auth.json")).unwrap();
             let error = ModelClient::from_effective_settings(settings).unwrap_err();
             assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
             assert_eq!(error.to_string(), "failed to load stored Arcee credentials");
@@ -474,7 +483,8 @@ mod tests {
     fn explicit_arcee_backend_binds_stored_key_to_its_origin() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai");
-        let _env = IsolatedModelEnv::new("explicit-arcee", Some(&auth), None, None);
+        let env = IsolatedModelEnv::new("explicit-arcee", None, None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), &auth).unwrap();
 
         let requested_base = "https://stored.arcee.ai:443/api/v1/";
         let client = ModelClient::from_effective_settings(effective_settings(
@@ -500,7 +510,8 @@ mod tests {
     fn both_arcee_modes_validate_endpoints_and_sensitive_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let auth = stored_arcee_auth("stored-arcee-secret", "https://api.arcee.ai");
-        let _env = IsolatedModelEnv::new("canonical-modes", Some(&auth), None, None);
+        let env = IsolatedModelEnv::new("canonical-modes", None, None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), &auth).unwrap();
         let selector = "NAC_ARCEE_CANONICAL_TEST_KEY";
         let original = std::env::var_os(selector);
         set_env(selector, Some("api-arcee-secret"));
@@ -593,40 +604,46 @@ mod tests {
     }
 
     #[test]
-    fn codex_logout_migrates_legacy_arcee_auth_before_touching_auth_json() {
+    fn legacy_shaped_auth_json_is_ignored_and_unchanged_by_arcee_status_and_client_creation() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let legacy = stored_arcee_auth("rcai-legacy", "https://api.arcee.ai");
-        let env = IsolatedModelEnv::new("codex-migrates", Some(&legacy), None, None);
+        let env = IsolatedModelEnv::new("legacy-ignored", Some(&legacy), None, None);
+        let auth_path = env.home.join("auth.json");
+        let canonical_path = env.home.join("arcee_auth.json");
+        let before = std::fs::read(&auth_path).unwrap();
 
-        codex_auth_logout().unwrap();
+        arcee_auth_status().unwrap();
+        assert_eq!(std::fs::read(&auth_path).unwrap(), before);
+        assert!(!canonical_path.exists());
+        assert_eq!(directory_names(&env.home), ["auth.json"]);
 
-        assert!(!env.home.join("auth.json").exists());
-        let canonical = std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&canonical).unwrap(),
-            serde_json::from_str::<Value>(&legacy).unwrap()
-        );
+        let error = ModelClient::from_effective_settings(effective_settings(
+            BackendKind::ArceeAuth,
+            "https://api.arcee.ai",
+            None,
+        ))
+        .expect_err("legacy auth.json must not authenticate arcee-auth");
+        assert!(error.to_string().contains("Arcee auth is not configured"));
+        assert_eq!(std::fs::read(&auth_path).unwrap(), before);
+        assert!(!canonical_path.exists());
+        assert_eq!(directory_names(&env.home), ["auth.json"]);
     }
 
     #[test]
-    fn codex_operation_preserves_conflicting_arcee_files() {
+    fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let legacy = stored_arcee_auth("rcai-legacy", "https://api.arcee.ai");
-        let canonical = stored_arcee_auth("rcai-canonical", "https://api.arcee.ai");
-        let env = IsolatedModelEnv::new("codex-conflict", Some(&legacy), None, None);
-        std::fs::write(env.home.join("arcee_auth.json"), &canonical).unwrap();
+        let env = IsolatedModelEnv::new("codex-foreign-arcee", Some(&legacy), None, None);
+        let auth_path = env.home.join("auth.json");
+        let canonical_path = env.home.join("arcee_auth.json");
+        let before = std::fs::read(&auth_path).unwrap();
 
-        let error = codex_auth_logout().unwrap_err();
+        codex_auth_status().unwrap();
+        assert_eq!(directory_names(&env.home), ["auth.json"]);
+        codex_auth_logout().unwrap();
 
-        assert!(error.to_string().contains("conflicting Arcee credentials"));
-        assert_eq!(
-            std::fs::read_to_string(env.home.join("auth.json")).unwrap(),
-            legacy
-        );
-        assert_eq!(
-            std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap(),
-            canonical
-        );
+        assert_eq!(std::fs::read(&auth_path).unwrap(), before);
+        assert!(!canonical_path.exists());
     }
 
     #[test]

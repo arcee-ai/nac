@@ -1,7 +1,6 @@
 use super::auth_store::{
-    arcee_auth_file_path, legacy_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path,
-    read_auth_string_from_path, with_arcee_auth_lock, with_arcee_migration_locks,
-    write_arcee_auth_string, write_auth_string_to_path,
+    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path, with_arcee_auth_lock,
+    write_arcee_auth_string,
 };
 use super::*;
 use anyhow::Context;
@@ -12,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "nac-cli";
 const AUTH_TYPE: &str = "arcee_api_key";
-const DEFAULT_BASE_URL: &str = "https://api.arcee.ai";
+const CANONICAL_AUTH_SERVICE_BASE_URL: &str = "https://api.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_EXPIRES_IN_SECS: u64 = 900;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
@@ -310,10 +309,60 @@ struct DeviceCode {
     expires_in_secs: u64,
 }
 
+#[derive(Debug, Clone)]
+struct ArceeAuthService {
+    base_url: String,
+}
+
+impl ArceeAuthService {
+    fn canonical() -> Result<Self> {
+        Self::approved(CANONICAL_AUTH_SERVICE_BASE_URL)
+    }
+
+    fn approved(base_url: &str) -> Result<Self> {
+        validate_auth_service_base_url(base_url)?;
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+        })
+    }
+
+    #[cfg(test)]
+    fn for_test(base_url: &str) -> Self {
+        let parsed = Url::parse(base_url).expect("test auth service URL must be absolute");
+        assert!(matches!(parsed.scheme(), "http" | "https"));
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+        }
+    }
+
+    fn device_code_url(&self) -> String {
+        format!("{}/app/v1/device/code", self.base_url)
+    }
+
+    fn device_token_url(&self) -> String {
+        format!("{}/app/v1/device/token", self.base_url)
+    }
+}
+
+fn validate_auth_service_base_url(base_url: &str) -> Result<()> {
+    let parsed = validate_approved_base_url(base_url)
+        .with_context(|| format!("invalid Arcee auth service URL '{base_url}'"))?;
+    let canonical = Url::parse(CANONICAL_AUTH_SERVICE_BASE_URL)
+        .expect("canonical Arcee auth service URL must remain valid");
+    if parsed.origin() != canonical.origin() || parsed.path() != "/" {
+        return Err(anyhow!(
+            "Arcee auth service URL '{}' is not the canonical origin {}",
+            base_url,
+            CANONICAL_AUTH_SERVICE_BASE_URL
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn arcee_auth_login() -> Result<()> {
+    let service = ArceeAuthService::canonical()?;
     let client = no_redirect_client()?;
-    let base = arcee_api_base();
-    let device = request_device_code(&client, &base).await?;
+    let device = request_device_code(&client, &service).await?;
 
     println!("Open this URL in a browser to authorize nac:");
     println!("{}", device.verification_uri_complete);
@@ -323,12 +372,9 @@ pub(super) async fn arcee_auth_login() -> Result<()> {
     println!();
     println!("Waiting for authorization...");
 
-    let success = poll_device_code(&client, &base, &device).await?;
+    let success = poll_device_code(&client, &service, &device).await?;
     let auth = stored_auth_from_token_success(success)?;
-    with_arcee_migration_locks(|| {
-        migrate_legacy_auth_unlocked()?;
-        write_stored_auth(&auth)
-    })?;
+    with_arcee_auth_lock(|| write_stored_auth(&auth))?;
 
     println!("Arcee auth saved.");
     println!("workspace: {}", auth.workspace_name);
@@ -339,10 +385,7 @@ pub(super) async fn arcee_auth_login() -> Result<()> {
 
 pub(super) fn arcee_auth_status() -> Result<()> {
     let path = arcee_auth_file_path()?;
-    let auth = with_arcee_migration_locks(|| {
-        migrate_legacy_auth_unlocked()?;
-        read_stored_auth_optional()
-    })?;
+    let auth = read_stored_auth_optional()?;
     match auth {
         Some(auth) => {
             println!("Arcee auth: signed in");
@@ -361,9 +404,7 @@ pub(super) fn arcee_auth_status() -> Result<()> {
 
 pub(super) fn arcee_auth_logout() -> Result<()> {
     let path = arcee_auth_file_path()?;
-    let legacy_path = legacy_auth_file_path()?;
-    let removed =
-        with_arcee_migration_locks(|| remove_arcee_auth_files_for_logout(&legacy_path, &path))?;
+    let removed = with_arcee_auth_lock(|| remove_arcee_auth_file_for_logout(&path))?;
     if removed {
         println!("Arcee auth removed.");
     } else {
@@ -373,24 +414,15 @@ pub(super) fn arcee_auth_logout() -> Result<()> {
     Ok(())
 }
 
-fn remove_arcee_auth_files_for_logout(legacy_path: &Path, canonical_path: &Path) -> Result<bool> {
-    let remove_canonical = logout_disposition(canonical_path, true)?;
-    let remove_legacy = logout_disposition(legacy_path, false)?;
-
-    let canonical_removed = if remove_canonical {
-        remove_auth_path(canonical_path)?
+fn remove_arcee_auth_file_for_logout(path: &Path) -> Result<bool> {
+    if logout_disposition(path)? {
+        remove_auth_path(path)
     } else {
-        false
-    };
-    let legacy_removed = if remove_legacy {
-        remove_auth_path(legacy_path)?
-    } else {
-        false
-    };
-    Ok(canonical_removed || legacy_removed)
+        Ok(false)
+    }
 }
 
-fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
+fn logout_disposition(path: &Path) -> Result<bool> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -399,16 +431,10 @@ fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
         }
     };
 
+    // The canonical path belongs only to Arcee, so unlink a symlink without
+    // following it. Malformed canonical data is likewise recoverable by logout.
     if metadata.file_type().is_symlink() {
-        // The canonical path belongs to Arcee, so unlink it without following it.
-        // A legacy auth.json symlink is shared with Codex and cannot be safely classified.
-        if malformed_is_owned {
-            return Ok(true);
-        }
-        return Err(anyhow!(
-            "refusing to inspect shared legacy credential symlink {}; remove the symlink manually before retrying logout",
-            path.display()
-        ));
+        return Ok(true);
     }
     if !metadata.file_type().is_file() {
         return Err(anyhow!(
@@ -425,7 +451,7 @@ fn logout_disposition(path: &Path, malformed_is_owned: bool) -> Result<bool> {
     })?;
     let value: Value = match serde_json::from_slice(&raw) {
         Ok(value) => value,
-        Err(_) => return Ok(malformed_is_owned),
+        Err(_) => return Ok(true),
     };
     Ok(value.get("type").and_then(Value::as_str) == Some(AUTH_TYPE))
 }
@@ -451,16 +477,13 @@ fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAu
 }
 
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
-    with_arcee_migration_locks(|| {
-        migrate_legacy_auth_unlocked()?;
-        read_stored_auth_optional()
-    })
-    .map_err(classify_stored_auth_data_error)?
-    .ok_or_else(|| {
-        stored_auth_configuration_error(
-            "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
-        )
-    })
+    read_stored_auth_optional()
+        .map_err(classify_stored_auth_data_error)?
+        .ok_or_else(|| {
+            stored_auth_configuration_error(
+                "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
+            )
+        })
 }
 
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
@@ -507,108 +530,8 @@ fn write_stored_auth(auth: &StoredArceeAuth) -> Result<()> {
     write_arcee_auth_string(&raw)
 }
 
-/// Migrate while the caller holds the Codex/legacy auth.json lock. Acquiring the
-/// Arcee lock second preserves the global lock order used by Arcee operations.
-pub(super) fn migrate_legacy_auth_with_codex_lock() -> Result<()> {
-    with_arcee_auth_lock(migrate_legacy_auth_unlocked)
-}
-
-fn migrate_legacy_auth_unlocked() -> Result<()> {
-    let legacy_path = legacy_auth_file_path()?;
-    let arcee_path = arcee_auth_file_path()?;
-    migrate_legacy_auth_files(&legacy_path, &arcee_path)
-}
-
-fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()> {
-    let legacy_raw = match read_auth_string_from_path(legacy_path)? {
-        Some(raw) => raw,
-        None => return Ok(()),
-    };
-
-    // Malformed pre-split auth.json cannot safely be attributed to Arcee. Leave
-    // it untouched and let the Codex-owned path retain its existing behavior.
-    let legacy_value: Value = match serde_json::from_str(&legacy_raw) {
-        Ok(value) => value,
-        Err(_) => return Ok(()),
-    };
-    if legacy_value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
-        return Ok(());
-    }
-    let legacy_auth: StoredArceeAuth = serde_json::from_value(legacy_value).map_err(|error| {
-        stored_auth_configuration_error(format!(
-            "legacy Arcee auth in {} is invalid; refusing to overwrite it: {}",
-            legacy_path.display(),
-            error
-        ))
-    })?;
-    validate_stored_base_url(&legacy_auth.base_url).map_err(|error| {
-        stored_auth_configuration_error(format!(
-            "legacy Arcee auth in {} has an invalid base_url; refusing to migrate it: {}",
-            legacy_path.display(),
-            error
-        ))
-    })?;
-
-    match read_auth_string_from_path(arcee_path)? {
-        Some(arcee_raw) => {
-            let arcee_auth = parse_stored_auth(&arcee_raw, arcee_path)
-                .with_context(|| {
-                    format!(
-                        "cannot migrate legacy Arcee auth because {} is invalid; both files were preserved",
-                        arcee_path.display()
-                    )
-                })?
-                .ok_or_else(|| {
-                    stored_auth_configuration_error(format!(
-                        "cannot migrate legacy Arcee auth because {} already contains non-Arcee credentials; both files were preserved",
-                        arcee_path.display()
-                    ))
-                })?;
-            if arcee_auth != legacy_auth {
-                return Err(stored_auth_configuration_error(format!(
-                    "conflicting Arcee credentials exist in {} and {}; both files were preserved",
-                    legacy_path.display(),
-                    arcee_path.display()
-                )));
-            }
-        }
-        None => {
-            let raw = serde_json::to_string_pretty(&legacy_auth)
-                .context("failed to serialize legacy Arcee auth")?;
-            write_auth_string_to_path(arcee_path, &raw)?;
-            let migrated_raw = read_auth_string_from_path(arcee_path)?.ok_or_else(|| {
-                anyhow!(
-                    "failed to verify migrated Arcee auth in {} because it disappeared",
-                    arcee_path.display()
-                )
-            })?;
-            let migrated = parse_stored_auth(&migrated_raw, arcee_path)?.ok_or_else(|| {
-                anyhow!(
-                    "failed to verify migrated Arcee auth in {}",
-                    arcee_path.display()
-                )
-            })?;
-            if migrated != legacy_auth {
-                return Err(anyhow!(
-                    "migrated Arcee auth in {} did not match {}; the legacy file was preserved",
-                    arcee_path.display(),
-                    legacy_path.display()
-                ));
-            }
-        }
-    }
-
-    match fs::remove_file(legacy_path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to remove {}", legacy_path.display()))
-        }
-    }
-}
-
-async fn request_device_code(client: &Client, base: &str) -> Result<DeviceCode> {
-    let url = format!("{base}/app/v1/device/code");
+async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Result<DeviceCode> {
+    let url = service.device_code_url();
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")
@@ -676,15 +599,15 @@ async fn request_device_code(client: &Client, base: &str) -> Result<DeviceCode> 
 
 async fn poll_device_code(
     client: &Client,
-    base: &str,
+    service: &ArceeAuthService,
     device: &DeviceCode,
 ) -> Result<TokenSuccess> {
-    poll_device_code_with(client, base, device, now_ms, sleep).await
+    poll_device_code_with(client, service, device, now_ms, sleep).await
 }
 
 async fn poll_device_code_with<Now, Sleep, SleepFuture>(
     client: &Client,
-    base: &str,
+    service: &ArceeAuthService,
     device: &DeviceCode,
     mut now: Now,
     mut sleep_for: Sleep,
@@ -694,7 +617,7 @@ where
     Sleep: FnMut(Duration) -> SleepFuture,
     SleepFuture: std::future::Future<Output = ()>,
 {
-    let url = format!("{base}/app/v1/device/token");
+    let url = service.device_token_url();
     let started = now();
     let mut interval_secs = device.interval_secs;
 
@@ -770,15 +693,6 @@ where
 
         sleep_for(Duration::from_secs(interval_secs)).await;
     }
-}
-
-fn arcee_api_base() -> String {
-    std::env::var("ARCEE_BASE_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
-        .trim_end_matches('/')
-        .to_string()
 }
 
 fn string_field(value: &Value, key: &str) -> Result<String> {
@@ -905,9 +819,12 @@ mod tests {
             .to_string(),
         )]);
 
-        let device = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
-            .await
-            .expect("device-code response should parse");
+        let device = request_device_code(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+        )
+        .await
+        .expect("device-code response should parse");
         let requests = server.finish();
 
         assert_eq!(device.device_code, "device-123");
@@ -938,9 +855,12 @@ mod tests {
             .to_string(),
         )]);
 
-        let device = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
-            .await
-            .expect("fallback verification URI should parse");
+        let device = request_device_code(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+        )
+        .await
+        .expect("fallback verification URI should parse");
         server.finish();
 
         assert_eq!(
@@ -968,9 +888,12 @@ mod tests {
 
         for (status, body, expected) in cases {
             let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body)]);
-            let error = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
-                .await
-                .expect_err("invalid device-code response should fail");
+            let error = request_device_code(
+                &no_redirect_client().unwrap(),
+                &ArceeAuthService::for_test(&server.base_url),
+            )
+            .await
+            .expect_err("invalid device-code response should fail");
             let requests = server.finish();
 
             assert!(
@@ -989,10 +912,13 @@ mod tests {
             format!("{}not-in-error", "x".repeat(500)),
         );
 
-        let error = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
-            .await
-            .expect_err("Arcee device-code redirects must not be followed")
-            .to_string();
+        let error = request_device_code(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+        )
+        .await
+        .expect_err("Arcee device-code redirects must not be followed")
+        .to_string();
         let requests = server.finish();
 
         assert!(
@@ -1040,7 +966,7 @@ mod tests {
 
         let error = poll_device_code_with(
             &no_redirect_client().unwrap(),
-            &source.base_url,
+            &ArceeAuthService::for_test(&source.base_url),
             &device,
             || 0,
             |_| ready(()),
@@ -1100,7 +1026,7 @@ mod tests {
 
         let success = poll_device_code_with(
             &no_redirect_client().unwrap(),
-            &server.base_url,
+            &ArceeAuthService::for_test(&server.base_url),
             &device,
             move || now_clock.get(),
             move |duration| {
@@ -1171,7 +1097,7 @@ mod tests {
             };
             let error = poll_device_code_with(
                 &no_redirect_client().unwrap(),
-                &server.base_url,
+                &ArceeAuthService::for_test(&server.base_url),
                 &device,
                 || 0,
                 |_| ready(()),
@@ -1187,6 +1113,51 @@ mod tests {
             assert_eq!(requests.len(), 1);
             assert_device_request(&requests[0], "/app/v1/device/token");
         }
+    }
+
+    #[test]
+    fn canonical_auth_service_uses_the_fixed_approved_origin() {
+        let service = ArceeAuthService::canonical().unwrap();
+        assert_eq!(service.base_url, CANONICAL_AUTH_SERVICE_BASE_URL);
+        assert_eq!(
+            service.device_code_url(),
+            "https://api.arcee.ai/app/v1/device/code"
+        );
+        assert_eq!(
+            service.device_token_url(),
+            "https://api.arcee.ai/app/v1/device/token"
+        );
+    }
+
+    #[test]
+    fn noncanonical_auth_service_origins_are_rejected_before_connection() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let local_origin = format!("http://{}", listener.local_addr().unwrap());
+        let cases = [
+            local_origin.as_str(),
+            "https://arcee.ai",
+            "https://accounts.arcee.ai",
+            "http://api.arcee.ai",
+            "https://api.arcee.ai:8443",
+            "https://user@api.arcee.ai",
+            "https://api.arcee.ai/custom-path",
+            "not a URL",
+        ];
+
+        for base_url in cases {
+            let error = ArceeAuthService::approved(base_url).unwrap_err();
+            assert!(
+                error.to_string().contains("Arcee auth service")
+                    || error.to_string().contains("canonical origin"),
+                "unexpected error for {base_url}: {error:#}"
+            );
+        }
+
+        let accept_error = listener
+            .accept()
+            .expect_err("rejected auth-service origin must not receive a connection");
+        assert_eq!(accept_error.kind(), io::ErrorKind::WouldBlock);
     }
 
     #[test]
@@ -1467,235 +1438,66 @@ mod tests {
     }
 
     #[test]
-    fn valid_legacy_arcee_auth_migrates_idempotently() {
-        let dir = TestDir::new("valid-migration");
-        let (legacy, canonical) = dir.paths();
-        let auth = stored_auth("rcai-legacy");
-        write_json(&legacy, &auth);
-
-        migrate_legacy_auth_files(&legacy, &canonical).unwrap();
-
-        assert!(!legacy.exists());
-        let canonical_raw = fs::read_to_string(&canonical).unwrap();
-        assert_eq!(
-            parse_stored_auth(&canonical_raw, &canonical).unwrap(),
-            Some(auth)
-        );
-        migrate_legacy_auth_files(&legacy, &canonical).unwrap();
-    }
-
-    #[test]
-    fn invalid_legacy_arcee_url_is_not_migrated() {
-        let dir = TestDir::new("invalid-url-migration");
-        let (legacy, canonical) = dir.paths();
-        let mut auth = stored_auth("rcai-legacy");
-        auth.base_url = "https://attacker.example/steal".to_string();
-        write_json(&legacy, &auth);
-        let legacy_before = fs::read(&legacy).unwrap();
-
-        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
-
-        assert!(error.to_string().contains("invalid base_url"));
-        assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
-        assert!(!canonical.exists());
-    }
-
-    #[test]
-    fn migration_leaves_codex_auth_untouched() {
-        let dir = TestDir::new("codex");
-        let (legacy, canonical) = dir.paths();
-        let codex = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
-        fs::write(&legacy, codex).unwrap();
-
-        migrate_legacy_auth_files(&legacy, &canonical).unwrap();
-
-        assert_eq!(fs::read_to_string(&legacy).unwrap(), codex);
-        assert!(!canonical.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn migration_rejects_legacy_symlink_without_reading_or_moving_target() {
-        let dir = TestDir::new("legacy-symlink-migration");
-        let (legacy, canonical) = dir.paths();
-        let target = dir.0.join("legacy-target.json");
-        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
-        fs::write(&target, &target_raw).unwrap();
-        symlink(&target, &legacy).unwrap();
-
-        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
-
-        assert!(error.to_string().contains("symlink credential path"));
-        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
-        assert!(fs::symlink_metadata(&legacy)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(!canonical.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn migration_rejects_canonical_symlink_and_preserves_all_files() {
-        let dir = TestDir::new("canonical-symlink-migration");
-        let (legacy, canonical) = dir.paths();
-        let target = dir.0.join("canonical-target.json");
-        let legacy_raw = serde_json::to_string_pretty(&stored_auth("rcai-legacy")).unwrap();
-        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
-        fs::write(&legacy, &legacy_raw).unwrap();
-        fs::write(&target, &target_raw).unwrap();
-        symlink(&target, &canonical).unwrap();
-
-        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
-
-        assert!(error.to_string().contains("symlink credential path"));
-        assert_eq!(fs::read_to_string(&legacy).unwrap(), legacy_raw);
-        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
-        assert!(fs::symlink_metadata(&canonical)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-    }
-
-    #[test]
-    fn identical_legacy_and_canonical_auth_remove_only_legacy_copy() {
-        let dir = TestDir::new("identical");
-        let (legacy, canonical) = dir.paths();
-        let auth = stored_auth("rcai-same");
-        write_json(&legacy, &auth);
-        write_json(&canonical, &auth);
-        let canonical_before = fs::read(&canonical).unwrap();
-
-        migrate_legacy_auth_files(&legacy, &canonical).unwrap();
-
-        assert!(!legacy.exists());
-        assert_eq!(fs::read(&canonical).unwrap(), canonical_before);
-    }
-
-    #[test]
-    fn conflicting_arcee_auth_is_preserved() {
-        let dir = TestDir::new("conflict");
-        let (legacy, canonical) = dir.paths();
-        write_json(&legacy, &stored_auth("rcai-legacy"));
-        write_json(&canonical, &stored_auth("rcai-canonical"));
-        let legacy_before = fs::read(&legacy).unwrap();
-        let canonical_before = fs::read(&canonical).unwrap();
-
-        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
-
-        assert!(error.to_string().contains("conflicting Arcee credentials"));
-        assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
-        assert_eq!(fs::read(&canonical).unwrap(), canonical_before);
-    }
-
-    #[test]
-    fn malformed_canonical_auth_preserves_both_files() {
-        let dir = TestDir::new("malformed-canonical");
-        let (legacy, canonical) = dir.paths();
-        write_json(&legacy, &stored_auth("rcai-legacy"));
-        fs::write(&canonical, "{ malformed").unwrap();
-        let legacy_before = fs::read(&legacy).unwrap();
-        let canonical_before = fs::read(&canonical).unwrap();
-
-        assert!(migrate_legacy_auth_files(&legacy, &canonical).is_err());
-        assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
-        assert_eq!(fs::read(&canonical).unwrap(), canonical_before);
-    }
-
-    #[test]
-    fn arcee_logout_removes_malformed_canonical_and_preserves_codex() {
+    fn arcee_logout_removes_malformed_canonical_and_preserves_auth_json() {
         let dir = TestDir::new("logout-malformed");
-        let (codex_path, arcee_path) = dir.paths();
-        let codex = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
-        fs::write(&codex_path, codex).unwrap();
+        let (auth_path, arcee_path) = dir.paths();
+        let auth_json = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
+        fs::write(&auth_path, auth_json).unwrap();
         fs::write(&arcee_path, "{ malformed").unwrap();
 
-        assert!(remove_arcee_auth_files_for_logout(&codex_path, &arcee_path).unwrap());
+        assert!(remove_arcee_auth_file_for_logout(&arcee_path).unwrap());
 
         assert!(!arcee_path.exists());
-        assert_eq!(fs::read_to_string(codex_path).unwrap(), codex);
+        assert_eq!(fs::read_to_string(auth_path).unwrap(), auth_json);
     }
 
     #[test]
-    fn arcee_logout_preserves_coexisting_codex_auth() {
+    fn arcee_logout_removes_canonical_and_preserves_auth_json() {
         let dir = TestDir::new("logout-coexistence");
-        let (codex_path, arcee_path) = dir.paths();
-        let codex = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
-        fs::write(&codex_path, codex).unwrap();
+        let (auth_path, arcee_path) = dir.paths();
+        let auth_json = r#"{"type":"chatgpt-codex","access":"a","refresh":"r"}"#;
+        fs::write(&auth_path, auth_json).unwrap();
         write_json(&arcee_path, &stored_auth("rcai-canonical"));
 
-        assert!(remove_arcee_auth_files_for_logout(&codex_path, &arcee_path).unwrap());
+        assert!(remove_arcee_auth_file_for_logout(&arcee_path).unwrap());
 
         assert!(!arcee_path.exists());
-        assert_eq!(fs::read_to_string(codex_path).unwrap(), codex);
+        assert_eq!(fs::read_to_string(auth_path).unwrap(), auth_json);
     }
 
     #[test]
-    fn arcee_logout_is_idempotent_when_files_are_missing() {
+    fn arcee_logout_is_idempotent_when_canonical_file_is_missing() {
         let dir = TestDir::new("logout-missing");
-        let (legacy, canonical) = dir.paths();
+        let (_, canonical) = dir.paths();
 
-        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
-        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+        assert!(!remove_arcee_auth_file_for_logout(&canonical).unwrap());
+        assert!(!remove_arcee_auth_file_for_logout(&canonical).unwrap());
     }
 
     #[test]
-    fn arcee_logout_removes_typed_malformed_legacy_auth() {
-        let dir = TestDir::new("logout-typed-legacy");
-        let (legacy, canonical) = dir.paths();
-        fs::write(&legacy, r#"{"type":"arcee_api_key","api_key":7}"#).unwrap();
-
-        assert!(remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
-        assert!(!legacy.exists());
-    }
-
-    #[test]
-    fn arcee_logout_preserves_valid_unknown_records() {
+    fn arcee_logout_preserves_valid_unknown_canonical_record() {
         let dir = TestDir::new("logout-unknown");
-        let (legacy, canonical) = dir.paths();
-        let unknown_legacy = r#"{"type":"future-provider","token":"legacy"}"#;
-        let unknown_canonical = r#"{"type":"future-provider","token":"canonical"}"#;
-        fs::write(&legacy, unknown_legacy).unwrap();
-        fs::write(&canonical, unknown_canonical).unwrap();
+        let (auth_path, canonical) = dir.paths();
+        let legacy_shaped = serde_json::to_string(&stored_auth("rcai-legacy")).unwrap();
+        let unknown = r#"{"type":"future-provider","token":"canonical"}"#;
+        fs::write(&auth_path, &legacy_shaped).unwrap();
+        fs::write(&canonical, unknown).unwrap();
 
-        assert!(!remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
-        assert_eq!(fs::read_to_string(legacy).unwrap(), unknown_legacy);
-        assert_eq!(fs::read_to_string(canonical).unwrap(), unknown_canonical);
+        assert!(!remove_arcee_auth_file_for_logout(&canonical).unwrap());
+        assert_eq!(fs::read_to_string(auth_path).unwrap(), legacy_shaped);
+        assert_eq!(fs::read_to_string(canonical).unwrap(), unknown);
     }
 
     #[cfg(unix)]
     #[test]
-    fn arcee_logout_rejects_shared_legacy_symlink_without_touching_target() {
-        let dir = TestDir::new("logout-legacy-symlink");
-        let (legacy, canonical) = dir.paths();
-        let target = dir.0.join("legacy-target.json");
-        let target_raw = serde_json::to_string_pretty(&stored_auth("rcai-target")).unwrap();
-        fs::write(&target, &target_raw).unwrap();
-        symlink(&target, &legacy).unwrap();
-
-        let error = remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("shared legacy credential symlink"));
-        assert_eq!(fs::read_to_string(&target).unwrap(), target_raw);
-        assert!(fs::symlink_metadata(&legacy)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(!canonical.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn arcee_logout_unlinks_symlink_without_touching_target() {
+    fn arcee_logout_unlinks_canonical_symlink_without_touching_target() {
         let dir = TestDir::new("logout-symlink");
-        let (legacy, canonical) = dir.paths();
+        let (_, canonical) = dir.paths();
         let target = dir.0.join("target.json");
         fs::write(&target, "target-credentials").unwrap();
         symlink(&target, &canonical).unwrap();
 
-        assert!(remove_arcee_auth_files_for_logout(&legacy, &canonical).unwrap());
+        assert!(remove_arcee_auth_file_for_logout(&canonical).unwrap());
 
         assert!(fs::symlink_metadata(&canonical).is_err());
         assert_eq!(fs::read_to_string(target).unwrap(), "target-credentials");

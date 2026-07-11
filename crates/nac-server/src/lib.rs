@@ -1877,7 +1877,7 @@ mod tests {
         {
             let root = temp_root("arcee_auth_store_failure_status");
             let nac_home = root.join("nac-home");
-            std::fs::create_dir_all(nac_home.join("arcee_auth.json.lock")).unwrap();
+            std::fs::create_dir_all(nac_home.join("arcee_auth.json")).unwrap();
             let _env = ScopedModelEnv::isolated(&nac_home, None);
             seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
             let manager = test_manager(&root);
@@ -1897,7 +1897,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
-            assert!(format!("{error:#}").contains("non-regular auth lock"));
+            assert!(format!("{error:#}").contains("non-regular credential path"));
             let response = ApiError::from(error);
             assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(response.message, "failed to load stored Arcee credentials");

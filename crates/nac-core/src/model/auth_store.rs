@@ -10,30 +10,14 @@ pub(super) fn arcee_auth_file_path() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-pub(super) fn legacy_auth_file_path() -> Result<PathBuf> {
-    crate::paths::nac_home_dir()
-        .map(|dir| dir.join("auth.json"))
-        .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for legacy auth storage"))
-}
-
 fn arcee_auth_lock_path() -> Result<PathBuf> {
     crate::paths::nac_home_dir()
         .map(|dir| dir.join("arcee_auth.json.lock"))
         .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-fn legacy_auth_lock_path() -> Result<PathBuf> {
-    // Preserve the historical lock name used for auth.json so migration
-    // coordinates with Codex and older NAC versions.
-    Ok(legacy_auth_file_path()?.with_extension("auth.json.lock"))
-}
-
 fn acquire_arcee_auth_lock() -> Result<FileLock> {
     acquire_lock(&arcee_auth_lock_path()?)
-}
-
-fn acquire_legacy_auth_lock() -> Result<FileLock> {
-    acquire_lock(&legacy_auth_lock_path()?)
 }
 
 fn acquire_lock(path: &Path) -> Result<FileLock> {
@@ -48,17 +32,6 @@ pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> 
     let lock = acquire_arcee_auth_lock()?;
     let result = operation();
     drop(lock);
-    result
-}
-
-pub(super) fn with_arcee_migration_locks<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
-    // All dual-file operations lock auth.json first and arcee_auth.json second.
-    // Codex uses the same auth.json lock path and follows this order.
-    let legacy_lock = acquire_legacy_auth_lock()?;
-    let arcee_lock = acquire_arcee_auth_lock()?;
-    let result = operation();
-    drop(arcee_lock);
-    drop(legacy_lock);
     result
 }
 

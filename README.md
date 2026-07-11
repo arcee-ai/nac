@@ -148,9 +148,9 @@ nac arcee-auth logout
 
 > The CLI flow is implemented, but availability of the production device-authorization endpoint is still deferred. Do not assume `nac arcee-auth login` will complete against production yet.
 
-`login` prints a browser URL and confirmation code, then stores the returned API key and Arcee base URL. `status` prints the stored workspace, organization, base URL, and credential path without printing the key. If the credential is for the wrong deployment, run `logout`, log in for the intended Arcee deployment, and use `status` to confirm the returned `base_url` before starting NAC.
+`login` always contacts the canonical `https://api.arcee.ai` control-plane origin; environment variables cannot override the auth service. It prints a browser URL and confirmation code, then stores the returned API key and Arcee inference base URL. `status` prints the stored workspace, organization, base URL, and credential path without printing the key. If the credential is for the wrong deployment, run `logout`, log in for the intended Arcee deployment, and use `status` to confirm the returned `base_url` before starting NAC.
 
-Credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee uses the canonical `arcee_auth.json`; ChatGPT Codex continues to use `auth.json`. A recognized legacy Arcee record in `auth.json` is migrated to `arcee_auth.json` without overwriting conflicting credentials. If migration reports a conflict, both files are preserved so one can be moved aside before retrying.
+Credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee reads and writes only `arcee_auth.json`; ChatGPT Codex reads and writes only `auth.json`. Legacy Arcee-shaped records in `auth.json` are ignored and are never migrated implicitly.
 
 Credential selection follows the explicit backend mode:
 
@@ -184,4 +184,4 @@ base_url = "https://api.arcee.ai"
 api_key_env = "ARCEE_API_KEY"
 ```
 
-For safety, credential reads and legacy migration reject symlinks and non-regular files. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target. It refuses to classify or remove a symlink at the shared legacy `auth.json` path; remove that symlink manually and retry. All Arcee requests reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.
+For safety, credential reads reject symlinks and non-regular files, and writes use atomic replacement. `arcee-auth logout` may unlink a symlink at the Arcee-owned `arcee_auth.json` path without following or modifying its target; it never inspects or removes `auth.json`. All Arcee requests reject overrides of the sensitive `Host`, `Authorization`, and `Proxy-Authorization` headers.
