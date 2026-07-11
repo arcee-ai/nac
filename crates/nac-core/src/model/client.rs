@@ -15,8 +15,8 @@ enum ArceeCredentialSource {
     ApiKey,
 }
 
-fn is_sensitive_arcee_header(name: &str) -> bool {
-    ["host", "authorization", "proxy-authorization"]
+fn is_sensitive_model_header(name: &str) -> bool {
+    ["host", "authorization", "proxy-authorization", "x-api-key"]
         .iter()
         .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
 }
@@ -25,6 +25,11 @@ fn validate_extra_headers(
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     for (name, value) in extra_headers {
+        if is_sensitive_model_header(name) {
+            return Err(model_configuration_error(format!(
+                "invalid model configuration: extra_headers cannot set authority or credential-sensitive header '{name}'; credentials are selected by the configured backend"
+            )));
+        }
         reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
             model_configuration_error(format!(
                 "invalid model configuration: extra_headers name '{name}' is invalid: {error}"
@@ -35,21 +40,6 @@ fn validate_extra_headers(
                 "invalid model configuration: extra_headers value for '{name}' is invalid: {error}"
             ))
         })?;
-    }
-    Ok(())
-}
-
-fn validate_arcee_extra_headers(
-    extra_headers: &std::collections::BTreeMap<String, String>,
-) -> Result<()> {
-    if let Some(name) = extra_headers
-        .keys()
-        .find(|name| is_sensitive_arcee_header(name))
-    {
-        return Err(model_configuration_error(format!(
-            "invalid model configuration: extra_headers cannot override sensitive header '{}' for an Arcee backend",
-            name
-        )));
     }
     Ok(())
 }
@@ -111,7 +101,6 @@ pub fn validate_model_configuration(
     match backend {
         BackendKind::ArceeAuth => {
             resolve_arcee_auth_credentials(base_url)?;
-            validate_arcee_extra_headers(extra_headers)?;
         }
         BackendKind::ArceeApi => {
             let base_url = base_url.ok_or_else(|| {
@@ -120,7 +109,6 @@ pub fn validate_model_configuration(
                 )
             })?;
             resolve_arcee_api_credentials(base_url, api_key_env)?;
-            validate_arcee_extra_headers(extra_headers)?;
         }
         BackendKind::ChatGptCodexResponses => {
             let base_url = base_url.ok_or_else(|| {
@@ -143,12 +131,11 @@ pub fn validate_model_configuration(
     Ok(())
 }
 
-fn http_client_for_backend(backend: BackendKind) -> Result<Client> {
-    match backend {
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => arcee::no_redirect_client(),
-        BackendKind::ChatGptCodexResponses => chatgpt_codex::no_redirect_client(),
-        _ => Ok(Client::new()),
-    }
+pub(super) fn no_redirect_model_client() -> Result<Client> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build no-redirect model HTTP client")
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +167,6 @@ impl ModelClient {
                 )?;
                 let (_, api_key, source) =
                     resolve_arcee_auth_credentials(Some(&settings.base_url))?;
-                validate_arcee_extra_headers(&settings.extra_headers)?;
                 (api_key, Some(source))
             }
             BackendKind::ArceeApi => {
@@ -188,7 +174,6 @@ impl ModelClient {
                     &settings.base_url,
                     settings.api_key_env.as_deref(),
                 )?;
-                validate_arcee_extra_headers(&settings.extra_headers)?;
                 (api_key, Some(source))
             }
             BackendKind::ChatGptCodexResponses => {
@@ -214,7 +199,7 @@ impl ModelClient {
                 )
             }
         };
-        let client = http_client_for_backend(backend)?;
+        let client = no_redirect_model_client()?;
 
         Ok(Self {
             client,
@@ -389,7 +374,6 @@ impl ModelClient {
 
     async fn post_arcee_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
         debug_assert!(self.arcee_credential_source.is_some());
-        validate_arcee_extra_headers(&self.extra_headers)?;
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
             request
@@ -453,13 +437,14 @@ impl ModelClient {
                 .await
                 .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
 
-            if status.is_redirection() && self.backend.is_arcee() {
+            if status.is_redirection() {
                 let location = redirect_location
                     .as_deref()
                     .map(|value| format!(" Location: {}.", truncate_utf8(value, 500)))
                     .unwrap_or_default();
                 return Err(anyhow!(
-                    "Arcee request received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                    "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                    self.backend,
                     status.as_u16(),
                     url,
                     location,
@@ -509,6 +494,7 @@ impl ModelClient {
         &self,
         mut request: reqwest::RequestBuilder,
     ) -> Result<reqwest::RequestBuilder> {
+        validate_extra_headers(&self.extra_headers)?;
         for (name, value) in &self.extra_headers {
             let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
                 .with_context(|| format!("invalid model extra_headers name '{name}'"))?;
@@ -524,7 +510,7 @@ impl ModelClient {
 impl ModelClient {
     pub fn new_for_test() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: no_redirect_model_client().expect("build no-redirect test model client"),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test_dummy_key".to_string(),
             model: "gpt-5.5".to_string(),
@@ -786,44 +772,169 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn non_arcee_http_clients_preserve_default_redirect_behavior() {
-        let server = ScriptedServer::start_same_origin_redirect(
-            "307 Temporary Redirect",
-            "/redirected-non-arcee",
-            "follow this redirect",
+    fn test_model_client(
+        backend: BackendKind,
+        base_url: String,
+        extra_headers: std::collections::BTreeMap<String, String>,
+    ) -> ModelClient {
+        ModelClient {
+            client: no_redirect_model_client().unwrap(),
+            base_url,
+            api_key: "selected-provider-credential".to_string(),
+            model: "test-model".to_string(),
+            backend,
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers,
+            arcee_credential_source: None,
+            cache_ttl: None,
+        }
+    }
+
+    async fn send_provider_test_request(client: &ModelClient, url: &str) -> Result<Value> {
+        let body = json!({"prompt": "sensitive prompt must not replay"});
+        match client.backend {
+            BackendKind::OpenAiResponses => client.post_json_with_retry(url, &body).await,
+            BackendKind::AnthropicMessages => {
+                client.post_anthropic_json_with_retry(url, &body).await
+            }
+            backend => panic!("unsupported test backend: {backend}"),
+        }
+    }
+
+    fn assert_provider_request_contract(
+        backend: BackendKind,
+        request: &super::super::test_http::CapturedRequest,
+    ) {
+        let (credential_header, expected_value) = match backend {
+            BackendKind::OpenAiResponses => {
+                ("authorization", "Bearer selected-provider-credential")
+            }
+            BackendKind::AnthropicMessages => ("x-api-key", "selected-provider-credential"),
+            backend => panic!("unsupported test backend: {backend}"),
+        };
+        assert_eq!(
+            request.headers.get(credential_header).map(String::as_str),
+            Some(expected_value),
+            "{backend} selected credential"
         );
-        let client = http_client_for_backend(BackendKind::OpenAiResponses).unwrap();
+        assert_eq!(
+            request.header_counts.get(credential_header),
+            Some(&1),
+            "{backend} must emit exactly one selected credential header"
+        );
+        assert_eq!(
+            request.headers.get("x-benign-trace").map(String::as_str),
+            Some("trace-value"),
+            "{backend} benign header"
+        );
+        assert!(
+            String::from_utf8_lossy(&request.body).contains("sensitive prompt must not replay"),
+            "{backend} source request body"
+        );
+    }
 
-        let _ = client
-            .post(format!("{}/initial", server.base_url))
-            .body("non-Arcee request body")
-            .send()
-            .await;
-        let requests = server.finish();
+    #[tokio::test]
+    async fn anthropic_and_openai_redirects_never_replay_same_or_cross_origin() {
+        let benign_headers = std::collections::BTreeMap::from([(
+            "X-Benign-Trace".to_string(),
+            "trace-value".to_string(),
+        )]);
 
-        assert_eq!(requests.len(), 2, "non-Arcee redirect behavior changed");
-        assert_eq!(requests[0].path, "/initial");
-        assert_eq!(requests[1].path, "/redirected-non-arcee");
-        assert_eq!(requests[1].body, b"non-Arcee request body");
+        for backend in [BackendKind::AnthropicMessages, BackendKind::OpenAiResponses] {
+            for status in ["307 Temporary Redirect", "308 Permanent Redirect"] {
+                let same_origin = ScriptedServer::start_same_origin_redirect(
+                    status,
+                    "/same-origin-capture",
+                    format!("{}body-must-be-bounded", "x".repeat(500)),
+                );
+                let client = test_model_client(
+                    backend,
+                    same_origin.base_url.clone(),
+                    benign_headers.clone(),
+                );
+                let error = send_provider_test_request(
+                    &client,
+                    &format!("{}/initial", same_origin.base_url),
+                )
+                .await
+                .expect_err("same-origin redirect must not be followed")
+                .to_string();
+                let requests = same_origin.finish();
+
+                assert!(
+                    error.contains("automatic redirects are disabled"),
+                    "{error}"
+                );
+                assert!(error.contains("request was not replayed"), "{error}");
+                assert!(error.contains(&status[..3]), "{error}");
+                assert!(!error.contains("body-must-be-bounded"), "{error}");
+                assert_eq!(requests.len(), 1, "{backend} {status} same-origin replay");
+                assert_provider_request_contract(backend, &requests[0]);
+
+                let destination =
+                    TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect destination");
+                destination
+                    .set_nonblocking(true)
+                    .expect("make redirect destination nonblocking");
+                let destination_url = format!(
+                    "http://{}/cross-origin-capture",
+                    destination.local_addr().unwrap()
+                );
+                let cross_origin = ScriptedServer::start(vec![ScriptedResponse::redirect(
+                    status,
+                    destination_url,
+                    "cross-origin redirect blocked",
+                )]);
+                let client = test_model_client(
+                    backend,
+                    cross_origin.base_url.clone(),
+                    benign_headers.clone(),
+                );
+                let error = send_provider_test_request(
+                    &client,
+                    &format!("{}/initial", cross_origin.base_url),
+                )
+                .await
+                .expect_err("cross-origin redirect must not be followed")
+                .to_string();
+                let requests = cross_origin.finish();
+
+                assert!(
+                    error.contains("automatic redirects are disabled"),
+                    "{error}"
+                );
+                assert!(error.contains("request was not replayed"), "{error}");
+                assert_eq!(requests.len(), 1, "{backend} {status} cross-origin replay");
+                assert_provider_request_contract(backend, &requests[0]);
+                let accept_error = destination
+                    .accept()
+                    .expect_err("cross-origin destination must receive no replay");
+                assert_eq!(accept_error.kind(), std::io::ErrorKind::WouldBlock);
+            }
+        }
     }
 
     #[test]
-    fn stored_arcee_header_policy_is_case_insensitive_and_allows_benign_headers() {
+    fn sensitive_extra_header_policy_is_central_case_insensitive_and_allows_benign_headers() {
         for name in [
             "Host",
             "HOST",
             "hOsT",
             "Authorization",
+            "aUtHoRiZaTiOn",
+            "Proxy-Authorization",
             "pRoXy-AuThOrIzAtIoN",
+            "x-api-key",
+            "X-API-KEY",
         ] {
             let headers =
                 std::collections::BTreeMap::from([(name.to_string(), "hostile-value".to_string())]);
-            let error = validate_arcee_extra_headers(&headers)
+            let error = validate_extra_headers(&headers)
                 .expect_err("authority and credential headers must be rejected");
             assert!(
                 error.to_string().contains(name),
-                "unexpected error: {error:#}"
+                "unexpected error for {name}: {error:#}"
             );
         }
 
@@ -832,24 +943,55 @@ mod tests {
                 "Content-Type".to_string(),
                 "application/custom+json".to_string(),
             ),
-            ("X-Arcee-Tenant".to_string(), "tenant-test".to_string()),
+            ("X-Benign-Trace".to_string(), "trace-value".to_string()),
         ]);
-        validate_arcee_extra_headers(&benign)
-            .expect("benign stored-credential headers should remain supported");
+        validate_extra_headers(&benign).expect("benign model headers should remain supported");
     }
 
     #[tokio::test]
-    async fn stored_arcee_host_override_is_rejected_before_connecting() {
+    async fn sensitive_extra_headers_fail_before_any_provider_connection() {
+        for (backend, name) in [
+            (BackendKind::OpenAiResponses, "Authorization"),
+            (BackendKind::OpenAiResponses, "Host"),
+            (BackendKind::AnthropicMessages, "x-api-key"),
+            (BackendKind::AnthropicMessages, "Proxy-Authorization"),
+        ] {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile endpoint");
+            listener
+                .set_nonblocking(true)
+                .expect("make hostile endpoint nonblocking");
+            let address = listener.local_addr().expect("hostile endpoint address");
+            let client = test_model_client(
+                backend,
+                format!("http://{address}"),
+                std::collections::BTreeMap::from([(
+                    name.to_string(),
+                    "must-not-be-appended".to_string(),
+                )]),
+            );
+
+            let error = send_provider_test_request(&client, &format!("http://{address}/initial"))
+                .await
+                .expect_err("sensitive extra header must fail before request")
+                .to_string();
+
+            assert!(error.contains(name), "unexpected error: {error}");
+            let accept_error = listener
+                .accept()
+                .expect_err("invalid header must not open a provider connection");
+            assert_eq!(accept_error.kind(), std::io::ErrorKind::WouldBlock);
+        }
+    }
+
+    #[tokio::test]
+    async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile endpoint");
         listener
             .set_nonblocking(true)
             .expect("make hostile endpoint nonblocking");
         let address = listener.local_addr().expect("hostile endpoint address");
         let client = ModelClient {
-            client: Client::builder()
-                .timeout(Duration::from_millis(250))
-                .build()
-                .expect("build bounded test client"),
+            client: no_redirect_model_client().unwrap(),
             base_url: format!("http://{address}"),
             api_key: "stored-login-secret-must-not-leak".to_string(),
             model: "test-model".to_string(),
@@ -858,7 +1000,7 @@ mod tests {
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::from([(
                 "hOsT".to_string(),
-                format!("{address}"),
+                address.to_string(),
             )]),
             arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
             cache_ttl: None,
@@ -877,6 +1019,34 @@ mod tests {
             .accept()
             .expect_err("hostile endpoint must receive no connection");
         assert_eq!(accept_error.kind(), std::io::ErrorKind::WouldBlock);
+    }
+
+    #[tokio::test]
+    async fn benign_extra_headers_pass_with_exactly_one_selected_provider_credential() {
+        for backend in [BackendKind::AnthropicMessages, BackendKind::OpenAiResponses] {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(
+                "200 OK",
+                json!({"ok": true}).to_string(),
+            )]);
+            let client = test_model_client(
+                backend,
+                server.base_url.clone(),
+                std::collections::BTreeMap::from([(
+                    "X-Benign-Trace".to_string(),
+                    "trace-value".to_string(),
+                )]),
+            );
+
+            let response =
+                send_provider_test_request(&client, &format!("{}/initial", server.base_url))
+                    .await
+                    .expect("benign header request should succeed");
+            let requests = server.finish();
+
+            assert_eq!(response, json!({"ok": true}));
+            assert_eq!(requests.len(), 1);
+            assert_provider_request_contract(backend, &requests[0]);
+        }
     }
 
     #[test]

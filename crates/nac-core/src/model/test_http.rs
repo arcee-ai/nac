@@ -37,6 +37,7 @@ pub(super) struct CapturedRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) headers: BTreeMap<String, String>,
+    pub(super) header_counts: BTreeMap<String, usize>,
     pub(super) body: Vec<u8>,
 }
 
@@ -144,9 +145,12 @@ fn read_request(stream: &mut TcpStream) -> CapturedRequest {
     let method = request_parts.next().expect("HTTP method").to_string();
     let path = request_parts.next().expect("HTTP path").to_string();
     let mut headers = BTreeMap::new();
+    let mut header_counts = BTreeMap::new();
     for line in lines {
         let (name, value) = line.split_once(':').expect("valid HTTP header");
-        headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
+        let name = name.to_ascii_lowercase();
+        *header_counts.entry(name.clone()).or_insert(0) += 1;
+        headers.insert(name, value.trim().to_string());
     }
     let content_length = headers
         .get("content-length")
@@ -165,6 +169,7 @@ fn read_request(stream: &mut TcpStream) -> CapturedRequest {
         method,
         path,
         headers,
+        header_counts,
         body: bytes[body_start..body_start + content_length].to_vec(),
     }
 }

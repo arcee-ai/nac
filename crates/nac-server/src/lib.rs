@@ -2502,6 +2502,20 @@ extra_headers = { X-Config = "yes" }
                 ..UpdateConfigRequest::default()
             },
             UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "Authorization".to_string(),
+                    "must-not-append".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "X-API-KEY".to_string(),
+                    "must-not-append".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
                 backend: RequestField::Value("together-chat".to_string()),
                 reasoning_effort: RequestField::Value("xhigh".to_string()),
                 ..UpdateConfigRequest::default()

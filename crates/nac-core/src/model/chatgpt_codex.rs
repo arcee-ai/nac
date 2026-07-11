@@ -89,13 +89,6 @@ impl fmt::Display for CodexRequestError {
 
 impl std::error::Error for CodexRequestError {}
 
-pub(super) fn no_redirect_client() -> Result<Client> {
-    Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .context("failed to build Codex HTTP client")
-}
-
 pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
     let parsed = Url::parse(base_url)
         .map_err(|error| anyhow!("invalid Codex base URL '{}': {}", base_url, error))?;
@@ -1562,7 +1555,7 @@ mod tests {
         )]);
         let secret = "codex-secret-must-not-replay";
 
-        let response = no_redirect_client()
+        let response = super::client::no_redirect_model_client()
             .unwrap()
             .post(format!("{}/backend-api/codex/responses", source.base_url))
             .bearer_auth(secret)
