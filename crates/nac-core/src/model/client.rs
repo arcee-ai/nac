@@ -137,6 +137,14 @@ pub fn validate_model_configuration(
     Ok(())
 }
 
+fn http_client_for_backend(backend: BackendKind) -> Result<Client> {
+    if backend == BackendKind::Arcee {
+        arcee::no_redirect_client()
+    } else {
+        Ok(Client::new())
+    }
+}
+
 #[derive(Clone)]
 pub struct ModelClient {
     client: Client,
@@ -197,8 +205,10 @@ impl ModelClient {
                 .or_else(|| default_reasoning_effort(backend)),
         };
 
+        let client = http_client_for_backend(backend)?;
+
         Ok(Self {
-            client: Client::new(),
+            client,
             base_url,
             api_key,
             model,
@@ -482,10 +492,29 @@ impl ModelClient {
                 .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
 
             let status = response.status();
+            let redirect_location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
             let body = response
                 .text()
                 .await
                 .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+
+            if status.is_redirection() && self.backend == BackendKind::Arcee {
+                let location = redirect_location
+                    .as_deref()
+                    .map(|value| format!(" Location: {}.", truncate_utf8(value, 500)))
+                    .unwrap_or_default();
+                return Err(anyhow!(
+                    "Arcee request received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                    status.as_u16(),
+                    url,
+                    location,
+                    truncate_utf8(&body, 500)
+                ));
+            }
 
             if status.is_success() {
                 return serde_json::from_str::<Value>(&body).map_err(|e| {
@@ -589,7 +618,7 @@ mod tests {
             .to_string(),
         )]);
         let client = ModelClient {
-            client: Client::new(),
+            client: arcee::no_redirect_client().unwrap(),
             base_url: format!("{}/tenant/base", server.base_url),
             api_key: "stored-login-credential".to_string(),
             model: "arcee-test-model".to_string(),
@@ -679,6 +708,105 @@ mod tests {
             body["tools"],
             serde_json::to_value(&tools).expect("tool definitions serialize")
         );
+    }
+
+    #[tokio::test]
+    async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_headers() {
+        for status in ["307 Temporary Redirect", "308 Permanent Redirect"] {
+            let destination =
+                TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect destination");
+            destination
+                .set_nonblocking(true)
+                .expect("make redirect destination nonblocking");
+            let destination_url = format!(
+                "http://{}/stolen-inference",
+                destination.local_addr().unwrap()
+            );
+            let source = ScriptedServer::start(vec![ScriptedResponse::redirect(
+                status,
+                destination_url,
+                format!("{}not-in-error", "x".repeat(500)),
+            )]);
+            let client = ModelClient {
+                client: arcee::no_redirect_client().unwrap(),
+                base_url: source.base_url.clone(),
+                api_key: "sensitive-arcee-credential".to_string(),
+                model: "arcee-test-model".to_string(),
+                backend: BackendKind::Arcee,
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: std::collections::BTreeMap::from([(
+                    "X-Arcee-Tenant".to_string(),
+                    "sensitive-tenant-header".to_string(),
+                )]),
+                arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
+                cache_ttl: None,
+            };
+
+            let error = client
+                .send_arcee_chat(
+                    vec![Message::User {
+                        content: "sensitive prompt".to_string(),
+                    }],
+                    Vec::new(),
+                )
+                .await
+                .expect_err("Arcee inference redirects must not be followed")
+                .to_string();
+            let requests = source.finish();
+
+            assert!(error.contains("redirect"), "unexpected error: {error}");
+            assert!(
+                error.contains("automatic redirects are disabled"),
+                "unexpected error: {error}"
+            );
+            assert!(
+                !error.contains("not-in-error"),
+                "error body was not bounded"
+            );
+            assert_eq!(requests.len(), 1);
+            assert_eq!(
+                requests[0].headers.get("authorization").map(String::as_str),
+                Some("Bearer sensitive-arcee-credential")
+            );
+            assert_eq!(
+                requests[0]
+                    .headers
+                    .get("x-arcee-tenant")
+                    .map(String::as_str),
+                Some("sensitive-tenant-header")
+            );
+            assert!(
+                String::from_utf8_lossy(&requests[0].body).contains("sensitive prompt"),
+                "source did not receive the prompt"
+            );
+            let accept_error = destination
+                .accept()
+                .expect_err("cross-origin redirect destination must receive no request");
+            assert_eq!(accept_error.kind(), std::io::ErrorKind::WouldBlock);
+        }
+    }
+
+    #[tokio::test]
+    async fn non_arcee_http_clients_preserve_default_redirect_behavior() {
+        let server = ScriptedServer::start_same_origin_redirect(
+            "307 Temporary Redirect",
+            "/redirected-non-arcee",
+            "follow this redirect",
+        );
+        let client = http_client_for_backend(BackendKind::OpenAiResponses).unwrap();
+
+        let _ = client
+            .post(format!("{}/initial", server.base_url))
+            .body("non-Arcee request body")
+            .send()
+            .await;
+        let requests = server.finish();
+
+        assert_eq!(requests.len(), 2, "non-Arcee redirect behavior changed");
+        assert_eq!(requests[0].path, "/initial");
+        assert_eq!(requests[1].path, "/redirected-non-arcee");
+        assert_eq!(requests[1].body, b"non-Arcee request body");
     }
 
     #[test]
@@ -794,7 +922,7 @@ mod tests {
         });
 
         let client = ModelClient {
-            client: Client::new(),
+            client: arcee::no_redirect_client().unwrap(),
             base_url: format!("http://{address}"),
             api_key: "rcai-test".to_string(),
             model: "test-model".to_string(),

@@ -17,6 +17,13 @@ const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_EXPIRES_IN_SECS: u64 = 900;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
 
+pub(super) fn no_redirect_client() -> Result<Client> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build Arcee HTTP client")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArceeEndpointKind {
     Approved,
@@ -116,7 +123,7 @@ struct DeviceCode {
 }
 
 pub(super) async fn arcee_auth_login() -> Result<()> {
-    let client = Client::new();
+    let client = no_redirect_client()?;
     let base = arcee_api_base();
     let device = request_device_code(&client, &base).await?;
 
@@ -406,10 +413,24 @@ async fn request_device_code(client: &Client, base: &str) -> Result<DeviceCode> 
         .context("failed to request Arcee device code")?;
 
     let status = response.status();
+    let redirect_location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let body = response
         .text()
         .await
         .context("failed to read Arcee device-code response")?;
+    if status.is_redirection() {
+        return Err(arcee_redirect_error(
+            "device-code request",
+            &url,
+            status,
+            redirect_location.as_deref(),
+            &body,
+        ));
+    }
     if !status.is_success() {
         return Err(anyhow!(
             "Arcee device-code request failed with HTTP {}: {}",
@@ -482,10 +503,25 @@ where
             .context("failed to poll Arcee device authorization")?;
 
         let status = response.status();
+        let redirect_location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let body = response
             .text()
             .await
             .context("failed to read Arcee device authorization response")?;
+
+        if status.is_redirection() {
+            return Err(arcee_redirect_error(
+                "device authorization request",
+                &url,
+                status,
+                redirect_location.as_deref(),
+                &body,
+            ));
+        }
 
         if status.is_success() {
             return serde_json::from_str::<TokenSuccess>(&body)
@@ -564,12 +600,31 @@ fn truncate(value: &str) -> String {
     value.chars().take(500).collect()
 }
 
+fn arcee_redirect_error(
+    action: &str,
+    url: &str,
+    status: reqwest::StatusCode,
+    location: Option<&str>,
+    body: &str,
+) -> anyhow::Error {
+    let location = location
+        .map(|value| format!(" Location: {}.", truncate(value)))
+        .unwrap_or_default();
+    anyhow!(
+        "Arcee {action} received HTTP {} redirect from {url}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+        status.as_u16(),
+        location,
+        truncate(body)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_http::{ScriptedResponse, ScriptedServer};
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::future::ready;
+    use std::net::TcpListener;
     use std::path::PathBuf;
     use std::rc::Rc;
 
@@ -644,7 +699,7 @@ mod tests {
             .to_string(),
         )]);
 
-        let device = request_device_code(&Client::new(), &server.base_url)
+        let device = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
             .await
             .expect("device-code response should parse");
         let requests = server.finish();
@@ -677,7 +732,7 @@ mod tests {
             .to_string(),
         )]);
 
-        let device = request_device_code(&Client::new(), &server.base_url)
+        let device = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
             .await
             .expect("fallback verification URI should parse");
         server.finish();
@@ -707,7 +762,7 @@ mod tests {
 
         for (status, body, expected) in cases {
             let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body)]);
-            let error = request_device_code(&Client::new(), &server.base_url)
+            let error = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
                 .await
                 .expect_err("invalid device-code response should fail");
             let requests = server.finish();
@@ -718,6 +773,94 @@ mod tests {
             );
             assert_device_request(&requests[0], "/app/v1/device/code");
         }
+    }
+
+    #[tokio::test]
+    async fn device_code_same_origin_redirect_is_reported_without_replay() {
+        let server = ScriptedServer::start_same_origin_redirect(
+            "308 Permanent Redirect",
+            "/redirected-device-code",
+            format!("{}not-in-error", "x".repeat(500)),
+        );
+
+        let error = request_device_code(&no_redirect_client().unwrap(), &server.base_url)
+            .await
+            .expect_err("Arcee device-code redirects must not be followed")
+            .to_string();
+        let requests = server.finish();
+
+        assert!(
+            error.contains("HTTP 308 redirect"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("automatic redirects are disabled"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !error.contains("not-in-error"),
+            "error body was not bounded"
+        );
+        assert_eq!(requests.len(), 1, "same-origin redirect was replayed");
+        assert_device_request(&requests[0], "/app/v1/device/code");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
+            json!({"client_id": CLIENT_ID})
+        );
+    }
+
+    #[tokio::test]
+    async fn device_token_redirect_to_http_destination_does_not_replay_code() {
+        let destination = TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect destination");
+        destination
+            .set_nonblocking(true)
+            .expect("make redirect destination nonblocking");
+        let destination_url = format!(
+            "http://{}/stolen-device-code",
+            destination.local_addr().unwrap()
+        );
+        let source = ScriptedServer::start(vec![ScriptedResponse::redirect(
+            "307 Temporary Redirect",
+            destination_url,
+            "redirect blocked",
+        )]);
+        let device = DeviceCode {
+            device_code: "sensitive-device-code".to_string(),
+            user_code: "SENSITIVE".to_string(),
+            verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
+            interval_secs: 1,
+            expires_in_secs: 60,
+        };
+
+        let error = poll_device_code_with(
+            &no_redirect_client().unwrap(),
+            &source.base_url,
+            &device,
+            || 0,
+            |_| ready(()),
+        )
+        .await
+        .expect_err("Arcee token redirects must not be followed")
+        .to_string();
+        let requests = source.finish();
+
+        assert!(
+            error.contains("HTTP 307 redirect"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("was not replayed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
+            json!({"device_code": "sensitive-device-code", "client_id": CLIENT_ID})
+        );
+        let accept_error = destination
+            .accept()
+            .expect_err("HTTP redirect destination must receive no request");
+        assert_eq!(accept_error.kind(), io::ErrorKind::WouldBlock);
     }
 
     #[tokio::test]
@@ -750,7 +893,7 @@ mod tests {
         let recorded_sleeps = Rc::clone(&sleeps);
 
         let success = poll_device_code_with(
-            &Client::new(),
+            &no_redirect_client().unwrap(),
             &server.base_url,
             &device,
             move || now_clock.get(),
@@ -821,7 +964,7 @@ mod tests {
                 expires_in_secs: 60,
             };
             let error = poll_device_code_with(
-                &Client::new(),
+                &no_redirect_client().unwrap(),
                 &server.base_url,
                 &device,
                 || 0,
