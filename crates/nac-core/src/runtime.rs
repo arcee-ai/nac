@@ -65,6 +65,27 @@ pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct NonModelNacConfig {
+    #[serde(default)]
+    storage: StorageConfig,
+    #[serde(default)]
+    sandbox: SandboxConfig,
+    #[serde(default)]
+    worker: WorkerConfig,
+}
+
+impl From<NonModelNacConfig> for NacConfig {
+    fn from(config: NonModelNacConfig) -> Self {
+        Self {
+            storage: config.storage,
+            model: ModelConfig::default(),
+            sandbox: config.sandbox,
+            worker: config.worker,
+        }
+    }
+}
+
 impl NacConfig {
     pub fn load() -> Result<Self> {
         let Some(path) = crate::paths::nac_config_path() else {
@@ -81,18 +102,40 @@ impl NacConfig {
         Self::load_from_path(path)
     }
 
-    fn load_from_path(path: PathBuf) -> Result<Self> {
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default());
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read config {}", path.display()));
-            }
+    /// Load runtime settings for a command whose model tuple comes from a
+    /// persisted session snapshot or managed-worker transport.
+    ///
+    /// The complete TOML document must still be syntactically valid and all
+    /// non-model runtime sections remain strictly typed. The `model` key is
+    /// deliberately omitted from the deserialization target, so obsolete
+    /// backend names, selector fields, and table shapes cannot affect a
+    /// snapshot-authoritative command. MCP, workspace metadata, and other
+    /// independent config consumers continue loading their own sections from
+    /// the same file.
+    pub fn load_without_model_from_cwd(cwd: &Path) -> Result<Self> {
+        let paths = PathContext::new(cwd);
+        let Some(path) = paths.nac_config_path() else {
+            return Ok(Self::default());
         };
+        let raw = Self::read_config(&path)?;
+        toml::from_str::<NonModelNacConfig>(&raw)
+            .map(Into::into)
+            .with_context(|| format!("failed to parse non-model config {}", path.display()))
+    }
+
+    fn load_from_path(path: PathBuf) -> Result<Self> {
+        let raw = Self::read_config(&path)?;
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    fn read_config(path: &Path) -> Result<String> {
+        match std::fs::read_to_string(path) {
+            Ok(raw) => Ok(raw),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to read config {}", path.display()))
+            }
+        }
     }
 }
 
@@ -1551,6 +1594,64 @@ url = "https://mcp.context7.com/mcp"
         );
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+
+        restore_env("NAC_HOME", original_nac_home);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_strict() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_non_model_config_load_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let invalid_model_sections = [
+            "[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n",
+            "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
+            "model = [\"not\", \"a\", \"table\"]\n",
+            "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+        ];
+        for invalid_model in invalid_model_sections {
+            std::fs::write(
+                root.join("config.toml"),
+                format!(
+                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[worker]\nthread_timeout_secs = 7200\n"
+                ),
+            )
+            .unwrap();
+
+            let config = NacConfig::load_without_model_from_cwd(&root).unwrap();
+            assert_eq!(
+                config.storage.store_path.as_deref(),
+                Some(Path::new("persisted/store.db"))
+            );
+            assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
+            assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+            assert!(config.model.backend.is_none());
+            assert!(config.model.model.is_none());
+            assert!(
+                NacConfig::load_from_cwd(&root).is_err(),
+                "new-session config unexpectedly accepted {invalid_model:?}"
+            );
+        }
+
+        std::fs::write(
+            root.join("config.toml"),
+            "[model]\nbackend = \"auto\"\n\n[storage]\nstore_path = [\"invalid\"]\n",
+        )
+        .unwrap();
+        let error = NacConfig::load_without_model_from_cwd(&root).unwrap_err();
+        assert!(error.to_string().contains("non-model config"), "{error:#}");
 
         restore_env("NAC_HOME", original_nac_home);
         let _ = std::fs::remove_dir_all(root);

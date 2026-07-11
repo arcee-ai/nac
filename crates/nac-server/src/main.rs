@@ -311,7 +311,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         None if cli.ssh_host.is_some() => launch_cwd.clone(),
         None => workspace_cwd.clone(),
     };
-    let config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
+    let config = load_managed_worker_runtime_config(&config_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
         config_cwd: Some(config_cwd),
@@ -361,6 +361,10 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }
 
+fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
+    runtime::NacConfig::load_without_model_from_cwd(config_cwd)
+}
+
 fn resolve_cli_cwd(
     launch_cwd: &std::path::Path,
     directory: Option<&std::path::Path>,
@@ -378,6 +382,55 @@ fn resolve_cli_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn managed_worker_ignores_invalid_ambient_model_config() {
+        let _guard = CONFIG_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_web_worker_config_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+model = ["invalid-table-shape"]
+
+[storage]
+store_path = "worker-store.db"
+
+[worker]
+thread_timeout_secs = 7200
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let config = load_managed_worker_runtime_config(&root).unwrap();
+        assert_eq!(
+            config.storage.store_path.as_deref(),
+            Some(std::path::Path::new("worker-store.db"))
+        );
+        assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+        assert!(config.model.backend.is_none());
+        assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
+
+        unsafe {
+            match original_nac_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn worker_cli_rejects_malformed_header_json() {

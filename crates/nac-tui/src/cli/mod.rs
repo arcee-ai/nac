@@ -59,7 +59,7 @@ pub async fn run() -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let effective_cwd = effective_cli_cwd(&cli, &launch_cwd)?;
     let config_cwd = effective_cli_config_cwd(&cli, &launch_cwd, &effective_cwd)?;
-    let app_config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
+    let app_config = load_runtime_config(&cli, &config_cwd)?;
     let worker_executable = current_worker_executable()?;
     let mut run_state = build_run_state(
         cli,
@@ -129,6 +129,18 @@ pub async fn run() -> Result<()> {
                     }
                 }
             }
+        }
+    }
+}
+
+fn load_runtime_config(cli: &ParsedCli, config_cwd: &Path) -> Result<runtime::NacConfig> {
+    match cli {
+        ParsedCli::Run(_) => runtime::NacConfig::load_from_cwd(config_cwd),
+        ParsedCli::Resume(_) | ParsedCli::ManagedWorker(_) => {
+            runtime::NacConfig::load_without_model_from_cwd(config_cwd)
+        }
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            unreachable!("standalone commands are handled before loading runtime config")
         }
     }
 }
@@ -383,6 +395,81 @@ fn resume_options(
 mod tests {
     use super::*;
     use std::path::Path;
+
+    static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn persisted_session_commands_ignore_invalid_ambient_model_config() {
+        let _guard = CONFIG_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_tui_persisted_config_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+[model]
+backend = "arcee"
+api_key_env = ["invalid-selector-shape"]
+extra_headers = "invalid-header-shape"
+
+[storage]
+store_path = "persisted.db"
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let commands = [
+            vec![OsString::from("nac"), OsString::from("resume")],
+            vec![
+                OsString::from("nac"),
+                OsString::from("resume"),
+                OsString::from("session-123"),
+            ],
+            vec![
+                OsString::from("nac"),
+                OsString::from("__worker"),
+                OsString::from("--session-id"),
+                OsString::from("session-123"),
+                OsString::from("--thread-name"),
+                OsString::from("impl"),
+                OsString::from("--action"),
+                OsString::from("do work"),
+            ],
+        ];
+        for args in commands {
+            let cli = parse_cli_from(args);
+            let config = load_runtime_config(&cli, &root).unwrap();
+            assert_eq!(
+                config.storage.store_path.as_deref(),
+                Some(Path::new("persisted.db"))
+            );
+            assert!(config.model.backend.is_none());
+        }
+
+        let new_session = parse_cli_from(vec![OsString::from("nac")]);
+        let error = load_runtime_config(&new_session, &root).unwrap_err();
+        assert!(
+            error.to_string().contains("failed to parse config"),
+            "{error:#}"
+        );
+
+        unsafe {
+            match original_nac_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn parse_resume_command_uses_resume_cli() {

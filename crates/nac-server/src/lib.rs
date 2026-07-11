@@ -296,7 +296,7 @@ pub struct ReplayGapEvent {
 impl SessionManager {
     pub fn new(options: ServerOptions) -> Result<Self> {
         let root_cwd = canonicalize_dir(options.root_cwd)?;
-        let config = NacConfig::load_from_cwd(&root_cwd)?;
+        let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
         let store_path = runtime::resolve_store_path(
             &root_cwd,
             StoreOptions {
@@ -820,7 +820,7 @@ impl SessionManager {
         } else {
             &summary.cwd
         };
-        let config = NacConfig::load_from_cwd(config_cwd)?;
+        let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
         let run_config = runtime::build_resume_config_for_session(
             self.inner.store_path.clone(),
             session_id,
@@ -2062,6 +2062,53 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn server_attach_ignores_invalid_ambient_model_but_create_remains_strict() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("persisted_attach_invalid_ambient_model");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"
+[model]
+backend = "auto"
+api_key_env = ["invalid-selector-shape"]
+extra_headers = "invalid-header-shape"
+
+[worker]
+thread_timeout_secs = 7200
+"#,
+        )
+        .unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-resume-key"));
+        seed_editable_session(&root, "persisted");
+
+        // Server startup, listing, and attachment use only non-model ambient
+        // settings; the model tuple and selector come from the stored snapshot.
+        let manager = test_manager(&root);
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+        let resumed = manager.snapshot("persisted").await.unwrap();
+        assert_eq!(resumed.metadata.session_id.as_deref(), Some("persisted"));
+
+        // A new session still parses the complete model table before doing any
+        // persistence, so the same obsolete config remains an actionable error.
+        let error = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("failed to parse config"),
+            "{error:#}"
+        );
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
