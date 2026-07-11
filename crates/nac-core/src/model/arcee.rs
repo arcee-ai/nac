@@ -492,13 +492,18 @@ where
                 .context("failed to parse Arcee device authorization response");
         }
 
-        let error_code = serde_json::from_str::<Value>(&body)
-            .ok()
-            .and_then(|value| value.get("error").and_then(Value::as_str).map(str::to_string));
+        let error_code = serde_json::from_str::<Value>(&body).ok().and_then(|value| {
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
 
         match error_code.as_deref() {
             Some("authorization_pending") => {}
-            Some("slow_down") => interval_secs = interval_secs.saturating_add(SLOW_DOWN_BACKOFF_SECS),
+            Some("slow_down") => {
+                interval_secs = interval_secs.saturating_add(SLOW_DOWN_BACKOFF_SECS)
+            }
             Some("access_denied") => return Err(anyhow!("Arcee authorization was denied")),
             Some("expired_token") => {
                 return Err(anyhow!(
