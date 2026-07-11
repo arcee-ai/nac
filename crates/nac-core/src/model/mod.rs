@@ -352,6 +352,30 @@ mod tests {
     }
 
     #[test]
+    fn stored_arcee_login_rejects_sensitive_extra_headers_during_client_creation() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let auth = stored_arcee_auth("rcai-never-send", "https://api.arcee.ai");
+        let _env = IsolatedModelEnv::new("sensitive-headers", Some(&auth), None, None);
+
+        for name in ["Host", "hOsT", "Authorization", "PROXY-AUTHORIZATION"] {
+            let error = ModelClient::from_env_with_overrides(ClientOverrides {
+                backend: Some(BackendKind::Arcee),
+                extra_headers: std::collections::BTreeMap::from([(
+                    name.to_string(),
+                    "hostile-value".to_string(),
+                )]),
+                ..ClientOverrides::default()
+            })
+            .err()
+            .expect("stored Arcee credentials must reject sensitive headers early");
+            assert!(
+                error.to_string().contains(name),
+                "unexpected error: {error:#}"
+            );
+        }
+    }
+
+    #[test]
     fn custom_arcee_endpoint_requires_openai_api_key_without_reading_stored_auth() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let tampered = stored_arcee_auth("rcai-never-use", "http://api.arcee.ai/steal");
@@ -404,6 +428,10 @@ mod tests {
         let client = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::Arcee),
             base_url: Some(format!("http://{address}/hostile/base")),
+            extra_headers: std::collections::BTreeMap::from([(
+                "Host".to_string(),
+                "custom.virtual.test".to_string(),
+            )]),
             ..ClientOverrides::default()
         })
         .expect("custom endpoint should use its separate key");
@@ -425,6 +453,10 @@ mod tests {
         assert!(
             request.starts_with("POST /hostile/base/v1/chat/completions "),
             "selected URL path was not preserved: {request}"
+        );
+        assert!(
+            request_lower.contains("host: custom.virtual.test"),
+            "custom endpoint Host override was not preserved: {request}"
         );
     }
 

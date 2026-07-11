@@ -9,11 +9,44 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
     &value[..end]
 }
 
-fn resolve_arcee_credentials(explicit_base_url: Option<&str>) -> Result<(String, String)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArceeCredentialSource {
+    StoredLogin,
+    CustomEndpoint,
+}
+
+fn is_sensitive_arcee_header(name: &str) -> bool {
+    ["host", "authorization", "proxy-authorization"]
+        .iter()
+        .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
+}
+
+fn validate_stored_arcee_extra_headers(
+    extra_headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    if let Some(name) = extra_headers
+        .keys()
+        .find(|name| is_sensitive_arcee_header(name))
+    {
+        return Err(anyhow!(
+            "invalid model configuration: extra_headers cannot override sensitive header '{}' when using stored Arcee login credentials",
+            name
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_arcee_credentials(
+    explicit_base_url: Option<&str>,
+) -> Result<(String, String, ArceeCredentialSource)> {
     match explicit_base_url {
         None => {
             let record = arcee::read_stored_auth()?;
-            Ok((record.base_url, record.api_key))
+            Ok((
+                record.base_url,
+                record.api_key,
+                ArceeCredentialSource::StoredLogin,
+            ))
         }
         Some(base_url) => {
             let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)?;
@@ -28,7 +61,11 @@ fn resolve_arcee_credentials(explicit_base_url: Option<&str>) -> Result<(String,
                             stored_url.origin().ascii_serialization()
                         ));
                     }
-                    Ok((base_url.to_string(), record.api_key))
+                    Ok((
+                        base_url.to_string(),
+                        record.api_key,
+                        ArceeCredentialSource::StoredLogin,
+                    ))
                 }
                 arcee::ArceeEndpointKind::Custom => {
                     let api_key = std::env::var("OPENAI_API_KEY")
@@ -40,7 +77,11 @@ fn resolve_arcee_credentials(explicit_base_url: Option<&str>) -> Result<(String,
                                 base_url
                             )
                         })?;
-                    Ok((base_url.to_string(), api_key))
+                    Ok((
+                        base_url.to_string(),
+                        api_key,
+                        ArceeCredentialSource::CustomEndpoint,
+                    ))
                 }
             }
         }
@@ -57,6 +98,7 @@ pub struct ModelClient {
     reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<String>,
     extra_headers: std::collections::BTreeMap<String, String>,
+    arcee_credential_source: Option<ArceeCredentialSource>,
     /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
@@ -88,14 +130,20 @@ impl ModelClient {
             explicit_base_url.as_deref(),
             overrides.api_key_env.as_deref(),
         )?;
-        let (base_url, api_key) = if backend == BackendKind::Arcee {
-            resolve_arcee_credentials(explicit_base_url.as_deref())?
+        let (base_url, api_key, arcee_credential_source) = if backend == BackendKind::Arcee {
+            let (base_url, api_key, source) =
+                resolve_arcee_credentials(explicit_base_url.as_deref())?;
+            if source == ArceeCredentialSource::StoredLogin {
+                validate_stored_arcee_extra_headers(&overrides.extra_headers)?;
+            }
+            (base_url, api_key, Some(source))
         } else {
             (
                 explicit_base_url
                     .clone()
                     .unwrap_or_else(|| default_base_url_for_backend_hint(backend).to_string()),
                 api_key_for_backend(backend, overrides.api_key_env.as_deref())?,
+                None,
             )
         };
         let model = overrides.model.unwrap_or_else(|| {
@@ -117,6 +165,7 @@ impl ModelClient {
             reasoning_effort,
             api_key_env: overrides.api_key_env.clone(),
             extra_headers: overrides.extra_headers,
+            arcee_credential_source,
             cache_ttl: None,
         })
     }
@@ -336,6 +385,9 @@ impl ModelClient {
     }
 
     async fn post_arcee_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+        if self.arcee_credential_source == Some(ArceeCredentialSource::StoredLogin) {
+            validate_stored_arcee_extra_headers(&self.extra_headers)?;
+        }
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
             request
@@ -459,6 +511,7 @@ impl ModelClient {
             reasoning_effort: Some(ReasoningEffort::Xhigh),
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::new(),
+            arcee_credential_source: None,
             cache_ttl: None,
         }
     }
@@ -502,7 +555,11 @@ mod tests {
             backend: BackendKind::Arcee,
             reasoning_effort: None,
             api_key_env: None,
-            extra_headers: std::collections::BTreeMap::new(),
+            extra_headers: std::collections::BTreeMap::from([(
+                "X-Arcee-Tenant".to_string(),
+                "tenant-test".to_string(),
+            )]),
+            arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
             cache_ttl: None,
         };
         let messages = vec![
@@ -563,6 +620,10 @@ mod tests {
             request.headers.get("content-type").map(String::as_str),
             Some("application/json")
         );
+        assert_eq!(
+            request.headers.get("x-arcee-tenant").map(String::as_str),
+            Some("tenant-test")
+        );
         let body: Value = serde_json::from_slice(&request.body).expect("request JSON");
         assert_eq!(body["model"], "arcee-test-model");
         assert_eq!(body["temperature"], 0.0);
@@ -577,6 +638,77 @@ mod tests {
             body["tools"],
             serde_json::to_value(&tools).expect("tool definitions serialize")
         );
+    }
+
+    #[test]
+    fn stored_arcee_header_policy_is_case_insensitive_and_allows_benign_headers() {
+        for name in [
+            "Host",
+            "HOST",
+            "hOsT",
+            "Authorization",
+            "pRoXy-AuThOrIzAtIoN",
+        ] {
+            let headers =
+                std::collections::BTreeMap::from([(name.to_string(), "hostile-value".to_string())]);
+            let error = validate_stored_arcee_extra_headers(&headers)
+                .expect_err("authority and credential headers must be rejected");
+            assert!(
+                error.to_string().contains(name),
+                "unexpected error: {error:#}"
+            );
+        }
+
+        let benign = std::collections::BTreeMap::from([
+            (
+                "Content-Type".to_string(),
+                "application/custom+json".to_string(),
+            ),
+            ("X-Arcee-Tenant".to_string(), "tenant-test".to_string()),
+        ]);
+        validate_stored_arcee_extra_headers(&benign)
+            .expect("benign stored-credential headers should remain supported");
+    }
+
+    #[tokio::test]
+    async fn stored_arcee_host_override_is_rejected_before_connecting() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile endpoint");
+        listener
+            .set_nonblocking(true)
+            .expect("make hostile endpoint nonblocking");
+        let address = listener.local_addr().expect("hostile endpoint address");
+        let client = ModelClient {
+            client: Client::builder()
+                .timeout(Duration::from_millis(250))
+                .build()
+                .expect("build bounded test client"),
+            base_url: format!("http://{address}"),
+            api_key: "stored-login-secret-must-not-leak".to_string(),
+            model: "test-model".to_string(),
+            backend: BackendKind::Arcee,
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: std::collections::BTreeMap::from([(
+                "hOsT".to_string(),
+                format!("{address}"),
+            )]),
+            arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
+            cache_ttl: None,
+        };
+
+        let error = client
+            .send_arcee_chat(Vec::new(), Vec::new())
+            .await
+            .expect_err("Host override must fail before the HTTP client runs");
+
+        assert!(
+            error.to_string().contains("hOsT"),
+            "unexpected error: {error:#}"
+        );
+        let accept_error = listener
+            .accept()
+            .expect_err("hostile endpoint must receive no connection");
+        assert_eq!(accept_error.kind(), std::io::ErrorKind::WouldBlock);
     }
 
     #[test]
@@ -629,6 +761,7 @@ mod tests {
             reasoning_effort: None,
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::new(),
+            arcee_credential_source: Some(ArceeCredentialSource::CustomEndpoint),
             cache_ttl: None,
         };
 
