@@ -1336,18 +1336,37 @@ mod tests {
         assert!(html.contains("class=\"threads-view\" aria-label=\"Thread lifecycle\""));
 
         let app = include_str!("../assets/app.js");
-        for area in ["Orchestrator", "Queued", "Running", "Finished"] {
-            assert!(
-                app.contains(&format!("renderEventStreamArea(\"{area}\"")),
-                "missing dense Events {area} area"
-            );
-            assert!(
-                app.contains(&format!("renderThreadTileArea(\"{area}\"")),
-                "missing Threads tile {area} area"
-            );
-        }
+        let event_lifecycle_order = ["Orchestrator", "Running", "Queued", "Finished"];
+        let event_positions: Vec<_> = event_lifecycle_order
+            .iter()
+            .map(|area| {
+                app.find(&format!("renderEventStreamArea(\"{area}\""))
+                    .unwrap_or_else(|| panic!("missing dense Events {area} area"))
+            })
+            .collect();
+        assert!(event_positions.windows(2).all(|pair| pair[0] < pair[1]));
+        let thread_lifecycle_order = ["Running", "Queued", "Finished"];
+        let thread_positions: Vec<_> = thread_lifecycle_order
+            .iter()
+            .map(|area| {
+                app.find(&format!("renderThreadTileArea(\"{area}\""))
+                    .unwrap_or_else(|| panic!("missing Threads tile {area} area"))
+            })
+            .collect();
+        assert!(thread_positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(!app.contains("renderThreadTileArea(\"Orchestrator\""));
+        assert!(!app.contains("renderOrchestratorThreadTile"));
+        assert_eq!(
+            app.matches("const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);")
+                .count(),
+            1,
+            "Events must remain the sole Orchestrator presentation consumer"
+        );
+        assert!(app.contains("class=\"event-stream-tile-grid\""));
         assert!(app.contains("class=\"event-thread-stream event-tone-${tone}\""));
         assert!(app.contains("items.map(renderDenseEventRow)"));
+        assert!(app.contains("stream.activity"));
+        assert!(!app.contains("stream.allActivity"));
         assert!(!app.contains("[...items].reverse()"));
         assert!(!app.contains("renderEventChronology"));
         assert!(!app.contains("eventsViewBySession"));
@@ -1366,10 +1385,36 @@ mod tests {
         assert!(app.contains("episodes,\n      retained,"));
 
         let css = include_str!("../assets/app.css");
+        assert!(css.contains("container-name: events"));
         for threshold in [600, 900, 1200] {
+            assert!(css.contains(&format!("@container events (min-width: {threshold}px)")));
             assert!(css.contains(&format!("@container threads (min-width: {threshold}px)")));
         }
-        assert!(!css.contains("@container events"));
+        assert!(css.contains(".event-stream-area-orchestrator .event-thread-stream"));
+        assert!(css.contains(".event-stream-tile-grid"));
+        for removed_thread_selector in [
+            ".thread-orchestrator-cell",
+            ".thread-orchestrator-summary",
+            ".thread-orchestrator-card",
+        ] {
+            assert!(!css.contains(removed_thread_selector));
+        }
+        for accent_selector in [
+            ".event-tone-running",
+            ".event-tone-queued",
+            ".thread-pulse-card.thread-tone-running",
+            ".thread-pulse-card.thread-tone-queued",
+            ".thread-tone-running .thread-card-status",
+            ".thread-tone-queued .thread-card-status",
+        ] {
+            assert!(
+                !css.contains(accent_selector),
+                "lifecycle tile must remain neutral: {accent_selector}"
+            );
+        }
+        assert!(css.contains(".event-thread-stream.event-tone-danger"));
+        assert!(css.contains(".thread-pulse-card.thread-tone-danger"));
+        assert!(!css.contains("box-shadow: 0 0 12px var(--danger-ring)"));
         assert!(css.contains(".thread-tile-cell.is-expanded"));
         assert!(css.contains("grid-column: 1 / -1"));
         assert!(css.contains(".event-stream-row"));

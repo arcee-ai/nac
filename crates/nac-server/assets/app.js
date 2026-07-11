@@ -3303,36 +3303,11 @@ function deriveOrchestratorPresentation(snapshot, evidence) {
     if (runId && item.runId && item.runId !== runId) return false;
     return true;
   });
-  const assistant = activity.find((item) => item.event?.type === "assistant_message");
-  const completed = activity.find((item) => item.envelope.event?.type === "run_completed");
-  const response = completed?.envelope?.event?.response || assistant?.event?.content || "";
-  const prompt = activity.find((item) => item.envelope.event?.type === "run_started")?.envelope?.event?.prompt_preview
-    || snapshot?.active_run?.prompt_preview || "No prompt available";
   return {
-    key: "orchestrator",
     label,
     tone,
-    prompt,
-    response,
-    lifecycle: event || null,
     activity,
-    allActivity,
-    currentOperation: orchestratorCurrentOperation(activity, label),
   };
-}
-
-function orchestratorCurrentOperation(activity, label) {
-  if (label === "Failed") {
-    return activity.find((item) => item.envelope.event?.type === "run_failed")?.envelope?.event?.message || "Run failed";
-  }
-  if (label === "Completed") return "Run completed";
-  const latest = activity.find((item) => item.event || item.envelope.event?.type === "run_started");
-  const event = latest?.event;
-  if (event?.type === "tool_call_started") return `Tool · ${event.name || "unknown"}`;
-  if (event?.type === "tool_call_finished") return `${event.is_error ? "Tool error" : "Tool result"} · ${event.name || "unknown"}`;
-  if (event?.type === "model_call_started") return `Model call · iteration ${event.iteration}`;
-  if (event?.type === "assistant_message") return "Response observed";
-  return label === "Running" ? "Orchestrator active" : "Lifecycle unavailable";
 }
 
 function renderGroupedEventStreams(snapshot, events) {
@@ -3340,15 +3315,15 @@ function renderGroupedEventStreams(snapshot, events) {
   const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);
   const threads = deriveThreadPresentations(snapshot, evidence);
   const areas = {
-    queued: threads.filter((thread) => thread.classification.area === "queued"),
     running: threads.filter((thread) => thread.classification.area === "running"),
+    queued: threads.filter((thread) => thread.classification.area === "queued"),
     finished: threads.filter((thread) => thread.classification.area === "finished"),
   };
   return `
     <div class="event-stream-stack">
       ${renderEventStreamArea("Orchestrator", [orchestrator], "orchestrator")}
-      ${renderEventStreamArea("Queued", areas.queued, "queued")}
       ${renderEventStreamArea("Running", areas.running, "running")}
+      ${renderEventStreamArea("Queued", areas.queued, "queued")}
       ${renderEventStreamArea("Finished", areas.finished, "finished")}
     </div>`;
 }
@@ -3356,11 +3331,11 @@ function renderGroupedEventStreams(snapshot, events) {
 function renderEventStreamArea(title, streams, area) {
   const count = area === "orchestrator" ? "" : `<span>${streams.length}</span>`;
   const content = streams.length > 0
-    ? streams.map((stream) => area === "orchestrator"
-      ? renderDenseEventStream("Orchestrator", stream.label, stream.allActivity, stream.tone, "No orchestrator events captured.")
+    ? `<div class="event-stream-tile-grid">${streams.map((stream) => area === "orchestrator"
+      ? renderDenseEventStream("Orchestrator", stream.label, stream.activity, stream.tone, "No orchestrator events captured.")
       : renderDenseEventStream(stream.name, stream.classification.label, stream.items, stream.classification.tone,
         stream.classification.area === "queued" ? stream.currentOperation : "No captured lifecycle events for this thread."))
-      .join("")
+      .join("")}</div>`
     : `<div class="event-stream-area-empty">None</div>`;
   return `
     <section class="event-stream-area event-stream-area-${area}" aria-labelledby="event-stream-${area}-title">
@@ -3464,12 +3439,11 @@ function renderThreads(snapshot) {
   const sessionId = snapshot.metadata.session_id;
   const events = getSessionEvents(sessionId);
   const evidence = indexedEventEvidence(events);
-  const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);
   const threads = deriveThreadPresentations(snapshot, evidence);
   const live = state.activeThreadsBySession.get(sessionId) || new Map();
   const areas = {
-    queued: threads.filter((thread) => thread.classification.area === "queued"),
     running: threads.filter((thread) => thread.classification.area === "running"),
+    queued: threads.filter((thread) => thread.classification.area === "queued"),
     finished: threads.filter((thread) => thread.classification.area === "finished"),
   };
   const focusedKey = el.threadsView.contains(document.activeElement)
@@ -3479,9 +3453,8 @@ function renderThreads(snapshot) {
 
   el.threadsView.innerHTML = `
     <div class="thread-lifecycle-stack">
-      ${renderThreadTileArea("Orchestrator", [orchestrator], "orchestrator", snapshot, live)}
-      ${renderThreadTileArea("Queued", areas.queued, "queued", snapshot, live)}
       ${renderThreadTileArea("Running", areas.running, "running", snapshot, live)}
+      ${renderThreadTileArea("Queued", areas.queued, "queued", snapshot, live)}
       ${renderThreadTileArea("Finished", areas.finished, "finished", snapshot, live)}
     </div>`;
   el.threadsView.scrollTop = previousScrollTop;
@@ -3496,15 +3469,12 @@ function renderThreads(snapshot) {
 }
 
 function renderThreadTileArea(title, tiles, area, snapshot, live) {
-  const count = area === "orchestrator" ? "" : `<span>${tiles.length}</span>`;
   const content = tiles.length > 0
-    ? `<ol class="thread-tile-grid">${tiles.map((tile) => area === "orchestrator"
-      ? renderOrchestratorThreadTile(tile, snapshot)
-      : renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
+    ? `<ol class="thread-tile-grid">${tiles.map((tile) => renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
     : `<div class="thread-area-empty">None</div>`;
   return `
     <section class="thread-lifecycle-area thread-area-${area}" aria-labelledby="thread-area-${area}-title">
-      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span>${count}</h3>
+      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span><span>${tiles.length}</span></h3>
       ${content}
     </section>`;
 }
@@ -3584,35 +3554,6 @@ function renderWorkerThreadDetails(tile, liveThread, detailId, sessionId) {
           : `<div class="dense-sublist">${tile.episodes.map(renderThreadEpisode).join("")}</div>`}
       </section>
     </div>`;
-}
-
-function renderOrchestratorThreadTile(tile, snapshot) {
-  const sessionId = snapshot.metadata.session_id;
-  const expanded = expandedThreadCards(sessionId).has(tile.key);
-  const detailId = `${threadCardDomId(sessionId, tile.key)}-details`;
-  return `
-    <li class="thread-tile-cell thread-orchestrator-cell ${expanded ? "is-expanded" : ""}">
-      <article class="thread-pulse-card thread-orchestrator-card thread-tone-${tile.tone}" aria-labelledby="${detailId}-title">
-        <header class="thread-card-header">
-          <h4 id="${detailId}-title">Orchestrator</h4>
-          <span class="thread-card-status">${escapeHtml(tile.label)}</span>
-        </header>
-        <div class="thread-orchestrator-summary">
-          <span class="thread-card-action">${escapeHtml(tile.prompt)}</span>
-          <span class="thread-card-operation">${escapeHtml(tile.currentOperation)}</span>
-        </div>
-        <footer class="thread-card-footer">
-          <span>${tile.response ? "Response available" : "No orchestrator response observed"}</span>
-          ${renderThreadDisclosure(tile.key, expanded, detailId)}
-        </footer>
-        ${expanded ? `
-          <div id="${detailId}" class="thread-card-details">
-            ${tile.response ? `<section aria-label="Orchestrator response"><h5>Response</h5><pre>${escapeHtml(tile.response)}</pre></section>` : ""}
-            ${tile.lifecycle?.type === "run_failed" ? `<section aria-label="Run failure"><h5>Failure</h5><pre>${escapeHtml(tile.lifecycle.message || "Run failed")}</pre></section>` : ""}
-            <section aria-label="Orchestrator activity"><h5>Observed activity</h5>${renderThreadActivity(tile.activity)}</section>
-          </div>` : ""}
-      </article>
-    </li>`;
 }
 
 function renderWorksets(snapshot) {

@@ -2200,6 +2200,8 @@ button.session-card {
 }
 
 .event-log.event-streams {
+  container-name: events;
+  container-type: inline-size;
   display: block;
   overflow-x: hidden;
   box-shadow: none;
@@ -2251,9 +2253,27 @@ button.session-card {
   font-size: var(--type-meta);
 }
 
-.event-thread-stream {
+.event-stream-tile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-md);
   min-width: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.event-stream-area-orchestrator .event-thread-stream {
+  grid-column: 1 / -1;
+}
+
+.event-thread-stream {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-md);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
 }
 
 .event-thread-header {
@@ -2271,9 +2291,7 @@ button.session-card {
   margin: 0;
   color: var(--text);
   font-size: var(--type-body);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .event-thread-header span {
@@ -2283,8 +2301,10 @@ button.session-card {
   text-align: right;
 }
 
-.event-tone-running .event-thread-header span { color: var(--teal); }
-.event-tone-queued .event-thread-header span { color: var(--blue); }
+.event-thread-stream.event-tone-danger {
+  border-color: var(--danger-ring-strong);
+}
+
 .event-tone-danger .event-thread-header span { color: #eea0a8; }
 
 .event-stream-rows {
@@ -2297,7 +2317,7 @@ button.session-card {
 
 .event-stream-row {
   display: grid;
-  grid-template-columns: minmax(40px, auto) minmax(112px, 0.28fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 40px) minmax(0, 0.34fr) minmax(0, 1fr);
   gap: var(--space-sm);
   min-width: 0;
   padding: 3px 0;
@@ -2310,6 +2330,7 @@ button.session-card {
 .event-stream-sequence {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .event-stream-kind {
@@ -2336,6 +2357,23 @@ button.session-card {
   font-family: var(--mono);
   font-size: var(--type-meta);
   overflow-wrap: anywhere;
+}
+
+@container events (min-width: 600px) {
+  .event-stream-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container events (min-width: 900px) {
+  .event-stream-tile-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@container events (min-width: 1200px) {
+  .event-stream-tile-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@container events (max-width: 420px) {
+  .event-stream-row { grid-template-columns: auto minmax(0, 1fr); }
+  .event-stream-detail { grid-column: 2; }
 }
 
 #tab-threads.active {
@@ -2367,8 +2405,7 @@ button.session-card {
   min-width: 0;
 }
 
-.thread-tile-cell.is-expanded,
-.thread-orchestrator-cell {
+.thread-tile-cell.is-expanded {
   grid-column: 1 / -1;
 }
 
@@ -2383,15 +2420,9 @@ button.session-card {
   background: var(--panel-2);
 }
 
-.thread-pulse-card.thread-tone-running { border-color: rgba(79, 210, 168, 0.3); }
-.thread-pulse-card.thread-tone-queued { border-color: rgba(110, 168, 255, 0.24); }
 .thread-pulse-card.thread-tone-danger {
   border-color: var(--danger-ring-strong);
-  box-shadow: 0 0 12px var(--danger-ring);
 }
-.thread-pulse-card.thread-tone-history,
-.thread-pulse-card.thread-tone-unknown,
-.thread-pulse-card.thread-tone-finished { border-color: rgba(255, 255, 255, 0.07); }
 
 .thread-card-header {
   display: flex;
@@ -2423,8 +2454,6 @@ button.session-card {
   text-align: right;
 }
 
-.thread-tone-running .thread-card-status { color: var(--teal); }
-.thread-tone-queued .thread-card-status { color: var(--blue); }
 .thread-tone-danger .thread-card-status { color: #eea0a8; }
 
 .thread-card-action,
@@ -2591,13 +2620,6 @@ button.session-card {
   white-space: pre-wrap;
 }
 
-.thread-orchestrator-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr);
-  gap: var(--space-lg);
-  min-width: 0;
-}
-
 @container threads (min-width: 600px) {
   .thread-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .thread-response-excerpt { -webkit-line-clamp: 4; }
@@ -2615,10 +2637,7 @@ button.session-card {
 @media (max-width: 520px), (pointer: coarse) {
   .events-toolbar { align-items: flex-start; }
   .events-stream-status { text-align: right; }
-  .event-stream-row { grid-template-columns: auto minmax(0, 1fr); }
-  .event-stream-detail { grid-column: 2; }
   .thread-card-disclosure { min-height: 44px; }
-  .thread-orchestrator-summary,
   .thread-card-details .dense-detail-row { grid-template-columns: minmax(0, 1fr); }
   .thread-card-details pre { max-height: 40dvh; }
 }
