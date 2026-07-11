@@ -108,10 +108,6 @@ pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
         .ok_or_else(|| anyhow!("Arcee auth is not configured. Run `nac arcee-auth login` to sign in."))
 }
 
-pub(super) fn stored_auth_present() -> Result<bool> {
-    Ok(with_auth_lock(read_stored_auth_optional)?.is_some())
-}
-
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
     let path = auth_file_path()?;
     let raw = match read_auth_string()? {
@@ -301,39 +297,5 @@ mod tests {
         assert_eq!(value["type"], "arcee_api_key");
         assert_eq!(value["api_key"], "rcai-abc");
         assert_eq!(value["base_url"], "https://api.arcee.ai");
-    }
-
-    #[test]
-    fn stored_auth_present_distinguishes_states() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
-        let original = std::env::var_os("NAC_HOME");
-        let dir = std::env::temp_dir().join("nac-arcee-stored-auth-present-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let auth = dir.join("auth.json");
-        unsafe {
-            std::env::set_var("NAC_HOME", &dir);
-        }
-
-        let _ = std::fs::remove_file(&auth);
-        assert!(!stored_auth_present().unwrap());
-
-        std::fs::write(&auth, r#"{"type":"chatgpt-codex","access":"a"}"#).unwrap();
-        assert!(!stored_auth_present().unwrap());
-
-        std::fs::write(
-            &auth,
-            r#"{"type":"arcee_api_key","api_key":"rcai-x","base_url":"https://api.arcee.ai","organization_id":"o","workspace_name":"w"}"#,
-        )
-        .unwrap();
-        assert!(stored_auth_present().unwrap());
-
-        std::fs::write(&auth, "{ not valid json").unwrap();
-        assert!(stored_auth_present().is_err());
-
-        let _ = std::fs::remove_file(&auth);
-        match original {
-            Some(value) => unsafe { std::env::set_var("NAC_HOME", value) },
-            None => unsafe { std::env::remove_var("NAC_HOME") },
-        }
     }
 }

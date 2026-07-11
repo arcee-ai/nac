@@ -67,6 +67,77 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct IsolatedModelEnv {
+        original: Vec<(&'static str, Option<OsString>)>,
+        home: PathBuf,
+    }
+
+    impl IsolatedModelEnv {
+        fn new(
+            label: &str,
+            auth_contents: Option<&str>,
+            openai_key: Option<&str>,
+            base_url: Option<&str>,
+        ) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos();
+            let home = std::env::temp_dir()
+                .join(format!("nac-model-{label}-{}-{unique}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            if let Some(contents) = auth_contents {
+                std::fs::write(home.join("auth.json"), contents).unwrap();
+            }
+
+            let names = [
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "OPENAI_MODEL",
+                "NAC_HOME",
+            ];
+            let original = names
+                .into_iter()
+                .map(|name| (name, std::env::var_os(name)))
+                .collect();
+            set_env("OPENAI_API_KEY", openai_key);
+            set_env("OPENAI_BASE_URL", base_url);
+            set_env("OPENAI_MODEL", None);
+            unsafe { std::env::set_var("NAC_HOME", &home) };
+
+            Self { original, home }
+        }
+    }
+
+    impl Drop for IsolatedModelEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.original.drain(..) {
+                restore_env(name, value);
+            }
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
+    fn set_env(name: &str, value: Option<&str>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
+    fn stored_arcee_auth(api_key: &str, base_url: &str) -> String {
+        json!({
+            "type": "arcee_api_key",
+            "api_key": api_key,
+            "base_url": base_url,
+            "organization_id": "org-test",
+            "workspace_name": "workspace-test"
+        })
+        .to_string()
+    }
 
     fn restore_env(name: &str, value: Option<OsString>) {
         match value {
@@ -142,34 +213,65 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_arcee_auth_does_not_block_other_backends() {
+    fn automatic_backend_ignores_stored_arcee_auth_state() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let current_auth = stored_arcee_auth("rcai-current", "https://api.arcee.ai");
+        // Credential freshness cannot be checked locally. A structurally valid but
+        // expired key must be just as irrelevant to automatic provider selection.
+        let stale_auth = stored_arcee_auth("rcai-expired", "https://api.arcee.ai");
+        let cases = [
+            ("current", current_auth.as_str()),
+            ("stale", stale_auth.as_str()),
+            ("corrupt", "{ not valid json"),
+        ];
 
-        let original_key = std::env::var_os("OPENAI_API_KEY");
-        let original_base = std::env::var_os("OPENAI_BASE_URL");
-        let original_model = std::env::var_os("OPENAI_MODEL");
-        let original_home = std::env::var_os("NAC_HOME");
+        for (label, auth_contents) in cases {
+            let _env =
+                IsolatedModelEnv::new(label, Some(auth_contents), Some("test_openai_key"), None);
+            let client = ModelClient::from_env_with_overrides(ClientOverrides::default())
+                .unwrap_or_else(|error| panic!("{label} Arcee auth changed Auto: {error:#}"));
 
-        let home = std::env::temp_dir().join("nac-corrupt-auth-fallback-test");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(home.join("auth.json"), "{ not valid json").unwrap();
-
-        unsafe {
-            std::env::set_var("OPENAI_API_KEY", "test_openai_key");
-            std::env::remove_var("OPENAI_BASE_URL");
-            std::env::remove_var("OPENAI_MODEL");
-            std::env::set_var("NAC_HOME", &home);
+            assert_eq!(client.backend(), BackendKind::OpenAiResponses, "{label}");
+            assert_eq!(client.base_url(), "https://api.openai.com/v1", "{label}");
         }
+    }
 
-        let client = ModelClient::from_env_with_overrides(ClientOverrides::default())
-            .expect("corrupt Arcee auth must not block an OpenAI run");
-        assert_eq!(client.backend(), BackendKind::OpenAiResponses);
+    #[test]
+    fn automatic_backend_does_not_fall_back_to_stored_arcee_auth() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let stale_auth = stored_arcee_auth("rcai-expired", "https://api.arcee.ai");
+        let _env = IsolatedModelEnv::new("no-openai-key", Some(&stale_auth), None, None);
 
-        let _ = std::fs::remove_file(home.join("auth.json"));
-        restore_env("OPENAI_API_KEY", original_key);
-        restore_env("OPENAI_BASE_URL", original_base);
-        restore_env("OPENAI_MODEL", original_model);
-        restore_env("NAC_HOME", original_home);
+        let error = ModelClient::from_env_with_overrides(ClientOverrides::default())
+            .err()
+            .expect("Auto must require OpenAI credentials without an explicit Arcee URL");
+        assert!(
+            error.to_string().contains("OPENAI_API_KEY"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn explicit_arcee_backend_and_base_still_use_stored_auth() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai");
+        let _env = IsolatedModelEnv::new("explicit-arcee", Some(&auth), None, None);
+
+        let from_base = ModelClient::from_env_with_overrides(ClientOverrides {
+            base_url: Some("https://api.internal.arcee.ai/custom".to_string()),
+            ..ClientOverrides::default()
+        })
+        .expect("an explicit Arcee base URL should resolve Auto to Arcee");
+        assert_eq!(from_base.backend(), BackendKind::Arcee);
+        assert_eq!(from_base.base_url(), "https://api.internal.arcee.ai/custom");
+
+        let from_backend = ModelClient::from_env_with_overrides(ClientOverrides {
+            backend: Some(BackendKind::Arcee),
+            ..ClientOverrides::default()
+        })
+        .expect("an explicit Arcee backend should use stored auth");
+        assert_eq!(from_backend.backend(), BackendKind::Arcee);
+        assert_eq!(from_backend.base_url(), "https://stored.arcee.ai");
     }
 
     #[test]
