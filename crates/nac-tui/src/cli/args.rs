@@ -4,7 +4,8 @@ use super::*;
 #[command(
     name = "nac",
     about = "agent",
-    after_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release"
+    after_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release",
+    after_long_help = "Commands:\n  nac resume [SESSION_ID]    Continue a saved session\n  nac codex-auth [COMMAND]   Manage ChatGPT Codex auth\n  nac arcee-auth [COMMAND]   Manage Arcee auth\n  nac upgrade                Reinstall the latest nac release\n\nModel configuration:\n  New sessions require backend, model, and base URL, supplied here or in config.toml.\n  API-key backends use exactly the environment variable named by --api-key-env;\n  no provider key variable is selected implicitly. arcee-auth uses the stored Arcee\n  login and accepts no key selector. arcee-api requires --api-key-env.\n  chatgpt-codex-responses uses stored Codex OAuth and accepts no key selector."
 )]
 pub(super) struct RunCli {
     /// Working directory (default: current directory)
@@ -126,33 +127,77 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
 
 #[derive(clap::Args, Default)]
 pub(super) struct ModelArgs {
-    /// Backend wire shape to use for model requests
+    /// Backend wire shape (required here or in config.toml)
+    ///
+    /// arcee-auth uses the stored Arcee login and rejects --api-key-env;
+    /// arcee-api requires a selected environment key; chatgpt-codex-responses
+    /// uses stored Codex OAuth and rejects --api-key-env.
     #[arg(long, value_enum)]
     pub(super) backend: Option<BackendArg>,
+
+    /// Model identifier (required here or in config.toml)
+    #[arg(
+        long = "model",
+        alias = "api-model",
+        value_name = "MODEL",
+        value_parser = nonblank_model_value
+    )]
+    pub(super) api_model: Option<String>,
+
+    /// Model API base URL (required here or in config.toml)
+    #[arg(
+        long = "base-url",
+        alias = "api-base-url",
+        value_name = "BASE_URL",
+        value_parser = nonblank_base_url_value
+    )]
+    pub(super) api_base_url: Option<String>,
+
+    /// Exact environment variable containing the API key
+    ///
+    /// No provider variable is chosen implicitly. Required by API-key backends,
+    /// including arcee-api; rejected by arcee-auth and
+    /// chatgpt-codex-responses, which use stored credentials.
+    #[arg(
+        long = "api-key-env",
+        value_name = "ENV_VAR",
+        value_parser = nonblank_api_key_env_value
+    )]
+    pub(super) api_key_env: Option<String>,
 
     /// Reasoning effort to request when supported by the selected backend
     #[arg(long = "effort", value_enum)]
     pub(super) reasoning_effort: Option<ReasoningEffortArg>,
 
-    /// Internal API base URL override used by managed workers and resume
-    #[arg(long, hide = true)]
-    pub(super) api_base_url: Option<String>,
-
-    /// Internal model override used by managed workers and resume
-    #[arg(long, hide = true)]
-    pub(super) api_model: Option<String>,
-
-    /// Internal api_key_env override used by managed workers to inherit session config
-    #[arg(long = "api-key-env", hide = true)]
-    pub(super) api_key_env: Option<String>,
-
-    /// Internal extra headers snapshot transport (JSON object) used by managed workers.
+    /// Extra request headers as a JSON object with string values
+    ///
+    /// Omit to inherit config.toml. Pass `{}` to explicitly select no headers.
     #[arg(
         long = "extra-headers",
-        hide = true,
+        value_name = "JSON",
         value_parser = runtime::parse_extra_headers_json
     )]
     pub(super) extra_headers: Option<std::collections::BTreeMap<String, String>>,
+}
+
+fn nonblank_model_value(value: &str) -> std::result::Result<String, String> {
+    nonblank_model_setting(value, "model")
+}
+
+fn nonblank_base_url_value(value: &str) -> std::result::Result<String, String> {
+    nonblank_model_setting(value, "base URL")
+}
+
+fn nonblank_api_key_env_value(value: &str) -> std::result::Result<String, String> {
+    nonblank_model_setting(value, "api_key_env")
+}
+
+fn nonblank_model_setting(value: &str, name: &str) -> std::result::Result<String, String> {
+    if value.trim().is_empty() {
+        Err(format!("{name} must not be blank"))
+    } else {
+        Ok(value.to_string())
+    }
 }
 
 #[derive(clap::Args)]
@@ -353,6 +398,244 @@ fn subcommand_args(args: Vec<OsString>, name: &str) -> Vec<OsString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_model_options_parse_and_override_config_as_a_complete_tuple() {
+        let cli = RunCli::try_parse_from([
+            "nac",
+            "--backend",
+            "together-chat",
+            "--model",
+            "cli-model",
+            "--base-url",
+            "https://cli.example/v1",
+            "--api-key-env",
+            "CLI_API_KEY",
+            "--effort",
+            "high",
+            "--extra-headers",
+            r#"{"X-CLI":"selected"}"#,
+        ])
+        .unwrap();
+        let options = model_options(cli.model);
+
+        let mut config = runtime::NacConfig::default();
+        config.model.backend = Some(BackendKind::OpenAiResponses);
+        config.model.model = Some("config-model".to_string());
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+        config.model.reasoning_effort = Some(ReasoningEffort::Low);
+        config
+            .model
+            .extra_headers
+            .insert("X-Config".to_string(), "ignored".to_string());
+
+        let actual = runtime::effective_model_settings(&options, &config).unwrap();
+        let expected = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::TogetherChat,
+            "cli-model".to_string(),
+            "https://cli.example/v1".to_string(),
+            Some(ReasoningEffort::High),
+            Some("CLI_API_KEY".to_string()),
+            std::collections::BTreeMap::from([("X-CLI".to_string(), "selected".to_string())]),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn omitted_public_model_options_inherit_config() {
+        let cli = RunCli::try_parse_from(["nac"]).unwrap();
+        let mut config = runtime::NacConfig::default();
+        config.model.backend = Some(BackendKind::AnthropicMessages);
+        config.model.model = Some("config-model".to_string());
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+        config.model.reasoning_effort = Some(ReasoningEffort::Medium);
+        config
+            .model
+            .extra_headers
+            .insert("X-Config".to_string(), "inherited".to_string());
+
+        let actual = runtime::effective_model_settings(&model_options(cli.model), &config).unwrap();
+        let expected = nac_core::model::EffectiveModelSettings::new(
+            BackendKind::AnthropicMessages,
+            "config-model".to_string(),
+            "https://config.example/v1".to_string(),
+            Some(ReasoningEffort::Medium),
+            Some("CONFIG_API_KEY".to_string()),
+            config.model.extra_headers.clone(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn public_model_options_resolve_each_credential_mode() {
+        for (backend, selector) in [
+            ("openai-responses", Some("OPENAI_SELECTED_KEY")),
+            ("arcee-api", Some("ARCEE_SELECTED_KEY")),
+            ("arcee-auth", None),
+            ("chatgpt-codex-responses", None),
+        ] {
+            let mut args = vec![
+                "nac",
+                "--backend",
+                backend,
+                "--model",
+                "selected-model",
+                "--base-url",
+                "https://api.example/v1",
+            ];
+            if let Some(selector) = selector {
+                args.extend(["--api-key-env", selector]);
+            }
+            let cli = RunCli::try_parse_from(args).unwrap();
+            let options = model_options(cli.model);
+            let expected_backend = options.backend.unwrap();
+
+            let settings =
+                runtime::effective_model_settings(&options, &runtime::NacConfig::default())
+                    .unwrap();
+            let expected = nac_core::model::EffectiveModelSettings::new(
+                expected_backend,
+                "selected-model".to_string(),
+                "https://api.example/v1".to_string(),
+                None,
+                selector.map(str::to_string),
+                std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+            assert_eq!(settings, expected, "backend {backend}");
+            nac_core::model::validate_backend_api_key_env(
+                expected_backend,
+                Some("https://api.example/v1"),
+                selector,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn public_model_options_report_missing_and_blank_required_settings() {
+        for (config, expected) in [
+            (runtime::NacConfig::default(), "backend"),
+            (
+                {
+                    let mut config = runtime::NacConfig::default();
+                    config.model.backend = Some(BackendKind::OpenAiResponses);
+                    config
+                },
+                "model",
+            ),
+            (
+                {
+                    let mut config = runtime::NacConfig::default();
+                    config.model.backend = Some(BackendKind::OpenAiResponses);
+                    config.model.model = Some("configured-model".to_string());
+                    config
+                },
+                "base_url",
+            ),
+        ] {
+            let cli = RunCli::try_parse_from(["nac"]).unwrap();
+            let error =
+                runtime::effective_model_settings(&model_options(cli.model), &config).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
+
+        let backend_error = RunCli::try_parse_from(["nac", "--backend", ""])
+            .err()
+            .expect("blank explicit backend must be rejected")
+            .to_string();
+        assert!(
+            backend_error.contains("a value is required"),
+            "{backend_error}"
+        );
+        assert!(backend_error.contains("--backend"), "{backend_error}");
+
+        for (flag, label) in [
+            ("--model", "model"),
+            ("--base-url", "base URL"),
+            ("--api-key-env", "api_key_env"),
+        ] {
+            let error = RunCli::try_parse_from(["nac", flag, "   "])
+                .err()
+                .expect("blank explicit value must be rejected")
+                .to_string();
+            assert!(error.contains(label), "{error}");
+            assert!(error.contains("must not be blank"), "{error}");
+        }
+    }
+
+    #[test]
+    fn public_extra_headers_reject_malformed_json_and_accept_empty_object() {
+        let error = RunCli::try_parse_from(["nac", "--extra-headers", "not-json"])
+            .err()
+            .expect("malformed public headers must be rejected")
+            .to_string();
+        assert!(error.contains("expected a JSON object"), "{error}");
+
+        let cli = RunCli::try_parse_from(["nac", "--extra-headers", "{}"]).unwrap();
+        assert_eq!(
+            cli.model.extra_headers,
+            Some(std::collections::BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn long_help_documents_strict_model_and_credential_contract() {
+        let help = RunCli::command().render_long_help().to_string();
+        for expected in [
+            "--backend",
+            "--model",
+            "--base-url",
+            "--api-key-env",
+            "--effort",
+            "--extra-headers",
+            "required here or in config.toml",
+            "exactly the environment variable",
+            "arcee-auth uses the stored Arcee login",
+            "arcee-api requires --api-key-env",
+            "stored Codex OAuth",
+        ] {
+            assert!(help.contains(expected), "missing {expected:?} in:\n{help}");
+        }
+    }
+
+    #[test]
+    fn hidden_worker_accepts_snapshot_transport_aliases() {
+        let cli = ManagedWorkerCli::try_parse_from([
+            "nac __worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "work",
+            "--backend",
+            "together-chat",
+            "--api-model",
+            "snapshot-model",
+            "--api-base-url",
+            "https://snapshot.example/v1",
+            "--api-key-env",
+            "SNAPSHOT_API_KEY",
+            "--extra-headers",
+            "{}",
+        ])
+        .unwrap();
+        assert_eq!(cli.model.api_model.as_deref(), Some("snapshot-model"));
+        assert_eq!(
+            cli.model.api_base_url.as_deref(),
+            Some("https://snapshot.example/v1")
+        );
+        assert_eq!(cli.model.api_key_env.as_deref(), Some("SNAPSHOT_API_KEY"));
+        assert_eq!(
+            cli.model.extra_headers,
+            Some(std::collections::BTreeMap::new())
+        );
+    }
 
     #[test]
     fn hidden_worker_rejects_malformed_header_json() {

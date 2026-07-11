@@ -349,7 +349,12 @@ pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(crate) fn effective_model_settings(
+/// Merge explicit new-session model options over `config.toml` settings.
+///
+/// This resolution never consults ambient model, base URL, backend, or
+/// provider-key defaults. Credential values are read later when constructing
+/// the model client.
+pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
