@@ -41,7 +41,7 @@ fn resolve_arcee_credentials(
 ) -> Result<(String, String, ArceeCredentialSource)> {
     match explicit_base_url {
         None => {
-            let record = arcee::read_stored_auth().map_err(classify_model_configuration_error)?;
+            let record = arcee::read_stored_auth().map_err(classify_stored_arcee_auth_error)?;
             Ok((
                 record.base_url,
                 record.api_key,
@@ -54,7 +54,7 @@ fn resolve_arcee_credentials(
             match kind {
                 arcee::ArceeEndpointKind::Approved => {
                     let record =
-                        arcee::read_stored_auth().map_err(classify_model_configuration_error)?;
+                        arcee::read_stored_auth().map_err(classify_stored_arcee_auth_error)?;
                     let stored_url = arcee::validate_stored_base_url(&record.base_url)
                         .map_err(classify_model_configuration_error)?;
                     if requested_url.origin() != stored_url.origin() {

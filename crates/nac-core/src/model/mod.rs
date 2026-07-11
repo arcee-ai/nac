@@ -67,6 +67,17 @@ fn classify_model_configuration_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+fn classify_stored_arcee_auth_error(error: anyhow::Error) -> anyhow::Error {
+    if error
+        .downcast_ref::<arcee::StoredArceeAuthConfigurationError>()
+        .is_some()
+    {
+        model_configuration_error(error.to_string())
+    } else {
+        error.context("failed to load stored Arcee credentials")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAuthAction {
     Login,
@@ -347,6 +358,53 @@ mod tests {
             error.to_string().contains("OPENAI_API_KEY"),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn stored_arcee_auth_config_and_store_failures_remain_distinct() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let overrides = ClientOverrides {
+            backend: Some(BackendKind::Arcee),
+            ..ClientOverrides::default()
+        };
+
+        {
+            let _env = IsolatedModelEnv::new("missing-stored-auth", None, None, None);
+            let error = ModelClient::from_env_with_overrides(overrides.clone())
+                .err()
+                .expect("missing stored auth must fail");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("Arcee auth is not configured"));
+        }
+
+        {
+            let env = IsolatedModelEnv::new("malformed-stored-auth", None, None, None);
+            std::fs::write(env.home.join("arcee_auth.json"), "{not-json}").unwrap();
+            let error = ModelClient::from_env_with_overrides(overrides.clone())
+                .err()
+                .expect("malformed stored auth must fail");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error
+                .to_string()
+                .contains("failed to parse stored Arcee auth"));
+        }
+
+        {
+            let env = IsolatedModelEnv::new("stored-auth-lock-io", None, None, None);
+            std::fs::create_dir(env.home.join("arcee_auth.json.lock")).unwrap();
+            let error = ModelClient::from_env_with_overrides(overrides)
+                .err()
+                .expect("an unusable credential lock must fail");
+            assert!(
+                error.downcast_ref::<ModelConfigurationError>().is_none(),
+                "credential-store safety failures are not caller configuration errors: {error:#}"
+            );
+            assert_eq!(error.to_string(), "failed to load stored Arcee credentials");
+            assert!(
+                format!("{error:#}").contains("non-regular auth lock"),
+                "operational cause should remain available internally: {error:#}"
+            );
+        }
     }
 
     #[test]

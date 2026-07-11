@@ -30,6 +30,41 @@ pub(super) enum ArceeEndpointKind {
     Custom,
 }
 
+/// Marks stored-auth content and policy failures that a caller can fix.
+/// Credential-store access and safety failures deliberately do not use this
+/// marker so server callers preserve them as internal errors.
+#[derive(Debug)]
+pub(super) struct StoredArceeAuthConfigurationError {
+    message: String,
+}
+
+impl std::fmt::Display for StoredArceeAuthConfigurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StoredArceeAuthConfigurationError {}
+
+fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(StoredArceeAuthConfigurationError {
+        message: message.into(),
+    })
+}
+
+fn classify_stored_auth_data_error(error: anyhow::Error) -> anyhow::Error {
+    if error
+        .downcast_ref::<StoredArceeAuthConfigurationError>()
+        .is_some()
+    {
+        error
+    } else if error.downcast_ref::<std::string::FromUtf8Error>().is_some() {
+        stored_auth_configuration_error(error.to_string())
+    } else {
+        error
+    }
+}
+
 pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKind, Url)> {
     let parsed = Url::parse(base_url)
         .map_err(|error| anyhow!("invalid Arcee base URL '{}': {}", base_url, error))?;
@@ -266,8 +301,13 @@ pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
     with_arcee_migration_locks(|| {
         migrate_legacy_auth_unlocked()?;
         read_stored_auth_optional()
-    })?
-    .ok_or_else(|| anyhow!("Arcee auth is not configured. Run `nac arcee-auth login` to sign in."))
+    })
+    .map_err(classify_stored_auth_data_error)?
+    .ok_or_else(|| {
+        stored_auth_configuration_error(
+            "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
+        )
+    })
 }
 
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
@@ -280,18 +320,29 @@ fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
 }
 
 fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> {
-    let value: Value =
-        serde_json::from_str(raw).with_context(|| format!("failed to parse {}", path.display()))?;
+    let value: Value = serde_json::from_str(raw).map_err(|error| {
+        stored_auth_configuration_error(format!(
+            "failed to parse stored Arcee auth in {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
     if value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
         return Ok(None);
     }
-    let auth: StoredArceeAuth = serde_json::from_value(value)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    validate_stored_base_url(&auth.base_url).with_context(|| {
-        format!(
-            "stored Arcee auth in {} has an invalid base_url",
-            path.display()
-        )
+    let auth: StoredArceeAuth = serde_json::from_value(value).map_err(|error| {
+        stored_auth_configuration_error(format!(
+            "failed to parse stored Arcee auth schema in {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    validate_stored_base_url(&auth.base_url).map_err(|error| {
+        stored_auth_configuration_error(format!(
+            "stored Arcee auth in {} has an invalid base_url: {}",
+            path.display(),
+            error
+        ))
     })?;
     Ok(Some(auth))
 }
@@ -330,17 +381,19 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
     if legacy_value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
         return Ok(());
     }
-    let legacy_auth: StoredArceeAuth = serde_json::from_value(legacy_value).with_context(|| {
-        format!(
-            "legacy Arcee auth in {} is invalid; refusing to overwrite it",
-            legacy_path.display()
-        )
+    let legacy_auth: StoredArceeAuth = serde_json::from_value(legacy_value).map_err(|error| {
+        stored_auth_configuration_error(format!(
+            "legacy Arcee auth in {} is invalid; refusing to overwrite it: {}",
+            legacy_path.display(),
+            error
+        ))
     })?;
-    validate_stored_base_url(&legacy_auth.base_url).with_context(|| {
-        format!(
-            "legacy Arcee auth in {} has an invalid base_url; refusing to migrate it",
-            legacy_path.display()
-        )
+    validate_stored_base_url(&legacy_auth.base_url).map_err(|error| {
+        stored_auth_configuration_error(format!(
+            "legacy Arcee auth in {} has an invalid base_url; refusing to migrate it: {}",
+            legacy_path.display(),
+            error
+        ))
     })?;
 
     match read_auth_string_from_path(arcee_path)? {
@@ -353,17 +406,17 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
                     )
                 })?
                 .ok_or_else(|| {
-                    anyhow!(
+                    stored_auth_configuration_error(format!(
                         "cannot migrate legacy Arcee auth because {} already contains non-Arcee credentials; both files were preserved",
                         arcee_path.display()
-                    )
+                    ))
                 })?;
             if arcee_auth != legacy_auth {
-                return Err(anyhow!(
+                return Err(stored_auth_configuration_error(format!(
                     "conflicting Arcee credentials exist in {} and {}; both files were preserved",
                     legacy_path.display(),
                     arcee_path.display()
-                ));
+                )));
             }
         }
         None => {

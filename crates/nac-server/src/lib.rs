@@ -1626,6 +1626,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[tokio::test]
+    async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        {
+            let root = temp_root("arcee_malformed_auth_status");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            std::fs::write(nac_home.join("arcee_auth.json"), "{not-json}").unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: None,
+                        base_url: Some("https://api.arcee.ai".to_string()),
+                        backend: Some("arcee".to_string()),
+                        reasoning_effort: None,
+                        api_key_env: None,
+                        extra_headers: None,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+            assert!(response
+                .message
+                .contains("failed to parse stored Arcee auth"));
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        {
+            let root = temp_root("arcee_auth_store_failure_status");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(nac_home.join("arcee_auth.json.lock")).unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: None,
+                        base_url: Some("https://api.arcee.ai".to_string()),
+                        backend: Some("arcee".to_string()),
+                        reasoning_effort: None,
+                        api_key_env: None,
+                        extra_headers: None,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert!(format!("{error:#}").contains("non-regular auth lock"));
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(response.message, "failed to load stored Arcee credentials");
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
     fn seed_session(root: &std::path::Path, session_id: &str, created_at: &str) {
         let mut snapshot = sessions::new_snapshot(
             session_id.to_string(),
