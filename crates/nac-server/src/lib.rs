@@ -1873,7 +1873,7 @@ mod tests {
         let created = manager
             .create_session(CreateSessionRequest {
                 cwd: None,
-                model: None,
+                model: Some("test-model".to_string()),
                 base_url: Some("https://tenant.arcee.ai/api/v1".to_string()),
                 backend: Some("arcee-api".to_string()),
                 reasoning_effort: None,

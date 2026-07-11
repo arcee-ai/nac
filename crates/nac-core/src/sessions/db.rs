@@ -354,7 +354,7 @@ fn query_session_summary(
 ) -> Result<Option<SessionSummary>> {
     let row = conn
         .query_row(
-            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
                     s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
                     COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
@@ -373,7 +373,7 @@ fn query_session_summaries(
 ) -> Result<Vec<SessionSummary>> {
     let sql = match pinned {
         Some(_) => {
-            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
                     s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
                     COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
@@ -385,7 +385,7 @@ fn query_session_summaries(
                       s.session_id DESC"
         }
         None => {
-            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.sandbox_json,
+            "SELECT s.session_id, s.cwd, s.model, s.backend, s.sandbox_json,
                     s.messages_json, s.created_at, s.updated_at, s.host_id, p.title,
                     COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
              FROM sessions s
@@ -415,17 +415,16 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         session_id: row.get(0)?,
         cwd: row.get(1)?,
         model: row.get(2)?,
-        base_url: row.get(3)?,
-        backend_raw: row.get(4)?,
-        sandbox_json: row.get(5)?,
-        messages_json: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-        ssh_host: row.get(9)?,
-        title: row.get(10)?,
-        pinned: row.get::<_, i64>(11)? != 0,
-        sort_order: row.get(12)?,
-        presentation_version: row.get(13)?,
+        backend_raw: row.get(3)?,
+        sandbox_json: row.get(4)?,
+        messages_json: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        ssh_host: row.get(8)?,
+        title: row.get(9)?,
+        pinned: row.get::<_, i64>(10)? != 0,
+        sort_order: row.get(11)?,
+        presentation_version: row.get(12)?,
     })
 }
 
@@ -433,7 +432,6 @@ struct SessionSummaryRow {
     session_id: String,
     cwd: String,
     model: String,
-    base_url: String,
     backend_raw: Option<String>,
     sandbox_json: Option<String>,
     messages_json: String,
@@ -448,7 +446,7 @@ struct SessionSummaryRow {
 
 impl SessionSummaryRow {
     fn into_summary(self) -> Result<SessionSummary> {
-        let backend = parse_backend(self.backend_raw, &self.base_url)?;
+        let backend = parse_backend(self.backend_raw)?;
         let cwd = PathBuf::from(self.cwd);
         let sandbox_spec = deserialize_sandbox(self.sandbox_json)?;
         let sandboxed = sandbox_spec.is_some();
@@ -597,7 +595,7 @@ impl SessionRow {
             })
             .transpose()?;
         let base_url = self.base_url;
-        let backend = parse_backend(self.backend, &base_url)?;
+        let backend = parse_backend(self.backend)?;
         let extra_headers = self
             .extra_headers_json
             .as_deref()
@@ -640,17 +638,19 @@ impl SessionRow {
     }
 }
 
-fn parse_backend(raw: Option<String>, base_url: &str) -> Result<BackendKind> {
-    match raw {
-        Some(raw) => raw.parse::<BackendKind>().map_err(|error| {
-            anyhow!(
-                "unsupported stored backend '{}'; session settings repair required: {}",
-                raw,
-                error
-            )
-        }),
-        None => detect_backend(base_url),
-    }
+fn parse_backend(raw: Option<String>) -> Result<BackendKind> {
+    let raw = raw.ok_or_else(|| {
+        anyhow!(
+            "stored session has no backend; session settings repair required: select an explicit backend"
+        )
+    })?;
+    raw.parse::<BackendKind>().map_err(|error| {
+        anyhow!(
+            "unsupported stored backend '{}'; session settings repair required: {}",
+            raw,
+            error
+        )
+    })
 }
 
 fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>> {
@@ -661,7 +661,10 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some("medium") => Ok(Some(ReasoningEffort::Medium)),
         Some("high") => Ok(Some(ReasoningEffort::High)),
         Some("xhigh") => Ok(Some(ReasoningEffort::Xhigh)),
-        Some(other) => Err(anyhow!("unsupported stored reasoning effort '{}'", other)),
+        Some(other) => Err(anyhow!(
+            "unsupported stored reasoning effort '{}'; session settings repair required: select a supported reasoning effort or clear it",
+            other
+        )),
         None => Ok(None),
     }
 }
@@ -673,19 +676,26 @@ mod backend_tests {
     #[test]
     fn stored_backend_parser_accepts_explicit_arcee_modes() {
         assert_eq!(
-            parse_backend(Some("arcee-auth".to_string()), "https://ignored.example").unwrap(),
+            parse_backend(Some("arcee-auth".to_string())).unwrap(),
             BackendKind::ArceeAuth
         );
         assert_eq!(
-            parse_backend(Some("arcee-api".to_string()), "https://ignored.example").unwrap(),
+            parse_backend(Some("arcee-api".to_string())).unwrap(),
             BackendKind::ArceeApi
         );
     }
 
     #[test]
+    fn stored_backend_parser_rejects_missing_backend_without_inference() {
+        let error = parse_backend(None).unwrap_err().to_string();
+        assert!(error.contains("no backend"), "{error}");
+        assert!(error.contains("settings repair required"), "{error}");
+    }
+
+    #[test]
     fn stored_backend_parser_rejects_removed_names_without_migration() {
         for raw in ["arcee", "auto"] {
-            let error = parse_backend(Some(raw.to_string()), "https://api.arcee.ai")
+            let error = parse_backend(Some(raw.to_string()))
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("unsupported stored backend"), "{error}");

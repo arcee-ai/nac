@@ -106,14 +106,89 @@ impl ReasoningEffort {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ClientOverrides {
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-    pub backend: Option<BackendKind>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub api_key_env: Option<String>,
-    pub extra_headers: std::collections::BTreeMap<String, String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveModelSettings {
+    pub(crate) backend: BackendKind,
+    pub(crate) model: String,
+    pub(crate) base_url: String,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) api_key_env: Option<String>,
+    pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
+}
+
+impl EffectiveModelSettings {
+    pub fn from_optional(
+        backend: Option<BackendKind>,
+        model: Option<String>,
+        base_url: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+        api_key_env: Option<String>,
+        extra_headers: std::collections::BTreeMap<String, String>,
+    ) -> Result<Self> {
+        let backend = backend.ok_or_else(|| {
+            model_configuration_error(
+                "invalid model configuration: required setting 'backend' is missing; set it in config.toml or the session settings",
+            )
+        })?;
+        let model = required_nonblank_setting(model, "model")?;
+        let base_url = required_nonblank_setting(base_url, "base_url")?;
+        let parsed = Url::parse(&base_url).map_err(|error| {
+            model_configuration_error(format!(
+                "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
+                base_url, error
+            ))
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(model_configuration_error(format!(
+                "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
+                base_url
+            )));
+        }
+
+        Ok(Self {
+            backend,
+            model,
+            base_url,
+            reasoning_effort,
+            api_key_env,
+            extra_headers,
+        })
+    }
+
+    pub fn new(
+        backend: BackendKind,
+        model: String,
+        base_url: String,
+        reasoning_effort: Option<ReasoningEffort>,
+        api_key_env: Option<String>,
+        extra_headers: std::collections::BTreeMap<String, String>,
+    ) -> Result<Self> {
+        Self::from_optional(
+            Some(backend),
+            Some(model),
+            Some(base_url),
+            reasoning_effort,
+            api_key_env,
+            extra_headers,
+        )
+    }
+}
+
+fn required_nonblank_setting(value: Option<String>, name: &str) -> Result<String> {
+    let value = value.ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: required setting '{}' is missing; set it in config.toml or the session settings",
+            name
+        ))
+    })?;
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: required setting '{}' must not be blank",
+            name
+        )));
+    }
+    Ok(normalized.to_string())
 }
 
 #[derive(Debug, Clone)]

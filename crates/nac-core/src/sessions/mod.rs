@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{detect_backend, BackendKind, ReasoningEffort};
+use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec};
 use crate::types::Message;
 
@@ -337,15 +337,16 @@ mod tests {
             let conn = crate::store::open_connection(&store_path).unwrap();
             conn.execute(
                 "INSERT INTO sessions (
-                    session_id, cwd, store_path, model, base_url, messages_json,
+                    session_id, cwd, store_path, model, base_url, backend, messages_json,
                     created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     "session-foreign",
                     "/repo",
                     foreign_store_path.display().to_string(),
                     "model-a",
                     "https://api.openai.com/v1",
+                    "openai-responses",
                     messages_json,
                     "2026-01-01 00:00:00.000000000",
                     "2026-01-01 00:00:01.000000000",
@@ -809,15 +810,16 @@ mod tests {
             .unwrap();
             conn.execute(
                 "INSERT INTO sessions (
-                    session_id, cwd, store_path, model, base_url, messages_json,
+                    session_id, cwd, store_path, model, base_url, backend, messages_json,
                     created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     "legacy-session",
                     "/repo",
                     store_path.display().to_string(),
                     "model-a",
                     "https://api.openai.com/v1",
+                    "openai-responses",
                     messages_json,
                     "2026-01-01 00:00:00.000000000",
                     "2026-01-02 00:00:00.000000000",

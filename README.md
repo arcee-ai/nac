@@ -20,9 +20,7 @@ Set an API key variable and configure its name explicitly before launching. For 
 
 To use ChatGPT Codex auth instead of an OpenAI API key, run `nac codex-auth login` and complete the device-code flow in a browser. In `nac-web`, choose `chatgpt-codex-responses` in the launch modal, or configure `backend = "chatgpt-codex-responses"` under `[model]`. For the TUI, launch with `nac --backend chatgpt-codex-responses`.
 
-Optional:
-- `OPENAI_BASE_URL`
-- `OPENAI_MODEL`
+`backend`, `model`, and `base_url` are required model settings. Set them in `config.toml` or provide explicit session launch values; nac does not infer them from ambient environment variables or provider defaults.
 
 Linux installs use the portable static build.
 
@@ -93,7 +91,7 @@ smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mou
 
 ## Recommended config
 
-Optional config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit CLI args and environment variables override TOML defaults. Resumed sessions continue using the model and sandbox settings stored in their session snapshot.
+Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. Explicit session launch settings override TOML values. `backend`, `model`, and `base_url` must resolve from those two sources; ambient model/base variables and provider defaults are not used. Resumed sessions continue using the exact model settings stored in their session snapshot.
 
 For every API-key backend (`openai-responses`, `together-chat`, `anthropic-messages`, `deepseek-chat`, `fireworks-chat`, and `arcee-api`), `api_key_env` is required and names the only environment variable read for credentials. The selector must match `[A-Za-z_][A-Za-z0-9_]*`, and its value must be nonempty. Managed `arcee-auth` and `chatgpt-codex-responses` reject `api_key_env` and use their respective stored credentials. Store paths remain relative to the launch working directory.
 
@@ -136,7 +134,7 @@ url = "https://mcp.grep.app"
 
 Supported MCP transports right now are `stdio` and `streamable_http`. Stdio servers can provide `command`, `args`, and `env`; streamable HTTP servers provide `url` and optional `headers`. MCP string values support `${ENV_VAR}` expansion.
 
-For ChatGPT Codex auth, the default base URL is `https://chatgpt.com/backend-api`; NAC sends non-streaming Responses requests to `/codex/responses`. Use `nac codex-auth status` to inspect the saved account and `nac codex-auth logout` to remove local tokens.
+For ChatGPT Codex auth, configure `base_url = "https://chatgpt.com/backend-api"`; NAC sends non-streaming Responses requests to `/codex/responses`. Use `nac codex-auth status` to inspect the saved account and `nac codex-auth logout` to remove local tokens.
 
 ## Arcee auth
 
@@ -156,19 +154,20 @@ Credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XD
 
 Credential selection follows the explicit backend mode:
 
-- `backend = "arcee-auth"` uses the managed API key and base URL saved by `arcee-auth login` when no base URL is configured.
+- `backend = "arcee-auth"` uses the managed API key saved by `arcee-auth login`; the required explicit/configured `base_url` must match the stored credential origin.
 - An explicit Arcee-owned URL with `arcee-auth` (`arcee.ai` or a subdomain) must use HTTPS on effective port 443. Its origin must match the origin saved at login; changing only the path does not change the credential origin.
 - `backend = "arcee-api"` uses only the environment variable explicitly selected by `api_key_env` and never reads `arcee_auth.json`.
 - Both Arcee modes accept only approved Arcee-owned HTTPS origins on effective port 443 and the canonical production path forms. Non-Arcee hosts are not supported as custom Arcee endpoints.
 - Both Arcee modes preserve Arcee chat-completions URL normalization, no-redirect request handling, and rejection of sensitive `Host`, `Authorization`, and `Proxy-Authorization` header overrides.
 - The old `backend = "arcee"` and `backend = "auto"` values are unsupported. Existing config and stored sessions using either value require explicit settings repair; they are not silently migrated.
 
-For example, a stored login needs only the managed backend and model:
+For example, a stored login still requires the complete model tuple:
 
 ```toml
 [model]
 backend = "arcee-auth"
 model = "trinity-large-thinking"
+base_url = "https://api.arcee.ai"
 ```
 
 An API-key Arcee session instead selects `arcee-api` and an explicit selector:

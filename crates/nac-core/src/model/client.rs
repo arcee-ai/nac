@@ -71,31 +71,12 @@ fn resolve_arcee_auth_credentials(
 }
 
 fn resolve_arcee_api_credentials(
-    explicit_base_url: Option<&str>,
+    base_url: &str,
     api_key_env: Option<&str>,
 ) -> Result<(String, String, ArceeCredentialSource)> {
-    let base_url = explicit_base_url
-        .unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::ArceeApi));
     arcee::validate_approved_base_url(base_url).map_err(classify_model_configuration_error)?;
     let api_key = api_key_for_backend(BackendKind::ArceeApi, api_key_env)?;
     Ok((base_url.to_string(), api_key, ArceeCredentialSource::ApiKey))
-}
-
-fn resolve_configured_backend(
-    requested_backend: Option<BackendKind>,
-    explicit_base_url: Option<&str>,
-) -> Result<BackendKind> {
-    if let Some(explicit) = requested_backend {
-        return Ok(explicit);
-    }
-
-    // Temporary compatibility: omission still infers from the selected ambient
-    // or explicit base URL. A following config-first resolver will require
-    // explicit/configured selection and remove this model/base fallback; there
-    // is no public `auto` backend.
-    let probe = explicit_base_url
-        .unwrap_or_else(|| default_base_url_for_backend_hint(BackendKind::OpenAiResponses));
-    detect_backend(probe).map_err(classify_model_configuration_error)
 }
 
 /// Validates the effective model configuration without issuing a model request.
@@ -112,6 +93,11 @@ pub fn validate_model_configuration(
             validate_arcee_extra_headers(extra_headers)?;
         }
         BackendKind::ArceeApi => {
+            let base_url = base_url.ok_or_else(|| {
+                model_configuration_error(
+                    "invalid model configuration: backend 'arcee-api' requires base_url",
+                )
+            })?;
             resolve_arcee_api_credentials(base_url, api_key_env)?;
             validate_arcee_extra_headers(extra_headers)?;
         }
@@ -135,7 +121,7 @@ fn http_client_for_backend(backend: BackendKind) -> Result<Client> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ModelClient {
     client: Client,
     base_url: String,
@@ -152,68 +138,51 @@ pub struct ModelClient {
 }
 
 impl ModelClient {
-    pub fn from_env_with_overrides(overrides: ClientOverrides) -> Result<Self> {
-        let explicit_base_url = overrides
-            .base_url
-            .clone()
-            .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
-        let backend = resolve_configured_backend(overrides.backend, explicit_base_url.as_deref())?;
-        let (base_url, api_key, arcee_credential_source) = match backend {
+    pub fn from_effective_settings(settings: EffectiveModelSettings) -> Result<Self> {
+        let backend = settings.backend;
+        let (api_key, arcee_credential_source) = match backend {
             BackendKind::ArceeAuth => {
                 validate_backend_api_key_env(
                     backend,
-                    explicit_base_url.as_deref(),
-                    overrides.api_key_env.as_deref(),
+                    Some(&settings.base_url),
+                    settings.api_key_env.as_deref(),
                 )?;
-                let (base_url, api_key, source) =
-                    resolve_arcee_auth_credentials(explicit_base_url.as_deref())?;
-                validate_arcee_extra_headers(&overrides.extra_headers)?;
-                (base_url, api_key, Some(source))
+                let (_, api_key, source) =
+                    resolve_arcee_auth_credentials(Some(&settings.base_url))?;
+                validate_arcee_extra_headers(&settings.extra_headers)?;
+                (api_key, Some(source))
             }
             BackendKind::ArceeApi => {
-                let (base_url, api_key, source) = resolve_arcee_api_credentials(
-                    explicit_base_url.as_deref(),
-                    overrides.api_key_env.as_deref(),
+                let (_, api_key, source) = resolve_arcee_api_credentials(
+                    &settings.base_url,
+                    settings.api_key_env.as_deref(),
                 )?;
-                validate_arcee_extra_headers(&overrides.extra_headers)?;
-                (base_url, api_key, Some(source))
+                validate_arcee_extra_headers(&settings.extra_headers)?;
+                (api_key, Some(source))
             }
             _ => {
                 validate_backend_api_key_env(
                     backend,
-                    explicit_base_url.as_deref(),
-                    overrides.api_key_env.as_deref(),
+                    Some(&settings.base_url),
+                    settings.api_key_env.as_deref(),
                 )?;
                 (
-                    explicit_base_url
-                        .clone()
-                        .unwrap_or_else(|| default_base_url_for_backend_hint(backend).to_string()),
-                    api_key_for_backend(backend, overrides.api_key_env.as_deref())?,
+                    api_key_for_backend(backend, settings.api_key_env.as_deref())?,
                     None,
                 )
             }
         };
-        let model = overrides.model.unwrap_or_else(|| {
-            std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
-        });
-        let reasoning_effort = match backend {
-            BackendKind::DeepSeekChat | BackendKind::AnthropicMessages => None,
-            _ => overrides
-                .reasoning_effort
-                .or_else(|| default_reasoning_effort(backend)),
-        };
-
         let client = http_client_for_backend(backend)?;
 
         Ok(Self {
             client,
-            base_url,
+            base_url: settings.base_url,
             api_key,
-            model,
+            model: settings.model,
             backend,
-            reasoning_effort,
-            api_key_env: overrides.api_key_env.clone(),
-            extra_headers: overrides.extra_headers,
+            reasoning_effort: settings.reasoning_effort,
+            api_key_env: settings.api_key_env,
+            extra_headers: settings.extra_headers,
             arcee_credential_source,
             cache_ttl: None,
         })
