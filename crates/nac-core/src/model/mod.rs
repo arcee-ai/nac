@@ -22,7 +22,7 @@ mod test_http;
 mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
-pub use backend::validate_backend_api_key_env;
+pub use backend::{validate_backend_api_key_env, validate_backend_reasoning_effort};
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
@@ -452,6 +452,93 @@ mod tests {
     }
 
     #[test]
+    fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence() {
+        let all = [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ];
+        let cases: &[(BackendKind, &[ReasoningEffort])] = &[
+            (
+                BackendKind::DeepSeekChat,
+                &[
+                    ReasoningEffort::None,
+                    ReasoningEffort::High,
+                    ReasoningEffort::Xhigh,
+                ],
+            ),
+            (
+                BackendKind::FireworksChat,
+                &[
+                    ReasoningEffort::None,
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                ],
+            ),
+            (
+                BackendKind::TogetherChat,
+                &[
+                    ReasoningEffort::None,
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                ],
+            ),
+            (BackendKind::OpenAiResponses, &all),
+            (BackendKind::ChatGptCodexResponses, &all),
+            (
+                BackendKind::AnthropicMessages,
+                &[
+                    ReasoningEffort::None,
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                    ReasoningEffort::Xhigh,
+                ],
+            ),
+            (BackendKind::ArceeAuth, &[]),
+            (BackendKind::ArceeApi, &[]),
+        ];
+
+        for (backend, supported) in cases {
+            EffectiveModelSettings::new(
+                *backend,
+                "model".into(),
+                "https://example.com/v1".into(),
+                None,
+                None,
+                std::collections::BTreeMap::new(),
+            )
+            .expect("absent effort must be valid for every backend");
+            for effort in all {
+                let result = EffectiveModelSettings::new(
+                    *backend,
+                    "model".into(),
+                    "https://example.com/v1".into(),
+                    Some(effort),
+                    None,
+                    std::collections::BTreeMap::new(),
+                );
+                if supported.contains(&effort) {
+                    result.unwrap_or_else(|error| {
+                        panic!("{backend} rejected {}: {error:#}", effort.as_str())
+                    });
+                } else {
+                    let error = result
+                        .expect_err("unsupported effort must fail effective settings validation");
+                    assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                    assert!(error.to_string().contains(effort.as_str()), "{error:#}");
+                    assert!(error.to_string().contains(backend.as_str()), "{error:#}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn stored_arcee_auth_config_and_store_failures_remain_distinct() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let settings = effective_settings(BackendKind::ArceeAuth, "https://api.arcee.ai", None);
@@ -648,63 +735,46 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_messages_request_includes_adaptive_max_thinking_and_128000() {
-        let request = anthropic_messages_request(
+    fn anthropic_request_reasoning_is_driven_only_by_explicit_effort() {
+        let messages = [Message::User {
+            content: "read a file".to_string(),
+        }];
+        let absent =
+            anthropic_messages_request("claude-opus-4-6", None, &messages, &[], None).unwrap();
+        assert_eq!(absent["max_tokens"], 128000);
+        assert!(absent.get("thinking").is_none());
+        assert!(absent.get("output_config").is_none());
+
+        let disabled = anthropic_messages_request(
             "claude-opus-4-6",
-            &[
-                Message::System {
-                    content: "system instructions".to_string(),
-                },
-                Message::User {
-                    content: "read a file".to_string(),
-                },
-            ],
-            &[ToolDefinition {
-                def_type: "function".to_string(),
-                function: crate::types::FunctionDef {
-                    name: "read".to_string(),
-                    description: "Read a file".to_string(),
-                    parameters: json!({
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string"}
-                        },
-                        "required": ["path"]
-                    }),
-                },
-            }],
+            Some(ReasoningEffort::None),
+            &messages,
+            &[],
             None,
         )
         .unwrap();
+        assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
+        assert!(disabled.get("output_config").is_none());
 
-        assert_eq!(request["model"], "claude-opus-4-6");
-        assert_eq!(request["max_tokens"], 128000);
-        assert_eq!(request["thinking"]["type"], "adaptive");
-        assert_eq!(request["thinking"]["display"], "omitted");
-        assert_eq!(request["output_config"]["effort"], "max");
-        // System prompt is now a content-block array with cache_control.
-        assert_eq!(request["system"][0]["type"], "text");
-        assert_eq!(request["system"][0]["text"], "system instructions");
-        assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
-        assert!(request["system"][0]["cache_control"].get("ttl").is_none());
-        // Last tool has cache_control.
-        assert_eq!(request["tools"][0]["name"], "read");
-        assert_eq!(request["tools"][0]["input_schema"]["type"], "object");
-        assert_eq!(request["tools"][0]["cache_control"]["type"], "ephemeral");
-        // Last message (user) content is converted to array with cache_control.
-        assert_eq!(request["messages"][0]["role"], "user");
-        assert_eq!(request["messages"][0]["content"][0]["type"], "text");
-        assert_eq!(request["messages"][0]["content"][0]["text"], "read a file");
-        assert_eq!(
-            request["messages"][0]["content"][0]["cache_control"]["type"],
-            "ephemeral"
-        );
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ] {
+            let request =
+                anthropic_messages_request("claude-opus-4-6", Some(effort), &messages, &[], None)
+                    .unwrap();
+            assert_eq!(request["thinking"], json!({"type": "adaptive"}));
+            assert_eq!(request["output_config"]["effort"], effort.as_str());
+        }
     }
 
     #[test]
     fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
         let request = anthropic_messages_request(
             "claude-sonnet-4-6",
+            None,
             &[
                 Message::System {
                     content: "system".to_string(),
@@ -742,6 +812,7 @@ mod tests {
     fn anthropic_request_with_no_messages_skips_message_breakpoint() {
         let request = anthropic_messages_request(
             "claude-sonnet-4-6",
+            None,
             &[Message::System {
                 content: "system only".to_string(),
             }],
@@ -821,6 +892,7 @@ mod tests {
 
         let request = anthropic_messages_request(
             "claude-opus-4-6",
+            None,
             &[
                 Message::User {
                     content: "please inspect".to_string(),
@@ -857,47 +929,98 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_chat_request_enables_max_thinking_and_preserves_reasoning() {
-        let request = deepseek_chat_request(
-            "deepseek-v4-pro",
-            &[Message::Assistant {
-                content: Some("calling a tool".to_string()),
-                reasoning_text: Some("need current context".to_string()),
-                reasoning_details: None,
-                tool_calls: Some(vec![ToolCall {
-                    id: "call_1".to_string(),
-                    call_type: "function".to_string(),
-                    function: FunctionCall {
-                        name: "read".to_string(),
-                        arguments: "{\"path\":\"src/main.rs\"}".to_string(),
-                    },
-                }]),
-            }],
-            &[ToolDefinition {
-                def_type: "function".to_string(),
-                function: crate::types::FunctionDef {
-                    name: "read".to_string(),
-                    description: "Read a file".to_string(),
-                    parameters: json!({
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string"}
-                        },
-                        "required": ["path"]
-                    }),
-                },
-            }],
-        );
-
-        assert_eq!(request["model"], "deepseek-v4-pro");
-        assert_eq!(request["thinking"]["type"], "enabled");
-        assert_eq!(request["reasoning_effort"], "max");
-        assert!(request.get("temperature").is_none());
+    fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
+        let messages = [Message::Assistant {
+            content: Some("calling a tool".to_string()),
+            reasoning_text: Some("need current context".to_string()),
+            reasoning_details: None,
+            tool_calls: None,
+        }];
+        let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]);
+        assert!(absent.get("thinking").is_none());
+        assert!(absent.get("reasoning_effort").is_none());
         assert_eq!(
-            request["messages"][0]["reasoning_content"],
+            absent["messages"][0]["reasoning_content"],
             "need current context"
         );
-        assert_eq!(request["tools"][0]["type"], "function");
+
+        let disabled = deepseek_chat_request(
+            "deepseek-v4-pro",
+            Some(ReasoningEffort::None),
+            &messages,
+            &[],
+        );
+        assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
+        assert!(disabled.get("reasoning_effort").is_none());
+
+        for (effort, wire_effort) in [
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Xhigh, "max"),
+        ] {
+            let request = deepseek_chat_request("deepseek-v4-pro", Some(effort), &messages, &[]);
+            assert_eq!(request["thinking"], json!({"type": "enabled"}));
+            assert_eq!(request["reasoning_effort"], wire_effort);
+        }
+    }
+
+    #[test]
+    fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
+        let messages = [Message::User {
+            content: "hi".into(),
+        }];
+
+        let fireworks_absent = fireworks_chat_request("model", None, &messages, &[]);
+        assert!(fireworks_absent.get("reasoning_effort").is_none());
+        assert!(fireworks_absent.get("reasoning_history").is_none());
+        let fireworks_none =
+            fireworks_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
+        assert_eq!(fireworks_none["reasoning_effort"], "none");
+        assert_eq!(fireworks_none["reasoning_history"], "disabled");
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ] {
+            let request = fireworks_chat_request("model", Some(effort), &messages, &[]);
+            assert_eq!(request["reasoning_effort"], effort.as_str());
+            assert_eq!(request["reasoning_history"], "preserved");
+        }
+
+        let together_absent = together_chat_request("model", None, &messages, &[]);
+        assert!(together_absent.get("reasoning").is_none());
+        assert!(together_absent.get("reasoning_effort").is_none());
+        assert!(together_absent.get("chat_template_kwargs").is_none());
+        let together_none =
+            together_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
+        assert_eq!(together_none["reasoning"], json!({"enabled": false}));
+        assert!(together_none.get("reasoning_effort").is_none());
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ] {
+            let request = together_chat_request("model", Some(effort), &messages, &[]);
+            assert_eq!(request["reasoning"], json!({"enabled": true}));
+            assert_eq!(request["reasoning_effort"], effort.as_str());
+            assert_eq!(
+                request["chat_template_kwargs"],
+                json!({"clear_thinking": false})
+            );
+        }
+
+        let openai_absent = openai_responses_request("model", None, &messages, &[]);
+        assert!(openai_absent.get("reasoning").is_none());
+        for effort in [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ] {
+            let request = openai_responses_request("model", Some(effort), &messages, &[]);
+            assert_eq!(request["reasoning"]["effort"], effort.as_str());
+        }
     }
 
     #[test]

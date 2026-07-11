@@ -18,6 +18,59 @@ fn api_key_backend(backend: BackendKind) -> bool {
     )
 }
 
+/// Validate effort values against each backend's request schema.
+///
+/// This is intentionally backend-level rather than model-level: OpenAI and
+/// Anthropic expose model-dependent subsets, while the remaining adapters have
+/// fixed wire-level sets. No backend receives an application-selected default.
+pub fn validate_backend_reasoning_effort(
+    backend: BackendKind,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> Result<()> {
+    let Some(effort) = reasoning_effort else {
+        return Ok(());
+    };
+
+    let supported = match backend {
+        BackendKind::DeepSeekChat => matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
+        ),
+        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        ),
+        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
+        BackendKind::AnthropicMessages => matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+                | ReasoningEffort::Xhigh
+        ),
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
+    };
+    if supported {
+        return Ok(());
+    }
+
+    let allowed = match backend {
+        BackendKind::DeepSeekChat => "none, high, or xhigh",
+        BackendKind::FireworksChat | BackendKind::TogetherChat => "none, low, medium, or high",
+        BackendKind::AnthropicMessages => "none, low, medium, high, or xhigh",
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => "no explicit effort levels",
+        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => unreachable!(),
+    };
+    Err(model_configuration_error(format!(
+        "invalid model configuration: reasoning effort '{}' is not supported by backend '{}'; supported values: {}",
+        effort.as_str(), backend, allowed
+    )))
+}
+
 pub fn validate_backend_api_key_env(
     backend: BackendKind,
     _base_url: Option<&str>,

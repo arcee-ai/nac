@@ -101,10 +101,12 @@ fn resolve_arcee_api_credentials(
 pub fn validate_model_configuration(
     backend: BackendKind,
     base_url: Option<&str>,
+    reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<&str>,
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     validate_extra_headers(extra_headers)?;
+    validate_backend_reasoning_effort(backend, reasoning_effort)?;
     validate_backend_api_key_env(backend, base_url, api_key_env)?;
     match backend {
         BackendKind::ArceeAuth => {
@@ -269,30 +271,7 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = json!({
-            "model": self.model,
-            "messages": messages
-                .iter()
-                .map(fireworks_message_to_value)
-                .collect::<Vec<_>>(),
-            "tools": tools,
-            "temperature": 0.0,
-            "reasoning_history": "preserved"
-        });
-
-        if let Some(effort) = self.reasoning_effort {
-            match effort {
-                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High => {
-                    request["reasoning_effort"] = Value::String(effort.as_str().to_string());
-                }
-                unsupported => {
-                    return Err(anyhow!(
-                        "reasoning effort '{}' is not supported by fireworks-chat; use low, medium, or high",
-                        unsupported.as_str()
-                    ));
-                }
-            }
-        }
+        let request = fireworks_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_chat_completions_response(&value, &url)
@@ -304,31 +283,7 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = json!({
-            "model": self.model,
-            "messages": messages
-                .iter()
-                .map(fireworks_message_to_value)
-                .collect::<Vec<_>>(),
-            "tools": tools,
-            "temperature": 0.0,
-            "reasoning": {"enabled": true},
-            "chat_template_kwargs": {"clear_thinking": false}
-        });
-
-        if let Some(effort) = self.reasoning_effort {
-            match effort {
-                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High => {
-                    request["reasoning_effort"] = Value::String(effort.as_str().to_string());
-                }
-                unsupported => {
-                    return Err(anyhow!(
-                        "reasoning effort '{}' is not supported by together-chat; use low, medium, or high",
-                        unsupported.as_str()
-                    ));
-                }
-            }
-        }
+        let request = together_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_together_chat_response(&value, &url)
@@ -367,7 +322,7 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = deepseek_chat_request(&self.model, &messages, &tools);
+        let request = deepseek_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_chat_completions_response(&value, &url)
@@ -379,25 +334,8 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/responses", self.base_url);
-        let mut request = json!({
-            "model": self.model,
-            "input": responses_input_items(&messages),
-        });
-
-        if !tools.is_empty() {
-            request["tools"] = Value::Array(
-                tools
-                    .iter()
-                    .map(openai_responses_tool_to_value)
-                    .collect::<Vec<_>>(),
-            );
-        }
-
-        if let Some(effort) = self.reasoning_effort {
-            request["reasoning"] = json!({
-                "effort": effort.as_str(),
-            });
-        }
+        let request =
+            openai_responses_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
         parse_openai_responses_response(&value, &url)
@@ -409,7 +347,13 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-        let request = anthropic_messages_request(&self.model, &messages, &tools, self.cache_ttl)?;
+        let request = anthropic_messages_request(
+            &self.model,
+            self.reasoning_effort,
+            &messages,
+            &tools,
+            self.cache_ttl,
+        )?;
 
         let value = self.post_anthropic_json_with_retry(&url, &request).await?;
         parse_anthropic_messages_response(&value, &url)

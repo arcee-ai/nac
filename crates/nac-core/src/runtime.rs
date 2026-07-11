@@ -1845,6 +1845,99 @@ url = "https://mcp.context7.com/mcp"
     }
 
     #[tokio::test]
+    async fn reasoning_effort_is_identical_across_create_snapshot_resume_and_worker() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_REASONING_LIFECYCLE_TEST_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("reasoning_lifecycle")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let store_path = root.join("store.db");
+        let headers = BTreeMap::from([("X-Snapshot".to_string(), "exact".to_string())]);
+        let created = build_run_config(
+            RunOptions {
+                workspace_cwd: workspace.clone(),
+                config_cwd: None,
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: ModelOptions {
+                    backend: Some(BackendKind::OpenAiResponses),
+                    reasoning_effort: Some(ReasoningEffort::Xhigh),
+                    api_base_url: Some("https://snapshot.example/v1".to_string()),
+                    api_model: Some("snapshot-model".to_string()),
+                    api_key_env: Some(key_name.to_string()),
+                    extra_headers: Some(headers.clone()),
+                },
+                sandbox: SandboxOptions::default(),
+                ssh_host: None,
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .unwrap();
+        let session_id = created.session.session_id().unwrap().to_string();
+        assert_eq!(
+            created.client.reasoning_effort(),
+            Some(ReasoningEffort::Xhigh)
+        );
+
+        let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(snapshot.extra_headers, headers);
+
+        let mut conflicting_config = complete_model_config();
+        conflicting_config.model.reasoning_effort = Some(ReasoningEffort::Low);
+        conflicting_config.model.model = Some("must-not-win".to_string());
+        let resumed = build_resume_config(
+            ResumeOptions {
+                lookup_cwd: workspace,
+                worker_executable: None,
+                session_id: Some(session_id),
+                last: false,
+                store: StoreOptions {
+                    store_path: Some(store_path),
+                },
+            },
+            &conflicting_config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumed.client.model, "snapshot-model");
+        assert_eq!(
+            resumed.client.reasoning_effort(),
+            Some(ReasoningEffort::Xhigh)
+        );
+        assert_eq!(resumed.client.extra_headers(), &headers);
+        assert_eq!(
+            crate::tools::thread::worker_model_arguments_for_test(&resumed.client),
+            vec![
+                "--api-model",
+                "snapshot-model",
+                "--api-base-url",
+                "https://snapshot.example/v1",
+                "--backend",
+                "openai-responses",
+                "--effort",
+                "xhigh",
+                "--api-key-env",
+                key_name,
+                "--extra-headers",
+                "{\"X-Snapshot\":\"exact\"}",
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
     async fn resume_config_restores_messages_without_changing_process_cwd() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 

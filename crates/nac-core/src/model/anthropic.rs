@@ -5,6 +5,7 @@ const ANTHROPIC_MAX_TOKENS: u32 = 128_000;
 
 pub(super) fn anthropic_messages_request(
     model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
     cache_ttl: Option<&str>,
@@ -14,14 +15,17 @@ pub(super) fn anthropic_messages_request(
         "model": model,
         "max_tokens": ANTHROPIC_MAX_TOKENS,
         "messages": &messages,
-        "thinking": {
-            "type": "adaptive",
-            "display": "omitted",
-        },
-        "output_config": {
-            "effort": "max",
-        },
     });
+    match reasoning_effort {
+        None => {}
+        Some(ReasoningEffort::None) => {
+            request["thinking"] = json!({"type": "disabled"});
+        }
+        Some(effort) => {
+            request["thinking"] = json!({"type": "adaptive"});
+            request["output_config"] = json!({"effort": effort.as_str()});
+        }
+    }
 
     // Breakpoint 1: system prompt (also caches tools, which render before system).
     if let Some(system) = system {

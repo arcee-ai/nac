@@ -717,6 +717,7 @@ impl SessionManager {
         validate_model_configuration(
             prospective.backend,
             Some(&prospective.base_url),
+            prospective.reasoning_effort,
             prospective.api_key_env.as_deref(),
             &prospective.extra_headers,
         )?;
@@ -2049,6 +2050,29 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
+    async fn create_rejects_unsupported_reasoning_before_persisting() {
+        let root = temp_root("create_invalid_reasoning");
+        let manager = test_manager(&root);
+        let error = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("test-model".to_string()),
+                base_url: RequestField::Value("https://api.together.xyz/v1".to_string()),
+                backend: RequestField::Value("together-chat".to_string()),
+                reasoning_effort: RequestField::Value("minimal".to_string()),
+                api_key_env: RequestField::Value("UNREAD_REASONING_TEST_KEY".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("unsupported effort must fail creation");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("minimal"), "{error:#}");
+        assert!(error.to_string().contains("together-chat"), "{error:#}");
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert!(!root.join("store.db").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("patch_tristate");
@@ -2238,6 +2262,11 @@ extra_headers = { X-Config = "yes" }
                     "bad header".to_string(),
                     "value".to_string(),
                 )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Value("together-chat".to_string()),
+                reasoning_effort: RequestField::Value("xhigh".to_string()),
                 ..UpdateConfigRequest::default()
             },
         ];

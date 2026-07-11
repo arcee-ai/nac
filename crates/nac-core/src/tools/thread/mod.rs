@@ -8,6 +8,8 @@ use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
 use crate::types::ToolDefinition;
 
 mod worker;
+#[cfg(test)]
+pub(crate) use worker::worker_model_arguments_for_test;
 use worker::{run_worker, WorkerInvocation};
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;

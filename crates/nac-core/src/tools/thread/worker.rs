@@ -167,6 +167,17 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     command.arg("--extra-headers").arg(headers);
 }
 
+#[cfg(test)]
+pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<String> {
+    let mut command = Command::new("worker");
+    append_worker_model_arguments(&mut command, client);
+    command
+        .as_std()
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect()
+}
+
 pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,

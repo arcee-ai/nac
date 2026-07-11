@@ -1410,32 +1410,36 @@ mod tests {
     }
 
     #[test]
-    fn builds_codex_responses_stream_request() {
-        let request = codex_responses_request(
-            "gpt-5.5",
-            Some(ReasoningEffort::High),
-            &[
-                Message::System {
-                    content: "system instructions".to_string(),
-                },
-                Message::User {
-                    content: "hello".to_string(),
-                },
-            ],
-            &[],
-        );
+    fn codex_request_reasoning_is_driven_only_by_explicit_effort() {
+        let messages = [
+            Message::System {
+                content: "system instructions".to_string(),
+            },
+            Message::User {
+                content: "hello".to_string(),
+            },
+        ];
+        let absent = codex_responses_request("gpt-5.5", None, &messages, &[]);
+        assert_eq!(absent["model"], "gpt-5.5");
+        assert_eq!(absent["instructions"], "system instructions");
+        assert_eq!(absent["store"], false);
+        assert_eq!(absent["stream"], true);
+        assert_eq!(absent["text"]["verbosity"], "low");
+        assert!(absent.get("reasoning").is_none());
+        assert!(absent.get("include").is_none());
 
-        assert_eq!(request["model"], "gpt-5.5");
-        assert_eq!(request["instructions"], "system instructions");
-        assert_eq!(request["store"], false);
-        assert_eq!(request["stream"], true);
-        assert_eq!(request["text"]["verbosity"], "low");
-        assert_eq!(request["tool_choice"], "auto");
-        assert_eq!(request["parallel_tool_calls"], true);
-        assert_eq!(request["reasoning"]["effort"], "high");
-        assert_eq!(request["include"][0], "reasoning.encrypted_content");
-        assert_eq!(request["input"].as_array().unwrap().len(), 1);
-        assert_eq!(request["input"][0]["role"], "user");
+        for effort in [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ] {
+            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[]);
+            assert_eq!(request["reasoning"]["effort"], effort.as_str());
+            assert_eq!(request["include"][0], "reasoning.encrypted_content");
+        }
     }
 
     #[test]
