@@ -9,6 +9,44 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
     &value[..end]
 }
 
+fn resolve_arcee_credentials(explicit_base_url: Option<&str>) -> Result<(String, String)> {
+    match explicit_base_url {
+        None => {
+            let record = arcee::read_stored_auth()?;
+            Ok((record.base_url, record.api_key))
+        }
+        Some(base_url) => {
+            let (kind, requested_url) = arcee::validate_arcee_base_url(base_url)?;
+            match kind {
+                arcee::ArceeEndpointKind::Approved => {
+                    let record = arcee::read_stored_auth()?;
+                    let stored_url = arcee::validate_stored_base_url(&record.base_url)?;
+                    if requested_url.origin() != stored_url.origin() {
+                        return Err(anyhow!(
+                            "Arcee endpoint origin '{}' does not match the stored credential origin '{}'; log in for the selected origin or use a custom non-Arcee endpoint with OPENAI_API_KEY",
+                            requested_url.origin().ascii_serialization(),
+                            stored_url.origin().ascii_serialization()
+                        ));
+                    }
+                    Ok((base_url.to_string(), record.api_key))
+                }
+                arcee::ArceeEndpointKind::Custom => {
+                    let api_key = std::env::var("OPENAI_API_KEY")
+                        .ok()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "OPENAI_API_KEY is not set; custom Arcee endpoint '{}' requires a separately supplied API key",
+                                base_url
+                            )
+                        })?;
+                    Ok((base_url.to_string(), api_key))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ModelClient {
     client: Client,
@@ -45,18 +83,16 @@ impl ModelClient {
             }
             explicit => explicit,
         };
-        let mut base_url = explicit_base_url
-            .clone()
-            .unwrap_or_else(|| default_base_url_for_backend_hint(backend).to_string());
-        let mut api_key = api_key_for_backend(backend, overrides.api_key_env.as_deref())?;
-
-        if backend == BackendKind::Arcee {
-            let record = arcee::read_stored_auth()?;
-            api_key = record.api_key;
-            if explicit_base_url.is_none() {
-                base_url = record.base_url;
-            }
-        }
+        let (base_url, api_key) = if backend == BackendKind::Arcee {
+            resolve_arcee_credentials(explicit_base_url.as_deref())?
+        } else {
+            (
+                explicit_base_url
+                    .clone()
+                    .unwrap_or_else(|| default_base_url_for_backend_hint(backend).to_string()),
+                api_key_for_backend(backend, overrides.api_key_env.as_deref())?,
+            )
+        };
         let model = overrides.model.unwrap_or_else(|| {
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| default_model_for_backend(backend))
         });

@@ -67,7 +67,10 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use std::ffi::OsString;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::PathBuf;
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct IsolatedModelEnv {
@@ -263,26 +266,139 @@ mod tests {
     }
 
     #[test]
-    fn explicit_arcee_backend_and_base_still_use_stored_auth() {
+    fn explicit_arcee_backend_binds_stored_key_to_its_origin() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai");
+        let auth = stored_arcee_auth("rcai-test", "https://stored.arcee.ai/login/path");
         let _env = IsolatedModelEnv::new("explicit-arcee", Some(&auth), None, None);
 
+        let requested_base = "https://stored.arcee.ai:443/custom/path/";
         let from_base = ModelClient::from_env_with_overrides(ClientOverrides {
+            base_url: Some(requested_base.to_string()),
+            ..ClientOverrides::default()
+        })
+        .expect("the stored credential should work on the same approved origin");
+        assert_eq!(from_base.backend(), BackendKind::Arcee);
+        assert_eq!(from_base.base_url(), requested_base);
+
+        let mismatch = ModelClient::from_env_with_overrides(ClientOverrides {
             base_url: Some("https://api.internal.arcee.ai/custom".to_string()),
             ..ClientOverrides::default()
         })
-        .expect("an explicit Arcee base URL should resolve Auto to Arcee");
-        assert_eq!(from_base.backend(), BackendKind::Arcee);
-        assert_eq!(from_base.base_url(), "https://api.internal.arcee.ai/custom");
+        .err()
+        .expect("a different approved origin must not receive the stored key");
+        assert!(
+            mismatch
+                .to_string()
+                .contains("does not match the stored credential origin"),
+            "unexpected error: {mismatch:#}"
+        );
 
         let from_backend = ModelClient::from_env_with_overrides(ClientOverrides {
             backend: Some(BackendKind::Arcee),
             ..ClientOverrides::default()
         })
-        .expect("an explicit Arcee backend should use stored auth");
+        .expect("an explicit Arcee backend should use its stored base URL");
         assert_eq!(from_backend.backend(), BackendKind::Arcee);
-        assert_eq!(from_backend.base_url(), "https://stored.arcee.ai");
+        assert_eq!(
+            from_backend.base_url(),
+            "https://stored.arcee.ai/login/path"
+        );
+    }
+
+    #[test]
+    fn custom_arcee_endpoint_requires_openai_api_key_without_reading_stored_auth() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let tampered = stored_arcee_auth("rcai-never-use", "http://api.arcee.ai/steal");
+        let _env = IsolatedModelEnv::new("custom-key", Some(&tampered), None, None);
+        let overrides = ClientOverrides {
+            backend: Some(BackendKind::Arcee),
+            base_url: Some("http://127.0.0.1:12345/dev".to_string()),
+            ..ClientOverrides::default()
+        };
+
+        let error = ModelClient::from_env_with_overrides(overrides.clone())
+            .err()
+            .expect("a custom endpoint without OPENAI_API_KEY must fail");
+        assert!(
+            error.to_string().contains("custom Arcee endpoint"),
+            "unexpected error: {error:#}"
+        );
+
+        set_env("OPENAI_API_KEY", Some("custom-separate-key"));
+        let client = ModelClient::from_env_with_overrides(overrides)
+            .expect("custom endpoint should use OPENAI_API_KEY without loading stored auth");
+        assert_eq!(client.base_url(), "http://127.0.0.1:12345/dev");
+    }
+
+    #[tokio::test]
+    async fn custom_arcee_request_never_leaks_stored_key_to_hostile_endpoint() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let stored_key = "rcai-stored-secret";
+        let custom_key = "custom-separate-secret";
+        let auth = stored_arcee_auth(stored_key, "https://api.arcee.ai/stored/path");
+        let _env = IsolatedModelEnv::new("custom-no-leak", Some(&auth), Some(custom_key), None);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile endpoint");
+        let address = listener.local_addr().expect("hostile endpoint address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept Arcee request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set request timeout");
+            let mut request = [0; 8192];
+            let read = stream.read(&mut request).expect("read Arcee request");
+            let request = String::from_utf8_lossy(&request[..read]).into_owned();
+            stream
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 7\r\nConnection: close\r\n\r\ndenied!",
+                )
+                .expect("write hostile response");
+            request
+        });
+
+        let client = ModelClient::from_env_with_overrides(ClientOverrides {
+            backend: Some(BackendKind::Arcee),
+            base_url: Some(format!("http://{address}/hostile/base")),
+            ..ClientOverrides::default()
+        })
+        .expect("custom endpoint should use its separate key");
+        client
+            .send_turn(Vec::new(), Vec::new())
+            .await
+            .expect_err("hostile endpoint should return HTTP 400");
+        let request = server.join().expect("hostile endpoint thread");
+
+        let request_lower = request.to_ascii_lowercase();
+        assert!(
+            request_lower.contains(&format!("authorization: bearer {custom_key}")),
+            "custom key missing from request: {request}"
+        );
+        assert!(
+            !request.contains(stored_key),
+            "stored key leaked to custom endpoint: {request}"
+        );
+        assert!(
+            request.starts_with("POST /hostile/base/v1/chat/completions "),
+            "selected URL path was not preserved: {request}"
+        );
+    }
+
+    #[test]
+    fn tampered_stored_arcee_url_is_rejected_before_client_creation() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let tampered = stored_arcee_auth("rcai-never-use", "https://attacker.example/steal");
+        let env = IsolatedModelEnv::new("tampered-stored-url", None, None, None);
+        std::fs::write(env.home.join("arcee_auth.json"), tampered).unwrap();
+
+        let error = ModelClient::from_env_with_overrides(ClientOverrides {
+            backend: Some(BackendKind::Arcee),
+            ..ClientOverrides::default()
+        })
+        .err()
+        .expect("a tampered stored endpoint must fail before requests can be made");
+        assert!(
+            error.to_string().contains("invalid base_url"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

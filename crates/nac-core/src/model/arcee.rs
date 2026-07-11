@@ -16,6 +16,77 @@ const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_EXPIRES_IN_SECS: u64 = 900;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ArceeEndpointKind {
+    Approved,
+    Custom,
+}
+
+pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKind, Url)> {
+    let parsed = Url::parse(base_url)
+        .map_err(|error| anyhow!("invalid Arcee base URL '{}': {}", base_url, error))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': scheme must be http or https",
+            base_url
+        ));
+    }
+    let host = parsed.host_str().ok_or_else(|| {
+        anyhow!(
+            "invalid Arcee base URL '{}': URL must include a host",
+            base_url
+        )
+    })?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': userinfo is not allowed",
+            base_url
+        ));
+    }
+    if parsed.query().is_some() {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': query parameters are not allowed",
+            base_url
+        ));
+    }
+    if parsed.fragment().is_some() {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': fragments are not allowed",
+            base_url
+        ));
+    }
+
+    let arcee_owned = host == "arcee.ai" || host.ends_with(".arcee.ai");
+    if !arcee_owned {
+        return Ok((ArceeEndpointKind::Custom, parsed));
+    }
+    if parsed.scheme() != "https" {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': Arcee-owned endpoints require HTTPS",
+            base_url
+        ));
+    }
+    if parsed.port_or_known_default() != Some(443) {
+        return Err(anyhow!(
+            "invalid Arcee base URL '{}': Arcee-owned endpoints require effective port 443",
+            base_url
+        ));
+    }
+
+    Ok((ArceeEndpointKind::Approved, parsed))
+}
+
+pub(super) fn validate_stored_base_url(base_url: &str) -> Result<Url> {
+    let (kind, parsed) = validate_arcee_base_url(base_url)?;
+    if kind != ArceeEndpointKind::Approved {
+        return Err(anyhow!(
+            "stored Arcee base URL '{}' is not an approved Arcee origin",
+            base_url
+        ));
+    }
+    Ok(parsed)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]
@@ -57,13 +128,7 @@ pub(super) async fn arcee_auth_login() -> Result<()> {
     println!("Waiting for authorization...");
 
     let success = poll_device_code(&client, &base, &device).await?;
-    let auth = StoredArceeAuth {
-        auth_type: AUTH_TYPE.to_string(),
-        api_key: success.api_key,
-        base_url: success.base_url,
-        organization_id: success.organization_id,
-        workspace_name: success.workspace_name,
-    };
+    let auth = stored_auth_from_token_success(success)?;
     with_arcee_migration_locks(|| {
         migrate_legacy_auth_unlocked()?;
         write_stored_auth(&auth)
@@ -166,6 +231,18 @@ fn remove_auth_path(path: &Path) -> Result<bool> {
     }
 }
 
+fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAuth> {
+    validate_stored_base_url(&success.base_url)
+        .context("Arcee login returned an invalid credential base URL")?;
+    Ok(StoredArceeAuth {
+        auth_type: AUTH_TYPE.to_string(),
+        api_key: success.api_key,
+        base_url: success.base_url,
+        organization_id: success.organization_id,
+        workspace_name: success.workspace_name,
+    })
+}
+
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
     with_arcee_migration_locks(|| {
         migrate_legacy_auth_unlocked()?;
@@ -191,10 +268,18 @@ fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> 
     }
     let auth: StoredArceeAuth = serde_json::from_value(value)
         .with_context(|| format!("failed to parse {}", path.display()))?;
+    validate_stored_base_url(&auth.base_url).with_context(|| {
+        format!(
+            "stored Arcee auth in {} has an invalid base_url",
+            path.display()
+        )
+    })?;
     Ok(Some(auth))
 }
 
 fn write_stored_auth(auth: &StoredArceeAuth) -> Result<()> {
+    validate_stored_base_url(&auth.base_url)
+        .context("refusing to store Arcee credentials with an invalid base_url")?;
     let raw = serde_json::to_string_pretty(auth).context("failed to serialize Arcee auth")?;
     write_arcee_auth_string(&raw)
 }
@@ -232,6 +317,12 @@ fn migrate_legacy_auth_files(legacy_path: &Path, arcee_path: &Path) -> Result<()
     let legacy_auth: StoredArceeAuth = serde_json::from_value(legacy_value).with_context(|| {
         format!(
             "legacy Arcee auth in {} is invalid; refusing to overwrite it",
+            legacy_path.display()
+        )
+    })?;
+    validate_stored_base_url(&legacy_auth.base_url).with_context(|| {
+        format!(
+            "legacy Arcee auth in {} has an invalid base_url; refusing to migrate it",
             legacy_path.display()
         )
     })?;
@@ -493,6 +584,89 @@ mod tests {
     }
 
     #[test]
+    fn arcee_url_policy_approves_only_secure_arcee_origins() {
+        for base_url in [
+            "https://arcee.ai",
+            "https://api.arcee.ai",
+            "https://api.internal.arcee.ai/v1/custom/",
+            "https://api.arcee.ai:443/path",
+        ] {
+            let (kind, parsed) = validate_arcee_base_url(base_url).unwrap();
+            assert_eq!(kind, ArceeEndpointKind::Approved, "{base_url}");
+            assert_eq!(parsed.port_or_known_default(), Some(443), "{base_url}");
+        }
+    }
+
+    #[test]
+    fn arcee_url_policy_allows_custom_http_and_https_endpoints() {
+        for base_url in [
+            "http://127.0.0.1:8080/dev/path",
+            "http://localhost:3000",
+            "https://models.example.com/arcee",
+            "https://arcee.ai.attacker.example/v1",
+        ] {
+            let (kind, _) = validate_arcee_base_url(base_url).unwrap();
+            assert_eq!(kind, ArceeEndpointKind::Custom, "{base_url}");
+        }
+    }
+
+    #[test]
+    fn arcee_url_policy_rejects_malformed_and_unsafe_urls() {
+        let cases = [
+            ("relative/path", "invalid Arcee base URL"),
+            ("ftp://api.arcee.ai/models", "scheme must be http or https"),
+            ("https://", "invalid Arcee base URL"),
+            ("https://user@api.arcee.ai", "userinfo is not allowed"),
+            (
+                "https://api.arcee.ai?tenant=evil",
+                "query parameters are not allowed",
+            ),
+            ("https://api.arcee.ai#fragment", "fragments are not allowed"),
+            ("http://api.arcee.ai", "require HTTPS"),
+            ("https://api.arcee.ai:8443", "effective port 443"),
+        ];
+
+        for (base_url, expected) in cases {
+            let error = validate_arcee_base_url(base_url).unwrap_err().to_string();
+            assert!(
+                error.contains(expected),
+                "{base_url}: expected {expected:?} in {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn login_token_base_url_must_be_an_approved_arcee_origin() {
+        let success = TokenSuccess {
+            api_key: "rcai-hostile".to_string(),
+            base_url: "https://capture.attacker.example/v1".to_string(),
+            organization_id: "org-1".to_string(),
+            workspace_name: "acme".to_string(),
+        };
+
+        let error = stored_auth_from_token_success(success).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid credential base URL"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn tampered_stored_base_url_is_rejected() {
+        let dir = TestDir::new("tampered-url");
+        let (_, canonical) = dir.paths();
+        let mut auth = stored_auth("rcai-stored");
+        auth.base_url = "http://api.arcee.ai:8080/steal".to_string();
+        let raw = serde_json::to_string(&auth).unwrap();
+
+        let error = parse_stored_auth(&raw, &canonical).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid base_url"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
     fn stored_auth_round_trips() {
         let auth = stored_auth("rcai-abc");
         let raw = serde_json::to_string(&auth).unwrap();
@@ -518,6 +692,22 @@ mod tests {
             Some(auth)
         );
         migrate_legacy_auth_files(&legacy, &canonical).unwrap();
+    }
+
+    #[test]
+    fn invalid_legacy_arcee_url_is_not_migrated() {
+        let dir = TestDir::new("invalid-url-migration");
+        let (legacy, canonical) = dir.paths();
+        let mut auth = stored_auth("rcai-legacy");
+        auth.base_url = "https://attacker.example/steal".to_string();
+        write_json(&legacy, &auth);
+        let legacy_before = fs::read(&legacy).unwrap();
+
+        let error = migrate_legacy_auth_files(&legacy, &canonical).unwrap_err();
+
+        assert!(error.to_string().contains("invalid base_url"));
+        assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
+        assert!(!canonical.exists());
     }
 
     #[test]
