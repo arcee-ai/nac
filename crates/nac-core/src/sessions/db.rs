@@ -27,16 +27,85 @@ pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
 pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
+    // Existing rows only receive run/history state. Model configuration is
+    // independently revisioned so a stale in-memory service cannot undo a
+    // configuration PATCH from another process.
     insert_or_replace_session(&tx, path, snapshot)?;
     tx.commit()?;
     Ok(())
+}
+
+pub fn update_session_model_config(
+    path: &Path,
+    snapshot: &SessionSnapshot,
+) -> std::result::Result<i64, SessionConfigUpdateError> {
+    let expected_version = snapshot.config_version;
+    let next_version = expected_version.checked_add(1).ok_or_else(|| {
+        SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
+    })?;
+    let extra_headers_json = if snapshot.extra_headers.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&snapshot.extra_headers)
+                .context("failed to serialize session extra_headers")?,
+        )
+    };
+
+    let mut conn = crate::store::open_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let updated = tx.execute(
+        "UPDATE sessions
+         SET model = ?1,
+             base_url = ?2,
+             backend = ?3,
+             reasoning_effort = ?4,
+             api_key_env = ?5,
+             extra_headers_json = ?6,
+             config_version = ?7
+         WHERE session_id = ?8 AND config_version = ?9",
+        params![
+            snapshot.model,
+            snapshot.base_url,
+            snapshot.backend.as_str(),
+            snapshot
+                .reasoning_effort
+                .map(|effort| effort.as_str().to_string()),
+            snapshot.api_key_env,
+            extra_headers_json,
+            next_version,
+            snapshot.session_id,
+            expected_version,
+        ],
+    )?;
+    if updated == 0 {
+        let current_version = tx
+            .query_row(
+                "SELECT config_version FROM sessions WHERE session_id = ?1",
+                params![snapshot.session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        return match current_version {
+            Some(current_version) => Err(SessionConfigUpdateError::Conflict(format!(
+                "session '{}' configuration changed concurrently (expected version {}, found {})",
+                snapshot.session_id, expected_version, current_version
+            ))),
+            None => Err(SessionConfigUpdateError::NotFound(format!(
+                "session '{}' was not found",
+                snapshot.session_id
+            ))),
+        };
+    }
+    tx.commit()?;
+    Ok(next_version)
 }
 
 pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -55,7 +124,7 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<Sessio
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json
+            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json, config_version
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -68,13 +137,22 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<Sessio
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((session_id, model, base_url, backend, reasoning_effort, api_key_env, headers_json)) =
-        row
+    let Some((
+        session_id,
+        model,
+        base_url,
+        backend,
+        reasoning_effort,
+        api_key_env,
+        headers_json,
+        config_version,
+    )) = row
     else {
         return Err(anyhow!("session '{}' was not found", session_id));
     };
@@ -88,6 +166,7 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<Sessio
         reasoning_effort: parse_reasoning_effort(reasoning_effort)?,
         api_key_env,
         extra_headers,
+        config_version,
     })
 }
 
@@ -95,7 +174,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -159,6 +238,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         api_key_env: row.get(14)?,
         extra_headers_json: row.get(15)?,
         token_usages_json: row.get(16)?,
+        config_version: row.get(17)?,
     })
 }
 
@@ -560,15 +640,11 @@ fn insert_or_replace_session(
     // actually opened for this write and is never read back.
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
-             model = excluded.model,
-             base_url = excluded.base_url,
-             backend = excluded.backend,
-             reasoning_effort = excluded.reasoning_effort,
              sandbox_json = excluded.sandbox_json,
              messages_json = excluded.messages_json,
              last_response_duration_ms = excluded.last_response_duration_ms,
@@ -576,8 +652,6 @@ fn insert_or_replace_session(
              response_durations_ms_json = excluded.response_durations_ms_json,
              updated_at = excluded.updated_at,
              host_id = excluded.host_id,
-             api_key_env = excluded.api_key_env,
-             extra_headers_json = excluded.extra_headers_json,
              token_usages_json = excluded.token_usages_json",
         params![
             snapshot.session_id,
@@ -598,6 +672,7 @@ fn insert_or_replace_session(
             snapshot.api_key_env,
             extra_headers_json,
             token_usages_json,
+            snapshot.config_version,
         ],
     )?;
     Ok(())
@@ -621,6 +696,7 @@ struct SessionRow {
     api_key_env: Option<String>,
     extra_headers_json: Option<String>,
     token_usages_json: Option<String>,
+    config_version: i64,
 }
 
 impl SessionRow {
@@ -658,6 +734,7 @@ impl SessionRow {
             ssh_host: self.ssh_host,
             api_key_env: self.api_key_env,
             extra_headers,
+            config_version: self.config_version,
             messages,
             last_response_duration_ms: self.last_response_duration_ms,
             previous_response_duration_ms: self.previous_response_duration_ms,

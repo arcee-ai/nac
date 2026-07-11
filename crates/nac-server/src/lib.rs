@@ -65,6 +65,8 @@ struct SessionManagerInner {
     worker_executable: PathBuf,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
+    #[cfg(test)]
+    config_update_after_load: StdMutex<Option<Arc<tokio::sync::Barrier>>>,
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
 }
 
@@ -315,6 +317,8 @@ impl SessionManager {
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
                 lifecycle_gates: StdMutex::new(HashMap::new()),
+                #[cfg(test)]
+                config_update_after_load: StdMutex::new(None),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
             }),
         })
@@ -763,6 +767,18 @@ impl SessionManager {
         }
 
         let current = sessions::load_session(&self.inner.store_path, session_id)?;
+        #[cfg(test)]
+        let update_barrier = {
+            self.inner
+                .config_update_after_load
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        };
+        #[cfg(test)]
+        if let Some(barrier) = update_barrier {
+            barrier.wait().await;
+        }
         let mut prospective = current.clone();
         apply_config_patch(&mut prospective, request)?;
 
@@ -782,9 +798,11 @@ impl SessionManager {
             &prospective.extra_headers,
         )?;
 
-        // Save only after all caller-controlled configuration and credential
-        // checks succeed. A store failure leaves the active map untouched.
-        sessions::save_session(&self.inner.store_path, &prospective)?;
+        // Persist only model columns after all caller-controlled configuration
+        // and credential checks succeed. The revision CAS rejects a concurrent
+        // PATCH, while run/history writes remain independent of these columns.
+        // A store failure or conflict leaves the active map untouched.
+        sessions::update_session_model_config(&self.inner.store_path, &prospective)?;
         active.remove(session_id);
         Ok(())
     }
@@ -1399,10 +1417,31 @@ impl From<sessions::SessionPresentationError> for ApiError {
     }
 }
 
+impl From<sessions::SessionConfigUpdateError> for ApiError {
+    fn from(error: sessions::SessionConfigUpdateError) -> Self {
+        let status = match &error {
+            sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
+            sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
+            sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
-        let status = if error.downcast_ref::<ModelConfigurationError>().is_some()
+        let status = if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>()
+        {
+            match error {
+                sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
+                sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
+                sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")
         {
@@ -2043,7 +2082,7 @@ mod tests {
         let mut missing_value =
             sessions::load_session(&store_path, "missing-environment-value").unwrap();
         missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
-        sessions::save_session(&store_path, &missing_value).unwrap();
+        sessions::update_session_model_config(&store_path, &missing_value).unwrap();
 
         seed_session(
             &root,
@@ -2055,7 +2094,7 @@ mod tests {
         unavailable_auth.backend = BackendKind::ArceeAuth;
         unavailable_auth.base_url = "https://api.arcee.ai".to_string();
         unavailable_auth.api_key_env = None;
-        sessions::save_session(&store_path, &unavailable_auth).unwrap();
+        sessions::update_session_model_config(&store_path, &unavailable_auth).unwrap();
 
         let manager = test_manager(&root);
         let Json(endpoint_config) = session_config_handler(
@@ -2181,7 +2220,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
         snapshot.base_url = format!("http://{address}/v1");
-        sessions::save_session(&root.join("store.db"), &snapshot).unwrap();
+        sessions::update_session_model_config(&root.join("store.db"), &snapshot).unwrap();
 
         tokio::spawn(async move {
             if let Ok((socket, _)) = listener.accept().await {
@@ -2360,6 +2399,69 @@ mod tests {
 
         manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn independent_managers_reject_concurrent_config_conflict() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cross_manager_config_conflict");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let first_manager = test_manager(&root);
+        let second_manager = test_manager(&root);
+        let both_loaded = Arc::new(tokio::sync::Barrier::new(2));
+        *first_manager.inner.config_update_after_load.lock().unwrap() = Some(both_loaded.clone());
+        *second_manager
+            .inner
+            .config_update_after_load
+            .lock()
+            .unwrap() = Some(both_loaded);
+
+        let first = tokio::spawn(async move {
+            first_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("first-model".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            second_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("second-model".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        let results = [first.await.unwrap(), second.await.unwrap()];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let conflict = results
+            .into_iter()
+            .find_map(Result::err)
+            .expect("one manager must lose the configuration CAS");
+        assert!(matches!(
+            conflict.downcast_ref::<sessions::SessionConfigUpdateError>(),
+            Some(sessions::SessionConfigUpdateError::Conflict(_))
+        ));
+        assert!(conflict
+            .to_string()
+            .contains("configuration changed concurrently"));
+        assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert!(matches!(
+            stored.model.as_str(),
+            "first-model" | "second-model"
+        ));
+        assert_eq!(stored.config_version, 1);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2574,7 +2676,7 @@ extra_headers = { X-Config = "yes" }
         stored.backend = BackendKind::ChatGptCodexResponses;
         stored.base_url = "https://chatgpt.com/backend-api".to_string();
         stored.api_key_env = None;
-        sessions::save_session(&root.join("store.db"), &stored).unwrap();
+        sessions::update_session_model_config(&root.join("store.db"), &stored).unwrap();
         let manager = test_manager(&root);
 
         let error = manager
@@ -3063,7 +3165,7 @@ extra_headers = { X-Config = "yes" }
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
         attach_snapshot.backend = BackendKind::ArceeApi;
         attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
-        sessions::save_session(&store_path, &attach_snapshot).unwrap();
+        sessions::update_session_model_config(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
