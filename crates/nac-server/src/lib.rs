@@ -3,7 +3,7 @@ use std::{
     convert::Infallible,
     net::SocketAddr,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex, Weak},
     time::{Duration, Instant},
 };
 
@@ -38,7 +38,10 @@ use nac_core::{
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpListener, sync::RwLock};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, RwLock},
+};
 use tower_http::cors::CorsLayer;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
@@ -60,7 +63,8 @@ struct SessionManagerInner {
     root_cwd: PathBuf,
     store_path: PathBuf,
     worker_executable: PathBuf,
-    active_sessions: RwLock<HashMap<String, SessionService>>,
+    active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
+    lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
 }
 
@@ -216,6 +220,17 @@ pub struct UpdateConfigRequest {
     pub extra_headers: RequestField<HeadersRequest>,
 }
 
+impl UpdateConfigRequest {
+    fn is_empty(&self) -> bool {
+        matches!(self.model, RequestField::Omitted)
+            && matches!(self.base_url, RequestField::Omitted)
+            && matches!(self.backend, RequestField::Omitted)
+            && matches!(self.reasoning_effort, RequestField::Omitted)
+            && matches!(self.api_key_env, RequestField::Omitted)
+            && matches!(self.extra_headers, RequestField::Omitted)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateSessionPresentationRequest {
     pub title: String,
@@ -299,6 +314,7 @@ impl SessionManager {
                 store_path,
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
+                lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
             }),
         })
@@ -329,7 +345,7 @@ impl SessionManager {
                     let active_service = active.get(&summary.session_id);
                     ManagedSessionSummary {
                         active: active_service.is_some(),
-                        active_run: active_service.and_then(SessionService::active_run),
+                        active_run: active_service.and_then(|service| service.active_run()),
                         summary,
                         workspace_diff: None,
                     }
@@ -533,21 +549,45 @@ impl SessionManager {
             .active_sessions
             .write()
             .await
-            .insert(session_id, service);
+            .insert(session_id, Arc::new(service));
         Ok(snapshot)
     }
 
-    pub async fn attach_session(&self, session_id: &str) -> Result<SessionService> {
-        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
-            return Ok(service.clone());
+    fn lifecycle_gate(&self, session_id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self
+            .inner
+            .lifecycle_gates
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(gate) = gates.get(session_id).and_then(Weak::upgrade) {
+            return gate;
         }
 
-        let service = self.resume_session(session_id).await?;
+        let gate = Arc::new(Mutex::new(()));
+        gates.insert(session_id.to_string(), Arc::downgrade(&gate));
+        gate
+    }
+
+    async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        self.attach_session_locked(session_id).await
+    }
+
+    /// Attaches while the caller holds this session's lifecycle gate. Keeping
+    /// resume and insertion behind the same gate prevents an old service from
+    /// being inserted after a settings update has committed.
+    async fn attach_session_locked(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
+            return Ok(Arc::clone(service));
+        }
+
+        let service = Arc::new(self.resume_session(session_id).await?);
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
-            return Ok(existing.clone());
+            return Ok(Arc::clone(existing));
         }
-        active.insert(session_id.to_string(), service.clone());
+        active.insert(session_id.to_string(), Arc::clone(&service));
         Ok(service)
     }
 
@@ -589,7 +629,9 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
-        let service = self.attach_session(session_id).await?;
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let service = self.attach_session_locked(session_id).await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
             PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
@@ -693,8 +735,20 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // Hold the write lock through validation and persistence so an inactive
-        // service cannot start a run between the busy check and eviction.
+        // An omitted patch is intentionally independent of persisted settings
+        // and credentials. In particular, it must not evict an attached service.
+        if request.is_empty() {
+            return Ok(());
+        }
+
+        // Submission and update both hold this per-session gate. A submission
+        // that wins establishes active-run state synchronously before releasing
+        // it; an update that wins commits and evicts before a submit can attach.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+
+        // Hold the write lock through validation and persistence so other
+        // attachment paths cannot observe or insert a stale service.
         let mut active = self.inner.active_sessions.write().await;
         if let Some(service) = active.get(session_id) {
             if service.active_run().is_some() {
@@ -1958,6 +2012,238 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    async fn point_session_at_hanging_endpoint(
+        root: &std::path::Path,
+        session_id: &str,
+    ) -> tokio::task::JoinHandle<()> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
+        snapshot.base_url = format!("http://{address}/v1");
+        sessions::save_session(&root.join("store.db"), &snapshot).unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                let _socket = socket;
+                std::future::pending::<()>().await;
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn submission_winning_lifecycle_gate_makes_concurrent_patch_reject_busy() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("submit_before_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let original_service = manager.attach_session("session").await.unwrap();
+
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+        let (submit_started_tx, submit_started_rx) = tokio::sync::oneshot::channel();
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_started_tx.send(()).unwrap();
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "hold this run open".to_string(),
+                    },
+                )
+                .await
+        });
+        submit_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let (patch_started_tx, patch_started_rx) = tokio::sync::oneshot::channel();
+        let patch_manager = manager.clone();
+        let patch = tokio::spawn(async move {
+            patch_started_tx.send(()).unwrap();
+            patch_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("model-after-update".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        patch_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!submit.is_finished());
+        assert!(!patch.is_finished());
+
+        drop(blocker);
+        let submitted = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should acquire the gate")
+            .unwrap()
+            .unwrap();
+        let patch_error = tokio::time::timeout(Duration::from_secs(2), patch)
+            .await
+            .expect("patch should run after submission")
+            .unwrap()
+            .unwrap_err();
+        assert!(patch_error.to_string().contains("busy with an active run"));
+        assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-a"
+        );
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&mapped, &original_service));
+        assert_eq!(
+            mapped.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn patch_winning_lifecycle_gate_evicts_before_concurrent_submission_attaches() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_before_submit");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let stale_service = manager.attach_session("session").await.unwrap();
+
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+        let (patch_started_tx, patch_started_rx) = tokio::sync::oneshot::channel();
+        let patch_manager = manager.clone();
+        let patch = tokio::spawn(async move {
+            patch_started_tx.send(()).unwrap();
+            patch_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("model-after-update".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        patch_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let (submit_started_tx, submit_started_rx) = tokio::sync::oneshot::channel();
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_started_tx.send(()).unwrap();
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "use committed settings".to_string(),
+                    },
+                )
+                .await
+        });
+        submit_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!patch.is_finished());
+        assert!(!submit.is_finished());
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), patch)
+            .await
+            .expect("patch should acquire the gate")
+            .unwrap()
+            .unwrap();
+        let submitted = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should run after patch")
+            .unwrap()
+            .unwrap();
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(!Arc::ptr_eq(&mapped, &stale_service));
+        assert_eq!(mapped.metadata().model, "model-after-update");
+        assert!(stale_service.active_run().is_none());
+        assert_eq!(
+            mapped.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-after-update"
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn empty_patch_does_not_touch_store_credentials_or_attached_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("empty_patch_noop");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let before = manager.attach_session("session").await.unwrap();
+        let before_metadata = before.metadata();
+        let store_path = root.join("store.db");
+        let hidden_store = root.join("store.db.hidden");
+        std::fs::rename(&store_path, &hidden_store).unwrap();
+        std::fs::create_dir(&store_path).unwrap();
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
+        manager
+            .update_session_config("session", UpdateConfigRequest::default())
+            .await
+            .expect("an empty patch must not read the store or credentials");
+
+        let after = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .expect("empty patch must preserve attached service");
+        assert!(Arc::ptr_eq(&before, &after));
+        assert_eq!(after.metadata().model, before_metadata.model);
+        assert_eq!(after.metadata().base_url, before_metadata.base_url);
+        assert_eq!(after.active_run(), None);
+
+        std::fs::remove_dir(&store_path).unwrap();
+        std::fs::rename(hidden_store, store_path).unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "model-a");
+        assert_eq!(stored.updated_at, "2026-01-01 00:00:00.000000000");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
