@@ -54,6 +54,7 @@ const state = {
   paneRatio: 0.5,
   paneResize: null,
   paneDesktopMedia: null,
+  settingsInitial: null,
 };
 
 const el = {};
@@ -101,6 +102,7 @@ function bindElements() {
     "launchModel",
     "launchBaseUrl",
     "launchApiKeyEnv",
+    "launchCredentialMode",
     "launchExtraHeaders",
     "sandboxFields",
     "sandboxEnabled",
@@ -163,6 +165,7 @@ function bindElements() {
     "settingsModel",
     "settingsBaseUrl",
     "settingsApiKeyEnv",
+    "settingsCredentialMode",
     "settingsExtraHeaders",
   ]) {
     el[id] = document.getElementById(id);
@@ -172,6 +175,8 @@ function bindElements() {
 function bindEvents() {
   el.launchForm.addEventListener("submit", createSession);
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
+  el.launchCredentialMode.addEventListener("change", renderCredentialControls);
+  el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
   el.cancelRun.addEventListener("click", cancelActiveRun);
@@ -288,6 +293,7 @@ async function boot() {
   }
 
   renderLaunchHostFields();
+  renderCredentialControls();
   await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
   scheduleSessionPoll();
 }
@@ -722,19 +728,23 @@ function showSettingsOverlay() {
     el.settingsModel.value = metadata.model || "";
     el.settingsBaseUrl.value = metadata.base_url || "";
     el.settingsBackend.value = metadata.backend || "";
-    el.settingsEffort.value = metadata.reasoning_effort || "";
+    el.settingsEffort.value = metadata.reasoning_effort || "__clear__";
+    el.settingsCredentialMode.value = metadata.api_key_env ? "variable" : "none";
     el.settingsApiKeyEnv.value = metadata.api_key_env || "";
     el.settingsExtraHeaders.value = metadata.extra_headers
       && Object.keys(metadata.extra_headers).length > 0
       ? JSON.stringify(metadata.extra_headers, null, 2)
       : "";
+    state.settingsInitial = settingsValuesFromMetadata(metadata);
   }
+  renderCredentialControls();
   setSettingsStatus("", false);
   el.settingsOverlay.hidden = false;
 }
 
 function hideSettingsOverlay() {
   el.settingsOverlay.hidden = true;
+  state.settingsInitial = null;
 }
 
 function setSettingsStatus(message, error) {
@@ -745,26 +755,29 @@ function setSettingsStatus(message, error) {
 async function updateSessionConfig(event) {
   event.preventDefault();
   const sessionId = state.selectedId;
-  if (!sessionId) return;
-  setSettingsStatus("saving", false);
+  if (!sessionId || !state.settingsInitial) return;
 
-  const extraHeadersRaw = el.settingsExtraHeaders.value;
-  let extraHeaders = null;
+  let body;
   try {
-    extraHeaders = serializeExtraHeaders(extraHeadersRaw);
-  } catch (parseError) {
-    setSettingsStatus(parseError.message, true);
+    body = buildSettingsPatch({
+      model: el.settingsModel.value,
+      base_url: el.settingsBaseUrl.value,
+      backend: el.settingsBackend.value,
+      reasoning_effort: el.settingsEffort.value,
+      credential_mode: el.settingsCredentialMode.value,
+      api_key_env: el.settingsApiKeyEnv.value,
+      extra_headers: el.settingsExtraHeaders.value,
+    }, state.settingsInitial);
+  } catch (validationError) {
+    setSettingsStatus(validationError.message, true);
     return;
   }
 
-  const body = {
-    model: nullable(el.settingsModel.value),
-    base_url: nullable(el.settingsBaseUrl.value),
-    backend: nullable(el.settingsBackend.value),
-    reasoning_effort: nullable(el.settingsEffort.value),
-    api_key_env: nullable(el.settingsApiKeyEnv.value),
-    extra_headers: extraHeaders,
-  };
+  if (Object.keys(body).length === 0) {
+    setSettingsStatus("No changes", false);
+    return;
+  }
+  setSettingsStatus("saving", false);
 
   try {
     const response = await fetch(
@@ -808,11 +821,20 @@ function showMobileSessions() {
 
 async function createSession(event) {
   event.preventDefault();
-  let extraHeaders = null;
+
+  let modelPayload;
   try {
-    extraHeaders = serializeExtraHeaders(el.launchExtraHeaders.value);
-  } catch (parseError) {
-    setLaunchStatus(parseError.message, true);
+    modelPayload = buildLaunchModelPayload({
+      model: el.launchModel.value,
+      base_url: el.launchBaseUrl.value,
+      backend: el.launchBackend.value,
+      reasoning_effort: el.launchEffort.value,
+      credential_mode: el.launchCredentialMode.value,
+      api_key_env: el.launchApiKeyEnv.value,
+      extra_headers: el.launchExtraHeaders.value,
+    });
+  } catch (validationError) {
+    setLaunchStatus(validationError.message, true);
     return;
   }
 
@@ -822,12 +844,7 @@ async function createSession(event) {
   const body = {
     cwd: sshHost ? (nullable(el.launchCwd.value) || "~") : nullable(el.launchCwd.value),
     ssh_host: sshHost,
-    model: nullable(el.launchModel.value),
-    base_url: nullable(el.launchBaseUrl.value),
-    backend: nullable(el.launchBackend.value),
-    reasoning_effort: nullable(el.launchEffort.value),
-    api_key_env: nullable(el.launchApiKeyEnv.value),
-    extra_headers: extraHeaders,
+    ...modelPayload,
   };
   if (!sshHost) {
     body.sandbox = {
@@ -4384,9 +4401,9 @@ function setLaunchStatus(message, error) {
   el.launchStatus.classList.toggle("error", Boolean(error));
 }
 
-function serializeExtraHeaders(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
+function serializeExtraHeaders(value, blankValue) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return blankValue;
 
   let parsed;
   try {
@@ -4402,7 +4419,122 @@ function serializeExtraHeaders(value) {
       throw new Error(`Extra Headers value for "${key}" must be a string`);
     }
   }
-  return JSON.stringify(parsed);
+  return parsed;
+}
+
+function optionalLaunchString(value, label) {
+  const raw = String(value ?? "");
+  if (raw === "") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error(`${label} cannot contain only whitespace`);
+  return trimmed;
+}
+
+function requiredSettingsString(value, label) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) throw new Error(`${label} is required and cannot be cleared`);
+  return trimmed;
+}
+
+function selectedApiKeyEnv(mode, value) {
+  if (mode === "inherit") return undefined;
+  if (mode === "none") return null;
+  if (mode !== "variable") throw new Error("Choose how credentials are selected");
+  const selected = String(value ?? "").trim();
+  if (!selected) throw new Error("API key environment variable is required when Environment variable is selected");
+  return selected;
+}
+
+function validateCredentialMode(backend, mode) {
+  if (!backend) return;
+  const stored = backend === "arcee-auth" || backend === "chatgpt-codex-responses";
+  if (stored && mode !== "none") {
+    const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
+    throw new Error(`${backend} uses ${source}; explicitly select No API key environment variable`);
+  }
+  if (!stored && mode !== "variable") {
+    throw new Error(`${backend} requires an API key environment variable; explicitly select Environment variable`);
+  }
+}
+
+function buildLaunchModelPayload(values) {
+  const payload = {};
+  for (const [field, label] of [
+    ["model", "Model"],
+    ["base_url", "Base URL"],
+    ["backend", "Backend"],
+  ]) {
+    const selected = optionalLaunchString(values[field], label);
+    if (selected !== undefined) payload[field] = selected;
+  }
+
+  const effort = String(values.reasoning_effort ?? "");
+  if (effort === "__clear__") payload.reasoning_effort = null;
+  else if (effort) payload.reasoning_effort = effort;
+
+  const credentialMode = String(values.credential_mode || "inherit");
+  validateCredentialMode(payload.backend, credentialMode);
+  const apiKeyEnv = selectedApiKeyEnv(credentialMode, values.api_key_env);
+  if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
+
+  const headers = serializeExtraHeaders(values.extra_headers, undefined);
+  if (headers !== undefined) payload.extra_headers = headers;
+  return payload;
+}
+
+function settingsValuesFromMetadata(metadata) {
+  return {
+    model: String(metadata?.model || "").trim(),
+    base_url: String(metadata?.base_url || "").trim(),
+    backend: String(metadata?.backend || "").trim(),
+    reasoning_effort: metadata?.reasoning_effort || null,
+    api_key_env: metadata?.api_key_env || null,
+    extra_headers: metadata?.extra_headers || {},
+  };
+}
+
+function sameHeaderObject(left, right) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
+}
+
+function buildSettingsPatch(values, initial) {
+  const current = {
+    model: requiredSettingsString(values.model, "Model"),
+    base_url: requiredSettingsString(values.base_url, "Base URL"),
+    backend: requiredSettingsString(values.backend, "Backend"),
+    reasoning_effort: values.reasoning_effort === "__clear__" ? null : values.reasoning_effort,
+    api_key_env: selectedApiKeyEnv(values.credential_mode, values.api_key_env),
+    extra_headers: serializeExtraHeaders(values.extra_headers, {}),
+  };
+  if (current.api_key_env === undefined) {
+    throw new Error("Session settings must explicitly select an API key environment variable or none");
+  }
+  validateCredentialMode(current.backend, values.credential_mode);
+
+  const patch = {};
+  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
+    if (current[field] !== initial[field]) patch[field] = current[field];
+  }
+  if (!sameHeaderObject(current.extra_headers, initial.extra_headers || {})) {
+    patch.extra_headers = current.extra_headers;
+  }
+  return patch;
+}
+
+function renderCredentialControls() {
+  for (const [modeElement, inputElement] of [
+    [el.launchCredentialMode, el.launchApiKeyEnv],
+    [el.settingsCredentialMode, el.settingsApiKeyEnv],
+  ]) {
+    if (!modeElement || !inputElement) continue;
+    const acceptsVariable = modeElement.value === "variable";
+    inputElement.disabled = !acceptsVariable;
+    inputElement.required = acceptsVariable;
+    inputElement.placeholder = acceptsVariable ? "MY_PROVIDER_API_KEY" : "not used";
+  }
 }
 
 function nullable(value) {

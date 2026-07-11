@@ -1532,9 +1532,10 @@ mod tests {
         assert!(html.contains("id=\"launchExtraHeaders\""));
 
         let app = include_str!("../assets/app.js");
-        assert!(app.contains("api_key_env: nullable(el.launchApiKeyEnv.value)"));
-        assert!(app.contains("extra_headers: extraHeaders"));
-        assert!(app.contains("serializeExtraHeaders(el.launchExtraHeaders.value)"));
+        assert!(app.contains("buildLaunchModelPayload"));
+        assert!(app.contains("payload.api_key_env = apiKeyEnv"));
+        assert!(app.contains("payload.extra_headers = headers"));
+        assert!(app.contains("body = buildSettingsPatch"));
     }
 
     #[test]
