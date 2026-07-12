@@ -25,3 +25,4 @@ toml = "0.8"
 url = "2"
 serde_yaml_ng = "0.10"
 diffy = { version = "0.5.0", default-features = false }
+fs2 = "0.4"

@@ -65,8 +65,6 @@ struct SessionManagerInner {
     worker_executable: PathBuf,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
-    #[cfg(test)]
-    config_update_after_load: StdMutex<Option<Arc<tokio::sync::Barrier>>>,
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
 }
 
@@ -317,8 +315,6 @@ impl SessionManager {
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
                 lifecycle_gates: StdMutex::new(HashMap::new()),
-                #[cfg(test)]
-                config_update_after_load: StdMutex::new(None),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
             }),
         })
@@ -595,6 +591,36 @@ impl SessionManager {
         Ok(service)
     }
 
+    /// Returns a service whose model configuration revision matches the store.
+    /// The caller must hold both the local lifecycle gate and the shared run
+    /// lease, preventing a PATCH between the revision read and run start.
+    async fn attach_current_submission_service_locked(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<SessionService>> {
+        let persisted_version =
+            sessions::load_session_model_config(&self.inner.store_path, session_id)?.config_version;
+        let cached = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        if let Some(service) = cached {
+            if service.config_version() == Some(persisted_version) {
+                return Ok(service);
+            }
+            if service.active_run().is_some() {
+                return Err(anyhow!(
+                    "session is busy with an active run while its persisted configuration changed"
+                ));
+            }
+            self.inner.active_sessions.write().await.remove(session_id);
+        }
+        self.attach_session_locked(session_id).await
+    }
+
     pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
         sessions::load_session_model_config(&self.inner.store_path, session_id)
     }
@@ -639,7 +665,12 @@ impl SessionManager {
     ) -> Result<SubmitPromptResponse> {
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        let service = self.attach_session_locked(session_id).await?;
+        // The OS lease closes the cross-process gap between checking the
+        // persisted revision and synchronously establishing active-run state.
+        let run_lease = sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let service = self
+            .attach_current_submission_service_locked(session_id)
+            .await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
             PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
@@ -651,7 +682,7 @@ impl SessionManager {
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
-                    .try_submit_prepared_prompt(prompt)
+                    .try_submit_prepared_prompt_with_lease(prompt, run_lease)
                     .map_err(submit_error_to_anyhow)?;
                 Ok(submit_response(handle, display_prompt))
             }
@@ -766,19 +797,13 @@ impl SessionManager {
             }
         }
 
+        // Independent server/TUI processes coordinate through the same
+        // crash-safe lease. Keep it through validation, CAS persistence, and
+        // local eviction, but never hold a SQLite transaction over model I/O.
+        let _run_lease =
+            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+
         let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
-        #[cfg(test)]
-        let update_barrier = {
-            self.inner
-                .config_update_after_load
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone()
-        };
-        #[cfg(test)]
-        if let Some(barrier) = update_barrier {
-            barrier.wait().await;
-        }
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) =
@@ -1339,6 +1364,11 @@ fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
             active_run.run_id,
             active_run.prompt_preview
         ),
+        SessionSubmitError::ExternalBusy { session_id } => anyhow!(
+            "session '{}' is busy with an active run in another process",
+            session_id
+        ),
+        SessionSubmitError::Coordination { message } => anyhow!(message),
     }
 }
 
@@ -1824,7 +1854,12 @@ mod tests {
 
     impl ScopedModelEnv {
         fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
-            let names = ["NAC_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"];
+            let names = [
+                "NAC_HOME",
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "SECOND_API_KEY",
+            ];
             let original = names
                 .into_iter()
                 .map(|name| (name, std::env::var_os(name)))
@@ -1836,6 +1871,7 @@ mod tests {
                     None => std::env::remove_var("OPENAI_API_KEY"),
                 }
                 std::env::remove_var("OPENAI_BASE_URL");
+                std::env::remove_var("SECOND_API_KEY");
             }
             Self { original }
         }
@@ -2684,64 +2720,176 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
-    async fn independent_managers_reject_concurrent_config_conflict() {
+    async fn external_active_run_lease_rejects_patch_from_independent_manager() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-        let root = temp_root("cross_manager_config_conflict");
+        let root = temp_root("external_active_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let running_manager = test_manager(&root);
+        let patch_manager = test_manager(&root);
+
+        running_manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "hold cross-process lease".to_string(),
+                },
+            )
+            .await
+            .expect("first manager starts run");
+        let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
+
+        let error = patch_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("must-not-commit".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("PATCH cannot commit beneath another process run");
+        assert!(error.to_string().contains("busy with an active run"));
+        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
+        let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(after.model, before.model);
+        assert_eq!(after.config_version, before.config_version);
+        assert!(!patch_manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+
+        running_manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("external_patch_rebuild");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("SECOND_API_KEY", "second-server-key") };
+        seed_editable_session(&root, "session");
+        let stale_manager = test_manager(&root);
+        let patch_manager = test_manager(&root);
+        let stale_service = stale_manager.attach_session("session").await.unwrap();
+        assert_eq!(stale_service.config_version(), Some(0));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let new_base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let endpoint = tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                let _socket = socket;
+                std::future::pending::<()>().await;
+            }
+        });
+        let new_headers = BTreeMap::from([
+            ("X-Cross-Process".to_string(), "current".to_string()),
+            ("X-Revision".to_string(), "1".to_string()),
+        ]);
+        patch_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("model-from-other-manager".to_string()),
+                    base_url: RequestField::Value(new_base_url.clone()),
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
+                },
+            )
+            .await
+            .expect("external manager commits complete model settings");
+        assert_eq!(stale_service.metadata().model, "model-a");
+
+        let submitted = stale_manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "must use externally committed authority".to_string(),
+                },
+            )
+            .await
+            .expect("stale manager converges before starting the next run");
+        let current_service = stale_manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(!Arc::ptr_eq(&current_service, &stale_service));
+        assert_eq!(current_service.config_version(), Some(1));
+        let metadata = current_service.metadata();
+        assert_eq!(metadata.model, "model-from-other-manager");
+        assert_eq!(metadata.base_url, new_base_url);
+        assert_eq!(metadata.backend, "openai-responses");
+        assert_eq!(metadata.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(metadata.api_key_env.as_deref(), Some("SECOND_API_KEY"));
+        assert_eq!(metadata.extra_headers, new_headers);
+        assert_eq!(
+            current_service.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        assert!(stale_service.active_run().is_none());
+
+        stale_manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn independent_manager_patch_rejects_held_shared_lease() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cross_manager_config_lease");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
         seed_editable_session(&root, "session");
         let first_manager = test_manager(&root);
         let second_manager = test_manager(&root);
-        let both_loaded = Arc::new(tokio::sync::Barrier::new(2));
-        *first_manager.inner.config_update_after_load.lock().unwrap() = Some(both_loaded.clone());
-        *second_manager
-            .inner
-            .config_update_after_load
-            .lock()
-            .unwrap() = Some(both_loaded);
+        let held = sessions::SessionRunLease::try_acquire(&root.join("store.db"), "session")
+            .expect("first process lease");
 
-        let first = tokio::spawn(async move {
-            first_manager
-                .update_session_config(
-                    "session",
-                    UpdateConfigRequest {
-                        model: RequestField::Value("first-model".to_string()),
-                        ..UpdateConfigRequest::default()
-                    },
-                )
-                .await
-        });
-        let second = tokio::spawn(async move {
-            second_manager
-                .update_session_config(
-                    "session",
-                    UpdateConfigRequest {
-                        model: RequestField::Value("second-model".to_string()),
-                        ..UpdateConfigRequest::default()
-                    },
-                )
-                .await
-        });
-        let results = [first.await.unwrap(), second.await.unwrap()];
-        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
-        let conflict = results
-            .into_iter()
-            .find_map(Result::err)
-            .expect("one manager must lose the configuration CAS");
-        assert!(matches!(
-            conflict.downcast_ref::<sessions::SessionConfigUpdateError>(),
-            Some(sessions::SessionConfigUpdateError::Conflict(_))
-        ));
-        assert!(conflict
-            .to_string()
-            .contains("configuration changed concurrently"));
+        let conflict = second_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("blocked-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("a concurrent shared lease must reject PATCH without waiting");
+        assert!(conflict.to_string().contains("busy with an active run"));
         assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-a"
+        );
 
+        drop(held);
+        first_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("committed-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("dropping the other process lease permits PATCH");
         let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
-        assert!(matches!(
-            stored.model.as_str(),
-            "first-model" | "second-model"
-        ));
+        assert_eq!(stored.model, "committed-model");
         assert_eq!(stored.config_version, 1);
         let _ = std::fs::remove_dir_all(root);
     }

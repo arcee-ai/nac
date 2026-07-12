@@ -433,8 +433,11 @@ fn submit_prompt(
             app.clear_composer();
             begin_top_level_run(app, handle.run_id, display_prompt);
         }
-        Err(SessionSubmitError::Busy { .. }) => {
+        Err(SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. }) => {
             app.show_composer_notice("session is busy; wait for the current reply", Tone::Warning);
+        }
+        Err(SessionSubmitError::Coordination { message }) => {
+            app.show_composer_notice(&message, Tone::Error);
         }
     }
 

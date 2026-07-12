@@ -12,6 +12,7 @@ use crate::types::Message;
 
 mod codec;
 mod db;
+mod run_lease;
 mod snapshot;
 mod summary;
 
@@ -20,6 +21,7 @@ pub use db::{
     load_session_model_config, reorder_sessions, save_session, update_raw_session_model_config,
     update_session_model_config, update_session_presentation,
 };
+pub use run_lease::{SessionRunLease, SessionRunLeaseError};
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
