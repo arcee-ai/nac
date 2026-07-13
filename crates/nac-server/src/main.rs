@@ -14,7 +14,8 @@ use nac_core::{
         WorkerDispatchOptions,
     },
 };
-use nac_server::{serve, ServerOptions, SessionManager};
+use nac_server::{serve_with_options, ServerOptions, SessionManager, WebSecurityOptions};
+use url::Url;
 
 #[derive(Parser)]
 #[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
@@ -22,6 +23,18 @@ struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
+
+    /// Public HTTP(S) origin used to reach this server through a trusted proxy.
+    #[arg(long, env = "NAC_PUBLIC_BASE_URL")]
+    public_base_url: Option<Url>,
+
+    /// Additional exact HTTP(S) origin allowed by browser CORS and CSRF checks.
+    #[arg(
+        long = "allowed-origin",
+        env = "NAC_ALLOWED_ORIGINS",
+        value_delimiter = ','
+    )]
+    allowed_origins: Vec<Url>,
 
     /// Server root directory for default config and relative store paths.
     #[arg(short = 'C', long)]
@@ -286,8 +299,19 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     })?;
     let info = manager.store_info();
     eprintln!("nac-web listening on http://{}", cli.bind);
+    if let Some(public_base_url) = &cli.public_base_url {
+        eprintln!("public base URL: {public_base_url}");
+    }
     eprintln!("store: {}", info.store_path.display());
-    serve(cli.bind, manager).await
+    serve_with_options(
+        cli.bind,
+        manager,
+        WebSecurityOptions {
+            public_base_url: cli.public_base_url,
+            allowed_origins: cli.allowed_origins,
+        },
+    )
+    .await
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {

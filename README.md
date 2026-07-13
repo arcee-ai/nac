@@ -52,6 +52,24 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
 - `POST /sessions/{session_id}/cancel-active-run`
 
+The default bind is loopback-only and allows the exact
+`http://127.0.0.1:3210` browser origin. When a trusted reverse proxy exposes
+the dashboard at another origin, configure that exact origin (scheme, host,
+and optional port; no path):
+
+```sh
+NAC_PUBLIC_BASE_URL=https://nac.example.com nac-web -C /path/to/project
+```
+
+Use repeated `--allowed-origin` flags, or a comma-separated
+`NAC_ALLOWED_ORIGINS`, only when additional browser origins must call the API.
+Unsafe browser requests are rejected unless their `Origin` is allowed and
+their `Sec-Fetch-Site` value, when present, is `same-origin`. Local CLI/API
+clients that do not send browser-origin headers continue to work. A
+non-loopback `--bind` requires an explicit public base URL or allowed origin;
+put authentication and TLS in front of nac-web rather than exposing it
+directly.
+
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 
 Uninstall:

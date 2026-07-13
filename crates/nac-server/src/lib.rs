@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     convert::Infallible,
     net::SocketAddr,
     path::PathBuf,
@@ -10,8 +10,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    extract::{Path as AxumPath, Query, Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -34,6 +35,7 @@ use nac_core::{
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::RwLock};
 use tower_http::cors::CorsLayer;
+use url::Url;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
@@ -43,6 +45,78 @@ pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
+}
+
+/// Browser-facing security configuration for `nac-web`.
+///
+/// The public base URL and every additional allowed origin must be an exact
+/// HTTP(S) origin: scheme, host, and optional port only. Loopback binds also
+/// allow their own `http://<bind-address>` origin so local and SSM-forwarded
+/// dashboard access keeps working.
+#[derive(Debug, Clone, Default)]
+pub struct WebSecurityOptions {
+    pub public_base_url: Option<Url>,
+    pub allowed_origins: Vec<Url>,
+}
+
+#[derive(Debug, Clone)]
+struct WebSecurityPolicy {
+    allowed_origins: Arc<BTreeSet<String>>,
+    cors_origins: Vec<HeaderValue>,
+}
+
+impl WebSecurityOptions {
+    fn resolve(&self, bind_addr: SocketAddr) -> Result<WebSecurityPolicy> {
+        let mut allowed_origins = BTreeSet::new();
+
+        if bind_addr.ip().is_loopback() {
+            allowed_origins.insert(format!("http://{bind_addr}"));
+        }
+        if let Some(public_base_url) = &self.public_base_url {
+            allowed_origins.insert(exact_http_origin(public_base_url, "public base URL")?);
+        }
+        for allowed_origin in &self.allowed_origins {
+            allowed_origins.insert(exact_http_origin(allowed_origin, "allowed origin")?);
+        }
+
+        if allowed_origins.is_empty() {
+            anyhow::bail!(
+                "non-loopback binds require --public-base-url or at least one --allowed-origin"
+            );
+        }
+
+        let cors_origins = allowed_origins
+            .iter()
+            .map(|origin| {
+                origin
+                    .parse::<HeaderValue>()
+                    .with_context(|| format!("invalid HTTP origin header value '{origin}'"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(WebSecurityPolicy {
+            allowed_origins: Arc::new(allowed_origins),
+            cors_origins,
+        })
+    }
+}
+
+fn exact_http_origin(url: &Url, label: &str) -> Result<String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        anyhow::bail!("{label} must use http or https: {url}");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        anyhow::bail!("{label} must not contain user information: {url}");
+    }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        anyhow::bail!("{label} must contain only scheme, host, and optional port: {url}");
+    }
+
+    let origin = url.origin().ascii_serialization();
+    if origin == "null" {
+        anyhow::bail!("{label} must have a network host: {url}");
+    }
+    Ok(origin)
 }
 
 #[derive(Clone)]
@@ -639,7 +713,33 @@ impl SessionManager {
 }
 
 pub fn router(manager: SessionManager) -> Router {
-    Router::new()
+    router_with_options(
+        manager,
+        SocketAddr::from(([127, 0, 0, 1], 3210)),
+        WebSecurityOptions::default(),
+    )
+    .expect("default loopback web security options must be valid")
+}
+
+pub fn router_with_options(
+    manager: SessionManager,
+    bind_addr: SocketAddr,
+    web_security: WebSecurityOptions,
+) -> Result<Router> {
+    let policy = web_security.resolve(bind_addr)?;
+    let cors = CorsLayer::new()
+        .allow_origin(policy.cors_origins.clone())
+        .allow_methods([
+            Method::GET,
+            Method::HEAD,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::ACCEPT, header::CONTENT_TYPE]);
+
+    Ok(Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/app.css", get(app_css))
@@ -662,17 +762,92 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(CorsLayer::permissive())
-        .with_state(manager)
+        .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            policy,
+            enforce_browser_same_origin,
+        ))
+        .with_state(manager))
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    serve_with_options(addr, manager, WebSecurityOptions::default()).await
+}
+
+pub async fn serve_with_options(
+    addr: SocketAddr,
+    manager: SessionManager,
+    web_security: WebSecurityOptions,
+) -> Result<()> {
+    let app = router_with_options(manager, addr, web_security)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, router(manager))
+    axum::serve(listener, app)
         .await
         .context("server stopped unexpectedly")
+}
+
+async fn enforce_browser_same_origin(
+    State(policy): State<WebSecurityPolicy>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if is_safe_method(request.method()) {
+        return next.run(request).await;
+    }
+
+    let headers = request.headers();
+    let origin_values = headers.get_all(header::ORIGIN);
+    if origin_values.iter().count() > 1 {
+        return forbidden_browser_request("multiple Origin headers are not allowed");
+    }
+    let fetch_site_values = headers.get_all("sec-fetch-site");
+    if fetch_site_values.iter().count() > 1 {
+        return forbidden_browser_request("multiple Sec-Fetch-Site headers are not allowed");
+    }
+
+    let origin = origin_values.iter().next();
+    let fetch_site = fetch_site_values.iter().next();
+
+    // Non-browser clients such as the local CLI generally send neither
+    // browser header. Preserve that local API behavior while validating any
+    // request that presents browser-origin metadata.
+    if origin.is_none() && fetch_site.is_none() {
+        return next.run(request).await;
+    }
+
+    if let Some(fetch_site) = fetch_site {
+        if fetch_site.to_str().ok() != Some("same-origin") {
+            return forbidden_browser_request("unsafe browser requests must be same-origin");
+        }
+    }
+
+    if let Some(origin) = origin {
+        let Ok(origin) = origin.to_str() else {
+            return forbidden_browser_request("Origin header is not valid text");
+        };
+        if !policy.allowed_origins.contains(origin) {
+            return forbidden_browser_request("Origin is not allowed");
+        }
+    }
+
+    next.run(request).await
+}
+
+fn is_safe_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    )
+}
+
+fn forbidden_browser_request(message: &'static str) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({ "error": message })),
+    )
+        .into_response()
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -1019,6 +1194,8 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use tower::ServiceExt;
 
     #[test]
     fn parses_model_option_enums_from_api_strings() {
@@ -1082,6 +1259,24 @@ mod tests {
         .expect("session manager")
     }
 
+    fn test_router_with_public_origin(root: &std::path::Path) -> Router {
+        router_with_options(
+            test_manager(root),
+            SocketAddr::from(([127, 0, 0, 1], 3210)),
+            WebSecurityOptions {
+                public_base_url: Some(Url::parse("https://nac.example.com").unwrap()),
+                allowed_origins: Vec::new(),
+            },
+        )
+        .expect("test router")
+    }
+
+    fn cancel_request() -> axum::http::request::Builder {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/sessions/missing/cancel-active-run")
+    }
+
     #[test]
     fn create_session_request_deserializes_optional_ssh_host() {
         let with_host: CreateSessionRequest =
@@ -1121,6 +1316,144 @@ mod tests {
         assert!(error.to_string().contains("ssh_host and sandbox"));
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn web_security_rejects_non_loopback_bind_without_an_origin() {
+        let error = WebSecurityOptions::default()
+            .resolve(SocketAddr::from(([0, 0, 0, 0], 3210)))
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("non-loopback binds require --public-base-url"));
+    }
+
+    #[test]
+    fn web_security_requires_an_exact_origin_without_a_path() {
+        let options = WebSecurityOptions {
+            public_base_url: Some(Url::parse("https://nac.example.com/dashboard").unwrap()),
+            allowed_origins: Vec::new(),
+        };
+        let error = options
+            .resolve(SocketAddr::from(([127, 0, 0, 1], 3210)))
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("scheme, host, and optional port"));
+    }
+
+    #[tokio::test]
+    async fn unsafe_local_api_request_without_browser_headers_is_allowed() {
+        let root = temp_root("local_api_security");
+        let response = test_router_with_public_origin(&root)
+            .oneshot(cancel_request().body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn unsafe_browser_request_from_default_loopback_origin_is_allowed() {
+        let root = temp_root("loopback_origin_security");
+        let response = router(test_manager(&root))
+            .oneshot(
+                cancel_request()
+                    .header(header::ORIGIN, "http://127.0.0.1:3210")
+                    .header("sec-fetch-site", "same-origin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn unsafe_browser_request_from_allowed_origin_is_allowed() {
+        let root = temp_root("allowed_origin_security");
+        let response = test_router_with_public_origin(&root)
+            .oneshot(
+                cancel_request()
+                    .header(header::ORIGIN, "https://nac.example.com")
+                    .header("sec-fetch-site", "same-origin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HeaderValue::from_static("https://nac.example.com"))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn unsafe_browser_request_from_unlisted_origin_is_forbidden() {
+        let root = temp_root("unlisted_origin_security");
+        let response = test_router_with_public_origin(&root)
+            .oneshot(
+                cancel_request()
+                    .header(header::ORIGIN, "https://evil.example.com")
+                    .header("sec-fetch-site", "same-origin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn unsafe_browser_request_with_cross_site_fetch_metadata_is_forbidden() {
+        let root = temp_root("cross_site_security");
+        let response = test_router_with_public_origin(&root)
+            .oneshot(
+                cancel_request()
+                    .header(header::ORIGIN, "https://nac.example.com")
+                    .header("sec-fetch-site", "cross-site")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn safe_requests_are_not_rejected_by_origin_middleware() {
+        let root = temp_root("safe_method_security");
+        let response = test_router_with_public_origin(&root)
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/health")
+                    .header(header::ORIGIN, "https://evil.example.com")
+                    .header("sec-fetch-site", "cross-site")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 }
