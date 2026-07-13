@@ -168,6 +168,16 @@ pub struct SubmitPromptResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SideQuestionRequest {
+    pub question: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SideQuestionResponse {
+    pub answer: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct EventsQuery {
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
@@ -526,6 +536,17 @@ impl SessionManager {
         }
     }
 
+    pub async fn answer_side_question(
+        &self,
+        session_id: &str,
+        request: SideQuestionRequest,
+    ) -> Result<SideQuestionResponse> {
+        let service = self.attach_session(session_id).await?;
+        Ok(SideQuestionResponse {
+            answer: service.answer_side_question(&request.question).await?,
+        })
+    }
+
     pub async fn recent_events(
         &self,
         session_id: &str,
@@ -745,6 +766,7 @@ pub fn router(manager: SessionManager) -> Router {
             patch(update_config_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route("/sessions/{session_id}/side-question", post(side_question))
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
@@ -902,6 +924,16 @@ async fn submit_prompt(
     Ok((
         StatusCode::ACCEPTED,
         Json(manager.submit_prompt(&session_id, request).await?),
+    ))
+}
+
+async fn side_question(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(request): Json<SideQuestionRequest>,
+) -> std::result::Result<Json<SideQuestionResponse>, ApiError> {
+    Ok(Json(
+        manager.answer_side_question(&session_id, request).await?,
     ))
 }
 

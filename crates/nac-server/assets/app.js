@@ -120,6 +120,7 @@ function bindElements() {
     "paneSeparator",
     "inspectorTitle",
     "inspectorMeta",
+    "btwTrigger",
     "cancelRun",
     "mobileBack",
     "tabs",
@@ -132,6 +133,11 @@ function bindElements() {
     "transcript",
     "promptForm",
     "promptInput",
+    "btwOverlay",
+    "closeBtw",
+    "btwForm",
+    "btwQuestion",
+    "btwAnswer",
     "eventStreamStatus",
     "eventLog",
     "threadsView",
@@ -174,6 +180,12 @@ function bindEvents() {
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
+  el.closeBtw.addEventListener("click", hideBtwOverlay);
+  el.btwOverlay.addEventListener("click", (event) => {
+    if (event.target === el.btwOverlay) hideBtwOverlay();
+  });
+  el.btwForm.addEventListener("submit", submitBtw);
+  el.btwTrigger.addEventListener("click", showBtwOverlay);
   el.cancelRun.addEventListener("click", cancelActiveRun);
   el.deleteSessionBtn.addEventListener("click", () => {
     if (state.selectedId) deleteSession(state.selectedId);
@@ -912,6 +924,38 @@ function handlePromptKeydown(event) {
   if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
   event.preventDefault();
   el.promptForm.requestSubmit();
+}
+
+function showBtwOverlay() {
+  if (!state.selectedId || !sessionHasActiveRun(state.selectedId)) return;
+  el.btwAnswer.hidden = true;
+  el.btwAnswer.textContent = "";
+  el.btwQuestion.value = "";
+  el.btwOverlay.hidden = false;
+  requestAnimationFrame(() => el.btwQuestion.focus());
+}
+
+function hideBtwOverlay() {
+  el.btwOverlay.hidden = true;
+}
+
+async function submitBtw(event) {
+  event.preventDefault();
+  const sessionId = state.selectedId;
+  const question = el.btwQuestion.value.trim();
+  if (!sessionId || !question) return;
+  const submit = el.btwForm.querySelector("button[type=submit]");
+  submit.disabled = true;
+  el.btwAnswer.hidden = false;
+  el.btwAnswer.textContent = "Thinking…";
+  try {
+    const result = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/side-question`, { question });
+    el.btwAnswer.textContent = result.answer;
+  } catch (error) {
+    el.btwAnswer.textContent = `Could not answer side question: ${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 async function cancelActiveRun() {
@@ -2252,6 +2296,7 @@ function renderInspector() {
     el.snapRun.textContent = "idle";
     el.snapTokens.textContent = "--";
     el.snapContext.textContent = "--";
+    el.btwTrigger.disabled = true;
     el.cancelRun.disabled = true;
     el.deleteSessionBtn.disabled = !selectedEntry;
     el.renameSessionBtn.disabled = !selectedEntry;
@@ -2287,6 +2332,7 @@ function renderInspector() {
     const lastDur = snapshot.response_timing?.last_response_duration_ms;
     el.snapRun.textContent = lastDur != null ? formatDuration(lastDur) : "idle";
   }
+  el.btwTrigger.disabled = !runActive;
   el.cancelRun.disabled = !runActive;
   el.deleteSessionBtn.disabled = false;
   el.renameSessionBtn.disabled = false;

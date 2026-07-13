@@ -2642,3 +2642,13 @@ button.session-card {
   .thread-card-details .dense-detail-row { grid-template-columns: minmax(0, 1fr); }
   .thread-card-details pre { max-height: 40dvh; }
 }
+
+@media (max-width: 520px) {
+  .inspector-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inspector-actions {
+    justify-self: end;
+  }
+}

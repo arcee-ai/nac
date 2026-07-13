@@ -17,6 +17,7 @@ pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
+use crate::model::ModelClient;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::types::Message;
@@ -26,6 +27,10 @@ use crate::view::{
 };
 
 pub type AgentEventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
+
+const SIDE_QUESTION_CONTEXT_MAX_CHARS: usize = 8_000;
+const SIDE_QUESTION_CONTEXT_MAX_THREADS: usize = 8;
+const SIDE_QUESTION_CONTEXT_MAX_EVENTS: usize = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionMetadata {
@@ -263,6 +268,7 @@ impl SessionClientHandle {
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
+    side_question_client: ModelClient,
     metadata: Arc<SessionMetadata>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     event_bus: SessionEventBus,
@@ -332,6 +338,7 @@ impl SessionService {
         let active_threads = run_config.agent.active_threads_handle();
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
+            side_question_client: run_config.client,
             metadata: Arc::new(metadata.clone()),
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             event_bus,
@@ -547,6 +554,59 @@ impl SessionService {
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
         })
+    }
+
+    /// Answer a one-turn side question without changing the durable session or
+    /// competing with the active agent for its tool runtime. This is the
+    /// server-side equivalent of Claude Code's `/btw` command.
+    pub async fn answer_side_question(&self, question: &str) -> Result<String> {
+        let question = question.trim();
+        if question.is_empty() {
+            anyhow::bail!("side question is empty");
+        }
+
+        // Persisted messages provide the stable conversation context while a
+        // run may be mutating the live agent history. The side turn is sent
+        // without tools and is never appended or persisted.
+        let mut messages = self
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map(|snapshot| snapshot.messages.clone())
+            .unwrap_or_default();
+        let active_run = self.active_run();
+        if let Some(submitted) = active_run
+            .as_ref()
+            .and_then(|run| run.submitted_user_message.as_ref())
+        {
+            messages.push(crate::types::Message::User {
+                content: submitted.content.clone(),
+            });
+        }
+        let active_threads = self.active_thread_names().await;
+        let recent_events = self.recent_events(None, SIDE_QUESTION_CONTEXT_MAX_EVENTS);
+        let thread_episodes = self.all_thread_episodes()?;
+        let live_context = render_side_question_live_context(
+            active_run.as_ref(),
+            &active_threads,
+            &recent_events,
+            &thread_episodes,
+        );
+        messages.push(crate::types::Message::User {
+            content: format!(
+                "This is a one-turn side question. Answer it directly using the conversation context and read-only live snapshot below. The snapshot may change after capture. Do not propose edits, run tools, or continue the main task.\n\n{live_context}\n\nSide question: {question}"
+            ),
+        });
+        let response = self
+            .side_question_client
+            .send_turn(messages, Vec::new())
+            .await?;
+        response
+            .assistant
+            .content
+            .filter(|content| !content.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("side question returned no text"))
     }
 
     pub fn try_submit_prompt(
@@ -998,6 +1058,125 @@ fn prompt_preview(value: &str, max_chars: usize) -> String {
     preview
 }
 
+fn render_side_question_live_context(
+    active_run: Option<&ActiveRunSnapshot>,
+    active_threads: &[String],
+    recent_events: &[SessionEventEnvelope],
+    thread_episodes: &HashMap<String, Vec<EpisodeSnapshot>>,
+) -> String {
+    let mut context =
+        String::from("Read-only live run snapshot captured for this side question:\n");
+    match active_run {
+        Some(run) => {
+            context.push_str("Run active: yes\n");
+            context.push_str("Main task: ");
+            context.push_str(&run.prompt_preview);
+            context.push('\n');
+        }
+        None => context.push_str("Run active: no\n"),
+    }
+
+    let (running_threads, queued_threads, finished_threads) =
+        side_question_thread_states(active_run, active_threads, recent_events);
+    push_thread_list(&mut context, "Running workers", &running_threads);
+    push_thread_list(&mut context, "Queued workers", &queued_threads);
+    push_thread_list(
+        &mut context,
+        "Finished workers still in the current dispatch batch",
+        &finished_threads,
+    );
+
+    let mut latest_episodes = thread_episodes
+        .iter()
+        .filter_map(|(name, episodes)| episodes.last().map(|episode| (name, episode)))
+        .collect::<Vec<_>>();
+    latest_episodes.sort_by(|(left, _), (right, _)| left.cmp(right));
+    context.push_str("Latest retained worker summaries:\n");
+    if latest_episodes.is_empty() {
+        context.push_str("none\n");
+    } else {
+        for (name, episode) in latest_episodes
+            .into_iter()
+            .take(SIDE_QUESTION_CONTEXT_MAX_THREADS)
+        {
+            context.push_str("- ");
+            context.push_str(name);
+            context.push_str("\n  Action: ");
+            context.push_str(&prompt_preview(&episode.action, 240));
+            context.push_str("\n  Result: ");
+            context.push_str(&prompt_preview(&episode.content, 1_200));
+            context.push('\n');
+        }
+    }
+
+    truncate_chars(&context, SIDE_QUESTION_CONTEXT_MAX_CHARS)
+}
+
+fn side_question_thread_states(
+    active_run: Option<&ActiveRunSnapshot>,
+    active_threads: &[String],
+    recent_events: &[SessionEventEnvelope],
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let Some(active_run) = active_run else {
+        return (Vec::new(), Vec::new(), Vec::new());
+    };
+    let mut states = HashMap::new();
+    for envelope in recent_events {
+        if envelope.run_id.as_ref() != Some(&active_run.run_id) {
+            continue;
+        }
+        let SessionEvent::Agent { event } = &envelope.event else {
+            continue;
+        };
+        match event {
+            AgentEvent::ThreadStarted { name, .. } => {
+                states.insert(name.as_str(), true);
+            }
+            AgentEvent::ThreadFinished { name, .. } => {
+                states.insert(name.as_str(), false);
+            }
+            _ => {}
+        }
+    }
+
+    let mut running = Vec::new();
+    let mut queued = Vec::new();
+    let mut finished = Vec::new();
+    for name in active_threads {
+        match states.get(name.as_str()) {
+            Some(true) => running.push(name.clone()),
+            Some(false) => finished.push(name.clone()),
+            None => queued.push(name.clone()),
+        }
+    }
+    running.sort();
+    queued.sort();
+    finished.sort();
+    (running, queued, finished)
+}
+
+fn push_thread_list(context: &mut String, label: &str, threads: &[String]) {
+    context.push_str(&format!("{label} ({}): ", threads.len()));
+    if threads.is_empty() {
+        context.push_str("none\n");
+    } else {
+        context.push_str(&threads.join(", "));
+        context.push('\n');
+    }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut truncated = value.chars().take(max_chars - 1).collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
 fn duration_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u64::MAX as u128) as u64
 }
@@ -1178,6 +1357,120 @@ mod tests {
             }
             other => panic!("expected run started, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn side_question_live_context_includes_current_workers_and_latest_episodes() {
+        let active_run = ActiveRunSnapshot {
+            run_id: SessionRunId::new(),
+            client_id: None,
+            prompt_preview: "Inspect the dashboard architecture".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 123,
+        };
+        let mut episodes = HashMap::new();
+        episodes.insert(
+            "qa_routes".to_string(),
+            vec![
+                EpisodeSnapshot {
+                    id: 1,
+                    thread_name: "qa_routes".to_string(),
+                    session_id: "session".to_string(),
+                    action: "old action".to_string(),
+                    content: "old result".to_string(),
+                    created_at: "earlier".to_string(),
+                },
+                EpisodeSnapshot {
+                    id: 2,
+                    thread_name: "qa_routes".to_string(),
+                    session_id: "session".to_string(),
+                    action: "trace server routes".to_string(),
+                    content: "found the side-question route".to_string(),
+                    created_at: "later".to_string(),
+                },
+            ],
+        );
+
+        let context = render_side_question_live_context(
+            Some(&active_run),
+            &["qa_wait".to_string(), "qa_routes".to_string()],
+            &[
+                SessionEventEnvelope {
+                    session_id: Some("session".to_string()),
+                    sequence_id: 1,
+                    client_id: None,
+                    run_id: Some(active_run.run_id.clone()),
+                    event: SessionEvent::Agent {
+                        event: AgentEvent::ThreadStarted {
+                            name: "qa_routes".to_string(),
+                            action: "trace server routes".to_string(),
+                            source_threads: Vec::new(),
+                        },
+                    },
+                },
+                SessionEventEnvelope {
+                    session_id: Some("session".to_string()),
+                    sequence_id: 2,
+                    client_id: None,
+                    run_id: Some(active_run.run_id.clone()),
+                    event: SessionEvent::Agent {
+                        event: AgentEvent::ThreadFinished {
+                            name: "qa_routes".to_string(),
+                            exit_code: 0,
+                            timed_out: false,
+                            timeout_reason: None,
+                            usage: None,
+                        },
+                    },
+                },
+                SessionEventEnvelope {
+                    session_id: Some("session".to_string()),
+                    sequence_id: 3,
+                    client_id: None,
+                    run_id: Some(active_run.run_id.clone()),
+                    event: SessionEvent::Agent {
+                        event: AgentEvent::ThreadStarted {
+                            name: "qa_wait".to_string(),
+                            action: "continue inspecting".to_string(),
+                            source_threads: Vec::new(),
+                        },
+                    },
+                },
+            ],
+            &episodes,
+        );
+
+        assert!(context.contains("Run active: yes"));
+        assert!(context.contains("Main task: Inspect the dashboard architecture"));
+        assert!(context.contains("Running workers (1): qa_wait"));
+        assert!(context.contains("Queued workers (0): none"));
+        assert!(context.contains(
+            "Finished workers still in the current dispatch batch (1): qa_routes"
+        ));
+        assert!(context.contains("Action: trace server routes"));
+        assert!(context.contains("Result: found the side-question route"));
+        assert!(!context.contains("old result"));
+    }
+
+    #[test]
+    fn side_question_live_context_is_bounded() {
+        let mut episodes = HashMap::new();
+        episodes.insert(
+            "qa_large".to_string(),
+            vec![EpisodeSnapshot {
+                id: 1,
+                thread_name: "qa_large".to_string(),
+                session_id: "session".to_string(),
+                action: "inspect".repeat(100),
+                content: "result".repeat(2_000),
+                created_at: "now".to_string(),
+            }],
+        );
+
+        let context = render_side_question_live_context(None, &[], &[], &episodes);
+
+        assert!(context.chars().count() <= SIDE_QUESTION_CONTEXT_MAX_CHARS);
+        assert!(context.contains("Run active: no"));
     }
 
     #[test]
