@@ -1,6 +1,7 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
 use super::*;
 use anyhow::Context;
+use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -1104,36 +1105,12 @@ impl Drop for FileLock {
     }
 }
 
-#[cfg(unix)]
 fn lock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    FileExt::lock_exclusive(file)
 }
 
-#[cfg(unix)]
 fn unlock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(unix))]
-fn lock_file(_file: &File) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn unlock_file(_file: &File) -> io::Result<()> {
-    Ok(())
+    FileExt::unlock(file)
 }
 
 fn extract_account_id(token: &str) -> Option<String> {
@@ -1283,6 +1260,15 @@ mod tests {
             expires_at_ms: 123_456,
             account_id: "account-1".to_string(),
         }
+    }
+
+    #[test]
+    fn codex_lock_contends_until_release() {
+        super::super::auth_store::assert_lock_contention_and_release(
+            "codex",
+            lock_file,
+            unlock_file,
+        );
     }
 
     #[test]
