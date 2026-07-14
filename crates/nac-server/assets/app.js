@@ -56,6 +56,10 @@ const state = {
   paneDesktopMedia: null,
   settingsInitial: null,
   launchBaseUrlRestoreValue: "",
+  launchConfiguredBackend: null,
+  launchDefaultsRequestGeneration: 0,
+  launchFormVersion: 0,
+  launchSubmitting: false,
 };
 
 const el = {};
@@ -179,7 +183,12 @@ function bindElements() {
 
 function bindEvents() {
   el.launchForm.addEventListener("submit", createSession);
+  el.launchForm.addEventListener("input", () => {
+    state.launchFormVersion += 1;
+  });
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
+  el.launchSshHost.addEventListener("change", refreshOpenLaunchModelDefaults);
+  el.launchCwd.addEventListener("change", refreshOpenLaunchModelDefaults);
   el.launchBackend.addEventListener("change", renderLaunchBaseUrlControl);
   el.launchCredentialMode.addEventListener("change", renderCredentialControls);
   el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
@@ -695,6 +704,7 @@ function showLaunchOverlay() {
     setLaunchStatus("", false);
   }
   el.launchOverlay.hidden = false;
+  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
   requestAnimationFrame(() => {
     el.launchCwd.focus();
     el.launchCwd.select();
@@ -703,6 +713,80 @@ function showLaunchOverlay() {
 
 function hideLaunchOverlay() {
   el.launchOverlay.hidden = true;
+  state.launchDefaultsRequestGeneration += 1;
+}
+
+function launchLocationFromValues(values) {
+  const sshHost = nullable(values?.ssh_host);
+  return {
+    cwd: sshHost ? (nullable(values?.cwd) || "~") : nullable(values?.cwd),
+    ssh_host: sshHost,
+  };
+}
+
+function launchLocationKey(location) {
+  return JSON.stringify([location?.cwd || null, location?.ssh_host || null]);
+}
+
+async function fetchLaunchModelDefaultsForValues(values, postDefaults = apiPost) {
+  const location = launchLocationFromValues(values);
+  const defaults = await postDefaults("/sessions/launch-defaults", location);
+  return { defaults, location };
+}
+
+function beginLaunchModelDefaultsRequest(showStatus) {
+  const requestGeneration = ++state.launchDefaultsRequestGeneration;
+  state.launchConfiguredBackend = null;
+  renderLaunchBaseUrlControl();
+  if (showStatus) setLaunchStatus("refreshing launch defaults", false);
+  return requestGeneration;
+}
+
+function applyLaunchModelDefaults(defaults) {
+  state.launchConfiguredBackend = defaults?.configured_model_backend || null;
+  renderLaunchBaseUrlControl();
+}
+
+async function refreshLaunchModelDefaults({ showStatus = false, postDefaults = apiPost } = {}) {
+  const requestGeneration = beginLaunchModelDefaultsRequest(showStatus);
+  const values = {
+    cwd: el.launchCwd.value,
+    ssh_host: el.launchSshHost.value,
+  };
+  const expectedLocation = launchLocationFromValues(values);
+  const expectedKey = launchLocationKey(expectedLocation);
+  try {
+    const refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+    const currentLocation = launchLocationFromValues({
+      cwd: el.launchCwd.value,
+      ssh_host: el.launchSshHost.value,
+    });
+    const applied = requestGeneration === state.launchDefaultsRequestGeneration
+      && !el.launchOverlay.hidden
+      && launchLocationKey(currentLocation) === expectedKey;
+    if (applied) {
+      applyLaunchModelDefaults(refreshed.defaults);
+      if (showStatus && el.launchStatus.textContent === "refreshing launch defaults") {
+        setLaunchStatus("", false);
+      }
+    }
+    return { ...refreshed, applied, requestGeneration };
+  } catch (error) {
+    if (requestGeneration === state.launchDefaultsRequestGeneration
+        && !el.launchOverlay.hidden
+        && launchLocationKey(launchLocationFromValues({
+          cwd: el.launchCwd.value,
+          ssh_host: el.launchSshHost.value,
+        })) === expectedKey) {
+      setLaunchStatus(error.message, true);
+    }
+    throw error;
+  }
+}
+
+function refreshOpenLaunchModelDefaults() {
+  if (el.launchOverlay.hidden) return;
+  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
 }
 
 function showDeleteOverlay(sessionId) {
@@ -893,76 +977,94 @@ function showMobileSessions() {
 
 async function createSession(event) {
   event.preventDefault();
-  renderLaunchBaseUrlControl();
-
-  let modelPayload;
-  try {
-    modelPayload = buildLaunchModelPayload({
-      model: el.launchModel.value,
-      base_url: el.launchBaseUrl.value,
-      backend: el.launchBackend.value,
-      reasoning_effort: el.launchEffort.value,
-      credential_mode: el.launchCredentialMode.value,
-      api_key_env: el.launchApiKeyEnv.value,
-      extra_headers: el.launchExtraHeaders.value,
-      configured_backend: state.store?.configured_model_backend,
-    });
-  } catch (validationError) {
-    setLaunchStatus(validationError.message, true);
-    return;
-  }
-
-  setLaunchStatus("launching", false);
-  const initialPrompt = el.initialPrompt.value.trim();
-  const sshHost = nullable(el.launchSshHost.value);
-  const body = {
-    cwd: sshHost ? (nullable(el.launchCwd.value) || "~") : nullable(el.launchCwd.value),
-    ssh_host: sshHost,
-    ...modelPayload,
-  };
-  if (!sshHost) {
-    body.sandbox = {
-      enabled: el.sandboxEnabled.checked,
-      no_mount_cwd: el.sandboxNoMount.checked,
-      image: nullable(el.sandboxImage.value),
-      gpus: csv(el.sandboxGpu.value),
-      workdir: nullable(el.sandboxWorkdir.value),
-      shm_size: nullable(el.sandboxShm.value),
-      mounts: csv(el.sandboxMounts.value),
-      mounts_ro: [],
-    };
-  }
+  if (state.launchSubmitting) return;
+  state.launchSubmitting = true;
+  const submittedFormVersion = state.launchFormVersion;
 
   try {
-    const snapshot = await apiPost("/sessions", body);
-    const sessionId = snapshot.metadata.session_id;
-    state.snapshots.set(sessionId, snapshot);
-    state.selectedId = sessionId;
-    await loadSessions({ forceFetch: true, workspaceStats: true });
-    hideLaunchOverlay();
-    selectSession(sessionId);
-    setLaunchStatus(`launched ${shortId(sessionId)}`, false);
-    if (initialPrompt) {
-      const hadAttention = state.attentionSessions.has(sessionId);
-      markRunSubmitting(sessionId);
-      clearSessionAttention(sessionId);
-      requestChatScrollToBottom();
-      requestRender({ shell: false, sessions: hadAttention, inspector: true });
-      try {
-        await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
-        scheduleRunSubmittingGrace(sessionId);
-        el.initialPrompt.value = "";
-        setLaunchStatus(`running ${shortId(sessionId)}`, false);
-        await loadSnapshot(sessionId, false);
-      } catch (error) {
-        clearRunSubmitting(sessionId);
-        state.activeRunsBySession.set(sessionId, false);
-        requestInspectorRender();
-        throw error;
-      }
+    let refreshed;
+    try {
+      refreshed = await refreshLaunchModelDefaults({ showStatus: true });
+    } catch (_) {
+      return;
     }
-  } catch (error) {
-    setLaunchStatus(error.message, true);
+    if (!refreshed.applied) {
+      return;
+    }
+    if (submittedFormVersion !== state.launchFormVersion) {
+      setLaunchStatus("Launch form changed while defaults were refreshing; submit again", true);
+      return;
+    }
+
+    let modelPayload;
+    try {
+      modelPayload = buildLaunchModelPayload({
+        model: el.launchModel.value,
+        base_url: el.launchBaseUrl.value,
+        backend: el.launchBackend.value,
+        reasoning_effort: el.launchEffort.value,
+        credential_mode: el.launchCredentialMode.value,
+        api_key_env: el.launchApiKeyEnv.value,
+        extra_headers: el.launchExtraHeaders.value,
+        configured_backend: refreshed.defaults?.configured_model_backend,
+      });
+    } catch (validationError) {
+      setLaunchStatus(validationError.message, true);
+      return;
+    }
+
+    setLaunchStatus("launching", false);
+    const initialPrompt = el.initialPrompt.value.trim();
+    const body = {
+      ...refreshed.location,
+      ...modelPayload,
+    };
+    if (!refreshed.location.ssh_host) {
+      body.sandbox = {
+        enabled: el.sandboxEnabled.checked,
+        no_mount_cwd: el.sandboxNoMount.checked,
+        image: nullable(el.sandboxImage.value),
+        gpus: csv(el.sandboxGpu.value),
+        workdir: nullable(el.sandboxWorkdir.value),
+        shm_size: nullable(el.sandboxShm.value),
+        mounts: csv(el.sandboxMounts.value),
+        mounts_ro: [],
+      };
+    }
+
+    try {
+      const snapshot = await apiPost("/sessions", body);
+      const sessionId = snapshot.metadata.session_id;
+      state.snapshots.set(sessionId, snapshot);
+      state.selectedId = sessionId;
+      await loadSessions({ forceFetch: true, workspaceStats: true });
+      hideLaunchOverlay();
+      selectSession(sessionId);
+      setLaunchStatus(`launched ${shortId(sessionId)}`, false);
+      if (initialPrompt) {
+        const hadAttention = state.attentionSessions.has(sessionId);
+        markRunSubmitting(sessionId);
+        clearSessionAttention(sessionId);
+        requestChatScrollToBottom();
+        requestRender({ shell: false, sessions: hadAttention, inspector: true });
+        try {
+          await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
+          scheduleRunSubmittingGrace(sessionId);
+          el.initialPrompt.value = "";
+          setLaunchStatus(`running ${shortId(sessionId)}`, false);
+          await loadSnapshot(sessionId, false);
+        } catch (error) {
+          clearRunSubmitting(sessionId);
+          state.activeRunsBySession.set(sessionId, false);
+          requestInspectorRender();
+          throw error;
+        }
+      }
+    } catch (error) {
+      setLaunchStatus(error.message, true);
+    }
+  } finally {
+    state.launchSubmitting = false;
   }
 }
 
@@ -4654,7 +4756,7 @@ function renderLaunchBaseUrlControl() {
       restoreValue: state.launchBaseUrlRestoreValue,
     },
     el.launchBackend.value,
-    state.store?.configured_model_backend,
+    state.launchConfiguredBackend,
   );
   el.launchBaseUrl.value = next.value;
   el.launchBaseUrl.readOnly = next.readOnly;

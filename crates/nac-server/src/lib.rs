@@ -68,6 +68,12 @@ struct SessionManagerInner {
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
 }
 
+struct ResolvedLaunchLocation {
+    workspace_cwd: PathBuf,
+    config_cwd: PathBuf,
+    ssh_host: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct WorkspaceDiffCacheEntry {
     updated_at: Instant,
@@ -79,7 +85,18 @@ pub struct StoreInfo {
     pub root_cwd: PathBuf,
     pub store_path: PathBuf,
     pub worker_executable: PathBuf,
-    /// Backend selected by the current server-side config for inherited launches.
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LaunchModelDefaultsRequest {
+    pub cwd: Option<PathBuf>,
+    /// OpenSSH target for remote sessions; remote paths never select local config.
+    #[serde(default, alias = "host_id")]
+    pub ssh_host: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LaunchModelDefaults {
     pub configured_model_backend: Option<BackendKind>,
 }
 
@@ -323,15 +340,58 @@ impl SessionManager {
     }
 
     pub fn store_info(&self) -> StoreInfo {
-        let configured_model_backend = NacConfig::load_from_cwd(&self.inner.root_cwd)
-            .ok()
-            .and_then(|config| config.model.backend);
         StoreInfo {
             root_cwd: self.inner.root_cwd.clone(),
             store_path: self.inner.store_path.clone(),
             worker_executable: self.inner.worker_executable.clone(),
-            configured_model_backend,
         }
+    }
+
+    fn resolve_launch_location(
+        &self,
+        cwd: Option<PathBuf>,
+        ssh_host: Option<String>,
+    ) -> Result<ResolvedLaunchLocation> {
+        let ssh_host = ssh_host
+            .as_deref()
+            .map(str::trim)
+            .filter(|ssh_host| !ssh_host.is_empty())
+            .map(str::to_string);
+        let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
+            let remote_cwd = cwd
+                .and_then(|cwd| {
+                    let trimmed = cwd.as_os_str().to_string_lossy().trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(trimmed))
+                    }
+                })
+                .unwrap_or_else(|| PathBuf::from("~"));
+            (remote_cwd, self.inner.root_cwd.clone())
+        } else {
+            let local_cwd = match cwd {
+                Some(cwd) => canonicalize_dir(cwd)?,
+                None => self.inner.root_cwd.clone(),
+            };
+            (local_cwd.clone(), local_cwd)
+        };
+        Ok(ResolvedLaunchLocation {
+            workspace_cwd,
+            config_cwd,
+            ssh_host,
+        })
+    }
+
+    pub fn launch_model_defaults(
+        &self,
+        request: LaunchModelDefaultsRequest,
+    ) -> Result<LaunchModelDefaults> {
+        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        Ok(LaunchModelDefaults {
+            configured_model_backend: config.model.backend,
+        })
     }
 
     pub async fn list_sessions(
@@ -488,38 +548,13 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let ssh_host = request
-            .ssh_host
-            .as_deref()
-            .map(str::trim)
-            .filter(|ssh_host| !ssh_host.is_empty())
-            .map(str::to_string);
-        if ssh_host.is_some() && sandbox_requested(&request.sandbox) {
+        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        if location.ssh_host.is_some() && sandbox_requested(&request.sandbox) {
             return Err(anyhow!(
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
         }
-        let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
-            let remote_cwd = request
-                .cwd
-                .and_then(|cwd| {
-                    let trimmed = cwd.as_os_str().to_string_lossy().trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(PathBuf::from(trimmed))
-                    }
-                })
-                .unwrap_or_else(|| PathBuf::from("~"));
-            (remote_cwd, self.inner.root_cwd.clone())
-        } else {
-            let local_cwd = match request.cwd {
-                Some(cwd) => canonicalize_dir(cwd)?,
-                None => self.inner.root_cwd.clone(),
-            };
-            (local_cwd.clone(), local_cwd)
-        };
-        let config = NacConfig::load_from_cwd(&config_cwd)?;
+        let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let model = model_options(
             request.model,
             request.base_url,
@@ -530,15 +565,15 @@ impl SessionManager {
         )?;
         let run_config = runtime::build_run_config(
             RunOptions {
-                workspace_cwd,
-                config_cwd: Some(config_cwd.clone()),
+                workspace_cwd: location.workspace_cwd,
+                config_cwd: Some(location.config_cwd.clone()),
                 worker_executable: Some(self.inner.worker_executable.clone()),
                 store: StoreOptions {
                     store_path: Some(self.inner.store_path.clone()),
                 },
                 model,
                 sandbox: sandbox_options(request.sandbox),
-                ssh_host,
+                ssh_host: location.ssh_host,
             },
             &config,
         )
@@ -885,6 +920,10 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route("/health", get(health))
         .route("/store", get(store_info))
+        .route(
+            "/sessions/launch-defaults",
+            post(launch_model_defaults_handler),
+        )
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/order", put(reorder_sessions_handler))
         .route(
@@ -981,6 +1020,14 @@ async fn vendor_markdown_it_js() -> impl IntoResponse {
 
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
+}
+
+async fn launch_model_defaults_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<LaunchModelDefaultsRequest>, JsonRejection>,
+) -> std::result::Result<Json<LaunchModelDefaults>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.launch_model_defaults(request)?))
 }
 
 async fn list_sessions(
@@ -1860,8 +1907,19 @@ mod tests {
 
     impl ScopedModelEnv {
         fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
+            Self::with_config_home(Some(nac_home), None, None, openai_api_key)
+        }
+
+        fn with_config_home(
+            nac_home: Option<&std::path::Path>,
+            xdg_config_home: Option<&std::path::Path>,
+            home: Option<&std::path::Path>,
+            openai_api_key: Option<&str>,
+        ) -> Self {
             let names = [
                 "NAC_HOME",
+                "XDG_CONFIG_HOME",
+                "HOME",
                 "OPENAI_API_KEY",
                 "OPENAI_BASE_URL",
                 "SECOND_API_KEY",
@@ -1871,7 +1929,16 @@ mod tests {
                 .map(|name| (name, std::env::var_os(name)))
                 .collect();
             unsafe {
-                std::env::set_var("NAC_HOME", nac_home);
+                for (name, value) in [
+                    ("NAC_HOME", nac_home),
+                    ("XDG_CONFIG_HOME", xdg_config_home),
+                    ("HOME", home),
+                ] {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
                 match openai_api_key {
                     Some(value) => std::env::set_var("OPENAI_API_KEY", value),
                     None => std::env::remove_var("OPENAI_API_KEY"),
@@ -1956,13 +2023,17 @@ mod tests {
     }
 
     #[test]
-    fn store_info_exposes_the_current_configured_model_backend() {
+    fn launch_defaults_reload_config_after_manager_boot() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-        let root = temp_root("store_info_backend");
+        let root = temp_root("launch_defaults_reload");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
         let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
+        let request = || LaunchModelDefaultsRequest {
+            cwd: Some(root.clone()),
+            ssh_host: None,
+        };
 
         std::fs::write(
             nac_home.join("config.toml"),
@@ -1970,7 +2041,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            manager.store_info().configured_model_backend,
+            manager
+                .launch_model_defaults(request())
+                .unwrap()
+                .configured_model_backend,
             Some(BackendKind::ArceeAuth)
         );
 
@@ -1979,17 +2053,103 @@ mod tests {
             "[model]\nbackend = \"chatgpt-codex-responses\"\n",
         )
         .unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(
-            manager.store_info().configured_model_backend,
+            defaults.configured_model_backend,
             Some(BackendKind::ChatGptCodexResponses)
         );
-
-        let serialized = serde_json::to_value(manager.store_info()).unwrap();
         assert_eq!(
-            serialized["configured_model_backend"],
+            serde_json::to_value(defaults).unwrap()["configured_model_backend"],
             "chatgpt-codex-responses"
         );
+        assert!(
+            serde_json::to_value(manager.store_info())
+                .unwrap()
+                .get("configured_model_backend")
+                .is_none(),
+            "root-only launch metadata must not remain on /store"
+        );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn launch_defaults_use_local_cwd_but_server_root_for_ssh_with_relative_config_homes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        for config_home_kind in ["NAC_HOME", "XDG_CONFIG_HOME", "HOME"] {
+            let root = temp_root(&format!("launch_defaults_{config_home_kind}"));
+            let workspace_a = root.join("workspace-a");
+            let workspace_b = root.join("workspace-b");
+            std::fs::create_dir_all(&workspace_a).unwrap();
+            std::fs::create_dir_all(&workspace_b).unwrap();
+            let relative_home = std::path::Path::new("relative-config-home");
+            let _env = match config_home_kind {
+                "NAC_HOME" => {
+                    ScopedModelEnv::with_config_home(Some(relative_home), None, None, None)
+                }
+                "XDG_CONFIG_HOME" => {
+                    ScopedModelEnv::with_config_home(None, Some(relative_home), None, None)
+                }
+                "HOME" => ScopedModelEnv::with_config_home(None, None, Some(relative_home), None),
+                _ => unreachable!(),
+            };
+            let config_dir = |cwd: &std::path::Path| match config_home_kind {
+                "NAC_HOME" => cwd.join(relative_home),
+                "XDG_CONFIG_HOME" => cwd.join(relative_home).join("nac"),
+                "HOME" => cwd.join(relative_home).join(".config").join("nac"),
+                _ => unreachable!(),
+            };
+            for (cwd, backend) in [
+                (&root, "openai-responses"),
+                (&workspace_a, "arcee-auth"),
+                (&workspace_b, "chatgpt-codex-responses"),
+            ] {
+                let dir = config_dir(cwd);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    dir.join("config.toml"),
+                    format!("[model]\nbackend = \"{backend}\"\n"),
+                )
+                .unwrap();
+            }
+            let manager = test_manager(&root);
+
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(workspace_a.clone()),
+                        ssh_host: None,
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::ArceeAuth),
+                "{config_home_kind} local workspace A"
+            );
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(workspace_b.clone()),
+                        ssh_host: None,
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::ChatGptCodexResponses),
+                "{config_home_kind} local workspace B"
+            );
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(std::path::PathBuf::from("remote/project")),
+                        ssh_host: Some(" build-box ".to_string()),
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::OpenAiResponses),
+                "{config_home_kind} SSH must use the server root"
+            );
+
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]

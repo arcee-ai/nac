@@ -10,7 +10,7 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl, launchLocationFromValues, fetchLaunchModelDefaultsForValues };`,
   context,
   { filename: "app.js" },
 );
@@ -24,6 +24,8 @@ const {
   serializeExtraHeaders,
   managedLaunchBaseUrl,
   nextLaunchBaseUrlControl,
+  launchLocationFromValues,
+  fetchLaunchModelDefaultsForValues,
 } = context.module.exports;
 
 function plain(value) {
@@ -183,6 +185,99 @@ test("managed launch backends lock canonical URLs and restore the non-managed dr
   assert.equal(managedLaunchBaseUrl("arcee-api"), null);
   assert.match(appSource, /launchBackend\.addEventListener\("change", renderLaunchBaseUrlControl\)/);
   assert.match(appSource, /el\.launchBaseUrl\.readOnly = next\.readOnly/);
+});
+
+test("launch defaults requests use creation-equivalent local and SSH locations", async () => {
+  const requests = [];
+  const postDefaults = async (path, body) => {
+    requests.push([path, body]);
+    return { configured_model_backend: "arcee-auth" };
+  };
+
+  const local = await fetchLaunchModelDefaultsForValues({
+    cwd: " /repo/worktree ",
+    ssh_host: "",
+  }, postDefaults);
+  const remote = await fetchLaunchModelDefaultsForValues({
+    cwd: "   ",
+    ssh_host: " build-box ",
+  }, postDefaults);
+
+  assert.deepEqual(plain(local.location), { cwd: "/repo/worktree", ssh_host: null });
+  assert.deepEqual(plain(remote.location), { cwd: "~", ssh_host: "build-box" });
+  assert.deepEqual(plain(requests), [
+    ["/sessions/launch-defaults", { cwd: "/repo/worktree", ssh_host: null }],
+    ["/sessions/launch-defaults", { cwd: "~", ssh_host: "build-box" }],
+  ]);
+});
+
+test("each launch refreshes changed config before payload construction and preserves the base draft", async () => {
+  let configuredBackend = "openai-responses";
+  const requests = [];
+  const postDefaults = async (path, body) => {
+    requests.push([path, body, configuredBackend]);
+    return { configured_model_backend: configuredBackend };
+  };
+  const values = launchValues({
+    cwd: "/repo",
+    base_url: "https://custom.example/v1",
+  });
+  let control = {
+    value: values.base_url,
+    readOnly: false,
+    restoreValue: "",
+  };
+
+  let refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  let payload = buildLaunchModelPayload({
+    ...values,
+    configured_backend: refreshed.defaults.configured_model_backend,
+  });
+  assert.deepEqual(plain(payload), { base_url: "https://custom.example/v1" });
+
+  configuredBackend = "arcee-auth";
+  refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    values.backend,
+    refreshed.defaults.configured_model_backend,
+  ));
+  payload = buildLaunchModelPayload({
+    ...values,
+    base_url: control.value,
+    configured_backend: refreshed.defaults.configured_model_backend,
+  });
+  assert.deepEqual(control, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+  assert.deepEqual(plain(payload), {});
+
+  configuredBackend = "openai-responses";
+  refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    values.backend,
+    refreshed.defaults.configured_model_backend,
+  ));
+  assert.deepEqual(control, {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "https://custom.example/v1",
+  });
+  assert.equal(requests.length, 3, "defaults must be fetched for every launch attempt");
+
+  const createSource = appSource.match(/async function createSession[\s\S]*?\n}\n\nasync function submitPrompt/)[0];
+  assert.ok(
+    createSource.indexOf("await refreshLaunchModelDefaults")
+      < createSource.indexOf("buildLaunchModelPayload"),
+    "submission must await refreshed defaults before building its payload",
+  );
+  assert.doesNotMatch(createSource, /state\.store.*configured_model_backend/);
+  assert.match(appSource, /showLaunchOverlay[\s\S]*refreshLaunchModelDefaults/);
+  assert.match(appSource, /launchCwd\.addEventListener\("change", refreshOpenLaunchModelDefaults\)/);
+  assert.match(appSource, /launchSshHost\.addEventListener\("change", refreshOpenLaunchModelDefaults\)/);
 });
 
 test("managed launch payloads override explicit backends but preserve inherited config", () => {
