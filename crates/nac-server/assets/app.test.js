@@ -178,6 +178,17 @@ test("managed launch backends lock canonical URLs and restore the non-managed dr
     readOnly: true,
     restoreValue: "",
   });
+  const inheritedServerValue = plain(nextLaunchBaseUrlControl(
+    { value: "", readOnly: false, restoreValue: "" },
+    "",
+    "chatgpt-codex-responses",
+    "https://chatgpt.com/backend-api",
+  ));
+  assert.deepEqual(inheritedServerValue, {
+    value: "https://chatgpt.com/backend-api",
+    readOnly: true,
+    restoreValue: "",
+  });
   assert.deepEqual(
     plain(nextLaunchBaseUrlControl(inherited, "", "openai-responses")),
     { value: "", readOnly: false, restoreValue: "" },

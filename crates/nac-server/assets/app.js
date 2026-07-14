@@ -57,6 +57,7 @@ const state = {
   settingsInitial: null,
   launchBaseUrlRestoreValue: "",
   launchConfiguredBackend: null,
+  launchConfiguredBaseUrl: null,
   launchDefaultsRequestGeneration: 0,
   launchFormVersion: 0,
   launchSubmitting: false,
@@ -737,6 +738,7 @@ async function fetchLaunchModelDefaultsForValues(values, postDefaults = apiPost)
 function beginLaunchModelDefaultsRequest(showStatus) {
   const requestGeneration = ++state.launchDefaultsRequestGeneration;
   state.launchConfiguredBackend = null;
+  state.launchConfiguredBaseUrl = null;
   renderLaunchBaseUrlControl();
   if (showStatus) setLaunchStatus("refreshing launch defaults", false);
   return requestGeneration;
@@ -744,6 +746,7 @@ function beginLaunchModelDefaultsRequest(showStatus) {
 
 function applyLaunchModelDefaults(defaults) {
   state.launchConfiguredBackend = defaults?.configured_model_backend || null;
+  state.launchConfiguredBaseUrl = defaults?.configured_model_base_url || null;
   renderLaunchBaseUrlControl();
 }
 
@@ -4646,16 +4649,24 @@ function effectiveLaunchBackend(selectedBackend, configuredBackend) {
   return String(selectedBackend || "").trim() || String(configuredBackend || "").trim();
 }
 
-function nextLaunchBaseUrlControl(current, selectedBackend, configuredBackend) {
+function nextLaunchBaseUrlControl(
+  current,
+  selectedBackend,
+  configuredBackend,
+  configuredBaseUrl = null,
+) {
   const value = String(current?.value ?? "");
   const readOnly = Boolean(current?.readOnly);
   const restoreValue = String(current?.restoreValue ?? "");
-  const managedUrl = managedLaunchBaseUrl(
-    effectiveLaunchBackend(selectedBackend, configuredBackend),
-  );
-  if (managedUrl) {
+  const explicitBackend = String(selectedBackend || "").trim();
+  const effectiveBackend = effectiveLaunchBackend(explicitBackend, configuredBackend);
+  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
+  const effectiveManagedUrl = managedUrl && !explicitBackend
+    ? (String(configuredBaseUrl || "").trim() || managedUrl)
+    : managedUrl;
+  if (effectiveManagedUrl) {
     return {
-      value: managedUrl,
+      value: effectiveManagedUrl,
       readOnly: true,
       restoreValue: readOnly ? restoreValue : value,
     };
@@ -4757,6 +4768,7 @@ function renderLaunchBaseUrlControl() {
     },
     el.launchBackend.value,
     state.launchConfiguredBackend,
+    state.launchConfiguredBaseUrl,
   );
   el.launchBaseUrl.value = next.value;
   el.launchBaseUrl.readOnly = next.readOnly;

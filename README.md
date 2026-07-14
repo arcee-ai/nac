@@ -16,9 +16,9 @@ The installer places two binaries in `$HOME/.local/bin` by default:
 - `nac-web`: the web dashboard for managing multiple sessions.
 - `nac`: the terminal UI and utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 
-Before launching a new session, configure an explicit `backend`, `model`, and `base_url`. API-key backends also require `api_key_env`, the exact name of the one environment variable NAC may read for that session. The full contract and examples are under [Model configuration](#model-configuration).
+Before launching a new session, configure an explicit `backend` and `model`. Most backends also require `base_url`; the managed `chatgpt-codex-responses` and `arcee-auth` backends materialize their fixed canonical URL when it is omitted. API-key backends also require `api_key_env`, the exact name of the one environment variable NAC may read for that session. The full contract and examples are under [Model configuration](#model-configuration).
 
-To use ChatGPT Codex OAuth instead of an API key, run `nac codex-auth login` and complete the device-code flow in a browser, then select `chatgpt-codex-responses` with its required model and canonical base URL.
+To use ChatGPT Codex OAuth instead of an API key, run `nac codex-auth login` and complete the device-code flow in a browser, then select `chatgpt-codex-responses` with its required model. An omitted base URL resolves to `https://chatgpt.com/backend-api`.
 
 Linux installs use the portable static build.
 
@@ -91,7 +91,7 @@ smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mou
 
 ## Model configuration
 
-Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. The resulting `backend`, `model`, and `base_url` must all be present and nonblank before the session is created.
+Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
 
 Model selection is config-first, not environment-driven:
 
@@ -170,13 +170,13 @@ Supported MCP transports right now are `stdio` and `streamable_http`. Stdio serv
 
 ### ChatGPT Codex OAuth
 
-Run `nac codex-auth login`, `nac codex-auth status`, or `nac codex-auth logout` to manage Codex OAuth. Login requests device codes from `https://auth.openai.com/api/accounts/deviceauth/usercode`, polls `https://auth.openai.com/api/accounts/deviceauth/token`, opens `https://auth.openai.com/codex/device` for browser verification, and exchanges or refreshes tokens at `https://auth.openai.com/oauth/token`. The `chatgpt-codex-responses` backend requires `base_url = "https://chatgpt.com/backend-api"` exactly (an optional trailing slash is accepted) and sends non-streaming Responses requests to `https://chatgpt.com/backend-api/codex/responses`. It reads OAuth only from `auth.json` and never accepts an API-key selector.
+Run `nac codex-auth login`, `nac codex-auth status`, or `nac codex-auth logout` to manage Codex OAuth. Login requests device codes from `https://auth.openai.com/api/accounts/deviceauth/usercode`, polls `https://auth.openai.com/api/accounts/deviceauth/token`, opens `https://auth.openai.com/codex/device` for browser verification, and exchanges or refreshes tokens at `https://auth.openai.com/oauth/token`. The `chatgpt-codex-responses` backend materializes `base_url = "https://chatgpt.com/backend-api"` when the setting is absent; an explicitly supplied value must still pass the managed Codex endpoint checks (an optional trailing slash is accepted). It sends non-streaming Responses requests to `https://chatgpt.com/backend-api/codex/responses`, reads OAuth only from `auth.json`, and never accepts an API-key selector.
 
 ### Arcee managed auth and API keys
 
 Arcee credential mode is explicit:
 
-- `arcee-auth` reads the API key and inference origin saved by `nac arcee-auth login` in `arcee_auth.json`. It rejects `api_key_env`, and the required configured `base_url` must have the same origin as the stored credential.
+- `arcee-auth` reads the API key and inference origin saved by `nac arcee-auth login` in `arcee_auth.json`. It rejects `api_key_env`. When `base_url` is absent NAC materializes `https://api.arcee.ai/api/v1`; a configured value must have the same origin as the stored credential.
 - `arcee-api` never reads `arcee_auth.json`. It requires `api_key_env` and uses only that selected environment variable.
 
 Manage the stored Arcee login with:
@@ -191,13 +191,13 @@ The login control plane is fixed at `https://api.arcee.ai`, using `/app/v1/devic
 
 Both Arcee backends accept only `https` origins on `arcee.ai` or its subdomains with effective port 443. Accepted inference paths are `/`, `/api`, `/api/v1`, and `/api/v1/chat/completions`; all resolve to `/api/v1/chat/completions`. Other hosts and path forms are rejected.
 
-A managed login still needs the complete model tuple:
+A managed login needs a model and may omit the fixed production base URL:
 
 ```toml
 [model]
 backend = "arcee-auth"
 model = "trinity-large-thinking"
-base_url = "https://api.arcee.ai"
+# base_url defaults to "https://api.arcee.ai/api/v1"
 ```
 
 An Arcee API-key session instead selects its key variable explicitly:

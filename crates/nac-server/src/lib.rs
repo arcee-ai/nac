@@ -23,8 +23,8 @@ use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{SessionEventEnvelope, SessionReplayGap},
     model::{
-        validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
-        ReasoningEffort,
+        managed_backend_base_url, resolve_model_base_url, validate_model_configuration,
+        BackendKind, EffectiveModelSettings, ModelConfigurationError, ReasoningEffort,
     },
     runtime::{
         self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
@@ -98,6 +98,9 @@ pub struct LaunchModelDefaultsRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchModelDefaults {
     pub configured_model_backend: Option<BackendKind>,
+    /// Effective configured base URL after applying the managed-backend-only
+    /// fixed URL invariant. Other incomplete backends remain `None`.
+    pub configured_model_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -389,8 +392,16 @@ impl SessionManager {
     ) -> Result<LaunchModelDefaults> {
         let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let configured_model_backend = config.model.backend;
+        let configured_model_base_url = match configured_model_backend {
+            Some(backend) if managed_backend_base_url(backend).is_some() => Some(
+                resolve_model_base_url(backend, config.model.base_url.clone())?,
+            ),
+            _ => config.model.base_url.clone(),
+        };
         Ok(LaunchModelDefaults {
-            configured_model_backend: config.model.backend,
+            configured_model_backend,
+            configured_model_base_url,
         })
     }
 
@@ -848,7 +859,7 @@ impl SessionManager {
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) =
-            parse_prospective_model_config(&prospective)?;
+            parse_prospective_model_config(&mut prospective)?;
 
         let _settings = EffectiveModelSettings::new(
             backend,
@@ -1331,14 +1342,13 @@ fn apply_raw_config_patch(
 }
 
 fn parse_prospective_model_config(
-    config: &sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionModelConfig,
 ) -> Result<(
     BackendKind,
     Option<ReasoningEffort>,
     BTreeMap<String, String>,
 )> {
     nonblank_request_string(config.model.clone(), "model")?;
-    nonblank_request_string(config.base_url.clone(), "base_url")?;
     let backend_raw = config.backend.as_deref().ok_or_else(|| {
         request_configuration_error(
             "invalid model configuration: required field 'backend' is missing; explicitly select a backend",
@@ -1346,6 +1356,15 @@ fn parse_prospective_model_config(
     })?;
     let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
     let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
+    // A zero-length stored value is how legacy/incomplete rows represent an
+    // absent NOT NULL base_url. Concrete request values are rejected before
+    // reaching this point, so only repair can take the managed default path.
+    let stored_base_url = if config.base_url.is_empty() {
+        None
+    } else {
+        Some(config.base_url.clone())
+    };
+    config.base_url = resolve_model_base_url(backend, stored_base_url)?;
     let reasoning_effort = config
         .reasoning_effort
         .as_deref()
@@ -2040,12 +2059,14 @@ mod tests {
             "[model]\nbackend = \"arcee-auth\"\n",
         )
         .unwrap();
+        let arcee_defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(
-            manager
-                .launch_model_defaults(request())
-                .unwrap()
-                .configured_model_backend,
+            arcee_defaults.configured_model_backend,
             Some(BackendKind::ArceeAuth)
+        );
+        assert_eq!(
+            arcee_defaults.configured_model_base_url.as_deref(),
+            Some(nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL)
         );
 
         std::fs::write(
@@ -2059,8 +2080,17 @@ mod tests {
             Some(BackendKind::ChatGptCodexResponses)
         );
         assert_eq!(
-            serde_json::to_value(defaults).unwrap()["configured_model_backend"],
+            defaults.configured_model_base_url.as_deref(),
+            Some(nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL)
+        );
+        let serialized_defaults = serde_json::to_value(defaults).unwrap();
+        assert_eq!(
+            serialized_defaults["configured_model_backend"],
             "chatgpt-codex-responses"
+        );
+        assert_eq!(
+            serialized_defaults["configured_model_base_url"],
+            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
         );
         assert!(
             serde_json::to_value(manager.store_info())
@@ -3197,6 +3227,204 @@ extra_headers = { X-Config = "yes" }
         assert!(stored.extra_headers.is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn inherited_managed_launches_materialize_fixed_bases_and_persist_them() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_base_materialization");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        write_codex_auth(&nac_home);
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        for (backend, expected_base) in [
+            (
+                "chatgpt-codex-responses",
+                nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            ("arcee-auth", nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL),
+        ] {
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!("[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\n"),
+            )
+            .unwrap();
+
+            let defaults = manager
+                .launch_model_defaults(LaunchModelDefaultsRequest {
+                    cwd: Some(root.clone()),
+                    ssh_host: None,
+                })
+                .unwrap();
+            assert_eq!(
+                defaults.configured_model_base_url.as_deref(),
+                Some(expected_base),
+                "launch metadata must expose the same materialized URL"
+            );
+
+            // This is the inherited shape emitted by the launch UI: the locked
+            // URL is visual metadata, while backend/base remain omitted.
+            let inherited: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "ssh_host": null
+            }))
+            .unwrap();
+            assert!(matches!(inherited.backend, RequestField::Omitted));
+            assert!(matches!(inherited.base_url, RequestField::Omitted));
+            let created = manager
+                .create_session(inherited)
+                .await
+                .unwrap_or_else(|error| panic!("inherited {backend} launch failed: {error:#}"));
+            assert_eq!(created.metadata.base_url, expected_base);
+            let session_id = created.metadata.session_id.unwrap();
+            let stored = sessions::load_session(&store_path, &session_id).unwrap();
+            assert_eq!(stored.base_url, expected_base);
+
+            // Force a real persisted-snapshot attach instead of returning the
+            // service left in memory by create.
+            manager
+                .inner
+                .active_sessions
+                .write()
+                .await
+                .remove(&session_id);
+            let resumed = manager.snapshot(&session_id).await.unwrap();
+            assert_eq!(resumed.metadata.base_url, expected_base);
+
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"configured-model\"\nbase_url = \"{expected_base}\"\n"
+                ),
+            )
+            .unwrap();
+            let configured = manager
+                .create_session(CreateSessionRequest {
+                    cwd: Some(root.clone()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect("an explicitly configured canonical base URL must remain accepted");
+            assert_eq!(configured.metadata.base_url, expected_base);
+
+            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "backend": backend,
+                "model": "explicit-model",
+                "base_url": expected_base,
+                "api_key_env": null
+            }))
+            .unwrap();
+            let explicit = manager
+                .create_session(explicit)
+                .await
+                .expect("an explicit canonical managed base URL must remain accepted");
+            assert_eq!(explicit.metadata.base_url, expected_base);
+        }
+
+        let before_controls = sessions::list_sessions(&store_path).unwrap().len();
+        for (backend, invalid_base, expected_error) in [
+            (
+                "chatgpt-codex-responses",
+                "https://attacker.example/backend-api",
+                "requires the approved ChatGPT origin",
+            ),
+            (
+                "arcee-auth",
+                "https://tenant.arcee.ai/api/v1",
+                "does not match the stored credential origin",
+            ),
+        ] {
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\nbase_url = \"{invalid_base}\"\n"
+                ),
+            )
+            .unwrap();
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    cwd: Some(root.clone()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("a present non-managed origin must not be overwritten by the default");
+            assert!(error.to_string().contains(expected_error), "{error:#}");
+        }
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"api-model\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+        )
+        .unwrap();
+        let error = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("non-managed backends must still require base_url");
+        assert!(error.to_string().contains("base_url"), "{error:#}");
+        assert_eq!(
+            sessions::list_sessions(&store_path).unwrap().len(),
+            before_controls,
+            "mismatch and non-managed failures must not persist sessions"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn patch_repairs_absent_managed_bases_with_the_same_materialized_urls() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_base_patch_repair");
+        let nac_home = root.join("nac-home");
+        write_codex_auth(&nac_home);
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+
+        for (session_id, backend, expected_base) in [
+            (
+                "repair-codex",
+                BackendKind::ChatGptCodexResponses,
+                nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                "repair-arcee",
+                BackendKind::ArceeAuth,
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
+            let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
+            incomplete.backend = backend;
+            incomplete.base_url.clear();
+            incomplete.api_key_env = None;
+            sessions::update_session_model_config(&store_path, &incomplete).unwrap();
+
+            manager
+                .update_session_config(
+                    session_id,
+                    UpdateConfigRequest {
+                        model: RequestField::Value("repaired-model".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .expect("repair PATCH should materialize an absent managed base URL");
+            let repaired = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(repaired.base_url, expected_base);
+            let resumed = manager.snapshot(session_id).await.unwrap();
+            assert_eq!(resumed.metadata.base_url, expected_base);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
