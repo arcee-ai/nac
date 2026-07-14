@@ -3,9 +3,11 @@ import { Icon } from "../atoms/icon.js";
 import { HorizontalTabsItem } from "../atoms/tabs.js";
 import { InspectorHeader } from "./inspector/InspectorHeader.js";
 import { MetricsBar } from "./inspector/MetricsBar.js";
-import { Transcript } from "./inspector/Transcript.js";
+import { ChatTab } from "./inspector/ChatTab.js";
+import { EventsView } from "./inspector/EventsView.js";
 import { useSnapshot } from "../store/sessionsStore.js";
 import { useActiveTab, setActiveTab, TABS } from "../store/selectionStore.js";
+import { useSessionStream } from "../hooks/useSessionStream.js";
 
 const TAB_META = {
   chat: { label: "Chat", icon: "chat" },
@@ -36,6 +38,7 @@ function Placeholder({ tab }) {
 export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings, onCancelRun }) {
   const snapshot = useSnapshot(id);
   const activeTab = useActiveTab();
+  useSessionStream(id);
 
   if (!id) return EmptyState();
 
@@ -62,8 +65,12 @@ export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings
       )}
     </nav>
     <${MetricsBar} snapshot=${snapshot} entry=${entry} />
-    <div class="flex-1 min-h-0 overflow-auto">
-      ${activeTab === "chat" ? html`<${Transcript} id=${id} />` : html`<${Placeholder} tab=${activeTab} />`}
+    <div class="flex-1 min-h-0">
+      ${activeTab === "chat"
+        ? html`<${ChatTab} id=${id} />`
+        : activeTab === "events"
+          ? html`<${EventsView} />`
+          : html`<div class="h-full overflow-auto"><${Placeholder} tab=${activeTab} /></div>`}
     </div>
   </section>`;
 }

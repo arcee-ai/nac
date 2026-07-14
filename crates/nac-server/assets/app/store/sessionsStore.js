@@ -64,22 +64,34 @@ export function stopPolling() {
   }
 }
 
-// Connect to a session's SSE stream. onEvent receives parsed JSON events.
-export function connectStream(id, onEvent) {
+// Connect to a session's SSE stream. The server emits *named* SSE events
+// (`session_event`, `replay_boundary`, `replay_gap`, `lagged`), so we must use
+// addEventListener — EventSource.onmessage only fires for unnamed events.
+// onEnvelope receives the parsed SessionEventEnvelope for each `session_event`.
+export function connectStream(id, onEnvelope) {
   disconnectStream();
   if (!id) return null;
   eventSessionId = id;
   eventSource = new EventSource(api.eventStreamUrl(id));
-  eventSource.onmessage = (e) => {
-    if (!onEvent) return;
+
+  const parse = (e) => {
     try {
-      onEvent(JSON.parse(e.data));
+      return JSON.parse(e.data);
     } catch (_) {
-      onEvent(e.data);
+      return null;
     }
   };
+
+  eventSource.addEventListener("session_event", (e) => {
+    const env = parse(e);
+    if (env && onEnvelope) onEnvelope(env);
+  });
+  // control frames are informational; kept quiet in the preview
+  eventSource.addEventListener("lagged", () => {});
+  eventSource.addEventListener("replay_boundary", () => {});
+  eventSource.addEventListener("replay_gap", () => {});
   eventSource.onerror = () => {
-    /* browser auto-reconnects; kept quiet for the buildless preview */
+    /* browser auto-reconnects */
   };
   return eventSource;
 }

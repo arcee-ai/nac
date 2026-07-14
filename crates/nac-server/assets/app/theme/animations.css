@@ -59,6 +59,14 @@
 @keyframes animate-background { from { background-color: var(--color-bg-btn-secondary-highlighted); } to { background-color: var(--color-bg-btn-secondary-highlighted-pressed); } }
 .animate-background { animation: animate-background 0.5s ease-in-out infinite alternate; }
 
+/* ---- streaming caret (typing indicator) ---- */
+.stream-caret {
+  display: inline-block; width: 7px; height: 1.05em; vertical-align: text-bottom;
+  background: var(--color-text-accent-primary); margin-left: 1px;
+  animation: stream-blink 1s steps(2, start) infinite;
+}
+@keyframes stream-blink { to { visibility: hidden; } }
+
 /* ---- misc utilities from index.css ---- */
 .hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }
