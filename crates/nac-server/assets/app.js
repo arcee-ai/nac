@@ -55,6 +55,10 @@ const state = {
   paneResize: null,
   paneDesktopMedia: null,
   settingsInitial: null,
+  settingsRequestGeneration: 0,
+  settingsBaseUrlRestoreValue: "",
+  settingsCredentialRestoreMode: "variable",
+  settingsCredentialRestoreValue: "",
   launchBaseUrlRestoreValue: "",
   launchCredentialRestoreMode: "inherit",
   launchCredentialRestoreValue: "",
@@ -194,6 +198,7 @@ function bindEvents() {
   el.launchCwd.addEventListener("change", refreshOpenLaunchModelDefaults);
   el.launchBackend.addEventListener("change", renderLaunchModelControls);
   el.launchCredentialMode.addEventListener("change", renderCredentialControls);
+  el.settingsBackend.addEventListener("change", renderSettingsModelControls);
   el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
@@ -859,26 +864,80 @@ function setSettingsSelectRawValue(select, raw, fieldLabel) {
   select.value = value;
 }
 
+function settingsFormStateFromMetadata(metadata) {
+  const initial = settingsValuesFromMetadata(metadata);
+  const managedUrl = managedLaunchBaseUrl(initial.backend);
+  const rawBaseUrl = String(metadata?.base_url ?? "");
+  const normalizedBaseUrl = rawBaseUrl.trim();
+  const hasApiKeyEnv = metadata?.api_key_env !== null && metadata?.api_key_env !== undefined;
+  const rawApiKeyEnv = String(metadata?.api_key_env ?? "");
+  return {
+    initial,
+    model: metadata?.model || "",
+    backend: initial.backend,
+    reasoning_effort: metadata?.reasoning_effort || "__clear__",
+    baseUrlControl: managedUrl
+      ? {
+          value: managedUrl,
+          readOnly: true,
+          restoreValue: normalizedBaseUrl && normalizedBaseUrl !== managedUrl ? rawBaseUrl : "",
+        }
+      : {
+          value: rawBaseUrl,
+          readOnly: false,
+          restoreValue: rawBaseUrl,
+        },
+    credentialControl: managedUrl
+      ? {
+          mode: "none",
+          value: "",
+          locked: true,
+          restoreMode: "variable",
+          restoreValue: hasApiKeyEnv ? rawApiKeyEnv : "",
+        }
+      : {
+          mode: hasApiKeyEnv ? "variable" : "none",
+          value: rawApiKeyEnv,
+          locked: false,
+          restoreMode: hasApiKeyEnv ? "variable" : "none",
+          restoreValue: rawApiKeyEnv,
+        },
+    extra_headers: rawHeadersFromMetadata(metadata).text,
+  };
+}
+
 function populateSettingsForm(metadata) {
-  el.settingsModel.value = metadata.model || "";
-  el.settingsBaseUrl.value = metadata.base_url || "";
-  setSettingsSelectRawValue(el.settingsBackend, metadata.backend, "backend");
+  const formState = settingsFormStateFromMetadata(metadata);
+  el.settingsModel.value = formState.model;
+  setSettingsSelectRawValue(el.settingsBackend, formState.backend, "backend");
   setSettingsSelectRawValue(
     el.settingsEffort,
-    metadata.reasoning_effort || "__clear__",
+    formState.reasoning_effort,
     "reasoning effort",
   );
-  const hasApiKeyEnv = metadata.api_key_env !== null && metadata.api_key_env !== undefined;
-  el.settingsCredentialMode.value = hasApiKeyEnv ? "variable" : "none";
-  el.settingsApiKeyEnv.value = metadata.api_key_env ?? "";
-  el.settingsExtraHeaders.value = rawHeadersFromMetadata(metadata).text;
-  state.settingsInitial = settingsValuesFromMetadata(metadata);
+  el.settingsBaseUrl.value = formState.baseUrlControl.value;
+  el.settingsBaseUrl.readOnly = formState.baseUrlControl.readOnly;
+  el.settingsBaseUrl.title = formState.baseUrlControl.readOnly
+    ? "Canonical URL for the selected managed backend"
+    : "";
+  state.settingsBaseUrlRestoreValue = formState.baseUrlControl.restoreValue;
+  el.settingsCredentialMode.value = formState.credentialControl.mode;
+  el.settingsCredentialMode.disabled = formState.credentialControl.locked;
+  el.settingsCredentialMode.title = formState.credentialControl.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  el.settingsApiKeyEnv.value = formState.credentialControl.value;
+  state.settingsCredentialRestoreMode = formState.credentialControl.restoreMode;
+  state.settingsCredentialRestoreValue = formState.credentialControl.restoreValue;
+  el.settingsExtraHeaders.value = formState.extra_headers;
+  state.settingsInitial = formState.initial;
   renderCredentialControls();
 }
 
 async function showSettingsOverlay() {
   const sessionId = state.selectedId;
   if (!sessionId) return;
+  const requestGeneration = ++state.settingsRequestGeneration;
   state.settingsInitial = null;
   el.settingsOverlay.hidden = false;
   setSettingsStatus("loading persisted settings", false);
@@ -886,7 +945,9 @@ async function showSettingsOverlay() {
   try {
     const snapshot = state.snapshots.get(sessionId);
     const metadata = await settingsMetadataForSession(sessionId, snapshot);
-    if (state.selectedId !== sessionId || el.settingsOverlay.hidden) return;
+    if (requestGeneration !== state.settingsRequestGeneration
+        || state.selectedId !== sessionId
+        || el.settingsOverlay.hidden) return;
     populateSettingsForm(metadata);
     const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics : [];
     setSettingsStatus(
@@ -896,13 +957,16 @@ async function showSettingsOverlay() {
       diagnostics.length > 0,
     );
   } catch (error) {
-    if (state.selectedId === sessionId && !el.settingsOverlay.hidden) {
+    if (requestGeneration === state.settingsRequestGeneration
+        && state.selectedId === sessionId
+        && !el.settingsOverlay.hidden) {
       setSettingsStatus(error.message, true);
     }
   }
 }
 
 function hideSettingsOverlay() {
+  state.settingsRequestGeneration += 1;
   el.settingsOverlay.hidden = true;
   state.settingsInitial = null;
 }
@@ -4748,9 +4812,9 @@ function buildLaunchModelPayload(values) {
 function settingsValuesFromMetadata(metadata) {
   const headers = rawHeadersFromMetadata(metadata);
   const values = {
-    model: String(metadata?.model || "").trim(),
-    base_url: String(metadata?.base_url || "").trim(),
-    backend: String(metadata?.backend || "").trim(),
+    model: String(metadata?.model ?? ""),
+    base_url: String(metadata?.base_url ?? ""),
+    backend: String(metadata?.backend ?? ""),
     reasoning_effort: metadata?.reasoning_effort || null,
     api_key_env: metadata?.api_key_env ?? null,
     extra_headers: headers.value,
@@ -4767,18 +4831,30 @@ function sameHeaderObject(left, right) {
 }
 
 function buildSettingsPatch(values, initial) {
+  const backend = requiredSettingsString(values.backend, "Backend");
+  const managedUrl = managedLaunchBaseUrl(backend);
+  let baseUrl;
+  let apiKeyEnv;
+  if (managedUrl) {
+    baseUrl = managedUrl;
+    apiKeyEnv = null;
+  } else {
+    baseUrl = requiredSettingsString(values.base_url, "Base URL");
+    apiKeyEnv = selectedApiKeyEnv(values.credential_mode, values.api_key_env);
+    if (apiKeyEnv === undefined) {
+      throw new Error("Session settings must explicitly select an API key environment variable or none");
+    }
+    validateCredentialMode(backend, values.credential_mode);
+  }
+
   const current = {
     model: requiredSettingsString(values.model, "Model"),
-    base_url: requiredSettingsString(values.base_url, "Base URL"),
-    backend: requiredSettingsString(values.backend, "Backend"),
+    base_url: baseUrl,
+    backend,
     reasoning_effort: values.reasoning_effort === "__clear__" ? null : values.reasoning_effort,
-    api_key_env: selectedApiKeyEnv(values.credential_mode, values.api_key_env),
+    api_key_env: apiKeyEnv,
     extra_headers: serializeExtraHeaders(values.extra_headers, {}),
   };
-  if (current.api_key_env === undefined) {
-    throw new Error("Session settings must explicitly select an API key environment variable or none");
-  }
-  validateCredentialMode(current.backend, values.credential_mode);
 
   const patch = {};
   for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
@@ -4789,6 +4865,87 @@ function buildSettingsPatch(values, initial) {
     patch.extra_headers = current.extra_headers;
   }
   return patch;
+}
+
+function nextSettingsBaseUrlControl(current, backend) {
+  const value = String(current?.value ?? "");
+  const readOnly = Boolean(current?.readOnly);
+  const restoreValue = String(current?.restoreValue ?? "");
+  const managedUrl = managedLaunchBaseUrl(backend);
+  if (managedUrl) {
+    return {
+      value: managedUrl,
+      readOnly: true,
+      restoreValue: readOnly ? restoreValue : value,
+    };
+  }
+  return {
+    value: readOnly ? restoreValue : value,
+    readOnly: false,
+    restoreValue,
+  };
+}
+
+function nextSettingsCredentialControl(current, backend) {
+  const mode = String(current?.mode || "none");
+  const value = String(current?.value ?? "");
+  const locked = Boolean(current?.locked);
+  const restoreMode = String(current?.restoreMode || "variable");
+  const restoreValue = String(current?.restoreValue ?? "");
+  if (managedLaunchBaseUrl(backend)) {
+    return {
+      mode: "none",
+      value: "",
+      locked: true,
+      restoreMode: locked ? restoreMode : mode,
+      restoreValue: locked ? restoreValue : value,
+    };
+  }
+  return {
+    mode: locked ? restoreMode : mode,
+    value: locked ? restoreValue : value,
+    locked: false,
+    restoreMode,
+    restoreValue,
+  };
+}
+
+function renderSettingsModelControls() {
+  if (!el.settingsBackend) return;
+  const nextBaseUrl = nextSettingsBaseUrlControl(
+    {
+      value: el.settingsBaseUrl.value,
+      readOnly: el.settingsBaseUrl.readOnly,
+      restoreValue: state.settingsBaseUrlRestoreValue,
+    },
+    el.settingsBackend.value,
+  );
+  el.settingsBaseUrl.value = nextBaseUrl.value;
+  el.settingsBaseUrl.readOnly = nextBaseUrl.readOnly;
+  el.settingsBaseUrl.title = nextBaseUrl.readOnly
+    ? "Canonical URL for the selected managed backend"
+    : "";
+  state.settingsBaseUrlRestoreValue = nextBaseUrl.restoreValue;
+
+  const nextCredential = nextSettingsCredentialControl(
+    {
+      mode: el.settingsCredentialMode.value,
+      value: el.settingsApiKeyEnv.value,
+      locked: el.settingsCredentialMode.disabled,
+      restoreMode: state.settingsCredentialRestoreMode,
+      restoreValue: state.settingsCredentialRestoreValue,
+    },
+    el.settingsBackend.value,
+  );
+  el.settingsCredentialMode.value = nextCredential.mode;
+  el.settingsApiKeyEnv.value = nextCredential.value;
+  el.settingsCredentialMode.disabled = nextCredential.locked;
+  el.settingsCredentialMode.title = nextCredential.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  state.settingsCredentialRestoreMode = nextCredential.restoreMode;
+  state.settingsCredentialRestoreValue = nextCredential.restoreValue;
+  renderCredentialControls();
 }
 
 function renderLaunchModelControls() {
