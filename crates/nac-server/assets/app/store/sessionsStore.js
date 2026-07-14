@@ -52,6 +52,36 @@ export async function loadSnapshot(id) {
   }
 }
 
+// ---- mutations (create / rename / delete / config) ----
+export async function createSession(payload) {
+  const snap = await api.createSession(payload);
+  await loadSessions({ silent: true });
+  return snap;
+}
+
+export async function renameSession(id, payload) {
+  const res = await api.renameSession(id, payload);
+  await loadSessions({ silent: true });
+  return res;
+}
+
+export async function deleteSession(id) {
+  await api.deleteSession(id);
+  setState((s) => {
+    const snapshots = { ...s.snapshots };
+    delete snapshots[id];
+    return { snapshots };
+  });
+  await loadSessions({ silent: true });
+}
+
+export async function updateConfig(id, payload) {
+  const res = await api.updateConfig(id, payload);
+  await loadSnapshot(id);
+  await loadSessions({ silent: true });
+  return res;
+}
+
 export function startPolling(ms = 5000, opts = {}) {
   stopPolling();
   pollTimer = setInterval(() => loadSessions({ ...opts, silent: true }), ms);

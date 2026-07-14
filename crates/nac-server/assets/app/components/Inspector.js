@@ -23,15 +23,15 @@ function EmptyState() {
       <div class="mx-auto mb-3 w-12 h-12 grid place-items-center rounded-full bg-elevation-level-1 border border-secondary">
         <${Icon} name="chat" size=${24} color="var(--color-text-basic-muted)" />
       </div>
-      <div class="header-small text-basic-primary mb-1">Brak wybranej sesji</div>
-      <div class="label-small text-basic-muted">Wybierz sesję z listy albo utwórz nową.</div>
+      <div class="header-small text-basic-primary mb-1">No session selected</div>
+      <div class="label-small text-basic-muted">Pick a session from the list or create a new one.</div>
     </div>
   </div>`;
 }
 
 function Placeholder({ tab }) {
   return html`<div class="p-6 text-basic-muted label-small">
-    Zakładka „${TAB_META[tab] ? TAB_META[tab].label : tab}" — pełna zawartość w kolejnych krokach.
+    "${TAB_META[tab] ? TAB_META[tab].label : tab}" tab — full content coming in later steps.
   </div>`;
 }
 

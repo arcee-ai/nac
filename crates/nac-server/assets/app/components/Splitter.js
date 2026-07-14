@@ -44,7 +44,7 @@ export function Splitter({ containerRef }) {
 
   return html`<div
     role="separator"
-    aria-label="Zmień proporcje paneli"
+    aria-label="Resize panels"
     aria-orientation="vertical"
     aria-valuemin=${20}
     aria-valuemax=${75}

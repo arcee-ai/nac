@@ -3,6 +3,10 @@ import { ThemeToggle } from "./ThemeToggle.js";
 import { SessionBoard } from "./SessionBoard.js";
 import { Splitter } from "./Splitter.js";
 import { Inspector } from "./Inspector.js";
+import { LaunchModal } from "./modals/LaunchModal.js";
+import { RenameModal } from "./modals/RenameModal.js";
+import { DeleteModal } from "./modals/DeleteModal.js";
+import { SettingsModal } from "./modals/SettingsModal.js";
 import { useToast } from "../providers/ToastProvider.js";
 import { useIsDesktop } from "../hooks/useMediaQuery.js";
 import { api } from "../services/api.js";
@@ -21,7 +25,7 @@ import {
   useMobileDetailOpen,
 } from "../store/selectionStore.js";
 
-const { useEffect, useRef } = React;
+const { useEffect, useRef, useState } = React;
 
 function useSelectedEntry() {
   const sessions = useSessions();
@@ -38,6 +42,7 @@ export function AppShell() {
   const mobileDetailOpen = useMobileDetailOpen();
   const toast = useToast();
   const containerRef = useRef(null);
+  const [modal, setModal] = useState(null); // "launch" | "rename" | "delete" | "settings" | null
 
   useEffect(() => {
     loadStoreInfo();
@@ -46,15 +51,15 @@ export function AppShell() {
     return () => stopPolling();
   }, []);
 
-  const soon = (what) => () => toast.info(`${what} — dopięte w Step 6 (modale).`);
+  const closeModal = () => setModal(null);
   const onCancelRun = async () => {
     if (!selectedId) return;
     try {
       await api.cancelActiveRun(selectedId);
-      toast.success("Wysłano żądanie zatrzymania runu");
+      toast.success("Run cancellation requested");
       loadSnapshot(selectedId);
     } catch (e) {
-      toast.error(`Nie udało się zatrzymać: ${e.message}`);
+      toast.error(`Failed to stop run: ${e.message}`);
     }
   };
 
@@ -62,13 +67,13 @@ export function AppShell() {
     id=${selectedId}
     entry=${entry}
     isDesktop=${isDesktop}
-    onRename=${soon("Zmiana nazwy")}
-    onDelete=${soon("Usuwanie")}
-    onSettings=${soon("Ustawienia")}
+    onRename=${() => setModal("rename")}
+    onDelete=${() => setModal("delete")}
+    onSettings=${() => setModal("settings")}
     onCancelRun=${onCancelRun}
   />`;
 
-  const board = html`<${SessionBoard} onNewSession=${soon("Nowa sesja")} />`;
+  const board = html`<${SessionBoard} onNewSession=${() => setModal("launch")} />`;
 
   let body;
   if (!isDesktop) {
@@ -96,5 +101,10 @@ export function AppShell() {
       </div>
     </header>
     <main class="flex-1 min-h-0">${body}</main>
+
+    <${LaunchModal} open=${modal === "launch"} onClose=${closeModal} />
+    <${RenameModal} open=${modal === "rename"} onClose=${closeModal} entry=${entry} />
+    <${DeleteModal} open=${modal === "delete"} onClose=${closeModal} entry=${entry} />
+    <${SettingsModal} open=${modal === "settings"} onClose=${closeModal} id=${selectedId} />
   </div>`;
 }

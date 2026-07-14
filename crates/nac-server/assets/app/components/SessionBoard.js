@@ -34,13 +34,13 @@ export function SessionBoard({ onNewSession }) {
         </div>
       </${Tooltip}>
       ${loading ? html`<${Loader} size=${LoaderSize.Small} />` : null}
-      <${Tooltip} title="Nowa sesja" position="bottom-right">
+      <${Tooltip} title="New session" position="bottom-right">
         <${Button}
           variant=${ButtonVariant.SecondaryAccent}
           size=${ButtonSize.Small}
           content=${ButtonContent.Icon}
           onClick=${onNewSession}
-          aria-label="Nowa sesja"
+          aria-label="New session"
         >
           <${Icon} name="add" />
         </${Button}>
@@ -50,7 +50,7 @@ export function SessionBoard({ onNewSession }) {
     <div class="flex-1 min-h-0 overflow-auto p-3 flex flex-col gap-2" aria-label="Sessions">
       ${error ? html`<div class="text-micro text-error-primary mb-1">${error}</div>` : null}
       ${!loading && sessions.length === 0 && !error
-        ? html`<div class="text-basic-muted label-small px-1 py-6 text-center">Brak sesji. Utwórz pierwszą.</div>`
+        ? html`<div class="text-basic-muted label-small px-1 py-6 text-center">No sessions yet. Create your first one.</div>`
         : null}
       ${sessions.map((entry) => {
         const id = (entry.summary || entry).session_id;

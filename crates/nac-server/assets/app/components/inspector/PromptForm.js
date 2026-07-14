@@ -28,7 +28,7 @@ export function PromptForm({ id }) {
       loadSnapshot(id); // user message appears; stream drives the rest
       if (ref.current) ref.current.style.height = "auto";
     } catch (e) {
-      toast.error(`Nie udało się wysłać: ${e.message}`);
+      toast.error(`Failed to send: ${e.message}`);
     } finally {
       setSending(false);
     }
@@ -62,7 +62,7 @@ export function PromptForm({ id }) {
         "min-h-[44px] max-h-[200px]",
       )}
       rows=${1}
-      placeholder=${running ? "Run w toku…" : "Napisz wiadomość…  (Enter wysyła, Shift+Enter = nowa linia)"}
+      placeholder=${running ? "Run in progress…" : "Type a message…  (Enter to send, Shift+Enter for newline)"}
       spellcheck="false"
       value=${value}
       disabled=${busy}
@@ -75,7 +75,7 @@ export function PromptForm({ id }) {
       content=${ButtonContent.Icon}
       loading=${busy}
       disabled=${!value.trim()}
-      aria-label="Wyślij"
+      aria-label="Send"
     >
       <${Icon} name="arrowRight" />
     </${Button}>

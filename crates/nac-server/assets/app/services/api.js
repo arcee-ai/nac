@@ -28,6 +28,7 @@ export const api = {
   get: (p) => request("GET", p),
   post: (p, b) => request("POST", p, b),
   put: (p, b) => request("PUT", p, b),
+  patch: (p, b) => request("PATCH", p, b),
   del: (p) => request("DELETE", p),
 
   // ---- endpoints (mirrors docs/01 audit) ----
@@ -40,6 +41,8 @@ export const api = {
   reorderSessions: (order) => request("PUT", "/sessions/order", { order }),
   renameSession: (id, payload) =>
     request("PUT", `/sessions/${encodeURIComponent(id)}/presentation`, payload),
+  updateConfig: (id, payload) =>
+    request("PATCH", `/sessions/${encodeURIComponent(id)}/config`, payload),
   submitRun: (id, payload) =>
     request("POST", `/sessions/${encodeURIComponent(id)}/runs`, payload),
   cancelActiveRun: (id) =>

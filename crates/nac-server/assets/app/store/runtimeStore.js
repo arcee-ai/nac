@@ -35,16 +35,16 @@ export function applyEnvelope(env) {
   const e = env.event || {};
   switch (e.type) {
     case "run_started":
-      setState({ running: true, activity: "Run uruchomiony…", error: null });
-      pushEvent({ seq, kind: "run", text: `Run uruchomiony: ${e.prompt_preview || ""}` });
+      setState({ running: true, activity: "Run started…", error: null });
+      pushEvent({ seq, kind: "run", text: `Run started: ${e.prompt_preview || ""}` });
       return true; // submitted user message shows up in snapshot
     case "run_completed":
       setState({ running: false, activity: "" });
-      pushEvent({ seq, kind: "run", text: "Run zakończony" });
+      pushEvent({ seq, kind: "run", text: "Run completed" });
       return true;
     case "run_failed":
-      setState({ running: false, activity: "", error: e.message || "Run nieudany" });
-      pushEvent({ seq, kind: "error", text: e.message || "Run nieudany", isError: true });
+      setState({ running: false, activity: "", error: e.message || "Run failed" });
+      pushEvent({ seq, kind: "error", text: e.message || "Run failed", isError: true });
       return true;
     case "snapshot_saved":
       return true;
@@ -58,10 +58,10 @@ export function applyEnvelope(env) {
 function applyAgent(seq, a) {
   switch (a.type) {
     case "model_call_started":
-      setState({ activity: `Model myśli…${a.iteration ? ` (iter ${a.iteration})` : ""}` });
+      setState({ activity: `Model thinking…${a.iteration ? ` (iter ${a.iteration})` : ""}` });
       return false;
     case "tool_call_started":
-      setState({ activity: `Narzędzie: ${a.name}` });
+      setState({ activity: `Tool: ${a.name}` });
       pushEvent({ seq, kind: "tool", text: `▶ ${a.name}(${a.args_preview || ""})` });
       return false;
     case "tool_call_finished":
@@ -73,22 +73,22 @@ function applyAgent(seq, a) {
       });
       return false;
     case "thread_started":
-      setState({ activity: `Wątek ${a.name}: ${a.action || ""}` });
-      pushEvent({ seq, kind: "thread", text: `⌥ wątek „${a.name}" — ${a.action || ""}` });
+      setState({ activity: `Thread ${a.name}: ${a.action || ""}` });
+      pushEvent({ seq, kind: "thread", text: `⌥ thread "${a.name}" — ${a.action || ""}` });
       return false;
     case "thread_log":
       pushEvent({ seq, kind: "log", text: `${a.name}: ${a.line || ""}` });
       return false;
     case "thread_finished":
-      pushEvent({ seq, kind: "thread", text: `⌦ wątek „${a.name}" (exit ${a.exit_code})` });
+      pushEvent({ seq, kind: "thread", text: `⌦ thread "${a.name}" (exit ${a.exit_code})` });
       return false;
     case "assistant_message":
       setState({ activity: "" });
-      pushEvent({ seq, kind: "assistant", text: "Nowa wiadomość asystenta" });
+      pushEvent({ seq, kind: "assistant", text: "New assistant message" });
       return true; // reconcile transcript from snapshot
     case "error":
-      setState({ error: a.message || "Błąd" });
-      pushEvent({ seq, kind: "error", text: a.message || "Błąd", isError: true });
+      setState({ error: a.message || "Error" });
+      pushEvent({ seq, kind: "error", text: a.message || "Error", isError: true });
       return false;
     case "run_finished":
       return false;

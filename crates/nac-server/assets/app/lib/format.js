@@ -53,9 +53,11 @@ export function tokenUsage(snapshot) {
   return rt.cumulative_token_usage || rt.last_token_usage || null;
 }
 
-// Build the six metrics shown in the inspector summary grid.
+// Build the six metrics shown in the inspector summary grid. The frontend
+// snapshot nests config under `metadata`; the list entry exposes `summary`.
 export function metricsFromSnapshot(snapshot, entry) {
-  const summary = (snapshot && snapshot) || (entry && entry.summary) || {};
+  const meta = (snapshot && snapshot.metadata) || {};
+  const summary = (entry && entry.summary) || {};
   const activeRun = (snapshot && snapshot.active_run) || (entry && entry.active_run);
   const active = isActiveRun(activeRun);
   const usage = tokenUsage(snapshot);
@@ -66,10 +68,14 @@ export function metricsFromSnapshot(snapshot, entry) {
     tokens = `↑${formatTokens(usage.input_tokens)}${cache} ↓${formatTokens(usage.output_tokens)}`;
     context = formatTokens(usage.total_tokens);
   }
+  const messages =
+    (snapshot && Array.isArray(snapshot.messages) ? snapshot.messages.length : undefined) ??
+    summary.visible_message_count ??
+    0;
   return {
-    model: summary.model || "--",
-    backend: summary.backend || "--",
-    messages: summary.visible_message_count ?? (snapshot && snapshot.messages ? snapshot.messages.length : 0) ?? 0,
+    model: meta.model || summary.model || "--",
+    backend: meta.backend || summary.backend || "--",
+    messages,
     run: active ? "running" : "idle",
     active,
     tokens,

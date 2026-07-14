@@ -14,7 +14,7 @@ function mapMessages(snap) {
     let content = typeof m.content === "string" ? m.content : "";
     if (role === "assistant" && !content && m.tool_calls) {
       const names = (m.tool_calls || []).map((c) => (c.function && c.function.name) || "tool").join(", ");
-      content = `_(wywołanie narzędzi: ${names})_`;
+      content = `_(tool calls: ${names})_`;
     }
     if (role === "tool") content = "```\n" + content + "\n```";
     return { id: `${role}-${i}`, role, content };
@@ -53,16 +53,16 @@ export function Transcript({ id }) {
 
   return html`<div ref=${scrollRef} class="flex-1 min-h-0 overflow-auto">
     <div class="flex flex-col gap-3 p-4">
-      ${!snap ? html`<div class="text-basic-muted label-small">Wczytywanie…</div>` : null}
+      ${!snap ? html`<div class="text-basic-muted label-small">Loading…</div>` : null}
       ${snap && messages.length === 0 && !running
-        ? html`<div class="text-basic-muted label-small">Brak wiadomości. Napisz coś poniżej.</div>`
+        ? html`<div class="text-basic-muted label-small">No messages yet. Type something below.</div>`
         : null}
       ${messages.map((m) => html`<${MessageRow} key=${m.id} role=${m.role} content=${m.content} />`)}
       ${running
         ? html`<div class="rounded-xl p-3 border border-secondary bg-elevation-level-1">
             <div class="tag-label text-basic-muted mb-1">assistant</div>
             <div class="flex items-center gap-2 paragraph-medium text-basic-tertiary">
-              <span class="text-shimmer-accent">${activity || "Pracuję…"}</span>
+              <span class="text-shimmer-accent">${activity || "Working…"}</span>
               <span class="stream-caret"></span>
             </div>
           </div>`

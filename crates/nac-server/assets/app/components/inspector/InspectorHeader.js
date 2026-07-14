@@ -25,7 +25,9 @@ function ActionButton({ title, icon, onClick, variant = ButtonVariant.Ghost, dis
 }
 
 export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete, onSettings, onCancelRun }) {
-  const s = snapshot || (entry && entry.summary) || {};
+  // Presentation (title/prompt) lives on the list summary; cwd/id/ssh_host also
+  // live on the snapshot's `metadata`. Merge with summary taking precedence.
+  const s = { ...((snapshot && snapshot.metadata) || {}), ...((entry && entry.summary) || {}) };
   const fullscreen = useInspectorFullscreen();
   const activeRun = (snapshot && snapshot.active_run) || (entry && entry.active_run);
   const active = isActiveRun(activeRun);
@@ -39,7 +41,7 @@ export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete
           content=${ButtonContent.IconLeft}
           onClick=${clearSelection}
         >
-          <${Icon} name="arrowLeft" /> Sesje
+          <${Icon} name="arrowLeft" /> Sessions
         </${Button}>`
       : null}
     <div class="min-w-0 flex-grow">
@@ -52,20 +54,20 @@ export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete
     <div class="flex items-center gap-1 shrink-0">
       ${active
         ? html`<${ActionButton}
-            title="Zatrzymaj run"
+            title="Stop run"
             icon="stop"
             variant=${ButtonVariant.GhostDestructive}
             onClick=${onCancelRun}
           />`
         : null}
-      <${ActionButton} title="Zmień nazwę" icon="edit" onClick=${onRename} />
+      <${ActionButton} title="Rename" icon="edit" onClick=${onRename} />
       <${ActionButton}
-        title=${fullscreen ? "Wyjdź z pełnego ekranu" : "Pełny ekran"}
+        title=${fullscreen ? "Exit fullscreen" : "Fullscreen"}
         icon=${fullscreen ? "fullScreenExit" : "fullScreen"}
         onClick=${toggleInspectorFullscreen}
       />
-      <${ActionButton} title="Ustawienia sesji" icon="gear" onClick=${onSettings} />
-      <${ActionButton} title="Usuń sesję" icon="trash" variant=${ButtonVariant.GhostDestructive} onClick=${onDelete} />
+      <${ActionButton} title="Session settings" icon="gear" onClick=${onSettings} />
+      <${ActionButton} title="Delete session" icon="trash" variant=${ButtonVariant.GhostDestructive} onClick=${onDelete} />
     </div>
   </header>`;
 }
