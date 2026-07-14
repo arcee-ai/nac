@@ -55,6 +55,7 @@ const state = {
   paneResize: null,
   paneDesktopMedia: null,
   settingsInitial: null,
+  launchBaseUrlRestoreValue: "",
 };
 
 const el = {};
@@ -70,6 +71,10 @@ const PANE_DESKTOP_QUERY = "(min-width: 1180px)";
 const PANE_BOARD_MIN_PX = 340;
 const PANE_INSPECTOR_MIN_PX = 420;
 const PANE_KEYBOARD_STEP = 0.02;
+const MANAGED_LAUNCH_BASE_URLS = Object.freeze({
+  "arcee-auth": "https://api.arcee.ai/api/v1",
+  "chatgpt-codex-responses": "https://chatgpt.com/backend-api",
+});
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -175,6 +180,7 @@ function bindElements() {
 function bindEvents() {
   el.launchForm.addEventListener("submit", createSession);
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
+  el.launchBackend.addEventListener("change", renderLaunchBaseUrlControl);
   el.launchCredentialMode.addEventListener("change", renderCredentialControls);
   el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
   el.promptForm.addEventListener("submit", submitPrompt);
@@ -293,6 +299,7 @@ async function boot() {
   }
 
   renderLaunchHostFields();
+  renderLaunchBaseUrlControl();
   renderCredentialControls();
   await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
   scheduleSessionPoll();
@@ -886,6 +893,7 @@ function showMobileSessions() {
 
 async function createSession(event) {
   event.preventDefault();
+  renderLaunchBaseUrlControl();
 
   let modelPayload;
   try {
@@ -897,6 +905,7 @@ async function createSession(event) {
       credential_mode: el.launchCredentialMode.value,
       api_key_env: el.launchApiKeyEnv.value,
       extra_headers: el.launchExtraHeaders.value,
+      configured_backend: state.store?.configured_model_backend,
     });
   } catch (validationError) {
     setLaunchStatus(validationError.message, true);
@@ -4527,15 +4536,53 @@ function validateCredentialMode(backend, mode) {
   }
 }
 
+function managedLaunchBaseUrl(backend) {
+  return MANAGED_LAUNCH_BASE_URLS[String(backend || "").trim()] || null;
+}
+
+function effectiveLaunchBackend(selectedBackend, configuredBackend) {
+  return String(selectedBackend || "").trim() || String(configuredBackend || "").trim();
+}
+
+function nextLaunchBaseUrlControl(current, selectedBackend, configuredBackend) {
+  const value = String(current?.value ?? "");
+  const readOnly = Boolean(current?.readOnly);
+  const restoreValue = String(current?.restoreValue ?? "");
+  const managedUrl = managedLaunchBaseUrl(
+    effectiveLaunchBackend(selectedBackend, configuredBackend),
+  );
+  if (managedUrl) {
+    return {
+      value: managedUrl,
+      readOnly: true,
+      restoreValue: readOnly ? restoreValue : value,
+    };
+  }
+  return {
+    value: readOnly ? restoreValue : value,
+    readOnly: false,
+    restoreValue,
+  };
+}
+
 function buildLaunchModelPayload(values) {
   const payload = {};
-  for (const [field, label] of [
-    ["model", "Model"],
-    ["base_url", "Base URL"],
-    ["backend", "Backend"],
-  ]) {
-    const selected = optionalLaunchString(values[field], label);
-    if (selected !== undefined) payload[field] = selected;
+  const model = optionalLaunchString(values.model, "Model");
+  if (model !== undefined) payload.model = model;
+
+  const selectedBackend = optionalLaunchString(values.backend, "Backend");
+  if (selectedBackend !== undefined) payload.backend = selectedBackend;
+
+  const managedUrl = managedLaunchBaseUrl(
+    effectiveLaunchBackend(selectedBackend, values.configured_backend),
+  );
+  if (managedUrl) {
+    // An explicit managed backend must override an unrelated configured URL.
+    // An inherited managed backend must leave the configured tuple untouched.
+    if (selectedBackend !== undefined) payload.base_url = managedUrl;
+  } else {
+    const baseUrl = optionalLaunchString(values.base_url, "Base URL");
+    if (baseUrl !== undefined) payload.base_url = baseUrl;
   }
 
   const effort = String(values.reasoning_effort ?? "");
@@ -4596,6 +4643,23 @@ function buildSettingsPatch(values, initial) {
     patch.extra_headers = current.extra_headers;
   }
   return patch;
+}
+
+function renderLaunchBaseUrlControl() {
+  if (!el.launchBaseUrl || !el.launchBackend) return;
+  const next = nextLaunchBaseUrlControl(
+    {
+      value: el.launchBaseUrl.value,
+      readOnly: el.launchBaseUrl.readOnly,
+      restoreValue: state.launchBaseUrlRestoreValue,
+    },
+    el.launchBackend.value,
+    state.store?.configured_model_backend,
+  );
+  el.launchBaseUrl.value = next.value;
+  el.launchBaseUrl.readOnly = next.readOnly;
+  el.launchBaseUrl.title = next.readOnly ? "Canonical URL for the selected managed backend" : "";
+  state.launchBaseUrlRestoreValue = next.restoreValue;
 }
 
 function renderCredentialControls() {

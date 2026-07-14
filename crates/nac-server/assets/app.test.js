@@ -10,7 +10,7 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl };`,
   context,
   { filename: "app.js" },
 );
@@ -22,6 +22,8 @@ const {
   settingsValuesFromMetadata,
   settingsMetadataForSession,
   serializeExtraHeaders,
+  managedLaunchBaseUrl,
+  nextLaunchBaseUrlControl,
 } = context.module.exports;
 
 function plain(value) {
@@ -127,6 +129,89 @@ test("launch and settings backend selectors expose explicit Arcee modes only", (
   assert.match(indexSource, /chatgpt-codex-responses[\s\S]*stored Codex OAuth/);
 });
 
+test("launch omits the backend credential guidance paragraph", () => {
+  const launchForm = indexSource.match(/<form id="launchForm"[\s\S]*?<\/form>/)[0];
+  assert.doesNotMatch(launchForm, /credential-help/);
+  assert.doesNotMatch(launchForm, /stored Arcee login|stored Codex OAuth|Every other backend requires/);
+});
+
+test("managed launch backends lock canonical URLs and restore the non-managed draft", () => {
+  let control = {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "",
+  };
+  control = plain(nextLaunchBaseUrlControl(control, "arcee-auth", "openai-responses"));
+  assert.deepEqual(control, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    "chatgpt-codex-responses",
+    "openai-responses",
+  ));
+  assert.deepEqual(control, {
+    value: "https://chatgpt.com/backend-api",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  control = plain(nextLaunchBaseUrlControl(control, "together-chat", "arcee-auth"));
+  assert.deepEqual(control, {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  const inherited = plain(nextLaunchBaseUrlControl(
+    { value: "", readOnly: false, restoreValue: "stale" },
+    "",
+    "arcee-auth",
+  ));
+  assert.deepEqual(inherited, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "",
+  });
+  assert.deepEqual(
+    plain(nextLaunchBaseUrlControl(inherited, "", "openai-responses")),
+    { value: "", readOnly: false, restoreValue: "" },
+  );
+  assert.equal(managedLaunchBaseUrl("arcee-api"), null);
+  assert.match(appSource, /launchBackend\.addEventListener\("change", renderLaunchBaseUrlControl\)/);
+  assert.match(appSource, /el\.launchBaseUrl\.readOnly = next\.readOnly/);
+});
+
+test("managed launch payloads override explicit backends but preserve inherited config", () => {
+  assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+    backend: "arcee-auth",
+    base_url: "https://stale.example/v1",
+    credential_mode: "none",
+  }))), {
+    backend: "arcee-auth",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+  });
+  assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+    backend: "chatgpt-codex-responses",
+    credential_mode: "none",
+  }))), {
+    backend: "chatgpt-codex-responses",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+  });
+
+  for (const configured_backend of ["arcee-auth", "chatgpt-codex-responses"]) {
+    assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+      base_url: managedLaunchBaseUrl(configured_backend),
+      configured_backend,
+    }))), {});
+  }
+});
+
 test("launch omits inherited model settings and sends header JSON as objects", () => {
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues())), {});
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
@@ -150,7 +235,11 @@ test("launch rejects whitespace concrete values and enforces explicit credential
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "arcee-auth",
     credential_mode: "none",
-  }))), { backend: "arcee-auth", api_key_env: null });
+  }))), {
+    backend: "arcee-auth",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+  });
   assert.throws(
     () => buildLaunchModelPayload(launchValues({
       backend: "arcee-api",

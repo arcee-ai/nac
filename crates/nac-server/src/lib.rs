@@ -79,6 +79,8 @@ pub struct StoreInfo {
     pub root_cwd: PathBuf,
     pub store_path: PathBuf,
     pub worker_executable: PathBuf,
+    /// Backend selected by the current server-side config for inherited launches.
+    pub configured_model_backend: Option<BackendKind>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -321,10 +323,14 @@ impl SessionManager {
     }
 
     pub fn store_info(&self) -> StoreInfo {
+        let configured_model_backend = NacConfig::load_from_cwd(&self.inner.root_cwd)
+            .ok()
+            .and_then(|config| config.model.backend);
         StoreInfo {
             root_cwd: self.inner.root_cwd.clone(),
             store_path: self.inner.store_path.clone(),
             worker_executable: self.inner.worker_executable.clone(),
+            configured_model_backend,
         }
     }
 
@@ -1947,6 +1953,43 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    #[test]
+    fn store_info_exposes_the_current_configured_model_backend() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("store_info_backend");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"arcee-auth\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manager.store_info().configured_model_backend,
+            Some(BackendKind::ArceeAuth)
+        );
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"chatgpt-codex-responses\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manager.store_info().configured_model_backend,
+            Some(BackendKind::ChatGptCodexResponses)
+        );
+
+        let serialized = serde_json::to_value(manager.store_info()).unwrap();
+        assert_eq!(
+            serialized["configured_model_backend"],
+            "chatgpt-codex-responses"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

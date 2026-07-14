@@ -252,12 +252,6 @@
               <input id="launchApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
             </label>
           </div>
-          <p class="form-help credential-help">
-            <strong>arcee-auth</strong> uses stored Arcee login and rejects a key selector;
-            <strong>arcee-api</strong> requires an environment variable;
-            <strong>chatgpt-codex-responses</strong> uses stored Codex OAuth and rejects a key selector.
-            Every other backend requires an environment variable. When choosing a backend here, explicitly choose the matching credential selector.
-          </p>
           <label>
             <span>Extra Headers (JSON object)</span>
             <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='blank inherits config; {} selects no extra headers'></textarea>
