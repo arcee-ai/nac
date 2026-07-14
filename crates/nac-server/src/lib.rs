@@ -715,8 +715,15 @@ pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
+        .route("/react", get(react_demo_html))
+        .route("/react/transcript", get(react_transcript_html))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
+        .route("/assets/app-react.js", get(app_react_js))
+        .route(
+            "/assets/app-react-transcript.js",
+            get(app_react_transcript_js),
+        )
         .route(
             "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
             get(doto_rounded_extra_bold_font),
@@ -726,6 +733,24 @@ pub fn router(manager: SessionManager) -> Router {
         .route(
             "/assets/vendor/markdown-it.min.js",
             get(vendor_markdown_it_js),
+        )
+        .route(
+            "/assets/vendor/react.production.min.js",
+            get(vendor_react_js),
+        )
+        .route(
+            "/assets/vendor/react-dom.production.min.js",
+            get(vendor_react_dom_js),
+        )
+        .route("/assets/vendor/htm.js", get(vendor_htm_js))
+        .route("/assets/vendor/highlight.min.js", get(vendor_highlight_js))
+        .route(
+            "/assets/vendor/highlight-github-dark.min.css",
+            get(vendor_highlight_css),
+        )
+        .route(
+            "/assets/vendor/html-react-parser.min.js",
+            get(vendor_html_react_parser_js),
         )
         .route("/health", get(health))
         .route("/store", get(store_info))
@@ -789,6 +814,20 @@ async fn app_js() -> impl IntoResponse {
     )
 }
 
+async fn react_demo_html() -> Html<&'static str> {
+    Html(include_str!("../assets/react-demo.html"))
+}
+
+async fn app_react_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/app-react.js"),
+    )
+}
+
 async fn doto_rounded_extra_bold_font() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "font/woff2")],
@@ -820,6 +859,77 @@ async fn vendor_markdown_it_js() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/vendor/markdown-it.min.js"),
+    )
+}
+
+async fn vendor_react_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/react.production.min.js"),
+    )
+}
+
+async fn vendor_react_dom_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/react-dom.production.min.js"),
+    )
+}
+
+async fn vendor_htm_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/htm.js"),
+    )
+}
+
+async fn react_transcript_html() -> Html<&'static str> {
+    Html(include_str!("../assets/react-transcript.html"))
+}
+
+async fn app_react_transcript_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/app-react-transcript.js"),
+    )
+}
+
+async fn vendor_highlight_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/highlight.min.js"),
+    )
+}
+
+async fn vendor_highlight_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/vendor/highlight-github-dark.min.css"),
+    )
+}
+
+async fn vendor_html_react_parser_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/vendor/html-react-parser.min.js"),
     )
 }
 
