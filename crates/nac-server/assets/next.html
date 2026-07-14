@@ -5,36 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>nac — React + Tailwind (buildless) — Step 0</title>
 
-    <!-- Design tokens copied from ArceeFM (raw CSS custom properties) -->
+    <!-- Design system copied from ArceeFM -->
+    <link rel="stylesheet" href="/assets/app/theme/fonts.css" />
     <link rel="stylesheet" href="/assets/app/theme/primitives.css" />
     <link rel="stylesheet" href="/assets/app/theme/light-mode.css" />
     <link rel="stylesheet" href="/assets/app/theme/dark-mode.css" />
+    <link rel="stylesheet" href="/assets/app/theme/semantic.css" />
+    <link rel="stylesheet" href="/assets/app/theme/typography.css" />
+    <link rel="stylesheet" href="/assets/app/theme/animations.css" />
     <link rel="stylesheet" href="/assets/vendor/highlight-github-dark.min.css" />
 
-    <!-- Tailwind v4 browser build: compiles utilities at runtime, no build step -->
+    <!-- Tailwind v4 browser build: generic utilities (grid/flex/spacing/rounded)
+         compiled at runtime. Semantic color tokens come from semantic.css. -->
     <script src="/assets/vendor/tailwindcss-browser.js"></script>
-    <style type="text/tailwindcss">
-      @theme {
-        --color-elevation-ground: var(--color-bg-elevation-ground);
-        --color-elevation-level-0-5: var(--color-bg-elevation-level-0-5);
-        --color-elevation-level-1: var(--color-bg-elevation-level-1);
-        --color-elevation-level-2: var(--color-bg-elevation-level-2);
-        --color-elevation-level-3: var(--color-bg-elevation-level-3);
-        --color-btn-primary: var(--color-bg-btn-primary);
-        --color-btn-primary-hovered: var(--color-bg-btn-primary-hovered);
-        --color-basic-primary: var(--color-text-basic-primary);
-        --color-basic-secondary: var(--color-text-basic-secondary);
-        --color-basic-tertiary: var(--color-text-basic-tertiary);
-        --color-basic-muted: var(--color-text-basic-muted);
-        --color-accent-primary: var(--color-text-accent-primary);
-        --color-primary: var(--color-border-primary);
-        --color-secondary: var(--color-border-secondary);
-        --color-brand-500: var(--brand-500);
-      }
-    </style>
     <style>
       html, body { height: 100%; margin: 0; }
-      body { background: var(--color-bg-elevation-ground); color: var(--color-text-basic-primary); font-family: Inter, system-ui, sans-serif; }
+      body {
+        background: var(--color-bg-elevation-ground);
+        color: var(--color-text-basic-primary);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
     </style>
 
     <!-- Vendored runtime (UMD globals): React, htm, converters -->

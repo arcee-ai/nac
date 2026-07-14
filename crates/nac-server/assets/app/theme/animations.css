@@ -1,0 +1,64 @@
+/* Animations copied/consolidated from ArceeFM (index.css + tailwind.config.js). */
+
+/* ---- keyframes (from tailwind.config.js) ---- */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin-reverse { 0% { transform: rotate(0deg); } 100% { transform: rotate(-360deg); } }
+@keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes loader-gradient-move { 0% { background-position: 200% 0%; } 100% { background-position: 0% 0%; } }
+@keyframes pulse-opacity { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---- animation utilities (match config `animation` names) ---- */
+.animate-spin { animation: spin 1s linear infinite; }
+.animate-spin-slow { animation: spin 1.5s linear infinite; }
+.animate-spin-reverse { animation: spin-reverse 1s linear infinite; }
+.animate-spin-reverse-slow { animation: spin-reverse 1.5s linear infinite; }
+.animate-progress { animation: progress 1.5s ease-in-out infinite; }
+.animate-shimmer { animation: shimmer 2s linear infinite; }
+.animate-text-shimmer { animation: shimmer 2s linear infinite; }
+.animate-loader-gradient-move { animation: loader-gradient-move 2s linear infinite; }
+.animate-pulse-opacity { animation: pulse-opacity 1s ease-in-out infinite; }
+
+/* ---- shimmer text utilities (from tailwind.config plugin) ---- */
+.text-shimmer-accent {
+  background-image: linear-gradient(90deg, var(--color-text-accent-primary), var(--color-text-accent-tertiary), var(--color-text-accent-primary));
+  background-size: 200% 100%; background-position: 200% 0;
+  animation: shimmer 2s linear infinite;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.text-shimmer-basic {
+  background-image: linear-gradient(90deg, var(--color-text-basic-secondary), var(--color-text-basic-muted), var(--color-text-basic-secondary));
+  background-size: 200% 100%; background-position: 200% 0;
+  animation: shimmer 2s linear infinite;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+
+/* ---- entrance animations (from index.css) ---- */
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-up-8 { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-up-8-delayed { 0% { opacity: 0; transform: translateY(8px); } 33% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+@keyframes fade-down-8 { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-left-8 { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes fade-right-8 { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+.fade { animation: fade 0.3s ease-out; }
+.fade-up { animation: fade-up-8 0.3s ease-out; }
+.fade-down { animation: fade-down-8 0.3s ease-out; }
+.fade-left { animation: fade-left-8 0.3s ease-out; }
+.fade-right { animation: fade-right-8 0.3s ease-out; }
+.fade-up-delayed { animation: fade-up-8-delayed 0.6s ease-out; }
+
+@keyframes popup-bounce { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
+.popup-bounce { animation: popup-bounce 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55); }
+@keyframes slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.slide-in-right { animation: slide-in-right 0.3s ease-in-out; }
+
+@keyframes loading_gleam { from { opacity: 0.4; } to { opacity: 0.2; } }
+.loading-gleam { animation: loading_gleam 0.5s ease-in-out infinite alternate; }
+@keyframes animate-background { from { background-color: var(--color-bg-btn-secondary-highlighted); } to { background-color: var(--color-bg-btn-secondary-highlighted-pressed); } }
+.animate-background { animation: animate-background 0.5s ease-in-out infinite alternate; }
+
+/* ---- misc utilities from index.css ---- */
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
