@@ -3230,7 +3230,7 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
-    async fn inherited_managed_launches_materialize_fixed_bases_and_persist_them() {
+    async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_bases() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("managed_base_materialization");
         let nac_home = root.join("nac-home");
@@ -3250,7 +3250,9 @@ extra_headers = { X-Config = "yes" }
         ] {
             std::fs::write(
                 nac_home.join("config.toml"),
-                format!("[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\n"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
+                ),
             )
             .unwrap();
 
@@ -3267,22 +3269,26 @@ extra_headers = { X-Config = "yes" }
             );
 
             // This is the inherited shape emitted by the launch UI: the locked
-            // URL is visual metadata, while backend/base remain omitted.
+            // backend/base remain omitted, while null clears a stale configured selector.
             let inherited: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
-                "ssh_host": null
+                "ssh_host": null,
+                "api_key_env": null
             }))
             .unwrap();
             assert!(matches!(inherited.backend, RequestField::Omitted));
             assert!(matches!(inherited.base_url, RequestField::Omitted));
+            assert_eq!(inherited.api_key_env, RequestField::Null);
             let created = manager
                 .create_session(inherited)
                 .await
                 .unwrap_or_else(|error| panic!("inherited {backend} launch failed: {error:#}"));
             assert_eq!(created.metadata.base_url, expected_base);
+            assert_eq!(created.metadata.api_key_env, None);
             let session_id = created.metadata.session_id.unwrap();
             let stored = sessions::load_session(&store_path, &session_id).unwrap();
             assert_eq!(stored.base_url, expected_base);
+            assert_eq!(stored.api_key_env, None);
 
             // Force a real persisted-snapshot attach instead of returning the
             // service left in memory by create.

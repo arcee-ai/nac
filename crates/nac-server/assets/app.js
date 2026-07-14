@@ -56,6 +56,8 @@ const state = {
   paneDesktopMedia: null,
   settingsInitial: null,
   launchBaseUrlRestoreValue: "",
+  launchCredentialRestoreMode: "inherit",
+  launchCredentialRestoreValue: "",
   launchConfiguredBackend: null,
   launchConfiguredBaseUrl: null,
   launchDefaultsRequestGeneration: 0,
@@ -190,7 +192,7 @@ function bindEvents() {
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
   el.launchSshHost.addEventListener("change", refreshOpenLaunchModelDefaults);
   el.launchCwd.addEventListener("change", refreshOpenLaunchModelDefaults);
-  el.launchBackend.addEventListener("change", renderLaunchBaseUrlControl);
+  el.launchBackend.addEventListener("change", renderLaunchModelControls);
   el.launchCredentialMode.addEventListener("change", renderCredentialControls);
   el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
   el.promptForm.addEventListener("submit", submitPrompt);
@@ -309,8 +311,7 @@ async function boot() {
   }
 
   renderLaunchHostFields();
-  renderLaunchBaseUrlControl();
-  renderCredentialControls();
+  renderLaunchModelControls();
   await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
   scheduleSessionPoll();
 }
@@ -739,7 +740,7 @@ function beginLaunchModelDefaultsRequest(showStatus) {
   const requestGeneration = ++state.launchDefaultsRequestGeneration;
   state.launchConfiguredBackend = null;
   state.launchConfiguredBaseUrl = null;
-  renderLaunchBaseUrlControl();
+  renderLaunchModelControls();
   if (showStatus) setLaunchStatus("refreshing launch defaults", false);
   return requestGeneration;
 }
@@ -747,7 +748,7 @@ function beginLaunchModelDefaultsRequest(showStatus) {
 function applyLaunchModelDefaults(defaults) {
   state.launchConfiguredBackend = defaults?.configured_model_backend || null;
   state.launchConfiguredBaseUrl = defaults?.configured_model_base_url || null;
-  renderLaunchBaseUrlControl();
+  renderLaunchModelControls();
 }
 
 async function refreshLaunchModelDefaults({ showStatus = false, postDefaults = apiPost } = {}) {
@@ -4634,7 +4635,7 @@ function validateCredentialMode(backend, mode) {
   const stored = backend === "arcee-auth" || backend === "chatgpt-codex-responses";
   if (stored && mode !== "none") {
     const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
-    throw new Error(`${backend} uses ${source}; explicitly select No API key environment variable`);
+    throw new Error(`${backend} uses ${source} and does not accept an API key environment variable`);
   }
   if (!stored && mode !== "variable") {
     throw new Error(`${backend} requires an API key environment variable; explicitly select Environment variable`);
@@ -4678,6 +4679,33 @@ function nextLaunchBaseUrlControl(
   };
 }
 
+function nextLaunchCredentialControl(current, selectedBackend, configuredBackend) {
+  const mode = String(current?.mode || "inherit");
+  const value = String(current?.value ?? "");
+  const locked = Boolean(current?.locked);
+  const restoreMode = String(current?.restoreMode || "inherit");
+  const restoreValue = String(current?.restoreValue ?? "");
+  const managed = Boolean(managedLaunchBaseUrl(
+    effectiveLaunchBackend(selectedBackend, configuredBackend),
+  ));
+  if (managed) {
+    return {
+      mode: "none",
+      value: "",
+      locked: true,
+      restoreMode: locked ? restoreMode : mode,
+      restoreValue: locked ? restoreValue : value,
+    };
+  }
+  return {
+    mode: locked ? restoreMode : mode,
+    value: locked ? restoreValue : value,
+    locked: false,
+    restoreMode,
+    restoreValue,
+  };
+}
+
 function buildLaunchModelPayload(values) {
   const payload = {};
   const model = optionalLaunchString(values.model, "Model");
@@ -4685,10 +4713,9 @@ function buildLaunchModelPayload(values) {
 
   const selectedBackend = optionalLaunchString(values.backend, "Backend");
   if (selectedBackend !== undefined) payload.backend = selectedBackend;
+  const effectiveBackend = effectiveLaunchBackend(selectedBackend, values.configured_backend);
+  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
 
-  const managedUrl = managedLaunchBaseUrl(
-    effectiveLaunchBackend(selectedBackend, values.configured_backend),
-  );
   if (managedUrl) {
     // An explicit managed backend must override an unrelated configured URL.
     // An inherited managed backend must leave the configured tuple untouched.
@@ -4702,10 +4729,16 @@ function buildLaunchModelPayload(values) {
   if (effort === "__clear__") payload.reasoning_effort = null;
   else if (effort) payload.reasoning_effort = effort;
 
-  const credentialMode = String(values.credential_mode || "inherit");
-  validateCredentialMode(payload.backend, credentialMode);
-  const apiKeyEnv = selectedApiKeyEnv(credentialMode, values.api_key_env);
-  if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
+  if (managedUrl) {
+    // Managed credentials must override a stale configured API-key selector,
+    // including when backend/base remain inherited.
+    payload.api_key_env = null;
+  } else {
+    const credentialMode = String(values.credential_mode || "inherit");
+    validateCredentialMode(payload.backend, credentialMode);
+    const apiKeyEnv = selectedApiKeyEnv(credentialMode, values.api_key_env);
+    if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
+  }
 
   const headers = serializeExtraHeaders(values.extra_headers, undefined);
   if (headers !== undefined) payload.extra_headers = headers;
@@ -4758,6 +4791,11 @@ function buildSettingsPatch(values, initial) {
   return patch;
 }
 
+function renderLaunchModelControls() {
+  renderLaunchBaseUrlControl();
+  renderLaunchCredentialControl();
+}
+
 function renderLaunchBaseUrlControl() {
   if (!el.launchBaseUrl || !el.launchBackend) return;
   const next = nextLaunchBaseUrlControl(
@@ -4774,6 +4812,30 @@ function renderLaunchBaseUrlControl() {
   el.launchBaseUrl.readOnly = next.readOnly;
   el.launchBaseUrl.title = next.readOnly ? "Canonical URL for the selected managed backend" : "";
   state.launchBaseUrlRestoreValue = next.restoreValue;
+}
+
+function renderLaunchCredentialControl() {
+  if (!el.launchCredentialMode || !el.launchApiKeyEnv || !el.launchBackend) return;
+  const next = nextLaunchCredentialControl(
+    {
+      mode: el.launchCredentialMode.value,
+      value: el.launchApiKeyEnv.value,
+      locked: el.launchCredentialMode.disabled,
+      restoreMode: state.launchCredentialRestoreMode,
+      restoreValue: state.launchCredentialRestoreValue,
+    },
+    el.launchBackend.value,
+    state.launchConfiguredBackend,
+  );
+  el.launchCredentialMode.value = next.mode;
+  el.launchApiKeyEnv.value = next.value;
+  el.launchCredentialMode.disabled = next.locked;
+  el.launchCredentialMode.title = next.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  state.launchCredentialRestoreMode = next.restoreMode;
+  state.launchCredentialRestoreValue = next.restoreValue;
+  renderCredentialControls();
 }
 
 function renderCredentialControls() {

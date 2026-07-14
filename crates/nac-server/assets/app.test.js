@@ -10,7 +10,7 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl, launchLocationFromValues, fetchLaunchModelDefaultsForValues };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl, nextLaunchCredentialControl, launchLocationFromValues, fetchLaunchModelDefaultsForValues };`,
   context,
   { filename: "app.js" },
 );
@@ -24,6 +24,7 @@ const {
   serializeExtraHeaders,
   managedLaunchBaseUrl,
   nextLaunchBaseUrlControl,
+  nextLaunchCredentialControl,
   launchLocationFromValues,
   fetchLaunchModelDefaultsForValues,
 } = context.module.exports;
@@ -131,10 +132,11 @@ test("launch and settings backend selectors expose explicit Arcee modes only", (
   assert.match(indexSource, /chatgpt-codex-responses[\s\S]*stored Codex OAuth/);
 });
 
-test("launch omits the backend credential guidance paragraph", () => {
+test("launch has no instruction to manually select managed credential mode", () => {
   const launchForm = indexSource.match(/<form id="launchForm"[\s\S]*?<\/form>/)[0];
   assert.doesNotMatch(launchForm, /credential-help/);
   assert.doesNotMatch(launchForm, /stored Arcee login|stored Codex OAuth|Every other backend requires/);
+  assert.doesNotMatch(appSource, /explicitly select No API key environment variable/i);
 });
 
 test("managed launch backends lock canonical URLs and restore the non-managed draft", () => {
@@ -194,8 +196,119 @@ test("managed launch backends lock canonical URLs and restore the non-managed dr
     { value: "", readOnly: false, restoreValue: "" },
   );
   assert.equal(managedLaunchBaseUrl("arcee-api"), null);
-  assert.match(appSource, /launchBackend\.addEventListener\("change", renderLaunchBaseUrlControl\)/);
+  assert.match(appSource, /launchBackend\.addEventListener\("change", renderLaunchModelControls\)/);
   assert.match(appSource, /el\.launchBaseUrl\.readOnly = next\.readOnly/);
+});
+
+test("managed launch backends lock no-key credentials across transitions and restore named drafts", () => {
+  let control = {
+    mode: "variable",
+    value: "CUSTOM_API_KEY",
+    locked: false,
+    restoreMode: "inherit",
+    restoreValue: "",
+  };
+  control = plain(nextLaunchCredentialControl(control, "arcee-auth", "openai-responses"));
+  assert.deepEqual(control, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  control = plain(nextLaunchCredentialControl(
+    control,
+    "chatgpt-codex-responses",
+    "arcee-auth",
+  ));
+  assert.deepEqual(control, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  control = plain(nextLaunchCredentialControl(control, "arcee-api", "arcee-auth"));
+  assert.deepEqual(control, {
+    mode: "variable",
+    value: "CUSTOM_API_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  const inheritedDraft = plain(nextLaunchCredentialControl({
+    mode: "inherit",
+    value: "",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "OLD_KEY",
+  }, "", "arcee-auth"));
+  assert.deepEqual(inheritedDraft, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "inherit",
+    restoreValue: "",
+  });
+  assert.deepEqual(
+    plain(nextLaunchCredentialControl(inheritedDraft, "", "openai-responses")),
+    {
+      mode: "inherit",
+      value: "",
+      locked: false,
+      restoreMode: "inherit",
+      restoreValue: "",
+    },
+  );
+
+  assert.match(appSource, /el\.launchCredentialMode\.disabled = next\.locked/);
+  assert.match(appSource, /Stored credentials are selected automatically/);
+});
+
+test("launch credential drafts survive modal reuse and launch-default refresh transitions", () => {
+  let control = {
+    mode: "variable",
+    value: "REUSED_API_KEY",
+    locked: false,
+    restoreMode: "inherit",
+    restoreValue: "",
+  };
+
+  // First open applies inherited managed defaults.
+  control = plain(nextLaunchCredentialControl(control, "", "arcee-auth"));
+  assert.equal(control.locked, true);
+
+  // Reopening starts a new refresh by clearing old configured defaults.
+  control = plain(nextLaunchCredentialControl(control, "", null));
+  assert.deepEqual(control, {
+    mode: "variable",
+    value: "REUSED_API_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "REUSED_API_KEY",
+  });
+
+  // The winning location/config response alone reapplies managed state.
+  control = plain(nextLaunchCredentialControl(control, "", "chatgpt-codex-responses"));
+  assert.equal(control.mode, "none");
+  assert.equal(control.locked, true);
+  control = plain(nextLaunchCredentialControl(control, "", "together-chat"));
+  assert.equal(control.mode, "variable");
+  assert.equal(control.value, "REUSED_API_KEY");
+  assert.equal(control.locked, false);
+
+  const beginSource = appSource.match(/function beginLaunchModelDefaultsRequest[\s\S]*?\n}/)[0];
+  const applySource = appSource.match(/function applyLaunchModelDefaults[\s\S]*?\n}/)[0];
+  const refreshSource = appSource.match(/async function refreshLaunchModelDefaults[\s\S]*?\n}/)[0];
+  assert.match(beginSource, /renderLaunchModelControls\(\)/);
+  assert.match(applySource, /renderLaunchModelControls\(\)/);
+  assert.match(refreshSource, /if \(applied\) \{[\s\S]*applyLaunchModelDefaults/);
+  assert.match(refreshSource, /requestGeneration === state\.launchDefaultsRequestGeneration/);
+  assert.match(refreshSource, /launchLocationKey\(currentLocation\) === expectedKey/);
+  assert.match(refreshSource, /!el\.launchOverlay\.hidden/);
 });
 
 test("launch defaults requests use creation-equivalent local and SSH locations", async () => {
@@ -263,7 +376,7 @@ test("each launch refreshes changed config before payload construction and prese
     readOnly: true,
     restoreValue: "https://custom.example/v1",
   });
-  assert.deepEqual(plain(payload), {});
+  assert.deepEqual(plain(payload), { api_key_env: null });
 
   configuredBackend = "openai-responses";
   refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
@@ -291,11 +404,12 @@ test("each launch refreshes changed config before payload construction and prese
   assert.match(appSource, /launchSshHost\.addEventListener\("change", refreshOpenLaunchModelDefaults\)/);
 });
 
-test("managed launch payloads override explicit backends but preserve inherited config", () => {
+test("managed launch payloads send exact explicit and inherited credential clearing", () => {
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "arcee-auth",
     base_url: "https://stale.example/v1",
-    credential_mode: "none",
+    credential_mode: "variable",
+    api_key_env: "STALE_CONFIG_KEY",
   }))), {
     backend: "arcee-auth",
     base_url: "https://api.arcee.ai/api/v1",
@@ -303,7 +417,7 @@ test("managed launch payloads override explicit backends but preserve inherited 
   });
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "chatgpt-codex-responses",
-    credential_mode: "none",
+    credential_mode: "inherit",
   }))), {
     backend: "chatgpt-codex-responses",
     base_url: "https://chatgpt.com/backend-api",
@@ -314,7 +428,9 @@ test("managed launch payloads override explicit backends but preserve inherited 
     assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
       base_url: managedLaunchBaseUrl(configured_backend),
       configured_backend,
-    }))), {});
+      credential_mode: "variable",
+      api_key_env: "STALE_CONFIG_KEY",
+    }))), { api_key_env: null });
   }
 });
 
@@ -329,18 +445,13 @@ test("launch omits inherited model settings and sends header JSON as objects", (
   assert.equal(serializeExtraHeaders("", undefined), undefined);
 });
 
-test("launch rejects whitespace concrete values and enforces explicit credential modes", () => {
+test("launch rejects whitespace values and enforces credentials only for API-key backends", () => {
   assert.throws(
     () => buildLaunchModelPayload(launchValues({ model: "   " })),
     /Model cannot contain only whitespace/,
   );
-  assert.throws(
-    () => buildLaunchModelPayload(launchValues({ backend: "arcee-auth" })),
-    /explicitly select No API key environment variable/,
-  );
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "arcee-auth",
-    credential_mode: "none",
   }))), {
     backend: "arcee-auth",
     base_url: "https://api.arcee.ai/api/v1",
@@ -445,7 +556,7 @@ test("settings rejects required clearing and stale selectors across backend tran
   );
   assert.throws(
     () => buildSettingsPatch(settingsFixture({ backend: "chatgpt-codex-responses" }), initialSettings),
-    /stored Codex OAuth.*No API key environment variable/,
+    /stored Codex OAuth.*does not accept an API key environment variable/,
   );
 
   const authInitial = settingsValuesFromMetadata({
