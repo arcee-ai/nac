@@ -1473,7 +1473,7 @@ mod tests {
         let dir = TestDir::new("logout-malformed");
         let codex_path = dir.path("auth.json");
         let arcee_path = dir.path("arcee_auth.json");
-        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
         write_credential(&codex_path, "{ malformed");
         fs::write(&arcee_path, arcee).unwrap();
 
@@ -1488,7 +1488,7 @@ mod tests {
         let dir = TestDir::new("logout-coexistence");
         let codex_path = dir.path("auth.json");
         let arcee_path = dir.path("arcee_auth.json");
-        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
         fs::write(&arcee_path, arcee).unwrap();
         write_auth_file_to_path(&codex_path, &stored_codex_auth("access-token")).unwrap();
 
@@ -1521,7 +1521,7 @@ mod tests {
     fn codex_logout_preserves_valid_foreign_and_unknown_records() {
         let dir = TestDir::new("logout-foreign");
         let path = dir.path("auth.json");
-        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
         write_credential(&path, arcee);
         assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), arcee);
