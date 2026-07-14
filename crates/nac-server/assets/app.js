@@ -54,6 +54,21 @@ const state = {
   paneRatio: 0.5,
   paneResize: null,
   paneDesktopMedia: null,
+  settingsInitial: null,
+  settingsSessionId: null,
+  settingsRequestGeneration: 0,
+  settingsSubmission: null,
+  settingsBaseUrlRestoreValue: "",
+  settingsCredentialRestoreMode: "variable",
+  settingsCredentialRestoreValue: "",
+  launchBaseUrlRestoreValue: "",
+  launchCredentialRestoreMode: "inherit",
+  launchCredentialRestoreValue: "",
+  launchConfiguredBackend: null,
+  launchConfiguredBaseUrl: null,
+  launchDefaultsRequestGeneration: 0,
+  launchFormVersion: 0,
+  launchSubmitting: false,
 };
 
 const el = {};
@@ -69,6 +84,10 @@ const PANE_DESKTOP_QUERY = "(min-width: 1180px)";
 const PANE_BOARD_MIN_PX = 340;
 const PANE_INSPECTOR_MIN_PX = 420;
 const PANE_KEYBOARD_STEP = 0.02;
+const MANAGED_LAUNCH_BASE_URLS = Object.freeze({
+  "arcee-auth": "https://api.arcee.ai/api/v1",
+  "chatgpt-codex-responses": "https://chatgpt.com/backend-api",
+});
 
 const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const MARKDOWN_ALLOWED_TAGS = [
@@ -101,6 +120,7 @@ function bindElements() {
     "launchModel",
     "launchBaseUrl",
     "launchApiKeyEnv",
+    "launchCredentialMode",
     "launchExtraHeaders",
     "sandboxFields",
     "sandboxEnabled",
@@ -157,12 +177,14 @@ function bindElements() {
     "settingsOverlay",
     "closeSettings",
     "settingsForm",
+    "settingsSubmit",
     "settingsStatus",
     "settingsBackend",
     "settingsEffort",
     "settingsModel",
     "settingsBaseUrl",
     "settingsApiKeyEnv",
+    "settingsCredentialMode",
     "settingsExtraHeaders",
   ]) {
     el[id] = document.getElementById(id);
@@ -171,7 +193,16 @@ function bindElements() {
 
 function bindEvents() {
   el.launchForm.addEventListener("submit", createSession);
+  el.launchForm.addEventListener("input", () => {
+    state.launchFormVersion += 1;
+  });
   el.launchSshHost.addEventListener("input", renderLaunchHostFields);
+  el.launchSshHost.addEventListener("change", refreshOpenLaunchModelDefaults);
+  el.launchCwd.addEventListener("change", refreshOpenLaunchModelDefaults);
+  el.launchBackend.addEventListener("change", renderLaunchModelControls);
+  el.launchCredentialMode.addEventListener("change", renderCredentialControls);
+  el.settingsBackend.addEventListener("change", renderSettingsModelControls);
+  el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
   el.promptForm.addEventListener("submit", submitPrompt);
   el.promptInput.addEventListener("keydown", handlePromptKeydown);
   el.cancelRun.addEventListener("click", cancelActiveRun);
@@ -288,6 +319,7 @@ async function boot() {
   }
 
   renderLaunchHostFields();
+  renderLaunchModelControls();
   await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
   scheduleSessionPoll();
 }
@@ -682,6 +714,7 @@ function showLaunchOverlay() {
     setLaunchStatus("", false);
   }
   el.launchOverlay.hidden = false;
+  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
   requestAnimationFrame(() => {
     el.launchCwd.focus();
     el.launchCwd.select();
@@ -690,6 +723,82 @@ function showLaunchOverlay() {
 
 function hideLaunchOverlay() {
   el.launchOverlay.hidden = true;
+  state.launchDefaultsRequestGeneration += 1;
+}
+
+function launchLocationFromValues(values) {
+  const sshHost = nullable(values?.ssh_host);
+  return {
+    cwd: sshHost ? (nullable(values?.cwd) || "~") : nullable(values?.cwd),
+    ssh_host: sshHost,
+  };
+}
+
+function launchLocationKey(location) {
+  return JSON.stringify([location?.cwd || null, location?.ssh_host || null]);
+}
+
+async function fetchLaunchModelDefaultsForValues(values, postDefaults = apiPost) {
+  const location = launchLocationFromValues(values);
+  const defaults = await postDefaults("/sessions/launch-defaults", location);
+  return { defaults, location };
+}
+
+function beginLaunchModelDefaultsRequest(showStatus) {
+  const requestGeneration = ++state.launchDefaultsRequestGeneration;
+  state.launchConfiguredBackend = null;
+  state.launchConfiguredBaseUrl = null;
+  renderLaunchModelControls();
+  if (showStatus) setLaunchStatus("refreshing launch defaults", false);
+  return requestGeneration;
+}
+
+function applyLaunchModelDefaults(defaults) {
+  state.launchConfiguredBackend = defaults?.configured_model_backend || null;
+  state.launchConfiguredBaseUrl = defaults?.configured_model_base_url || null;
+  renderLaunchModelControls();
+}
+
+async function refreshLaunchModelDefaults({ showStatus = false, postDefaults = apiPost } = {}) {
+  const requestGeneration = beginLaunchModelDefaultsRequest(showStatus);
+  const values = {
+    cwd: el.launchCwd.value,
+    ssh_host: el.launchSshHost.value,
+  };
+  const expectedLocation = launchLocationFromValues(values);
+  const expectedKey = launchLocationKey(expectedLocation);
+  try {
+    const refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+    const currentLocation = launchLocationFromValues({
+      cwd: el.launchCwd.value,
+      ssh_host: el.launchSshHost.value,
+    });
+    const applied = requestGeneration === state.launchDefaultsRequestGeneration
+      && !el.launchOverlay.hidden
+      && launchLocationKey(currentLocation) === expectedKey;
+    if (applied) {
+      applyLaunchModelDefaults(refreshed.defaults);
+      if (showStatus && el.launchStatus.textContent === "refreshing launch defaults") {
+        setLaunchStatus("", false);
+      }
+    }
+    return { ...refreshed, applied, requestGeneration };
+  } catch (error) {
+    if (requestGeneration === state.launchDefaultsRequestGeneration
+        && !el.launchOverlay.hidden
+        && launchLocationKey(launchLocationFromValues({
+          cwd: el.launchCwd.value,
+          ssh_host: el.launchSshHost.value,
+        })) === expectedKey) {
+      setLaunchStatus(error.message, true);
+    }
+    throw error;
+  }
+}
+
+function refreshOpenLaunchModelDefaults() {
+  if (el.launchOverlay.hidden) return;
+  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
 }
 
 function showDeleteOverlay(sessionId) {
@@ -713,28 +822,204 @@ function setDeleteStatus(message, error) {
   el.deleteStatus.classList.toggle("error", Boolean(error));
 }
 
-function showSettingsOverlay() {
+async function settingsMetadataForSession(sessionId, snapshot, fetchConfig = apiGet) {
+  if (snapshot?.metadata) return snapshot.metadata;
+  return fetchConfig(`/sessions/${encodeURIComponent(sessionId)}/config`);
+}
+
+function rawHeadersFromMetadata(metadata) {
+  if (Object.prototype.hasOwnProperty.call(metadata || {}, "extra_headers_json")) {
+    const raw = metadata.extra_headers_json;
+    if (raw === null || raw === undefined || raw === "") {
+      return { text: "", value: {}, invalid: false };
+    }
+    try {
+      const value = JSON.parse(raw);
+      if (!value || Array.isArray(value) || typeof value !== "object"
+          || Object.values(value).some((entry) => typeof entry !== "string")) {
+        return { text: raw, value: {}, invalid: true };
+      }
+      return { text: JSON.stringify(value, null, 2), value, invalid: false };
+    } catch (_) {
+      return { text: raw, value: {}, invalid: true };
+    }
+  }
+  const value = metadata?.extra_headers || {};
+  return {
+    text: Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "",
+    value,
+    invalid: false,
+  };
+}
+
+function setSettingsSelectRawValue(select, raw, fieldLabel) {
+  for (const option of Array.from(select.querySelectorAll("option[data-raw-invalid]"))) {
+    option.remove();
+  }
+  const value = raw ?? "";
+  if (value && !Array.from(select.options).some((option) => option.value === value)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = `${value} (unsupported — select a replacement ${fieldLabel})`;
+    option.dataset.rawInvalid = "true";
+    select.append(option);
+  }
+  select.value = value;
+}
+
+function settingsFormStateFromMetadata(metadata) {
+  const initial = settingsValuesFromMetadata(metadata);
+  const managedUrl = managedLaunchBaseUrl(initial.backend);
+  const rawBaseUrl = String(metadata?.base_url ?? "");
+  const normalizedBaseUrl = rawBaseUrl.trim();
+  const restoreBaseUrl = normalizedBaseUrl && !isManagedSettingsBaseUrl(normalizedBaseUrl)
+    ? rawBaseUrl
+    : "";
+  const hasApiKeyEnv = metadata?.api_key_env !== null && metadata?.api_key_env !== undefined;
+  const rawApiKeyEnv = String(metadata?.api_key_env ?? "");
+  return {
+    initial,
+    model: metadata?.model || "",
+    backend: initial.backend,
+    reasoning_effort: metadata?.reasoning_effort || "__clear__",
+    baseUrlControl: managedUrl
+      ? {
+          value: managedUrl,
+          readOnly: true,
+          restoreValue: restoreBaseUrl,
+        }
+      : {
+          value: rawBaseUrl,
+          readOnly: false,
+          restoreValue: restoreBaseUrl,
+        },
+    credentialControl: managedUrl
+      ? {
+          mode: "none",
+          value: "",
+          locked: true,
+          restoreMode: "variable",
+          restoreValue: hasApiKeyEnv ? rawApiKeyEnv : "",
+        }
+      : {
+          mode: hasApiKeyEnv ? "variable" : "none",
+          value: rawApiKeyEnv,
+          locked: false,
+          restoreMode: hasApiKeyEnv ? "variable" : "none",
+          restoreValue: rawApiKeyEnv,
+        },
+    extra_headers: rawHeadersFromMetadata(metadata).text,
+  };
+}
+
+function setSettingsFormInteractive(interactive) {
+  el.settingsForm.inert = !interactive;
+  if (interactive) {
+    el.settingsForm.removeAttribute("aria-busy");
+  } else {
+    el.settingsForm.setAttribute("aria-busy", "true");
+  }
+  el.settingsSubmit.disabled = !interactive;
+}
+
+function resetSettingsForm() {
+  state.settingsInitial = null;
+  state.settingsSessionId = null;
+  state.settingsSubmission = null;
+  state.settingsBaseUrlRestoreValue = "";
+  state.settingsCredentialRestoreMode = "variable";
+  state.settingsCredentialRestoreValue = "";
+
+  el.settingsModel.value = "";
+  setSettingsSelectRawValue(el.settingsBackend, "", "backend");
+  setSettingsSelectRawValue(el.settingsEffort, "", "reasoning effort");
+  el.settingsBaseUrl.value = "";
+  el.settingsBaseUrl.readOnly = false;
+  el.settingsBaseUrl.title = "";
+  el.settingsCredentialMode.value = "";
+  el.settingsCredentialMode.disabled = false;
+  el.settingsCredentialMode.title = "";
+  el.settingsApiKeyEnv.value = "";
+  el.settingsApiKeyEnv.disabled = true;
+  el.settingsApiKeyEnv.required = false;
+  el.settingsApiKeyEnv.placeholder = "not used";
+  el.settingsExtraHeaders.value = "";
+  setSettingsStatus("", false);
+  setSettingsFormInteractive(false);
+}
+
+function populateSettingsForm(metadata, sessionId) {
+  const formState = settingsFormStateFromMetadata(metadata);
+  el.settingsModel.value = formState.model;
+  setSettingsSelectRawValue(el.settingsBackend, formState.backend, "backend");
+  setSettingsSelectRawValue(
+    el.settingsEffort,
+    formState.reasoning_effort,
+    "reasoning effort",
+  );
+  el.settingsBaseUrl.value = formState.baseUrlControl.value;
+  el.settingsBaseUrl.readOnly = formState.baseUrlControl.readOnly;
+  el.settingsBaseUrl.title = formState.baseUrlControl.readOnly
+    ? "Canonical URL for the selected managed backend"
+    : "";
+  state.settingsBaseUrlRestoreValue = formState.baseUrlControl.restoreValue;
+  el.settingsCredentialMode.value = formState.credentialControl.mode;
+  el.settingsCredentialMode.disabled = formState.credentialControl.locked;
+  el.settingsCredentialMode.title = formState.credentialControl.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  el.settingsApiKeyEnv.value = formState.credentialControl.value;
+  state.settingsCredentialRestoreMode = formState.credentialControl.restoreMode;
+  state.settingsCredentialRestoreValue = formState.credentialControl.restoreValue;
+  el.settingsExtraHeaders.value = formState.extra_headers;
+  state.settingsInitial = formState.initial;
+  state.settingsSessionId = sessionId;
+  renderCredentialControls();
+}
+
+function settingsContextIsCurrent(requestGeneration, sessionId) {
+  return requestGeneration === state.settingsRequestGeneration
+    && state.settingsSessionId === sessionId
+    && state.selectedId === sessionId
+    && !el.settingsOverlay.hidden;
+}
+
+async function showSettingsOverlay() {
   const sessionId = state.selectedId;
   if (!sessionId) return;
-  const snapshot = state.snapshots.get(sessionId);
-  const metadata = snapshot?.metadata;
-  if (metadata) {
-    el.settingsModel.value = metadata.model || "";
-    el.settingsBaseUrl.value = metadata.base_url || "";
-    el.settingsBackend.value = metadata.backend || "";
-    el.settingsEffort.value = metadata.reasoning_effort || "";
-    el.settingsApiKeyEnv.value = metadata.api_key_env || "";
-    el.settingsExtraHeaders.value = metadata.extra_headers
-      && Object.keys(metadata.extra_headers).length > 0
-      ? JSON.stringify(metadata.extra_headers, null, 2)
-      : "";
-  }
-  setSettingsStatus("", false);
+  const requestGeneration = ++state.settingsRequestGeneration;
+  resetSettingsForm();
   el.settingsOverlay.hidden = false;
+  setSettingsStatus("loading persisted settings", false);
+
+  try {
+    const snapshot = state.snapshots.get(sessionId);
+    const metadata = await settingsMetadataForSession(sessionId, snapshot);
+    if (requestGeneration !== state.settingsRequestGeneration
+        || state.selectedId !== sessionId
+        || el.settingsOverlay.hidden) return;
+    populateSettingsForm(metadata, sessionId);
+    setSettingsFormInteractive(true);
+    const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics : [];
+    setSettingsStatus(
+      diagnostics.length > 0
+        ? `Repair required: ${diagnostics.join("; ")}`
+        : (snapshot?.metadata ? "" : "Loaded persisted settings for repair"),
+      diagnostics.length > 0,
+    );
+  } catch (error) {
+    if (requestGeneration === state.settingsRequestGeneration
+        && state.selectedId === sessionId
+        && !el.settingsOverlay.hidden) {
+      setSettingsStatus(error.message, true);
+    }
+  }
 }
 
 function hideSettingsOverlay() {
+  state.settingsRequestGeneration += 1;
   el.settingsOverlay.hidden = true;
+  resetSettingsForm();
 }
 
 function setSettingsStatus(message, error) {
@@ -745,26 +1030,42 @@ function setSettingsStatus(message, error) {
 async function updateSessionConfig(event) {
   event.preventDefault();
   const sessionId = state.selectedId;
-  if (!sessionId) return;
-  setSettingsStatus("saving", false);
+  const requestGeneration = state.settingsRequestGeneration;
+  if (!sessionId
+      || !state.settingsInitial
+      || state.settingsSessionId !== sessionId
+      || el.settingsOverlay.hidden
+      || state.settingsSubmission) return;
 
-  const extraHeadersRaw = el.settingsExtraHeaders.value;
-  let extraHeaders = null;
+  let body;
   try {
-    extraHeaders = serializeExtraHeaders(extraHeadersRaw);
-  } catch (parseError) {
-    setSettingsStatus(parseError.message, true);
+    body = buildSettingsPatch({
+      model: el.settingsModel.value,
+      base_url: el.settingsBaseUrl.value,
+      backend: el.settingsBackend.value,
+      reasoning_effort: el.settingsEffort.value,
+      credential_mode: el.settingsCredentialMode.value,
+      api_key_env: el.settingsApiKeyEnv.value,
+      extra_headers: el.settingsExtraHeaders.value,
+    }, state.settingsInitial);
+  } catch (validationError) {
+    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+      setSettingsStatus(validationError.message, true);
+    }
     return;
   }
 
-  const body = {
-    model: nullable(el.settingsModel.value),
-    base_url: nullable(el.settingsBaseUrl.value),
-    backend: nullable(el.settingsBackend.value),
-    reasoning_effort: nullable(el.settingsEffort.value),
-    api_key_env: nullable(el.settingsApiKeyEnv.value),
-    extra_headers: extraHeaders,
-  };
+  if (Object.keys(body).length === 0) {
+    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+      setSettingsStatus("No changes", false);
+    }
+    return;
+  }
+
+  const submission = { requestGeneration, sessionId };
+  state.settingsSubmission = submission;
+  setSettingsFormInteractive(false);
+  setSettingsStatus("saving", false);
 
   try {
     const response = await fetch(
@@ -780,13 +1081,26 @@ async function updateSessionConfig(event) {
       try { payload = await response.json(); } catch (_) {}
       throw new Error(payload.error || `${response.status} ${response.statusText}`);
     }
+    if (!settingsContextIsCurrent(requestGeneration, sessionId)
+        || state.settingsSubmission !== submission) return;
+
     hideSettingsOverlay();
     // Reconnect SSE and reload snapshot to pick up the new config.
     openEventStream(sessionId);
     await loadSnapshot(sessionId, false);
     await loadSessions({ forceFetch: true });
   } catch (error) {
-    setSettingsStatus(error.message, true);
+    if (settingsContextIsCurrent(requestGeneration, sessionId)
+        && state.settingsSubmission === submission) {
+      setSettingsStatus(error.message, true);
+    }
+  } finally {
+    if (state.settingsSubmission === submission) {
+      state.settingsSubmission = null;
+      if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+        setSettingsFormInteractive(true);
+      }
+    }
   }
 }
 
@@ -808,70 +1122,94 @@ function showMobileSessions() {
 
 async function createSession(event) {
   event.preventDefault();
-  let extraHeaders = null;
-  try {
-    extraHeaders = serializeExtraHeaders(el.launchExtraHeaders.value);
-  } catch (parseError) {
-    setLaunchStatus(parseError.message, true);
-    return;
-  }
-
-  setLaunchStatus("launching", false);
-  const initialPrompt = el.initialPrompt.value.trim();
-  const sshHost = nullable(el.launchSshHost.value);
-  const body = {
-    cwd: sshHost ? (nullable(el.launchCwd.value) || "~") : nullable(el.launchCwd.value),
-    ssh_host: sshHost,
-    model: nullable(el.launchModel.value),
-    base_url: nullable(el.launchBaseUrl.value),
-    backend: nullable(el.launchBackend.value),
-    reasoning_effort: nullable(el.launchEffort.value),
-    api_key_env: nullable(el.launchApiKeyEnv.value),
-    extra_headers: extraHeaders,
-  };
-  if (!sshHost) {
-    body.sandbox = {
-      enabled: el.sandboxEnabled.checked,
-      no_mount_cwd: el.sandboxNoMount.checked,
-      image: nullable(el.sandboxImage.value),
-      gpus: csv(el.sandboxGpu.value),
-      workdir: nullable(el.sandboxWorkdir.value),
-      shm_size: nullable(el.sandboxShm.value),
-      mounts: csv(el.sandboxMounts.value),
-      mounts_ro: [],
-    };
-  }
+  if (state.launchSubmitting) return;
+  state.launchSubmitting = true;
+  const submittedFormVersion = state.launchFormVersion;
 
   try {
-    const snapshot = await apiPost("/sessions", body);
-    const sessionId = snapshot.metadata.session_id;
-    state.snapshots.set(sessionId, snapshot);
-    state.selectedId = sessionId;
-    await loadSessions({ forceFetch: true, workspaceStats: true });
-    hideLaunchOverlay();
-    selectSession(sessionId);
-    setLaunchStatus(`launched ${shortId(sessionId)}`, false);
-    if (initialPrompt) {
-      const hadAttention = state.attentionSessions.has(sessionId);
-      markRunSubmitting(sessionId);
-      clearSessionAttention(sessionId);
-      requestChatScrollToBottom();
-      requestRender({ shell: false, sessions: hadAttention, inspector: true });
-      try {
-        await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
-        scheduleRunSubmittingGrace(sessionId);
-        el.initialPrompt.value = "";
-        setLaunchStatus(`running ${shortId(sessionId)}`, false);
-        await loadSnapshot(sessionId, false);
-      } catch (error) {
-        clearRunSubmitting(sessionId);
-        state.activeRunsBySession.set(sessionId, false);
-        requestInspectorRender();
-        throw error;
-      }
+    let refreshed;
+    try {
+      refreshed = await refreshLaunchModelDefaults({ showStatus: true });
+    } catch (_) {
+      return;
     }
-  } catch (error) {
-    setLaunchStatus(error.message, true);
+    if (!refreshed.applied) {
+      return;
+    }
+    if (submittedFormVersion !== state.launchFormVersion) {
+      setLaunchStatus("Launch form changed while defaults were refreshing; submit again", true);
+      return;
+    }
+
+    let modelPayload;
+    try {
+      modelPayload = buildLaunchModelPayload({
+        model: el.launchModel.value,
+        base_url: el.launchBaseUrl.value,
+        backend: el.launchBackend.value,
+        reasoning_effort: el.launchEffort.value,
+        credential_mode: el.launchCredentialMode.value,
+        api_key_env: el.launchApiKeyEnv.value,
+        extra_headers: el.launchExtraHeaders.value,
+        configured_backend: refreshed.defaults?.configured_model_backend,
+      });
+    } catch (validationError) {
+      setLaunchStatus(validationError.message, true);
+      return;
+    }
+
+    setLaunchStatus("launching", false);
+    const initialPrompt = el.initialPrompt.value.trim();
+    const body = {
+      ...refreshed.location,
+      ...modelPayload,
+    };
+    if (!refreshed.location.ssh_host) {
+      body.sandbox = {
+        enabled: el.sandboxEnabled.checked,
+        no_mount_cwd: el.sandboxNoMount.checked,
+        image: nullable(el.sandboxImage.value),
+        gpus: csv(el.sandboxGpu.value),
+        workdir: nullable(el.sandboxWorkdir.value),
+        shm_size: nullable(el.sandboxShm.value),
+        mounts: csv(el.sandboxMounts.value),
+        mounts_ro: [],
+      };
+    }
+
+    try {
+      const snapshot = await apiPost("/sessions", body);
+      const sessionId = snapshot.metadata.session_id;
+      state.snapshots.set(sessionId, snapshot);
+      state.selectedId = sessionId;
+      await loadSessions({ forceFetch: true, workspaceStats: true });
+      hideLaunchOverlay();
+      selectSession(sessionId);
+      setLaunchStatus(`launched ${shortId(sessionId)}`, false);
+      if (initialPrompt) {
+        const hadAttention = state.attentionSessions.has(sessionId);
+        markRunSubmitting(sessionId);
+        clearSessionAttention(sessionId);
+        requestChatScrollToBottom();
+        requestRender({ shell: false, sessions: hadAttention, inspector: true });
+        try {
+          await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
+          scheduleRunSubmittingGrace(sessionId);
+          el.initialPrompt.value = "";
+          setLaunchStatus(`running ${shortId(sessionId)}`, false);
+          await loadSnapshot(sessionId, false);
+        } catch (error) {
+          clearRunSubmitting(sessionId);
+          state.activeRunsBySession.set(sessionId, false);
+          requestInspectorRender();
+          throw error;
+        }
+      }
+    } catch (error) {
+      setLaunchStatus(error.message, true);
+    }
+  } finally {
+    state.launchSubmitting = false;
   }
 }
 
@@ -2245,7 +2583,9 @@ function renderInspector() {
   if (!sessionId || !snapshot) {
     el.inspectorTitle.textContent = selectedTitle || "No session selected";
     el.inspectorTitle.title = sessionId || "";
-    el.inspectorMeta.textContent = sessionId ? "Loading snapshot." : "Launch or select a session.";
+    el.inspectorMeta.textContent = sessionId
+      ? "Snapshot unavailable. Open settings to repair the persisted model configuration."
+      : "Launch or select a session.";
     el.snapModel.textContent = "--";
     el.snapBackend.textContent = "--";
     el.snapMessages.textContent = "0";
@@ -2256,7 +2596,7 @@ function renderInspector() {
     el.deleteSessionBtn.disabled = !selectedEntry;
     el.renameSessionBtn.disabled = !selectedEntry;
     el.fullscreenBtn.disabled = true;
-    el.settingsBtn.disabled = true;
+    el.settingsBtn.disabled = !selectedEntry;
     el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
     state.transcriptRenderedSessionId = null;
     el.threadsView.innerHTML = "";
@@ -4384,9 +4724,9 @@ function setLaunchStatus(message, error) {
   el.launchStatus.classList.toggle("error", Boolean(error));
 }
 
-function serializeExtraHeaders(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
+function serializeExtraHeaders(value, blankValue) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return blankValue;
 
   let parsed;
   try {
@@ -4402,7 +4742,352 @@ function serializeExtraHeaders(value) {
       throw new Error(`Extra Headers value for "${key}" must be a string`);
     }
   }
-  return JSON.stringify(parsed);
+  return parsed;
+}
+
+function optionalLaunchString(value, label) {
+  const raw = String(value ?? "");
+  if (raw === "") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error(`${label} cannot contain only whitespace`);
+  return trimmed;
+}
+
+function requiredSettingsString(value, label) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) throw new Error(`${label} is required and cannot be cleared`);
+  return trimmed;
+}
+
+function selectedApiKeyEnv(mode, value) {
+  if (mode === "inherit") return undefined;
+  if (mode === "none") return null;
+  if (mode !== "variable") throw new Error("Choose how credentials are selected");
+  const selected = String(value ?? "");
+  if (!selected) throw new Error("API key environment variable is required when Environment variable is selected");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(selected)) {
+    throw new Error("API key environment variable must match [A-Za-z_][A-Za-z0-9_]* exactly (no whitespace)");
+  }
+  return selected;
+}
+
+function validateCredentialMode(backend, mode) {
+  if (!backend) return;
+  const stored = backend === "arcee-auth" || backend === "chatgpt-codex-responses";
+  if (stored && mode !== "none") {
+    const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
+    throw new Error(`${backend} uses ${source} and does not accept an API key environment variable`);
+  }
+  if (!stored && mode !== "variable") {
+    throw new Error(`${backend} requires an API key environment variable; explicitly select Environment variable`);
+  }
+}
+
+function managedLaunchBaseUrl(backend) {
+  return MANAGED_LAUNCH_BASE_URLS[String(backend || "").trim()] || null;
+}
+
+function isManagedSettingsBaseUrl(baseUrl) {
+  const normalized = String(baseUrl ?? "").trim();
+  return Object.values(MANAGED_LAUNCH_BASE_URLS).includes(normalized);
+}
+
+function effectiveLaunchBackend(selectedBackend, configuredBackend) {
+  return String(selectedBackend || "").trim() || String(configuredBackend || "").trim();
+}
+
+function nextLaunchBaseUrlControl(
+  current,
+  selectedBackend,
+  configuredBackend,
+  configuredBaseUrl = null,
+) {
+  const value = String(current?.value ?? "");
+  const readOnly = Boolean(current?.readOnly);
+  const restoreValue = String(current?.restoreValue ?? "");
+  const explicitBackend = String(selectedBackend || "").trim();
+  const effectiveBackend = effectiveLaunchBackend(explicitBackend, configuredBackend);
+  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
+  const effectiveManagedUrl = managedUrl && !explicitBackend
+    ? (String(configuredBaseUrl || "").trim() || managedUrl)
+    : managedUrl;
+  if (effectiveManagedUrl) {
+    return {
+      value: effectiveManagedUrl,
+      readOnly: true,
+      restoreValue: readOnly ? restoreValue : value,
+    };
+  }
+  return {
+    value: readOnly ? restoreValue : value,
+    readOnly: false,
+    restoreValue,
+  };
+}
+
+function nextLaunchCredentialControl(current, selectedBackend, configuredBackend) {
+  const mode = String(current?.mode || "inherit");
+  const value = String(current?.value ?? "");
+  const locked = Boolean(current?.locked);
+  const restoreMode = String(current?.restoreMode || "inherit");
+  const restoreValue = String(current?.restoreValue ?? "");
+  const managed = Boolean(managedLaunchBaseUrl(
+    effectiveLaunchBackend(selectedBackend, configuredBackend),
+  ));
+  if (managed) {
+    return {
+      mode: "none",
+      value: "",
+      locked: true,
+      restoreMode: locked ? restoreMode : mode,
+      restoreValue: locked ? restoreValue : value,
+    };
+  }
+  return {
+    mode: locked ? restoreMode : mode,
+    value: locked ? restoreValue : value,
+    locked: false,
+    restoreMode,
+    restoreValue,
+  };
+}
+
+function buildLaunchModelPayload(values) {
+  const payload = {};
+  const model = optionalLaunchString(values.model, "Model");
+  if (model !== undefined) payload.model = model;
+
+  const selectedBackend = optionalLaunchString(values.backend, "Backend");
+  if (selectedBackend !== undefined) payload.backend = selectedBackend;
+  const effectiveBackend = effectiveLaunchBackend(selectedBackend, values.configured_backend);
+  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
+
+  if (managedUrl) {
+    // An explicit managed backend must override an unrelated configured URL.
+    // An inherited managed backend must leave the configured tuple untouched.
+    if (selectedBackend !== undefined) payload.base_url = managedUrl;
+  } else {
+    const baseUrl = optionalLaunchString(values.base_url, "Base URL");
+    if (baseUrl !== undefined) payload.base_url = baseUrl;
+  }
+
+  const effort = String(values.reasoning_effort ?? "");
+  if (effort === "__clear__") payload.reasoning_effort = null;
+  else if (effort) payload.reasoning_effort = effort;
+
+  if (managedUrl) {
+    // Managed credentials must override a stale configured API-key selector,
+    // including when backend/base remain inherited.
+    payload.api_key_env = null;
+  } else {
+    const credentialMode = String(values.credential_mode || "inherit");
+    validateCredentialMode(payload.backend, credentialMode);
+    const apiKeyEnv = selectedApiKeyEnv(credentialMode, values.api_key_env);
+    if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
+  }
+
+  const headers = serializeExtraHeaders(values.extra_headers, undefined);
+  if (headers !== undefined) payload.extra_headers = headers;
+  return payload;
+}
+
+function settingsValuesFromMetadata(metadata) {
+  const headers = rawHeadersFromMetadata(metadata);
+  const values = {
+    model: String(metadata?.model ?? ""),
+    base_url: String(metadata?.base_url ?? ""),
+    backend: String(metadata?.backend ?? ""),
+    reasoning_effort: metadata?.reasoning_effort ?? null,
+    api_key_env: metadata?.api_key_env ?? null,
+    extra_headers: headers.value,
+  };
+  if (headers.invalid) values.extra_headers_invalid = true;
+  return values;
+}
+
+function sameHeaderObject(left, right) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
+}
+
+function buildSettingsPatch(values, initial) {
+  const backend = requiredSettingsString(values.backend, "Backend");
+  const managedUrl = managedLaunchBaseUrl(backend);
+  let baseUrl;
+  let apiKeyEnv;
+  if (managedUrl) {
+    baseUrl = managedUrl;
+    apiKeyEnv = null;
+  } else {
+    baseUrl = requiredSettingsString(values.base_url, "Base URL");
+    apiKeyEnv = selectedApiKeyEnv(values.credential_mode, values.api_key_env);
+    if (apiKeyEnv === undefined) {
+      throw new Error("Session settings must explicitly select an API key environment variable or none");
+    }
+    validateCredentialMode(backend, values.credential_mode);
+  }
+
+  const current = {
+    model: requiredSettingsString(values.model, "Model"),
+    base_url: baseUrl,
+    backend,
+    reasoning_effort: values.reasoning_effort === "__clear__" ? null : values.reasoning_effort,
+    api_key_env: apiKeyEnv,
+    extra_headers: serializeExtraHeaders(values.extra_headers, {}),
+  };
+
+  const patch = {};
+  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
+    if (current[field] !== initial[field]) patch[field] = current[field];
+  }
+  if (initial.extra_headers_invalid
+      || !sameHeaderObject(current.extra_headers, initial.extra_headers || {})) {
+    patch.extra_headers = current.extra_headers;
+  }
+  return patch;
+}
+
+function nextSettingsBaseUrlControl(current, backend) {
+  const value = String(current?.value ?? "");
+  const readOnly = Boolean(current?.readOnly);
+  const restoreValue = String(current?.restoreValue ?? "");
+  const managedUrl = managedLaunchBaseUrl(backend);
+  if (managedUrl) {
+    return {
+      value: managedUrl,
+      readOnly: true,
+      restoreValue: readOnly || isManagedSettingsBaseUrl(value) ? restoreValue : value,
+    };
+  }
+  return {
+    value: readOnly ? restoreValue : value,
+    readOnly: false,
+    restoreValue,
+  };
+}
+
+function nextSettingsCredentialControl(current, backend) {
+  const mode = String(current?.mode || "none");
+  const value = String(current?.value ?? "");
+  const locked = Boolean(current?.locked);
+  const restoreMode = String(current?.restoreMode || "variable");
+  const restoreValue = String(current?.restoreValue ?? "");
+  if (managedLaunchBaseUrl(backend)) {
+    return {
+      mode: "none",
+      value: "",
+      locked: true,
+      restoreMode: locked ? restoreMode : mode,
+      restoreValue: locked ? restoreValue : value,
+    };
+  }
+  return {
+    mode: locked ? restoreMode : mode,
+    value: locked ? restoreValue : value,
+    locked: false,
+    restoreMode,
+    restoreValue,
+  };
+}
+
+function renderSettingsModelControls() {
+  if (!el.settingsBackend) return;
+  const nextBaseUrl = nextSettingsBaseUrlControl(
+    {
+      value: el.settingsBaseUrl.value,
+      readOnly: el.settingsBaseUrl.readOnly,
+      restoreValue: state.settingsBaseUrlRestoreValue,
+    },
+    el.settingsBackend.value,
+  );
+  el.settingsBaseUrl.value = nextBaseUrl.value;
+  el.settingsBaseUrl.readOnly = nextBaseUrl.readOnly;
+  el.settingsBaseUrl.title = nextBaseUrl.readOnly
+    ? "Canonical URL for the selected managed backend"
+    : "";
+  state.settingsBaseUrlRestoreValue = nextBaseUrl.restoreValue;
+
+  const nextCredential = nextSettingsCredentialControl(
+    {
+      mode: el.settingsCredentialMode.value,
+      value: el.settingsApiKeyEnv.value,
+      locked: el.settingsCredentialMode.disabled,
+      restoreMode: state.settingsCredentialRestoreMode,
+      restoreValue: state.settingsCredentialRestoreValue,
+    },
+    el.settingsBackend.value,
+  );
+  el.settingsCredentialMode.value = nextCredential.mode;
+  el.settingsApiKeyEnv.value = nextCredential.value;
+  el.settingsCredentialMode.disabled = nextCredential.locked;
+  el.settingsCredentialMode.title = nextCredential.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  state.settingsCredentialRestoreMode = nextCredential.restoreMode;
+  state.settingsCredentialRestoreValue = nextCredential.restoreValue;
+  renderCredentialControls();
+}
+
+function renderLaunchModelControls() {
+  renderLaunchBaseUrlControl();
+  renderLaunchCredentialControl();
+}
+
+function renderLaunchBaseUrlControl() {
+  if (!el.launchBaseUrl || !el.launchBackend) return;
+  const next = nextLaunchBaseUrlControl(
+    {
+      value: el.launchBaseUrl.value,
+      readOnly: el.launchBaseUrl.readOnly,
+      restoreValue: state.launchBaseUrlRestoreValue,
+    },
+    el.launchBackend.value,
+    state.launchConfiguredBackend,
+    state.launchConfiguredBaseUrl,
+  );
+  el.launchBaseUrl.value = next.value;
+  el.launchBaseUrl.readOnly = next.readOnly;
+  el.launchBaseUrl.title = next.readOnly ? "Canonical URL for the selected managed backend" : "";
+  state.launchBaseUrlRestoreValue = next.restoreValue;
+}
+
+function renderLaunchCredentialControl() {
+  if (!el.launchCredentialMode || !el.launchApiKeyEnv || !el.launchBackend) return;
+  const next = nextLaunchCredentialControl(
+    {
+      mode: el.launchCredentialMode.value,
+      value: el.launchApiKeyEnv.value,
+      locked: el.launchCredentialMode.disabled,
+      restoreMode: state.launchCredentialRestoreMode,
+      restoreValue: state.launchCredentialRestoreValue,
+    },
+    el.launchBackend.value,
+    state.launchConfiguredBackend,
+  );
+  el.launchCredentialMode.value = next.mode;
+  el.launchApiKeyEnv.value = next.value;
+  el.launchCredentialMode.disabled = next.locked;
+  el.launchCredentialMode.title = next.locked
+    ? "Stored credentials are selected automatically for this managed backend"
+    : "";
+  state.launchCredentialRestoreMode = next.restoreMode;
+  state.launchCredentialRestoreValue = next.restoreValue;
+  renderCredentialControls();
+}
+
+function renderCredentialControls() {
+  for (const [modeElement, inputElement] of [
+    [el.launchCredentialMode, el.launchApiKeyEnv],
+    [el.settingsCredentialMode, el.settingsApiKeyEnv],
+  ]) {
+    if (!modeElement || !inputElement) continue;
+    const acceptsVariable = modeElement.value === "variable";
+    inputElement.disabled = !acceptsVariable;
+    inputElement.required = acceptsVariable;
+    inputElement.placeholder = acceptsVariable ? "MY_PROVIDER_API_KEY" : "not used";
+  }
 }
 
 function nullable(value) {

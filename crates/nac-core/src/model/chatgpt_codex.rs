@@ -1,13 +1,16 @@
+use super::auth_store::ensure_open_credential_file_is_safe;
 use super::*;
 use anyhow::Context;
+use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
@@ -15,7 +18,7 @@ const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/
 const DEVICE_VERIFICATION_URL: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
+const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const ORIGINATOR: &str = "nac";
 const AUTH_TYPE: &str = "chatgpt-codex";
 const DEFAULT_EXPIRES_IN_SECS: u64 = 3600;
@@ -30,6 +33,28 @@ struct StoredCodexAuth {
     refresh: String,
     expires_at_ms: u64,
     account_id: String,
+}
+
+/// Marks missing or invalid managed Codex credential content. Credential-store
+/// access failures intentionally remain untyped operational errors. Unsafe Unix
+/// permissions use a shared actionable safety marker in `auth_store`.
+#[derive(Debug)]
+pub(super) struct StoredCodexAuthConfigurationError {
+    message: String,
+}
+
+impl fmt::Display for StoredCodexAuthConfigurationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StoredCodexAuthConfigurationError {}
+
+fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(StoredCodexAuthConfigurationError {
+        message: message.into(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +92,53 @@ impl fmt::Display for CodexRequestError {
 
 impl std::error::Error for CodexRequestError {}
 
+pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
+    let parsed = Url::parse(base_url)
+        .map_err(|error| anyhow!("invalid Codex base URL '{}': {}", base_url, error))?;
+    if parsed.scheme() != "https" {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires HTTPS",
+            base_url
+        ));
+    }
+    if parsed.host_str() != Some("chatgpt.com") {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires the approved ChatGPT origin",
+            base_url
+        ));
+    }
+    if parsed.port_or_known_default() != Some(443) {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires effective port 443",
+            base_url
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': userinfo is not allowed",
+            base_url
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': query parameters and fragments are not allowed",
+            base_url
+        ));
+    }
+    if !matches!(parsed.path(), "/backend-api" | "/backend-api/") {
+        return Err(anyhow!(
+            "invalid Codex base URL '{}': managed Codex requires path '/backend-api'",
+            base_url
+        ));
+    }
+    Ok(parsed)
+}
+
+pub(super) fn preflight_stored_auth() -> Result<()> {
+    let _lock = acquire_auth_lock()?;
+    read_auth_file().map(|_| ())
+}
+
 pub async fn codex_auth_login() -> Result<()> {
     let client = Client::new();
     let device = request_device_code(&client).await?;
@@ -93,10 +165,11 @@ pub async fn codex_auth_login() -> Result<()> {
 
 pub fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
-    let removed = with_auth_lock(|| match fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
+    let removed = with_auth_lock(|| {
+        if auth_path_is_symlink(&path)? {
+            return remove_auth_path(&path);
+        }
+        remove_codex_auth_file_for_logout(&path)
     })?;
 
     if removed {
@@ -108,9 +181,61 @@ pub fn codex_auth_logout() -> Result<()> {
     Ok(())
 }
 
+fn auth_path_is_symlink(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn remove_codex_auth_file_for_logout(path: &Path) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        return remove_auth_path(path);
+    }
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "refusing to remove non-regular credential path {}",
+            path.display()
+        ));
+    }
+
+    let raw = read_auth_bytes_from_path(path)?.ok_or_else(|| {
+        anyhow!(
+            "credential path {} disappeared while preparing logout; retry the operation",
+            path.display()
+        )
+    })?;
+    let value: Value = match serde_json::from_slice(&raw) {
+        Ok(value) => value,
+        Err(_) => return remove_auth_path(path),
+    };
+    if value.get("type").and_then(Value::as_str) == Some(AUTH_TYPE) {
+        remove_auth_path(path)
+    } else {
+        Ok(false)
+    }
+}
+
+fn remove_auth_path(path: &Path) -> Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
+    }
+}
+
 pub fn codex_auth_status() -> Result<()> {
     let path = auth_file_path()?;
-    let auth = with_auth_lock(read_auth_file_optional)?;
+    let auth = read_auth_file_optional_for_status()?;
     match auth {
         Some(auth) => {
             println!("Codex auth: signed in");
@@ -134,7 +259,7 @@ pub async fn send_responses(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
 ) -> Result<ModelTurnResponse> {
-    let url = codex_responses_url(base_url);
+    let url = codex_responses_url(base_url)?;
     let request = codex_responses_request(model, reasoning_effort, &messages, &tools);
     let auth = fresh_auth(client).await?;
 
@@ -620,20 +745,9 @@ fn codex_event_error_message(event: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn codex_responses_url(base_url: &str) -> String {
-    let raw = if base_url.trim().is_empty() {
-        DEFAULT_CODEX_BASE_URL
-    } else {
-        base_url.trim()
-    };
-    let normalized = raw.trim_end_matches('/');
-    if normalized.ends_with("/codex/responses") {
-        normalized.to_string()
-    } else if normalized.ends_with("/codex") {
-        format!("{normalized}/responses")
-    } else {
-        format!("{normalized}/codex/responses")
-    }
+fn codex_responses_url(base_url: &str) -> Result<String> {
+    validate_base_url(base_url)?;
+    Ok(CODEX_RESPONSES_URL.to_string())
 }
 
 fn auth_file_path() -> Result<PathBuf> {
@@ -663,61 +777,282 @@ fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
 }
 
 fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
-    let path = auth_file_path()?;
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
+    read_auth_file_optional_from_path(&auth_file_path()?)
+}
+
+fn read_auth_file_optional_for_status() -> Result<Option<StoredCodexAuth>> {
+    read_auth_file_optional_from_path_with_policy(&auth_file_path()?, true)
+}
+
+fn read_auth_file_optional_from_path(path: &Path) -> Result<Option<StoredCodexAuth>> {
+    read_auth_file_optional_from_path_with_policy(path, false)
+}
+
+fn read_auth_file_optional_from_path_with_policy(
+    path: &Path,
+    foreign_provider_is_missing: bool,
+) -> Result<Option<StoredCodexAuth>> {
+    let raw = match read_auth_bytes_from_path(path)? {
+        Some(raw) => raw,
+        None => return Ok(None),
+    };
+    let raw = String::from_utf8(raw).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "Codex credential file {} is not valid UTF-8",
+            path.display()
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&raw).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "failed to parse Codex credentials in {}",
+            path.display()
+        ))
+    })?;
+    let provider = value.get("type").and_then(Value::as_str);
+    if provider != Some(AUTH_TYPE) {
+        if foreign_provider_is_missing {
+            return Ok(None);
+        }
+        return Err(stored_auth_configuration_error(format!(
+            "Codex credentials in {} have an invalid or unsupported provider type",
+            path.display()
+        )));
+    }
+    let auth: StoredCodexAuth = serde_json::from_value(value).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "Codex credentials in {} do not match the required schema",
+            path.display()
+        ))
+    })?;
+    validate_stored_auth(&auth, path)?;
+    Ok(Some(auth))
+}
+
+fn validate_stored_auth(auth: &StoredCodexAuth, path: &Path) -> Result<()> {
+    for (field, value) in [
+        ("access", auth.access.as_str()),
+        ("refresh", auth.refresh.as_str()),
+        ("account_id", auth.account_id.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(stored_auth_configuration_error(format!(
+                "Codex credentials in {} require nonblank field '{}'",
+                path.display(),
+                field
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "refusing to read symlink credential path {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow!(
+                "refusing to read non-regular credential path {}",
+                path.display()
+            ))
+        }
+        Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", path.display()))
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to securely open credential file {}", path.display())
+            })
         }
     };
-    let auth: StoredCodexAuth = serde_json::from_str(&raw)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    if auth.auth_type != AUTH_TYPE {
-        return Err(anyhow!(
-            "{} contains unsupported auth type '{}'",
-            path.display(),
-            auth.auth_type
-        ));
-    }
-    Ok(Some(auth))
+    ensure_open_credential_file_is_safe(&file, path)?;
+
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw)
+        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    Ok(Some(raw))
 }
 
 fn read_auth_file() -> Result<StoredCodexAuth> {
     read_auth_file_optional()?.ok_or_else(|| {
-        anyhow!("Codex auth is not configured. Run `nac codex-auth` to sign in with ChatGPT.")
+        stored_auth_configuration_error(
+            "Codex auth is not configured. Run `nac codex-auth` to sign in with ChatGPT.",
+        )
     })
 }
 
 fn write_auth_file(auth: &StoredCodexAuth) -> Result<()> {
     let path = auth_file_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
+    validate_stored_auth(auth, &path)?;
+    write_auth_file_to_path(&path, auth)
+}
+
+fn write_auth_file_to_path(path: &Path, auth: &StoredCodexAuth) -> Result<()> {
     let raw = serde_json::to_string_pretty(auth).context("failed to serialize Codex auth")?;
+    atomic_replace_auth_file(path, |file| file.write_all(raw.as_bytes()))
+}
+
+fn atomic_replace_auth_file(
+    path: &Path,
+    write_contents: impl FnOnce(&mut File) -> io::Result<()>,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("auth path {} has no parent directory", path.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    validate_regular_destination(path)?;
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow!("auth path {} has no file name", path.display()))?
+        .to_string_lossy();
+    let temp_path = parent.join(format!(".{file_name}.tmp-{}", Uuid::new_v4().simple()));
+    let mut temp = open_private_temp_file(&temp_path)?;
+    let mut cleanup = TempFileCleanup::new(temp_path.clone());
+    let write_result = (|| -> Result<()> {
+        make_file_private(&temp, &temp_path)?;
+        ensure_open_file_is_regular(&temp, &temp_path, "temporary auth file")?;
+        write_contents(&mut temp).with_context(|| {
+            format!(
+                "failed to write temporary auth file {}",
+                temp_path.display()
+            )
+        })?;
+        temp.flush().with_context(|| {
+            format!(
+                "failed to flush temporary auth file {}",
+                temp_path.display()
+            )
+        })?;
+        temp.sync_all().with_context(|| {
+            format!("failed to sync temporary auth file {}", temp_path.display())
+        })?;
+        Ok(())
+    })();
+    drop(temp);
+    write_result?;
+
+    // Check again immediately before rename. On Unix, rename replaces a final
+    // component rather than following it, so a racing symlink cannot modify its target.
+    validate_regular_destination(path)?;
+    fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "failed to atomically replace {} with {}",
+            path.display(),
+            temp_path.display()
+        )
+    })?;
+    cleanup.disarm();
+    sync_parent_directory(parent)
+        .with_context(|| format!("failed to sync auth directory {}", parent.display()))?;
+    Ok(())
+}
+
+fn validate_regular_destination(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "refusing to replace symlink credential destination {}",
+            path.display()
+        )),
+        Ok(_) => Err(anyhow!(
+            "refusing to replace non-regular credential destination {}",
+            path.display()
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn open_private_temp_file(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
-    options.create(true).truncate(true).write(true);
+    options.create_new(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     }
-    let mut file = options
-        .open(&path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
-    use std::io::Write;
-    file.write_all(raw.as_bytes())
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    file.flush()
-        .with_context(|| format!("failed to flush {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
+    options
+        .open(path)
+        .with_context(|| format!("failed to create temporary auth file {}", path.display()))
+}
+
+#[cfg(unix)]
+fn make_file_private(file: &File, path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("failed to chmod {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_file_private(_file: &File, _path: &Path) -> Result<()> {
     Ok(())
+}
+
+fn ensure_open_file_is_regular(file: &File, path: &Path, kind: &str) -> Result<()> {
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect open {kind} {}", path.display()))?;
+    if metadata.file_type().is_file() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "refusing to use non-regular {kind} {}",
+            path.display()
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+struct TempFileCleanup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 struct FileLock {
@@ -726,15 +1061,41 @@ struct FileLock {
 
 impl FileLock {
     fn acquire(path: &Path) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
+        validate_lock_destination(path)?;
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(false).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        }
+        let file = options
             .open(path)
             .with_context(|| format!("failed to open auth lock {}", path.display()))?;
+        ensure_open_file_is_regular(&file, path, "auth lock")?;
+        make_file_private(&file, path)?;
         lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
         Ok(Self { file })
+    }
+}
+
+fn validate_lock_destination(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "refusing to use symlink auth lock {}",
+            path.display()
+        )),
+        Ok(_) => Err(anyhow!(
+            "refusing to use non-regular auth lock {}",
+            path.display()
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to inspect auth lock {}", path.display()))
+        }
     }
 }
 
@@ -744,36 +1105,12 @@ impl Drop for FileLock {
     }
 }
 
-#[cfg(unix)]
 fn lock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    FileExt::lock_exclusive(file)
 }
 
-#[cfg(unix)]
 fn unlock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(unix))]
-fn lock_file(_file: &File) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn unlock_file(_file: &File) -> io::Result<()> {
-    Ok(())
+    FileExt::unlock(file)
 }
 
 fn extract_account_id(token: &str) -> Option<String> {
@@ -872,19 +1209,400 @@ fn truncate(value: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    use std::io::{Read, Seek, SeekFrom};
+    #[cfg(unix)]
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "nac-codex-auth-{label}-{}",
+                Uuid::new_v4().simple()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+
+        fn assert_no_temp_files(&self) {
+            let names = fs::read_dir(&self.0)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|name| name.contains(".tmp-"))
+                .collect::<Vec<_>>();
+            assert!(names.is_empty(), "temporary files remain: {names:?}");
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_credential(path: &Path, contents: impl AsRef<[u8]>) {
+        fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    fn stored_codex_auth(access: &str) -> StoredCodexAuth {
+        StoredCodexAuth {
+            auth_type: AUTH_TYPE.to_string(),
+            access: access.to_string(),
+            refresh: "refresh-token".to_string(),
+            expires_at_ms: 123_456,
+            account_id: "account-1".to_string(),
+        }
+    }
+
     #[test]
-    fn resolves_codex_responses_urls() {
-        assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api"),
-            "https://chatgpt.com/backend-api/codex/responses"
+    fn codex_lock_contends_until_release() {
+        super::super::auth_store::assert_lock_contention_and_release(
+            "codex",
+            lock_file,
+            unlock_file,
         );
+    }
+
+    #[test]
+    fn codex_secure_read_rejects_invalid_provider_schema_and_blank_fields() {
+        let dir = TestDir::new("read-invalid-content");
+        let path = dir.path("auth.json");
+        for invalid in [
+            r#"{"type":"other","access":"a","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":7}"#,
+            r#"{"type":"chatgpt-codex","access":" ","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":"a","refresh":"\t","expires_at_ms":1,"account_id":"id"}"#,
+            r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":""}"#,
+        ] {
+            write_credential(&path, invalid);
+            let error = read_auth_file_optional_from_path(&path).unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<StoredCodexAuthConfigurationError>()
+                    .is_some(),
+                "content error was not typed: {error:#}"
+            );
+            assert!(!error.to_string().contains("access-test"));
+        }
+    }
+
+    #[test]
+    fn codex_secure_read_accepts_mode_0600_regular_file() {
+        let dir = TestDir::new("read-regular");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(&path, &stored_codex_auth("regular-access")).unwrap();
+
+        #[cfg(unix)]
         assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api/codex"),
-            "https://chatgpt.com/backend-api/codex/responses"
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
         );
+        let auth = read_auth_file_optional_from_path(&path).unwrap().unwrap();
+
+        assert_eq!(auth.access, "regular-access");
+        assert_eq!(auth.refresh, "refresh-token");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_secure_read_rejects_group_or_other_permissions_without_reading() {
+        let dir = TestDir::new("read-permissions");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(
+            &path,
+            &stored_codex_auth("secret-must-not-appear-in-errors"),
+        )
+        .unwrap();
+
+        for mode in [0o644, 0o660] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+
+            let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+            assert!(
+                error
+                    .downcast_ref::<super::super::auth_store::UnsafeCredentialPermissionsError>()
+                    .is_some(),
+                "mode {mode:04o} did not produce the safety error: {error:#}"
+            );
+            assert!(error.to_string().contains(&format!("{mode:04o}")));
+            assert!(error.to_string().contains("mode to 0600"));
+            assert!(!error.to_string().contains("secret-must-not-appear"));
+        }
+    }
+
+    #[test]
+    fn codex_secure_read_rejects_non_regular_path() {
+        let dir = TestDir::new("read-directory");
+        let path = dir.path("auth.json");
+        fs::create_dir(&path).unwrap();
+
+        let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("non-regular credential path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_secure_read_rejects_symlink_without_reading_target() {
+        let dir = TestDir::new("read-symlink");
+        let target = dir.path("target.json");
+        let path = dir.path("auth.json");
+        write_auth_file_to_path(&target, &stored_codex_auth("target-access")).unwrap();
+        let target_before = fs::read(&target).unwrap();
+        symlink(&target, &path).unwrap();
+
+        let error = read_auth_file_optional_from_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert_eq!(fs::read(&target).unwrap(), target_before);
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_atomic_write_creates_mode_0600_and_replaces_by_rename() {
+        let dir = TestDir::new("replace");
+        let path = dir.path("auth.json");
+        fs::write(&path, "old-valid-content").unwrap();
+        let mut old_file = File::open(&path).unwrap();
+
+        write_auth_file_to_path(&path, &stored_codex_auth("new-access")).unwrap();
+
+        let current: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(current["access"], "new-access");
+        let mut old_contents = String::new();
+        old_file.seek(SeekFrom::Start(0)).unwrap();
+        old_file.read_to_string(&mut old_contents).unwrap();
+        assert_eq!(old_contents, "old-valid-content");
         assert_eq!(
-            codex_responses_url("https://chatgpt.com/backend-api/codex/responses"),
-            "https://chatgpt.com/backend-api/codex/responses"
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        dir.assert_no_temp_files();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_pre_rename_failure_preserves_existing_file_and_cleans_temp() {
+        let dir = TestDir::new("failure");
+        let path = dir.path("auth.json");
+        fs::write(&path, "old-valid-content").unwrap();
+
+        let result = atomic_replace_auth_file(&path, |file| {
+            file.write_all(b"partial")?;
+            Err(io::Error::other("injected pre-rename failure"))
+        });
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old-valid-content");
+        dir.assert_no_temp_files();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_write_rejects_symlink_destination_without_touching_target() {
+        let dir = TestDir::new("symlink");
+        let target = dir.path("target.json");
+        let destination = dir.path("auth.json");
+        fs::write(&target, "target-valid-content").unwrap();
+        symlink(&target, &destination).unwrap();
+
+        let error =
+            write_auth_file_to_path(&destination, &stored_codex_auth("replacement")).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential destination"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "target-valid-content");
+        assert!(fs::symlink_metadata(&destination)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        dir.assert_no_temp_files();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_lock_is_private_and_rejects_symlink() {
+        let dir = TestDir::new("lock");
+        let lock_path = dir.path("auth.auth.json.lock");
+        let lock = FileLock::acquire(&lock_path).unwrap();
+        assert_eq!(
+            fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        drop(lock);
+
+        fs::remove_file(&lock_path).unwrap();
+        let target = dir.path("lock-target");
+        fs::write(&target, "unchanged").unwrap();
+        symlink(&target, &lock_path).unwrap();
+        let error = FileLock::acquire(&lock_path)
+            .err()
+            .expect("symlink lock accepted");
+        assert!(error.to_string().contains("symlink auth lock"));
+        assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn codex_logout_removes_malformed_auth_and_preserves_arcee() {
+        let dir = TestDir::new("logout-malformed");
+        let codex_path = dir.path("auth.json");
+        let arcee_path = dir.path("arcee_auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        write_credential(&codex_path, "{ malformed");
+        fs::write(&arcee_path, arcee).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&codex_path).unwrap());
+
+        assert!(!codex_path.exists());
+        assert_eq!(fs::read_to_string(arcee_path).unwrap(), arcee);
+    }
+
+    #[test]
+    fn codex_logout_preserves_coexisting_arcee_auth() {
+        let dir = TestDir::new("logout-coexistence");
+        let codex_path = dir.path("auth.json");
+        let arcee_path = dir.path("arcee_auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        fs::write(&arcee_path, arcee).unwrap();
+        write_auth_file_to_path(&codex_path, &stored_codex_auth("access-token")).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&codex_path).unwrap());
+
+        assert!(!codex_path.exists());
+        assert_eq!(fs::read_to_string(arcee_path).unwrap(), arcee);
+    }
+
+    #[test]
+    fn codex_logout_is_idempotent_when_auth_is_missing() {
+        let dir = TestDir::new("logout-missing");
+        let path = dir.path("auth.json");
+
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+    }
+
+    #[test]
+    fn codex_logout_removes_typed_malformed_codex_auth() {
+        let dir = TestDir::new("logout-typed-codex");
+        let path = dir.path("auth.json");
+        write_credential(&path, r#"{"type":"chatgpt-codex","access":7}"#);
+
+        assert!(remove_codex_auth_file_for_logout(&path).unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn codex_logout_preserves_valid_foreign_and_unknown_records() {
+        let dir = TestDir::new("logout-foreign");
+        let path = dir.path("auth.json");
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
+        write_credential(&path, arcee);
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), arcee);
+
+        let unknown = r#"{"type":"future-provider","token":"keep-me"}"#;
+        fs::write(&path, unknown).unwrap();
+        assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
+        assert_eq!(fs::read_to_string(path).unwrap(), unknown);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_logout_unlinks_symlink_without_touching_target() {
+        let dir = TestDir::new("logout-symlink");
+        let target = dir.path("target.json");
+        let path = dir.path("auth.json");
+        fs::write(&target, "target-credentials").unwrap();
+        symlink(&target, &path).unwrap();
+
+        assert!(remove_codex_auth_file_for_logout(&path).unwrap());
+
+        assert!(fs::symlink_metadata(&path).is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "target-credentials");
+    }
+
+    #[test]
+    fn codex_endpoint_matrix_accepts_only_canonical_chatgpt_base() {
+        for accepted in [
+            "https://chatgpt.com/backend-api",
+            "https://chatgpt.com/backend-api/",
+            "https://chatgpt.com:443/backend-api",
+        ] {
+            let parsed = validate_base_url(accepted)
+                .unwrap_or_else(|error| panic!("rejected {accepted}: {error:#}"));
+            assert_eq!(parsed.host_str(), Some("chatgpt.com"));
+            assert_eq!(parsed.port_or_known_default(), Some(443));
+            assert_eq!(codex_responses_url(accepted).unwrap(), CODEX_RESPONSES_URL);
+        }
+
+        for rejected in [
+            "http://chatgpt.com/backend-api",
+            "https://chatgpt.com:444/backend-api",
+            "https://api.chatgpt.com/backend-api",
+            "https://chatgpt.com.evil.example/backend-api",
+            "https://chatgpt.com/",
+            "https://chatgpt.com/backend-api/codex",
+            "https://chatgpt.com/backend-api/codex/responses",
+            "https://chatgpt.com/backend-api?next=https://evil.example",
+            "https://chatgpt.com/backend-api#fragment",
+            "https://user@chatgpt.com/backend-api",
+            "https://chatgpt.com/%62ackend-api",
+        ] {
+            assert!(
+                validate_base_url(rejected).is_err(),
+                "accepted unapproved Codex base {rejected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_model_http_client_does_not_follow_or_replay_redirects() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+        use std::net::TcpListener;
+
+        let destination = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        destination.set_nonblocking(true).unwrap();
+        let destination_url = format!("http://{}", destination.local_addr().unwrap());
+        let source = ScriptedServer::start(vec![ScriptedResponse::redirect(
+            "307 Temporary Redirect",
+            format!("{destination_url}/capture"),
+            "blocked",
+        )]);
+        let secret = "codex-secret-must-not-replay";
+
+        let response = super::client::no_redirect_model_client()
+            .unwrap()
+            .post(format!("{}/backend-api/codex/responses", source.base_url))
+            .bearer_auth(secret)
+            .body("prompt-must-not-replay")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        let requests = source.finish();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].headers.get("authorization").map(String::as_str),
+            Some("Bearer codex-secret-must-not-replay")
+        );
+        assert_eq!(requests[0].body, b"prompt-must-not-replay");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            destination.accept().is_err(),
+            "redirect destination received replay"
         );
     }
 
@@ -901,32 +1619,36 @@ mod tests {
     }
 
     #[test]
-    fn builds_codex_responses_stream_request() {
-        let request = codex_responses_request(
-            "gpt-5.5",
-            Some(ReasoningEffort::High),
-            &[
-                Message::System {
-                    content: "system instructions".to_string(),
-                },
-                Message::User {
-                    content: "hello".to_string(),
-                },
-            ],
-            &[],
-        );
+    fn codex_request_reasoning_is_driven_only_by_explicit_effort() {
+        let messages = [
+            Message::System {
+                content: "system instructions".to_string(),
+            },
+            Message::User {
+                content: "hello".to_string(),
+            },
+        ];
+        let absent = codex_responses_request("gpt-5.5", None, &messages, &[]);
+        assert_eq!(absent["model"], "gpt-5.5");
+        assert_eq!(absent["instructions"], "system instructions");
+        assert_eq!(absent["store"], false);
+        assert_eq!(absent["stream"], true);
+        assert_eq!(absent["text"]["verbosity"], "low");
+        assert!(absent.get("reasoning").is_none());
+        assert!(absent.get("include").is_none());
 
-        assert_eq!(request["model"], "gpt-5.5");
-        assert_eq!(request["instructions"], "system instructions");
-        assert_eq!(request["store"], false);
-        assert_eq!(request["stream"], true);
-        assert_eq!(request["text"]["verbosity"], "low");
-        assert_eq!(request["tool_choice"], "auto");
-        assert_eq!(request["parallel_tool_calls"], true);
-        assert_eq!(request["reasoning"]["effort"], "high");
-        assert_eq!(request["include"][0], "reasoning.encrypted_content");
-        assert_eq!(request["input"].as_array().unwrap().len(), 1);
-        assert_eq!(request["input"][0]["role"], "user");
+        for effort in [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ] {
+            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[]);
+            assert_eq!(request["reasoning"]["effort"], effort.as_str());
+            assert_eq!(request["include"][0], "reasoning.encrypted_content");
+        }
     }
 
     #[test]

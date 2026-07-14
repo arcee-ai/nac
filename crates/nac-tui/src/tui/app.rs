@@ -61,13 +61,21 @@ fn load_worksets_snapshot(
 }
 
 impl App {
+    pub(super) fn new_without_service(
+        metadata: TuiMetadata,
+        restored_messages: &[Message],
+        start_in_session_picker: bool,
+    ) -> Self {
+        Self::new_inner(None, metadata, restored_messages, start_in_session_picker)
+    }
+
     #[cfg(test)]
     pub(super) fn new(
         metadata: TuiMetadata,
         restored_messages: &[Message],
         start_in_session_picker: bool,
     ) -> Self {
-        Self::new_inner(None, metadata, restored_messages, start_in_session_picker)
+        Self::new_without_service(metadata, restored_messages, start_in_session_picker)
     }
 
     pub(super) fn new_with_service(
@@ -1735,11 +1743,16 @@ impl App {
                 .last_user_prompt
                 .as_deref()
                 .unwrap_or("No user prompt recorded.");
+            let repair_warning = session
+                .model_config_error
+                .as_deref()
+                .map(|error| format!("\n\n**Settings repair required:** {error}"))
+                .unwrap_or_default();
             let detail = format!(
                 "# Session: {}\n\
                  Updated: {}  |  Created: {}  |  Messages: {}  |  Sandbox: {}  |  SSH: {}\n\
                  Model: {}  |  Backend: {}\n\
-                 Cwd: {}\n\n\
+                 Cwd: {}{}\n\n\
                  ---\n\n\
                  ### Last prompt\n\n\
                  {}",
@@ -1750,8 +1763,13 @@ impl App {
                 if session.sandboxed { "on" } else { "off" },
                 session.ssh_host.as_deref().unwrap_or("local"),
                 session.model,
-                session.backend,
+                if session.backend.is_empty() {
+                    "<missing>"
+                } else {
+                    &session.backend
+                },
                 session.cwd.display(),
+                repair_warning,
                 last_prompt,
             );
             render_markdown_lines(&detail, Some(inner.width as usize))

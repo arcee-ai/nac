@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc,
@@ -117,10 +118,47 @@ pub enum TuiOutcome {
     ResumeSession(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionPickerConfig {
+    pub cwd: String,
+    pub workspace_host_path: Option<PathBuf>,
+    pub store_path: PathBuf,
+}
+
+pub async fn run_session_picker(config: SessionPickerConfig) -> Result<TuiOutcome> {
+    let init = SessionServiceInit {
+        metadata: SessionMetadata {
+            cwd: config.cwd,
+            workspace_host_path: config.workspace_host_path,
+            store_path: config.store_path,
+            model: String::new(),
+            backend: String::new(),
+            session_id: None,
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            base_url: String::new(),
+            reasoning_effort: None,
+            api_key_env: None,
+            extra_headers: Default::default(),
+        },
+        restored_messages: Vec::new(),
+        response_timing: Default::default(),
+    };
+    run_inner(None, init, None, true).await
+}
+
 pub async fn run(
     service: SessionService,
     init: SessionServiceInit,
-    mut event_rx: SessionEventReceiver,
+    event_rx: SessionEventReceiver,
+) -> Result<TuiOutcome> {
+    run_inner(Some(service), init, Some(event_rx), false).await
+}
+
+async fn run_inner(
+    service: Option<SessionService>,
+    init: SessionServiceInit,
+    mut event_rx: Option<SessionEventReceiver>,
     start_in_session_picker: bool,
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
@@ -160,12 +198,15 @@ pub async fn run(
     let previous_response_duration = response_timing
         .previous_response_duration_ms
         .map(Duration::from_millis);
-    let mut app = App::new_with_service(
-        service.clone(),
-        metadata,
-        &restored_messages,
-        start_in_session_picker,
-    );
+    let mut app = match service.clone() {
+        Some(service) => App::new_with_service(
+            service,
+            metadata,
+            &restored_messages,
+            start_in_session_picker,
+        ),
+        None => App::new_without_service(metadata, &restored_messages, start_in_session_picker),
+    };
     app.restore_response_duration_history(
         response_duration_history.as_deref(),
         last_response_duration,
@@ -190,7 +231,10 @@ pub async fn run(
                             if let Some(action) = app.handle_crossterm_event(event) {
                                 match action {
                                     AppAction::Submit(prompt) => {
-                                        submit_prompt(prompt, &service, &mut app, &mut terminal)?;
+                                        let service = service.as_ref().ok_or_else(|| {
+                                            anyhow::anyhow!("session picker cannot submit prompts")
+                                        })?;
+                                        submit_prompt(prompt, service, &mut app, &mut terminal)?;
                                         terminal_action = true;
                                     }
                                     AppAction::ResumeSession(session_id) => {
@@ -210,7 +254,10 @@ pub async fn run(
                                     if let Some(action) = app.handle_crossterm_event(next_event) {
                                         match action {
                                             AppAction::Submit(prompt) => {
-                                                submit_prompt(prompt, &service, &mut app, &mut terminal)?;
+                                                let service = service.as_ref().ok_or_else(|| {
+                                                    anyhow::anyhow!("session picker cannot submit prompts")
+                                                })?;
+                                                submit_prompt(prompt, service, &mut app, &mut terminal)?;
                                                 break;
                                             }
                                             AppAction::ResumeSession(session_id) => {
@@ -237,8 +284,13 @@ pub async fn run(
                         }
                     }
                 }
-                event = event_rx.recv() => {
-                    match event {
+                event = async {
+                    match event_rx.as_mut() {
+                        Some(receiver) => Some(receiver.recv().await),
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match event.expect("disabled event branch cannot complete") {
                         Ok(envelope) => {
                             handle_session_event(&mut app, envelope);
                         }
@@ -381,8 +433,11 @@ fn submit_prompt(
             app.clear_composer();
             begin_top_level_run(app, handle.run_id, display_prompt);
         }
-        Err(SessionSubmitError::Busy { .. }) => {
+        Err(SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. }) => {
             app.show_composer_notice("session is busy; wait for the current reply", Tone::Warning);
+        }
+        Err(SessionSubmitError::Coordination { message }) => {
+            app.show_composer_notice(&message, Tone::Error);
         }
     }
 
@@ -471,6 +526,56 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    #[test]
+    fn session_picker_lists_and_diagnoses_invalid_model_rows() {
+        let dir = temp_dir("invalid-session-picker-row");
+        let metadata = metadata_for(&dir);
+        for id in ["healthy", "invalid"] {
+            let snapshot = sessions::new_snapshot(
+                id.to_string(),
+                dir.clone(),
+                "gpt-test".to_string(),
+                "https://api.example.test/v1".to_string(),
+                nac_core::model::BackendKind::OpenAiResponses,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some("OPENAI_API_KEY".to_string()),
+                BTreeMap::new(),
+            );
+            sessions::create_session(&metadata.store_path, &snapshot).unwrap();
+        }
+        let mut raw = sessions::load_session_model_config(&metadata.store_path, "invalid").unwrap();
+        raw.backend = Some("auto".to_string());
+        raw.reasoning_effort = Some("ultra".to_string());
+        raw.extra_headers_json = Some("{broken".to_string());
+        sessions::update_raw_session_model_config(&metadata.store_path, &raw).unwrap();
+
+        let mut app = App::new_without_service(metadata, &[], true);
+        app.refresh_session_picker();
+        assert_eq!(app.session_picker.sessions.len(), 2);
+        assert!(app.session_picker.error.is_none());
+        app.session_picker.selected = app
+            .session_picker
+            .sessions
+            .iter()
+            .position(|session| session.session_id == "invalid")
+            .unwrap();
+        assert!(app.session_picker.sessions[app.session_picker.selected]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("auto"));
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let rendered = rendered_symbols(&terminal);
+        assert!(rendered.contains("Settings repair required"), "{rendered}");
+        assert!(rendered.contains("Backend: auto"), "{rendered}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1500,8 +1605,8 @@ mod tests {
             None,
             None,
             messages,
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(3_333);
         snapshot.previous_response_duration_ms = Some(2_222);

@@ -10,8 +10,8 @@ use clap::Parser;
 use nac_core::{
     model::{BackendKind, ReasoningEffort},
     runtime::{
-        self, ManagedWorkerOptions, ModelOptions, SandboxOptions, StoreOptions,
-        WorkerDispatchOptions,
+        self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
+        StoreOptions, WorkerDispatchOptions,
     },
 };
 use nac_server::{serve, ServerOptions, SessionManager};
@@ -47,7 +47,7 @@ struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
 
-    /// Internal local cwd used to resolve nac config for managed workers.
+    /// Internal local cwd used to resolve non-model runtime config for managed workers.
     #[arg(long, hide = true)]
     config_cwd: Option<PathBuf>,
 
@@ -77,8 +77,6 @@ struct StoreArgs {
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum BackendArg {
-    #[value(name = "auto")]
-    Auto,
     #[value(name = "deepseek-chat")]
     DeepSeekChat,
     #[value(name = "fireworks-chat")]
@@ -91,18 +89,23 @@ enum BackendArg {
     ChatGptCodexResponses,
     #[value(name = "anthropic-messages")]
     AnthropicMessages,
+    #[value(name = "arcee-auth")]
+    ArceeAuth,
+    #[value(name = "arcee-api")]
+    ArceeApi,
 }
 
 impl From<BackendArg> for BackendKind {
     fn from(value: BackendArg) -> Self {
         match value {
-            BackendArg::Auto => Self::Auto,
             BackendArg::DeepSeekChat => Self::DeepSeekChat,
             BackendArg::FireworksChat => Self::FireworksChat,
             BackendArg::TogetherChat => Self::TogetherChat,
             BackendArg::OpenAiResponses => Self::OpenAiResponses,
             BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
+            BackendArg::ArceeAuth => Self::ArceeAuth,
+            BackendArg::ArceeApi => Self::ArceeApi,
         }
     }
 }
@@ -138,29 +141,33 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
 
 #[derive(clap::Args, Default)]
 struct ModelArgs {
-    /// Backend wire shape to use for model requests.
+    /// Persisted backend snapshot transported to a managed worker.
     #[arg(long, value_enum)]
     backend: Option<BackendArg>,
 
-    /// Reasoning effort to request when supported by the selected backend.
+    /// Persisted reasoning-effort snapshot transported to a managed worker.
     #[arg(long = "effort", value_enum)]
     reasoning_effort: Option<ReasoningEffortArg>,
 
-    /// Internal API base URL override used by managed workers.
+    /// Persisted API base URL snapshot transported to a managed worker.
     #[arg(long, hide = true)]
     api_base_url: Option<String>,
 
-    /// Internal model override used by managed workers.
+    /// Persisted model identifier snapshot transported to a managed worker.
     #[arg(long, hide = true)]
     api_model: Option<String>,
 
-    /// Internal api_key_env override used by managed workers to inherit session config.
+    /// Persisted api_key_env selector snapshot transported to a managed worker.
     #[arg(long = "api-key-env", hide = true)]
     api_key_env: Option<String>,
 
-    /// Internal extra headers override (JSON object) used by managed workers to inherit session config.
-    #[arg(long = "extra-headers", hide = true)]
-    extra_headers: Option<String>,
+    /// Internal extra headers snapshot transport (JSON object) used by managed workers.
+    #[arg(
+        long = "extra-headers",
+        hide = true,
+        value_parser = runtime::parse_extra_headers_json
+    )]
+    extra_headers: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(clap::Args)]
@@ -304,7 +311,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         None if cli.ssh_host.is_some() => launch_cwd.clone(),
         None => workspace_cwd.clone(),
     };
-    let config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
+    let config = load_managed_worker_runtime_config(&config_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
         config_cwd: Some(config_cwd),
@@ -320,15 +327,20 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         },
         model: ModelOptions {
             backend: cli.model.backend.map(Into::into),
-            reasoning_effort: cli.model.reasoning_effort.map(Into::into),
+            reasoning_effort: cli
+                .model
+                .reasoning_effort
+                .map(Into::into)
+                .map(OptionalModelOption::Value)
+                .unwrap_or_default(),
             api_base_url: cli.model.api_base_url,
             api_model: cli.model.api_model,
-            api_key_env: cli.model.api_key_env,
-            extra_headers: cli
+            api_key_env: cli
                 .model
-                .extra_headers
-                .as_deref()
-                .and_then(runtime::parse_extra_headers_json),
+                .api_key_env
+                .map(OptionalModelOption::Value)
+                .unwrap_or_default(),
+            extra_headers: cli.model.extra_headers,
         },
         sandbox: SandboxOptions {
             sandbox: cli.sandbox.sandbox,
@@ -349,6 +361,10 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }
 
+fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
+    runtime::NacConfig::load_without_model_from_cwd(config_cwd)
+}
+
 fn resolve_cli_cwd(
     launch_cwd: &std::path::Path,
     directory: Option<&std::path::Path>,
@@ -361,4 +377,110 @@ fn resolve_cli_cwd(
     target
         .canonicalize()
         .with_context(|| format!("failed to resolve working directory {}", target.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn managed_worker_ignores_invalid_ambient_model_config() {
+        let _guard = CONFIG_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_web_worker_config_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+model = ["invalid-table-shape"]
+
+[storage]
+store_path = "worker-store.db"
+
+[worker]
+thread_timeout_secs = 7200
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let config = load_managed_worker_runtime_config(&root).unwrap();
+        assert_eq!(
+            config.storage.store_path.as_deref(),
+            Some(std::path::Path::new("worker-store.db"))
+        );
+        assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+        assert!(config.model.backend.is_none());
+        assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
+
+        unsafe {
+            match original_nac_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn worker_cli_rejects_malformed_header_json() {
+        let error = ManagedWorkerCli::try_parse_from([
+            "nac-web __worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "work",
+            "--extra-headers",
+            "not-json",
+        ])
+        .err()
+        .expect("malformed worker headers must be rejected")
+        .to_string();
+        assert!(error.contains("expected a JSON object"), "{error}");
+    }
+
+    #[test]
+    fn worker_cli_accepts_explicit_arcee_modes_and_rejects_removed_names() {
+        let required = [
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--action",
+            "work",
+        ];
+        for (raw, expected) in [
+            ("arcee-auth", BackendKind::ArceeAuth),
+            ("arcee-api", BackendKind::ArceeApi),
+        ] {
+            let mut args = vec!["nac-web __worker", "--backend", raw];
+            args.extend(required);
+            let cli = ManagedWorkerCli::try_parse_from(args).unwrap();
+            assert_eq!(cli.model.backend.map(BackendKind::from), Some(expected));
+        }
+
+        for raw in ["arcee", "auto"] {
+            let mut args = vec!["nac-web __worker", "--backend", raw];
+            args.extend(required);
+            let error = ManagedWorkerCli::try_parse_from(args)
+                .err()
+                .expect("removed backend must be rejected")
+                .to_string();
+            assert!(error.contains("invalid value"), "{error}");
+            assert!(error.contains("arcee-auth"), "{error}");
+            assert!(error.contains("arcee-api"), "{error}");
+        }
+    }
 }

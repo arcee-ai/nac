@@ -144,6 +144,40 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) timeout_secs: u64,
 }
 
+fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
+    command
+        .arg("--api-model")
+        .arg(client.model.as_str())
+        .arg("--api-base-url")
+        .arg(client.base_url())
+        .arg("--backend")
+        .arg(client.backend().as_str());
+
+    if let Some(reasoning_effort) = client.reasoning_effort() {
+        command.arg("--effort").arg(reasoning_effort.as_str());
+    }
+    if let Some(api_key_env) = client.api_key_env() {
+        command.arg("--api-key-env").arg(api_key_env);
+    }
+
+    // Always transport the snapshot header map, including `{}`, so workers can
+    // never reinterpret an empty map as permission to consult config.toml.
+    let headers = serde_json::to_string(client.extra_headers())
+        .expect("serializing a string header map cannot fail");
+    command.arg("--extra-headers").arg(headers);
+}
+
+#[cfg(test)]
+pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<String> {
+    let mut command = Command::new("worker");
+    append_worker_model_arguments(&mut command, client);
+    command
+        .as_std()
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect()
+}
+
 pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
@@ -167,16 +201,11 @@ pub(super) async fn run_worker(
         .arg(invocation.thread_name)
         .arg("--action")
         .arg(invocation.action)
-        .arg("--api-model")
-        .arg(client.model.as_str())
-        .arg("--api-base-url")
-        .arg(client.base_url())
-        .arg("--backend")
-        .arg(client.backend().as_str())
         .arg("--store-path")
         .arg(runtime.store_path.as_os_str())
         .arg("--workspace-cwd")
         .arg(runtime.workspace_cwd.as_os_str());
+    append_worker_model_arguments(&mut command, client);
 
     if !runtime.backend.workspace_cwd_is_local() || runtime.config_cwd != runtime.workspace_cwd {
         command
@@ -188,20 +217,6 @@ pub(super) async fn run_worker(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
-    if let Some(reasoning_effort) = client.reasoning_effort() {
-        command.arg("--effort").arg(reasoning_effort.as_str());
-    }
-
-    if let Some(api_key_env) = client.api_key_env() {
-        command.arg("--api-key-env").arg(api_key_env);
-    }
-
-    // Always pass --extra-headers, even when empty, so the worker uses the
-    // session's headers (possibly {}) instead of falling back to config.toml.
-    if let Ok(json) = serde_json::to_string(client.extra_headers()) {
-        command.arg("--extra-headers").arg(json);
-    }
 
     for source_thread in invocation.source_threads {
         command.arg("--source-thread").arg(source_thread);
@@ -303,6 +318,58 @@ pub(super) async fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{BackendKind, EffectiveModelSettings};
+    use crate::TEST_ENV_LOCK;
+
+    #[test]
+    fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_WORKER_TRANSPORT_TEST_KEY";
+        let original = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let client = ModelClient::from_effective_settings(
+            EffectiveModelSettings::new(
+                BackendKind::TogetherChat,
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                None,
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut command = Command::new("worker");
+        append_worker_model_arguments(&mut command, &client);
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            args,
+            vec![
+                "--api-model",
+                "snapshot-model",
+                "--api-base-url",
+                "https://snapshot.example/v1",
+                "--backend",
+                "together-chat",
+                "--api-key-env",
+                key_name,
+                "--extra-headers",
+                "{}",
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "--effort"));
+
+        match original {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+    }
 
     #[test]
     fn timeout_trace_reports_model_api_location() {
