@@ -55,7 +55,9 @@ const state = {
   paneResize: null,
   paneDesktopMedia: null,
   settingsInitial: null,
+  settingsSessionId: null,
   settingsRequestGeneration: 0,
+  settingsSubmission: null,
   settingsBaseUrlRestoreValue: "",
   settingsCredentialRestoreMode: "variable",
   settingsCredentialRestoreValue: "",
@@ -175,6 +177,7 @@ function bindElements() {
     "settingsOverlay",
     "closeSettings",
     "settingsForm",
+    "settingsSubmit",
     "settingsStatus",
     "settingsBackend",
     "settingsEffort",
@@ -869,6 +872,9 @@ function settingsFormStateFromMetadata(metadata) {
   const managedUrl = managedLaunchBaseUrl(initial.backend);
   const rawBaseUrl = String(metadata?.base_url ?? "");
   const normalizedBaseUrl = rawBaseUrl.trim();
+  const restoreBaseUrl = normalizedBaseUrl && !isManagedSettingsBaseUrl(normalizedBaseUrl)
+    ? rawBaseUrl
+    : "";
   const hasApiKeyEnv = metadata?.api_key_env !== null && metadata?.api_key_env !== undefined;
   const rawApiKeyEnv = String(metadata?.api_key_env ?? "");
   return {
@@ -880,12 +886,12 @@ function settingsFormStateFromMetadata(metadata) {
       ? {
           value: managedUrl,
           readOnly: true,
-          restoreValue: normalizedBaseUrl && normalizedBaseUrl !== managedUrl ? rawBaseUrl : "",
+          restoreValue: restoreBaseUrl,
         }
       : {
           value: rawBaseUrl,
           readOnly: false,
-          restoreValue: rawBaseUrl,
+          restoreValue: restoreBaseUrl,
         },
     credentialControl: managedUrl
       ? {
@@ -906,7 +912,43 @@ function settingsFormStateFromMetadata(metadata) {
   };
 }
 
-function populateSettingsForm(metadata) {
+function setSettingsFormInteractive(interactive) {
+  el.settingsForm.inert = !interactive;
+  if (interactive) {
+    el.settingsForm.removeAttribute("aria-busy");
+  } else {
+    el.settingsForm.setAttribute("aria-busy", "true");
+  }
+  el.settingsSubmit.disabled = !interactive;
+}
+
+function resetSettingsForm() {
+  state.settingsInitial = null;
+  state.settingsSessionId = null;
+  state.settingsSubmission = null;
+  state.settingsBaseUrlRestoreValue = "";
+  state.settingsCredentialRestoreMode = "variable";
+  state.settingsCredentialRestoreValue = "";
+
+  el.settingsModel.value = "";
+  setSettingsSelectRawValue(el.settingsBackend, "", "backend");
+  setSettingsSelectRawValue(el.settingsEffort, "", "reasoning effort");
+  el.settingsBaseUrl.value = "";
+  el.settingsBaseUrl.readOnly = false;
+  el.settingsBaseUrl.title = "";
+  el.settingsCredentialMode.value = "";
+  el.settingsCredentialMode.disabled = false;
+  el.settingsCredentialMode.title = "";
+  el.settingsApiKeyEnv.value = "";
+  el.settingsApiKeyEnv.disabled = true;
+  el.settingsApiKeyEnv.required = false;
+  el.settingsApiKeyEnv.placeholder = "not used";
+  el.settingsExtraHeaders.value = "";
+  setSettingsStatus("", false);
+  setSettingsFormInteractive(false);
+}
+
+function populateSettingsForm(metadata, sessionId) {
   const formState = settingsFormStateFromMetadata(metadata);
   el.settingsModel.value = formState.model;
   setSettingsSelectRawValue(el.settingsBackend, formState.backend, "backend");
@@ -931,14 +973,22 @@ function populateSettingsForm(metadata) {
   state.settingsCredentialRestoreValue = formState.credentialControl.restoreValue;
   el.settingsExtraHeaders.value = formState.extra_headers;
   state.settingsInitial = formState.initial;
+  state.settingsSessionId = sessionId;
   renderCredentialControls();
+}
+
+function settingsContextIsCurrent(requestGeneration, sessionId) {
+  return requestGeneration === state.settingsRequestGeneration
+    && state.settingsSessionId === sessionId
+    && state.selectedId === sessionId
+    && !el.settingsOverlay.hidden;
 }
 
 async function showSettingsOverlay() {
   const sessionId = state.selectedId;
   if (!sessionId) return;
   const requestGeneration = ++state.settingsRequestGeneration;
-  state.settingsInitial = null;
+  resetSettingsForm();
   el.settingsOverlay.hidden = false;
   setSettingsStatus("loading persisted settings", false);
 
@@ -948,7 +998,8 @@ async function showSettingsOverlay() {
     if (requestGeneration !== state.settingsRequestGeneration
         || state.selectedId !== sessionId
         || el.settingsOverlay.hidden) return;
-    populateSettingsForm(metadata);
+    populateSettingsForm(metadata, sessionId);
+    setSettingsFormInteractive(true);
     const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics : [];
     setSettingsStatus(
       diagnostics.length > 0
@@ -968,7 +1019,7 @@ async function showSettingsOverlay() {
 function hideSettingsOverlay() {
   state.settingsRequestGeneration += 1;
   el.settingsOverlay.hidden = true;
-  state.settingsInitial = null;
+  resetSettingsForm();
 }
 
 function setSettingsStatus(message, error) {
@@ -979,7 +1030,12 @@ function setSettingsStatus(message, error) {
 async function updateSessionConfig(event) {
   event.preventDefault();
   const sessionId = state.selectedId;
-  if (!sessionId || !state.settingsInitial) return;
+  const requestGeneration = state.settingsRequestGeneration;
+  if (!sessionId
+      || !state.settingsInitial
+      || state.settingsSessionId !== sessionId
+      || el.settingsOverlay.hidden
+      || state.settingsSubmission) return;
 
   let body;
   try {
@@ -993,14 +1049,22 @@ async function updateSessionConfig(event) {
       extra_headers: el.settingsExtraHeaders.value,
     }, state.settingsInitial);
   } catch (validationError) {
-    setSettingsStatus(validationError.message, true);
+    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+      setSettingsStatus(validationError.message, true);
+    }
     return;
   }
 
   if (Object.keys(body).length === 0) {
-    setSettingsStatus("No changes", false);
+    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+      setSettingsStatus("No changes", false);
+    }
     return;
   }
+
+  const submission = { requestGeneration, sessionId };
+  state.settingsSubmission = submission;
+  setSettingsFormInteractive(false);
   setSettingsStatus("saving", false);
 
   try {
@@ -1017,13 +1081,26 @@ async function updateSessionConfig(event) {
       try { payload = await response.json(); } catch (_) {}
       throw new Error(payload.error || `${response.status} ${response.statusText}`);
     }
+    if (!settingsContextIsCurrent(requestGeneration, sessionId)
+        || state.settingsSubmission !== submission) return;
+
     hideSettingsOverlay();
     // Reconnect SSE and reload snapshot to pick up the new config.
     openEventStream(sessionId);
     await loadSnapshot(sessionId, false);
     await loadSessions({ forceFetch: true });
   } catch (error) {
-    setSettingsStatus(error.message, true);
+    if (settingsContextIsCurrent(requestGeneration, sessionId)
+        && state.settingsSubmission === submission) {
+      setSettingsStatus(error.message, true);
+    }
+  } finally {
+    if (state.settingsSubmission === submission) {
+      state.settingsSubmission = null;
+      if (settingsContextIsCurrent(requestGeneration, sessionId)) {
+        setSettingsFormInteractive(true);
+      }
+    }
   }
 }
 
@@ -4710,6 +4787,11 @@ function managedLaunchBaseUrl(backend) {
   return MANAGED_LAUNCH_BASE_URLS[String(backend || "").trim()] || null;
 }
 
+function isManagedSettingsBaseUrl(baseUrl) {
+  const normalized = String(baseUrl ?? "").trim();
+  return Object.values(MANAGED_LAUNCH_BASE_URLS).includes(normalized);
+}
+
 function effectiveLaunchBackend(selectedBackend, configuredBackend) {
   return String(selectedBackend || "").trim() || String(configuredBackend || "").trim();
 }
@@ -4815,7 +4897,7 @@ function settingsValuesFromMetadata(metadata) {
     model: String(metadata?.model ?? ""),
     base_url: String(metadata?.base_url ?? ""),
     backend: String(metadata?.backend ?? ""),
-    reasoning_effort: metadata?.reasoning_effort || null,
+    reasoning_effort: metadata?.reasoning_effort ?? null,
     api_key_env: metadata?.api_key_env ?? null,
     extra_headers: headers.value,
   };
@@ -4876,7 +4958,7 @@ function nextSettingsBaseUrlControl(current, backend) {
     return {
       value: managedUrl,
       readOnly: true,
-      restoreValue: readOnly ? restoreValue : value,
+      restoreValue: readOnly || isManagedSettingsBaseUrl(value) ? restoreValue : value,
     };
   }
   return {

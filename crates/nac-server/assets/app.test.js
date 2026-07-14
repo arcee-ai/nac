@@ -36,6 +36,129 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function fakeSelect(values) {
+  const select = {
+    value: "",
+    disabled: false,
+    readOnly: false,
+    title: "",
+    options: values.map((value) => ({ value, dataset: {} })),
+    querySelectorAll(selector) {
+      if (selector !== "option[data-raw-invalid]") return [];
+      return this.options.filter((option) => option.dataset.rawInvalid);
+    },
+  };
+  for (const option of select.options) {
+    option.remove = () => {
+      select.options = select.options.filter((candidate) => candidate !== option);
+    };
+  }
+  return select;
+}
+
+function createSettingsLifecycleHarness() {
+  const sandbox = {
+    document: {
+      addEventListener() {},
+      createElement() {
+        return { value: "", textContent: "", dataset: {}, append() {} };
+      },
+    },
+    module: { exports: {} },
+  };
+  vm.runInNewContext(
+    `${appSource}\nmodule.exports = { state, el, showSettingsOverlay, hideSettingsOverlay, updateSessionConfig };`,
+    sandbox,
+    { filename: "app.js" },
+  );
+  const lifecycle = sandbox.module.exports;
+  const attributes = new Map();
+  const settingsForm = {
+    inert: false,
+    setAttribute(name, value) { attributes.set(name, value); },
+    removeAttribute(name) { attributes.delete(name); },
+    hasAttribute(name) { return attributes.has(name); },
+  };
+  const statusClasses = new Set();
+  Object.assign(lifecycle.el, {
+    settingsOverlay: { hidden: true },
+    settingsForm,
+    settingsSubmit: { disabled: false },
+    settingsStatus: {
+      textContent: "",
+      classList: {
+        toggle(name, enabled) {
+          if (enabled) statusClasses.add(name);
+          else statusClasses.delete(name);
+        },
+        contains(name) { return statusClasses.has(name); },
+      },
+    },
+    settingsBackend: fakeSelect([
+      "openai-responses",
+      "chatgpt-codex-responses",
+      "arcee-auth",
+      "arcee-api",
+    ]),
+    settingsEffort: fakeSelect([
+      "__clear__",
+      "none",
+      "low",
+      "medium",
+      "high",
+    ]),
+    settingsModel: { value: "" },
+    settingsBaseUrl: { value: "", readOnly: false, title: "" },
+    settingsCredentialMode: fakeSelect(["none", "variable"]),
+    settingsApiKeyEnv: {
+      value: "",
+      disabled: true,
+      required: false,
+      placeholder: "not used",
+    },
+    settingsExtraHeaders: { value: "" },
+  });
+
+  const effects = {
+    streams: [],
+    snapshots: [],
+    sessionLoads: [],
+  };
+  sandbox.openEventStream = (sessionId) => effects.streams.push(sessionId);
+  sandbox.loadSnapshot = async (...args) => { effects.snapshots.push(args); };
+  sandbox.loadSessions = async (...args) => { effects.sessionLoads.push(args); };
+
+  return {
+    ...lifecycle,
+    sandbox,
+    effects,
+    settingsForm,
+    event: { preventDefault() {} },
+  };
+}
+
+function persistedSettings(overrides = {}) {
+  return {
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: "medium",
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers: {},
+    ...overrides,
+  };
+}
+
 function launchValues(overrides = {}) {
   return {
     model: "",
@@ -151,6 +274,7 @@ test("launch and settings omit long managed credential guidance", () => {
     assert.doesNotMatch(form, /credential-help/);
     assert.doesNotMatch(form, /stored Arcee login|stored Codex OAuth|Every other backend requires/);
   }
+  assert.match(indexSource, /<button id="settingsSubmit"[^>]*type="submit"/);
   assert.doesNotMatch(appSource, /explicitly select No API key environment variable/i);
 });
 
@@ -831,6 +955,64 @@ test("settings malformed managed rows remain explicitly repairable", () => {
   });
 });
 
+test("settings empty raw reasoning effort is repaired as an explicit null", () => {
+  const malformed = settingsFormStateFromMetadata({
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: "",
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers: {},
+  });
+  assert.equal(malformed.initial.reasoning_effort, "");
+  assert.equal(malformed.reasoning_effort, "__clear__");
+  assert.deepEqual(
+    plain(buildSettingsPatch(valuesFromSettingsFormState(malformed), malformed.initial)),
+    { reasoning_effort: null },
+  );
+});
+
+test("settings never captures any managed canonical URL as an API-backend draft", () => {
+  for (const [backend, malformedBase, nextManagedBackend] of [
+    ["arcee-auth", "https://chatgpt.com/backend-api", "chatgpt-codex-responses"],
+    ["chatgpt-codex-responses", "https://api.arcee.ai/api/v1", "arcee-auth"],
+  ]) {
+    const hydrated = settingsFormStateFromMetadata({
+      model: "managed-model",
+      base_url: malformedBase,
+      backend,
+      reasoning_effort: null,
+      api_key_env: null,
+      extra_headers: {},
+    });
+    assert.equal(hydrated.baseUrlControl.restoreValue, "");
+
+    const switchedManaged = plain(nextSettingsBaseUrlControl(
+      hydrated.baseUrlControl,
+      nextManagedBackend,
+    ));
+    const switchedApi = plain(nextSettingsBaseUrlControl(switchedManaged, "arcee-api"));
+    assert.deepEqual(switchedApi, {
+      value: "",
+      readOnly: false,
+      restoreValue: "",
+    });
+  }
+
+  const apiWithManagedBase = settingsFormStateFromMetadata({
+    model: "api-model",
+    base_url: " https://chatgpt.com/backend-api ",
+    backend: "openai-responses",
+    reasoning_effort: null,
+    api_key_env: "API_KEY",
+    extra_headers: {},
+  });
+  assert.equal(apiWithManagedBase.baseUrlControl.restoreValue, "");
+  const locked = nextSettingsBaseUrlControl(apiWithManagedBase.baseUrlControl, "arcee-auth");
+  assert.equal(locked.restoreValue, "");
+  assert.equal(nextSettingsBaseUrlControl(locked, "arcee-api").value, "");
+});
+
 test("repeated settings modal openings reset drafts and ignore stale loads", () => {
   const first = settingsFormStateFromMetadata({
     model: "first",
@@ -868,6 +1050,197 @@ test("repeated settings modal openings reset drafts and ignore stale loads", () 
   assert.match(showSource, /state\.selectedId !== sessionId/);
   assert.match(showSource, /el\.settingsOverlay\.hidden/);
   assert.match(hideSource, /state\.settingsRequestGeneration \+= 1/);
+});
+
+test("pending settings PATCH success cannot affect a closed and reopened different session", async () => {
+  const harness = createSettingsLifecycleHarness();
+  const first = persistedSettings({ model: "first-model" });
+  const second = persistedSettings({
+    model: "second-model",
+    base_url: "https://second.example.test/v1",
+    api_key_env: "SECOND_API_KEY",
+  });
+  harness.state.snapshots.set("first", { metadata: first });
+  harness.state.snapshots.set("second", { metadata: second });
+  harness.state.selectedId = "first";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  const requests = [];
+  harness.sandbox.fetch = (...args) => {
+    requests.push(args);
+    return patch.promise;
+  };
+  harness.el.settingsModel.value = "first-model-updated";
+  const pendingSave = harness.updateSessionConfig(harness.event);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+
+  harness.hideSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "");
+  harness.state.selectedId = "second";
+  await harness.showSettingsOverlay();
+  const reopenedGeneration = harness.state.settingsRequestGeneration;
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+
+  patch.resolve({ ok: true });
+  await pendingSave;
+  assert.equal(requests.length, 1);
+  assert.equal(harness.state.settingsRequestGeneration, reopenedGeneration);
+  assert.equal(harness.state.settingsSessionId, "second");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.el.settingsStatus.textContent, "");
+  assert.deepEqual(harness.effects, { streams: [], snapshots: [], sessionLoads: [] });
+});
+
+test("pending settings PATCH error cannot leak into a reopened modal", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("first", { metadata: persistedSettings({ model: "first-model" }) });
+  harness.state.snapshots.set("second", { metadata: persistedSettings({ model: "second-model" }) });
+  harness.state.selectedId = "first";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  harness.sandbox.fetch = () => patch.promise;
+  harness.el.settingsModel.value = "first-model-updated";
+  const pendingSave = harness.updateSessionConfig(harness.event);
+  harness.hideSettingsOverlay();
+  harness.state.selectedId = "second";
+  await harness.showSettingsOverlay();
+
+  patch.resolve({
+    ok: false,
+    status: 409,
+    statusText: "Conflict",
+    async json() { return { error: "stale first-session failure" }; },
+  });
+  await pendingSave;
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.el.settingsStatus.textContent, "");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), false);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+});
+
+test("settings save suppresses duplicate submissions and re-enables after a current error", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("current", { metadata: persistedSettings() });
+  harness.state.selectedId = "current";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  let requestCount = 0;
+  harness.sandbox.fetch = () => {
+    requestCount += 1;
+    return patch.promise;
+  };
+  harness.el.settingsModel.value = "updated-model";
+  const firstSave = harness.updateSessionConfig(harness.event);
+  const duplicateSave = harness.updateSessionConfig(harness.event);
+  assert.equal(requestCount, 1);
+  assert.ok(harness.state.settingsSubmission);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+
+  patch.resolve({
+    ok: false,
+    status: 422,
+    statusText: "Unprocessable Content",
+    async json() { return { error: "save failed" }; },
+  });
+  await Promise.all([firstSave, duplicateSave]);
+  assert.equal(requestCount, 1);
+  assert.equal(harness.state.settingsSubmission, null);
+  assert.equal(harness.el.settingsStatus.textContent, "save failed");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+});
+
+test("settings loading immediately clears stale controls and failures stay inert", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("loaded", {
+    metadata: persistedSettings({
+      model: "loaded-model",
+      backend: "arcee-auth",
+      base_url: "https://api.arcee.ai/api/v1",
+      reasoning_effort: "high",
+      api_key_env: null,
+      extra_headers: { "X-Loaded": "yes" },
+      diagnostics: ["old failure"],
+    }),
+  });
+  harness.state.selectedId = "loaded";
+  await harness.showSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "loaded-model");
+  assert.equal(harness.el.settingsBaseUrl.readOnly, true);
+  assert.equal(harness.el.settingsCredentialMode.disabled, true);
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+
+  const failedLoad = deferred();
+  harness.sandbox.apiGet = () => failedLoad.promise;
+  harness.state.selectedId = "failed";
+  const loading = harness.showSettingsOverlay();
+  for (const control of [
+    harness.el.settingsModel,
+    harness.el.settingsBackend,
+    harness.el.settingsEffort,
+    harness.el.settingsBaseUrl,
+    harness.el.settingsCredentialMode,
+    harness.el.settingsApiKeyEnv,
+    harness.el.settingsExtraHeaders,
+  ]) {
+    assert.equal(control.value, "");
+  }
+  assert.equal(harness.el.settingsBaseUrl.readOnly, false);
+  assert.equal(harness.el.settingsBaseUrl.title, "");
+  assert.equal(harness.el.settingsCredentialMode.title, "");
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.settingsForm.hasAttribute("aria-busy"), true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+  assert.equal(harness.el.settingsStatus.textContent, "loading persisted settings");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), false);
+
+  failedLoad.reject(new Error("config load failed"));
+  await loading;
+  assert.equal(harness.el.settingsModel.value, "");
+  assert.equal(harness.el.settingsBackend.value, "");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsStatus.textContent, "config load failed");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+  assert.equal(harness.state.settingsInitial, null);
+  assert.equal(harness.state.settingsSessionId, null);
+});
+
+test("stale settings loads cannot overwrite a newer successful opening", async () => {
+  const harness = createSettingsLifecycleHarness();
+  const staleLoad = deferred();
+  harness.sandbox.apiGet = () => staleLoad.promise;
+  harness.state.selectedId = "stale";
+  const staleOpening = harness.showSettingsOverlay();
+  assert.equal(harness.settingsForm.inert, true);
+
+  harness.state.snapshots.set("current", {
+    metadata: persistedSettings({ model: "current-model" }),
+  });
+  harness.state.selectedId = "current";
+  await harness.showSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "current-model");
+  assert.equal(harness.settingsForm.inert, false);
+
+  staleLoad.resolve(persistedSettings({ model: "stale-model" }));
+  await staleOpening;
+  assert.equal(harness.state.settingsSessionId, "current");
+  assert.equal(harness.el.settingsModel.value, "current-model");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
 });
 
 test("settings metadata falls back to persisted config when no resumed snapshot exists", async () => {
