@@ -1,6 +1,6 @@
 use super::auth_store::{
-    acquire_arcee_auth_lock, arcee_auth_file_path, read_arcee_auth_string,
-    read_auth_bytes_from_path, with_arcee_auth_lock, write_arcee_auth_string,
+    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path, with_arcee_auth_lock,
+    write_arcee_auth_string,
 };
 use super::*;
 use anyhow::Context;
@@ -507,11 +507,26 @@ fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAu
     })
 }
 
+/// Process-wide async gate that single-flights token refreshes. It yields the
+/// executor while waiting (unlike a blocking file lock), so concurrent
+/// arcee-auth calls never stall Tokio workers during the refresh network round
+/// trip. Cross-process redundancy is acceptable: the refresh token is static
+/// and credential writes are atomic.
+fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
+    static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &GATE
+}
+
 /// Returns a valid access token, refreshing proactively when it is at or near
-/// expiry. The auth-store lock is held across the refresh so concurrent nac
-/// processes do not hammer the refresh endpoint.
+/// expiry. Reads are lock-free (credential writes are atomic renames, so a
+/// reader always sees a complete record); only the refresh itself is gated.
 pub(super) async fn fresh_access_token(client: &Client) -> Result<String> {
-    let _lock = acquire_arcee_auth_lock()?;
+    let auth = read_stored_auth()?;
+    if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
+        return Ok(auth.access_token);
+    }
+    let _gate = refresh_gate().lock().await;
+    // A concurrent caller may have refreshed while we waited on the gate.
     let auth = read_stored_auth()?;
     if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
         return Ok(auth.access_token);
@@ -521,7 +536,7 @@ pub(super) async fn fresh_access_token(client: &Client) -> Result<String> {
 
 /// Forces a refresh regardless of the stored expiry, used as the 401 fallback.
 pub(super) async fn force_refresh_access_token(client: &Client) -> Result<String> {
-    let _lock = acquire_arcee_auth_lock()?;
+    let _gate = refresh_gate().lock().await;
     let auth = read_stored_auth()?;
     Ok(refresh_and_store_auth(client, auth).await?.access_token)
 }
@@ -534,11 +549,11 @@ async fn refresh_and_store_auth(
     match request_token_refresh(client, &service, &current.refresh_token).await? {
         RefreshOutcome::Success(refreshed) => {
             let updated = stored_auth_from_refresh(current, refreshed);
-            write_stored_auth(&updated)?;
+            with_arcee_auth_lock(|| write_stored_auth(&updated))?;
             Ok(updated)
         }
         RefreshOutcome::Revoked => {
-            let _ = remove_auth_path(&arcee_auth_file_path()?);
+            let _ = with_arcee_auth_lock(|| remove_auth_path(&arcee_auth_file_path()?));
             Err(stored_auth_configuration_error(
                 "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
             ))

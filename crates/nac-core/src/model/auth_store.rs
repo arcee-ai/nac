@@ -18,7 +18,7 @@ fn arcee_auth_lock_path() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-pub(super) fn acquire_arcee_auth_lock() -> Result<FileLock> {
+fn acquire_arcee_auth_lock() -> Result<FileLock> {
     acquire_lock(&arcee_auth_lock_path()?)
 }
 
