@@ -6,17 +6,36 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod render;
 mod schema;
+mod session_overviews;
+mod steering;
+mod thread_events;
 mod threads;
 mod time;
 mod worksets;
 
 pub use render::*;
 pub use schema::{default_store_path, initialize};
+pub use session_overviews::*;
+pub use steering::*;
+pub use thread_events::*;
 pub use threads::*;
 pub use worksets::*;
 
-pub(crate) use schema::open_connection;
+pub(crate) use schema::{open_connection, open_runtime_connection};
 use time::now_utc;
+
+pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(code, _))
+                if matches!(
+                    code.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                )
+        )
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpisodeRecord {
@@ -36,6 +55,15 @@ pub struct ThreadRecord {
     pub updated_at: String,
     pub episode_count: i64,
     pub latest_action: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadEventRecord {
+    pub id: i64,
+    pub thread_name: String,
+    pub session_id: String,
+    pub event_json: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

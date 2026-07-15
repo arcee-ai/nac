@@ -2,102 +2,40 @@ const state = {
   store: null,
   sessions: [],
   snapshots: new Map(),
-  snapshotLoadGenerationBySession: new Map(),
-  selectedId: null,
-  eventsBySession: new Map(),
-  activeThreadsBySession: new Map(),
-  attentionSessions: new Set(),
-  activeRunsBySession: new Map(),
-  terminalRunsBySession: new Map(),
-  submittingRunsBySession: new Set(),
-  submittingRunTimersBySession: new Map(),
-  runStartedAtBySession: new Map(),
-  liveTimerInterval: null,
-  eventSource: null,
+  events: new Map(),
   lastSequence: new Map(),
-  activeTab: "chat",
-  mobileDetailOpen: false,
-  inspectorFullscreen: false,
-  scrollChatToBottom: false,
-  waitingLife: null,
-  workspaceSelectedPathBySession: new Map(),
-  workspaceDiffEntries: new Map(),
-  workspaceDiffRequestSeq: 0,
-  expandedThreadNamesBySession: new Map(),
-  renderRafId: null,
-  renderSessionsPending: false,
-  renderMobilePending: false,
-  renderInspectorPending: false,
-  sessionsPollTimer: null,
-  sessionsLoadPromise: null,
-  sessionsLoadIncludesWorkspaceStats: false,
-  sessionsLoadQueuedOptions: null,
-  sessionsLoadQueuedPromise: null,
-  sessionsLoadGeneration: 0,
-  lastSessionsDigest: "",
-  lastSelectedSessionDigest: "",
-  lastWorkspaceStatsRefresh: 0,
-  transcriptRenderedSessionId: null,
-  transcriptRenderedSignature: "",
-  pendingDeleteSessionId: null,
-  renameSessionId: null,
-  renameDialogGeneration: 0,
-  renameSubmission: null,
-  renameReturnFocus: null,
-  presentationMutations: new Set(),
-  sessionReorder: null,
-  deferredSessionLoadOptions: null,
-  renderSessionsDeferred: false,
-  pendingSessionFocus: null,
-  suppressSessionClickUntil: 0,
-  suppressSessionClickSessionId: null,
-  paneRatio: 0.5,
-  paneResize: null,
-  paneDesktopMedia: null,
-  settingsInitial: null,
-  settingsSessionId: null,
-  settingsRequestGeneration: 0,
-  settingsSubmission: null,
-  settingsBaseUrlRestoreValue: "",
-  settingsCredentialRestoreMode: "variable",
-  settingsCredentialRestoreValue: "",
-  launchBaseUrlRestoreValue: "",
-  launchCredentialRestoreMode: "inherit",
-  launchCredentialRestoreValue: "",
-  launchConfiguredBackend: null,
-  launchConfiguredBaseUrl: null,
-  launchDefaultsRequestGeneration: 0,
-  launchFormVersion: 0,
-  launchSubmitting: false,
+  currentId: null,
+  targetedThread: null,
+  eventSource: null,
+  submitting: false,
+  draggedSessionId: null,
+  snapshotTimer: null,
+  pollTimer: null,
+  statsLoadedAt: 0,
+  statusTimer: null,
+  commandIndex: 0,
+  overviewGenerationId: null,
+  focusView: null,
+  settingsFocus: null,
+  workspaceDiffs: new Map(),
 };
 
-const el = {};
+const ACTION_LEDGER_LIMIT = 5;
+const ORCHESTRATOR_STEERING_TARGET = "__orchestrator__";
+let focusMarkdownRenderer = null;
 
-const WORKSPACE_DIFF_STAGE = "all";
-const WORKSPACE_DIFF_CONTEXT = 3;
-const WORKSPACE_FILE_LIMIT = 80;
-const SESSION_POLL_INTERVAL_MS = 5000;
-const SESSION_WORKSPACE_STATS_INTERVAL_MS = 30000;
-const REORDER_DRAG_THRESHOLD_PX = 6;
-const SESSION_TITLE_MAX_CHARS = 120;
-const PANE_DESKTOP_QUERY = "(min-width: 1180px)";
-const PANE_BOARD_MIN_PX = 340;
-const PANE_INSPECTOR_MIN_PX = 420;
-const PANE_KEYBOARD_STEP = 0.02;
-const MANAGED_LAUNCH_BASE_URLS = Object.freeze({
-  "arcee-auth": "https://api.arcee.ai/api/v1",
-  "chatgpt-codex-responses": "https://chatgpt.com/backend-api",
-});
-
-const SAFE_MARKDOWN_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
-const MARKDOWN_ALLOWED_TAGS = [
-  "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+const commands = [
+  { name: "transcript", description: "open the orchestrator transcript" },
+  { name: "workspace", description: "inspect changed files and diffs" },
+  { name: "settings", description: "edit this session's model configuration" },
+  { name: "stop", description: "stop the active orchestrator run" },
+  { name: "rename", description: "rename this session" },
+  { name: "delete", description: "delete this session" },
+  { name: "clear", description: "clear the selected thread target" },
+  { name: "help", description: "show all commands" },
 ];
-const MARKDOWN_ALLOWED_ATTR = ["class", "href", "rel", "start", "target"];
-const MARKDOWN_FORBID_TAGS = ["base", "button", "embed", "form", "iframe", "img", "input", "link", "math", "meta", "object", "script", "select", "style", "svg", "textarea"];
-const MARKDOWN_FORBID_ATTR = ["id", "name", "src", "srcdoc", "style"];
 
-let markdownRenderer = null;
+const el = {};
 
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
@@ -107,5076 +45,1407 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function bindElements() {
   for (const id of [
-    "storePath",
-    "appShell",
-    "launchOverlay",
-    "closeLaunch",
-    "launchForm",
-    "launchSshHost",
-    "launchCwdField",
-    "launchCwd",
-    "launchBackend",
-    "launchEffort",
-    "launchModel",
-    "launchBaseUrl",
-    "launchApiKeyEnv",
-    "launchCredentialMode",
-    "launchExtraHeaders",
-    "sandboxFields",
-    "sandboxEnabled",
-    "sandboxNoMount",
-    "sandboxImage",
-    "sandboxGpu",
-    "sandboxWorkdir",
-    "sandboxShm",
-    "sandboxMounts",
-    "initialPrompt",
-    "launchStatus",
-    "sessionGrid",
-    "reorderLiveRegion",
-    "sessionBoard",
-    "sessionInspector",
-    "paneSplitter",
-    "paneSeparator",
-    "inspectorTitle",
-    "inspectorMeta",
-    "cancelRun",
-    "mobileBack",
-    "tabs",
-    "snapModel",
-    "snapBackend",
-    "snapMessages",
-    "snapRun",
-    "snapTokens",
-    "snapContext",
-    "transcript",
-    "promptForm",
-    "promptInput",
-    "eventStreamStatus",
-    "eventLog",
-    "threadsView",
-    "worksetsView",
-    "workspaceView",
-    "deleteOverlay",
-    "closeDelete",
-    "confirmDelete",
-    "deleteConfirmText",
-    "deleteStatus",
-    "deleteSessionBtn",
-    "renameSessionBtn",
-    "renameOverlay",
-    "closeRename",
-    "renameForm",
-    "renameTitleInput",
-    "confirmRename",
-    "renameStatus",
-    "fullscreenBtn",
-    "fullscreenEnterIcon",
-    "fullscreenExitIcon",
-    "settingsBtn",
-    "settingsOverlay",
-    "closeSettings",
-    "settingsForm",
-    "settingsSubmit",
-    "settingsStatus",
-    "settingsBackend",
-    "settingsEffort",
-    "settingsModel",
-    "settingsBaseUrl",
-    "settingsApiKeyEnv",
-    "settingsCredentialMode",
-    "settingsExtraHeaders",
-  ]) {
-    el[id] = document.getElementById(id);
-  }
+    "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerNavStatus",
+    "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
+    "sessionLocation", "renameSession", "metricModel", "metricContext", "metricTokens",
+    "metricChanges", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
+    "orchestratorState", "orchestratorLedger", "expandOrchestrator",
+    "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
+    "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
+    "promptInput", "sendPrompt", "commandMenu", "drawerBackdrop", "utilityDrawer",
+    "drawerTitle", "drawerContent", "closeDrawer", "launchDialog", "launchForm",
+    "launchExecutionModes", "launchCwd", "launchSshField", "launchSshHost", "launchBackend",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchApiKeyEnv", "launchExtraHeaders",
+    "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
+    "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
+  ]) el[id] = document.getElementById(id);
 }
 
 function bindEvents() {
-  el.launchForm.addEventListener("submit", createSession);
-  el.launchForm.addEventListener("input", () => {
-    state.launchFormVersion += 1;
-  });
-  el.launchSshHost.addEventListener("input", renderLaunchHostFields);
-  el.launchSshHost.addEventListener("change", refreshOpenLaunchModelDefaults);
-  el.launchCwd.addEventListener("change", refreshOpenLaunchModelDefaults);
-  el.launchBackend.addEventListener("change", renderLaunchModelControls);
-  el.launchCredentialMode.addEventListener("change", renderCredentialControls);
-  el.settingsBackend.addEventListener("change", renderSettingsModelControls);
-  el.settingsCredentialMode.addEventListener("change", renderCredentialControls);
-  el.promptForm.addEventListener("submit", submitPrompt);
-  el.promptInput.addEventListener("keydown", handlePromptKeydown);
-  el.cancelRun.addEventListener("click", cancelActiveRun);
-  el.deleteSessionBtn.addEventListener("click", () => {
-    if (state.selectedId) deleteSession(state.selectedId);
-  });
-  el.renameSessionBtn.addEventListener("click", showRenameOverlay);
-  el.closeRename.addEventListener("click", () => hideRenameOverlay(true));
-  el.renameOverlay.addEventListener("click", (event) => {
-    if (event.target === el.renameOverlay) hideRenameOverlay(true);
-  });
-  el.renameOverlay.addEventListener("keydown", containRenameDialogFocus);
-  el.renameForm.addEventListener("submit", renameSelectedSession);
-  el.fullscreenBtn.addEventListener("click", toggleInspectorFullscreen);
-  el.settingsBtn.addEventListener("click", showSettingsOverlay);
-  el.closeSettings.addEventListener("click", hideSettingsOverlay);
-  el.settingsOverlay.addEventListener("click", (event) => {
-    if (event.target === el.settingsOverlay) hideSettingsOverlay();
-  });
-  el.settingsForm.addEventListener("submit", updateSessionConfig);
-  el.mobileBack.addEventListener("click", showMobileSessions);
-  el.closeLaunch.addEventListener("click", hideLaunchOverlay);
-  el.launchOverlay.addEventListener("click", (event) => {
-    if (event.target === el.launchOverlay) hideLaunchOverlay();
-  });
-  el.closeDelete.addEventListener("click", hideDeleteOverlay);
-  el.deleteOverlay.addEventListener("click", (event) => {
-    if (event.target === el.deleteOverlay) hideDeleteOverlay();
-  });
-  el.confirmDelete.addEventListener("click", confirmDeleteSession);
-
+  el.newSessionBtn.addEventListener("click", openLaunchDialog);
   el.sessionGrid.addEventListener("click", handleSessionGridClick);
   el.sessionGrid.addEventListener("keydown", handleSessionGridKeydown);
-  el.sessionGrid.addEventListener("pointerdown", handleSessionPointerDown);
-  el.sessionGrid.addEventListener("dragstart", (event) => {
-    if (event.target.closest(".reorder-handle")) event.preventDefault();
+  el.sessionGrid.addEventListener("dragstart", handleSessionDragStart);
+  el.sessionGrid.addEventListener("dragover", handleSessionDragOver);
+  el.sessionGrid.addEventListener("dragleave", handleSessionDragLeave);
+  el.sessionGrid.addEventListener("drop", handleSessionDrop);
+  el.sessionGrid.addEventListener("dragend", clearSessionDragState);
+  el.backToSessions.addEventListener("click", showPicker);
+  el.renameSession.addEventListener("click", renameCurrentSession);
+  el.stopRun.addEventListener("click", stopActiveRun);
+  el.refreshSession.addEventListener("click", generateOverview);
+  el.expandOrchestrator.addEventListener("click", () => openFocusView("orchestrator"));
+  el.closeFocusPanel.addEventListener("click", closeFocusView);
+  el.focusContent.addEventListener("click", handleFocusClick);
+  el.focusContent.addEventListener("submit", handleDrawerSubmit);
+  el.threadGrid.addEventListener("click", handleThreadClick);
+  el.commandComposer.addEventListener("submit", submitComposer);
+  el.promptInput.addEventListener("input", handleComposerInput);
+  el.promptInput.addEventListener("keydown", handleComposerKeydown);
+  el.commandMenu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-command-option]");
+    if (option) runCommand(option.dataset.commandOption);
   });
-  document.addEventListener("pointermove", handleSessionPointerMove);
-  document.addEventListener("pointerup", handleSessionPointerUp);
-  document.addEventListener("pointercancel", handleSessionPointerCancel);
-  el.sessionGrid.addEventListener("lostpointercapture", handleSessionLostPointerCapture);
-  window.addEventListener("blur", cancelPointerSessionReorder);
+  el.clearTarget.addEventListener("click", clearThreadTarget);
+  document.addEventListener("click", (event) => {
+    const command = event.target.closest("[data-command]");
+    if (command) runCommand(command.dataset.command);
+    const closer = event.target.closest("[data-close-dialog]");
+    if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
+  });
+  el.drawerBackdrop.addEventListener("click", closeDrawer);
+  el.closeDrawer.addEventListener("click", closeDrawer);
+  el.drawerContent.addEventListener("submit", handleDrawerSubmit);
+  el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
+  el.launchForm.addEventListener("submit", createSession);
+  window.addEventListener("hashchange", syncRouteFromHash);
+  document.addEventListener("keydown", handleGlobalKeydown);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") cancelPointerSessionReorder();
+    if (!document.hidden) {
+      loadSessions({ workspaceStats: Date.now() - state.statsLoadedAt > 30_000 });
+      if (state.currentId) loadSnapshot(state.currentId, false);
+    }
   });
-
-  el.paneSeparator.addEventListener("pointerdown", handlePanePointerDown);
-  el.paneSeparator.addEventListener("keydown", handlePaneKeydown);
-  document.addEventListener("pointermove", handlePanePointerMove);
-  document.addEventListener("pointerup", handlePanePointerUp);
-  document.addEventListener("pointercancel", handlePanePointerCancel);
-  state.paneDesktopMedia = window.matchMedia(PANE_DESKTOP_QUERY);
-  const handlePaneMediaChange = () => {
-    cancelPaneResize(true);
-    syncPaneSplitter();
-  };
-  if (typeof state.paneDesktopMedia.addEventListener === "function") {
-    state.paneDesktopMedia.addEventListener("change", handlePaneMediaChange);
-  } else if (typeof state.paneDesktopMedia.addListener === "function") {
-    state.paneDesktopMedia.addListener(handlePaneMediaChange);
-  }
-  window.addEventListener("resize", () => {
-    cancelPaneResize(true);
-    syncPaneSplitter();
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    if (cancelSessionReorder()) {
-      event.preventDefault();
-      return;
-    }
-    if (!el.renameOverlay.hidden) {
-      hideRenameOverlay(true);
-      return;
-    }
-    if (!el.settingsOverlay.hidden) {
-      hideSettingsOverlay();
-      return;
-    }
-    if (!el.deleteOverlay.hidden) {
-      hideDeleteOverlay();
-      return;
-    }
-    if (!el.launchOverlay.hidden) {
-      hideLaunchOverlay();
-      return;
-    }
-    if (state.inspectorFullscreen) setInspectorFullscreen(false);
-  });
-
-  el.tabs.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-tab]");
-    if (!button) return;
-    state.activeTab = button.dataset.tab;
-    if (state.activeTab === "workspace") requestWorkspaceStatsRefresh();
-    requestInspectorRender();
-  });
-
-  el.workspaceView.addEventListener("click", handleWorkspaceFileClick);
-  el.threadsView.addEventListener("click", handleThreadClick);
 }
 
 async function boot() {
-  syncPaneSplitter();
   try {
     state.store = await apiGet("/store");
-    const storePath = state.store.store_path || "--";
-    el.storePath.textContent = storePath;
-    el.storePath.title = storePath;
-    el.launchCwd.value = state.store.root_cwd;
+    el.launchCwd.value = state.store.root_cwd || "";
   } catch (error) {
-    setLaunchStatus(error.message, true);
+    showToast(error.message, true);
   }
-
-  renderLaunchHostFields();
-  renderLaunchModelControls();
-  await loadSessions({ workspaceStats: true, forceRender: true, forceFetch: true });
-  scheduleSessionPoll();
+  await loadSessions({ workspaceStats: true });
+  syncRouteFromHash();
+  state.pollTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    const workspaceStats = Date.now() - state.statsLoadedAt > 30_000;
+    loadSessions({ workspaceStats });
+  }, 5_000);
 }
 
-async function apiGet(path) {
-  const response = await fetch(path);
-  return readJson(response);
-}
-
-async function apiPost(path, body) {
+async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    ...options,
+    headers: options.body ? { "Content-Type": "application/json", ...(options.headers || {}) } : options.headers,
   });
-  return readJson(response);
-}
-
-async function apiPut(path, body) {
-  const response = await fetch(path, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return readJson(response);
-}
-
-async function apiDelete(path) {
-  const response = await fetch(path, { method: "DELETE" });
-  return readJson(response);
-}
-
-async function readJson(response) {
+  const text = await response.text();
   let payload = null;
-  try {
-    payload = await response.json();
-  } catch (_) {
-    payload = {};
+  if (text) {
+    try { payload = JSON.parse(text); } catch (_) { payload = text; }
   }
   if (!response.ok) {
-    const error = new Error(payload.error || `${response.status} ${response.statusText}`);
+    const message = payload?.error || payload?.message || text || `${response.status} ${response.statusText}`;
+    const error = new Error(message);
     error.status = response.status;
-    error.payload = payload;
     throw error;
   }
   return payload;
 }
 
-async function loadSessions(options = {}) {
-  const loadOptions = normalizeSessionLoadOptions(options);
-  if (sessionReorderInProgress()) {
-    state.deferredSessionLoadOptions = mergeSessionLoadOptions(
-      state.deferredSessionLoadOptions,
-      loadOptions,
-    );
-    return null;
-  }
-  if (state.sessionsLoadPromise) {
-    const currentIncludesRequestedStats = !loadOptions.workspaceStats || state.sessionsLoadIncludesWorkspaceStats;
-    if (!loadOptions.forceFetch && currentIncludesRequestedStats) return joinCurrentSessionLoad(loadOptions);
-    state.sessionsLoadQueuedOptions = mergeSessionLoadOptions(state.sessionsLoadQueuedOptions, loadOptions);
-    if (!state.sessionsLoadQueuedPromise) {
-      state.sessionsLoadQueuedPromise = state.sessionsLoadPromise.then(() => {
-        const queuedOptions = state.sessionsLoadQueuedOptions;
-        state.sessionsLoadQueuedOptions = null;
-        state.sessionsLoadQueuedPromise = null;
-        return queuedOptions ? loadSessions(queuedOptions) : null;
-      });
-    }
-    return state.sessionsLoadQueuedPromise;
-  }
+const apiGet = (path) => apiRequest(path);
+const apiPost = (path, body = {}) => apiRequest(path, { method: "POST", body: JSON.stringify(body) });
+const apiPut = (path, body = {}) => apiRequest(path, { method: "PUT", body: JSON.stringify(body) });
+const apiPatch = (path, body = {}) => apiRequest(path, { method: "PATCH", body: JSON.stringify(body) });
+const apiDelete = (path) => apiRequest(path, { method: "DELETE" });
 
-  state.sessionsLoadIncludesWorkspaceStats = loadOptions.workspaceStats;
-  const loadGeneration = state.sessionsLoadGeneration;
-  state.sessionsLoadPromise = loadSessionsOnce(loadOptions, loadGeneration);
+async function loadSessions({ workspaceStats = false } = {}) {
   try {
-    return await state.sessionsLoadPromise;
-  } finally {
-    state.sessionsLoadPromise = null;
-    state.sessionsLoadIncludesWorkspaceStats = false;
-  }
-}
-
-function normalizeSessionLoadOptions(options = {}) {
-  return {
-    workspaceStats: Boolean(options.workspaceStats),
-    forceRender: Boolean(options.forceRender),
-    forceFetch: Boolean(options.forceFetch),
-    inspector: Boolean(options.inspector),
-  };
-}
-
-function mergeSessionLoadOptions(left, right) {
-  if (!left) return { ...right };
-  return {
-    workspaceStats: Boolean(left.workspaceStats || right.workspaceStats),
-    forceRender: Boolean(left.forceRender || right.forceRender),
-    forceFetch: Boolean(left.forceFetch || right.forceFetch),
-    inspector: Boolean(left.inspector || right.inspector),
-  };
-}
-
-function joinCurrentSessionLoad(loadOptions) {
-  if (!loadOptions.forceRender && !loadOptions.inspector) return state.sessionsLoadPromise;
-  return state.sessionsLoadPromise.then((sessions) => {
-    const shell = loadOptions.forceRender;
-    requestRender({
-      shell: false,
-      sessions: shell,
-      mobile: shell,
-      inspector: loadOptions.inspector || shell,
+    const previous = new Map(state.sessions.map((entry) => [entry.summary.session_id, entry]));
+    const loaded = await apiGet(`/sessions${workspaceStats ? "?workspace_stats=true" : ""}`);
+    if (workspaceStats) state.statsLoadedAt = Date.now();
+    state.sessions = loaded.map((entry) => {
+      const old = previous.get(entry.summary.session_id);
+      if (entry.workspace_diff == null && old?.workspace_diff != null) return { ...entry, workspace_diff: old.workspace_diff };
+      return entry;
     });
-    return sessions;
-  });
-}
-
-async function loadSessionsOnce(options, loadGeneration) {
-  try {
-    const path = options.workspaceStats ? "/sessions?workspace_stats=true" : "/sessions";
-    const sessions = await apiGet(path);
-    if (loadGeneration !== state.sessionsLoadGeneration) return null;
-    preserveSessionWorkspaceStats(sessions);
-    sanitizeSessionListActiveRuns(sessions);
-    updateSessionActivity(sessions);
-    if (state.runStartedAtBySession.size > 0) {
-      startLiveTimer();
-    } else {
-      stopLiveTimer();
-    }
-
-    if (options.workspaceStats) state.lastWorkspaceStatsRefresh = Date.now();
-    const previousSelectedId = state.selectedId;
-    const selectedSessionMissing = Boolean(
-      previousSelectedId
-      && !sessions.some((entry) => entry.summary.session_id === previousSelectedId),
-    );
-    if (selectedSessionMissing) {
-      clearSessionClientState(previousSelectedId);
-      if (state.eventSource) {
-        state.eventSource.close();
-        state.eventSource = null;
-      }
-      state.selectedId = null;
-      state.transcriptRenderedSessionId = null;
-      state.transcriptRenderedSignature = "";
-    }
-    if (!state.selectedId && sessions.length > 0) state.selectedId = sessions[0].summary.session_id;
-    if (selectedSessionMissing && !state.selectedId) {
-      state.mobileDetailOpen = false;
-      setInspectorFullscreen(false);
-    }
-
-    const nextSessionsDigest = sessionListRenderDigest(sessions);
-    const selectedEntry = sessions.find((entry) => entry.summary.session_id === state.selectedId) || null;
-    const nextSelectedDigest = sessionEntryRenderDigest(selectedEntry);
-    const sessionsChanged = nextSessionsDigest !== state.lastSessionsDigest;
-    const selectedChanged = nextSelectedDigest !== state.lastSelectedSessionDigest;
-    state.sessions = sessions;
-    state.lastSessionsDigest = nextSessionsDigest;
-    state.lastSelectedSessionDigest = nextSelectedDigest;
-
-    const needsSelectedSnapshot = Boolean(state.selectedId && !state.snapshots.has(state.selectedId));
-    const shellChanged = options.forceRender || sessionsChanged;
-    const inspectorChanged = options.inspector || selectedChanged || options.forceRender || needsSelectedSnapshot;
-    if (shellChanged || inspectorChanged) {
-      requestRender({
-        shell: false,
-        sessions: shellChanged,
-        mobile: shellChanged,
-        inspector: inspectorChanged,
-      });
-    }
-    if (state.selectedId && (selectedSessionMissing || needsSelectedSnapshot)) {
-      loadSnapshot(state.selectedId, true);
-    }
-    return sessions;
+    if (state.currentId && !sessionEntry(state.currentId)) showPicker();
+    renderPicker();
+    if (state.currentId) renderWorkspace();
+    return state.sessions;
   } catch (error) {
-    setLaunchStatus(error.message, true);
-    return null;
+    showToast(error.message, true);
+    return [];
   }
 }
 
-function preserveSessionWorkspaceStats(sessions) {
-  const previousById = new Map(state.sessions.map((entry) => [entry.summary.session_id, entry]));
-  for (const entry of sessions) {
-    const previous = previousById.get(entry.summary.session_id);
-    if (entry.workspace_diff === undefined && previous?.workspace_diff !== undefined) {
-      entry.workspace_diff = previous.workspace_diff;
-    }
-  }
-}
-
-function scheduleSessionPoll(delay = SESSION_POLL_INTERVAL_MS) {
-  if (state.sessionsPollTimer || typeof setTimeout !== "function") return;
-  state.sessionsPollTimer = setTimeout(runSessionPoll, delay);
-}
-
-async function runSessionPoll() {
-  state.sessionsPollTimer = null;
-  try {
-    await loadSessions({ workspaceStats: shouldRefreshWorkspaceStats() });
-  } finally {
-    scheduleSessionPoll();
-  }
-}
-
-function shouldRefreshWorkspaceStats(now = Date.now()) {
-  return !state.lastWorkspaceStatsRefresh || now - state.lastWorkspaceStatsRefresh >= SESSION_WORKSPACE_STATS_INTERVAL_MS;
-}
-
-function requestWorkspaceStatsRefresh() {
-  loadSessions({ workspaceStats: true, forceRender: true });
-}
-
-function sessionListRenderDigest(sessions) {
-  return sessionCardListRenderDigest(sessions.map(sessionCardViewModel));
-}
-
-function sessionCardListRenderDigest(cards) {
-  return cards.map(sessionCardRenderDigest).join("\n");
-}
-
-function sessionEntryRenderDigest(entry) {
-  return sessionCardRenderDigest(sessionCardViewModel(entry));
-}
-
-function sessionCardViewModel(entry) {
-  if (!entry) return null;
-  const summary = entry.summary || {};
-  const sessionId = summary.session_id || "";
-  const snapshot = state.snapshots.get(sessionId);
-  const workspaceError = snapshot?.workspace?.error || "";
-  const diffStats = workspaceDiffStats(snapshot, entry.workspace_diff);
-  const cardActive = activeRunCountsForSession(sessionId, entry.active_run);
-  const cardSnapshot = {
-    ...(snapshot || {}),
-    active_run: snapshot?.active_run || entry.active_run,
-    messages: snapshot?.messages || [],
-  };
-  const pendingCount = effectivePendingMessages(sessionId, cardSnapshot).length;
-  const promptPreview = latestPendingUserPrompt(sessionId, cardSnapshot)
-    || displayPromptFromMessageText(summary.last_user_prompt)
-    || "no prompt yet";
-  const runActive = activeRunCountsForSession(sessionId, entry.active_run);
-  const runStartedAt = runActive
-    ? (state.runStartedAtBySession.get(sessionId) || entry.active_run?.started_at_epoch_ms || null)
-    : null;
-  const snapshotForTiming = state.snapshots.get(sessionId);
-  const lastDur = snapshotForTiming?.response_timing?.last_response_duration_ms;
-  const runDisplay = runActive
-    ? (runStartedAt ? formatRuntime(Date.now() - runStartedAt) : "00:00:00")
-    : (lastDur != null ? formatRuntime(lastDur) : "--:--:--");
-  return {
-    sessionId,
-    shortId: shortId(sessionId),
-    title: typeof summary.title === "string" ? summary.title : "",
-    displayTitle: displaySessionTitle(summary),
-    cwd: summary.cwd || "",
-    sshHost: summary.ssh_host || "",
-    sandboxed: Boolean(summary.sandboxed),
-    selected: sessionId === state.selectedId,
-    pinned: Boolean(summary.pinned),
-    sortOrder: Number(summary.sort_order) || 0,
-    presentationVersion: Number(summary.presentation_version) || 0,
-    presentationBusy: state.presentationMutations.has(sessionId),
-    tone: cardActive ? "" : summary.sandboxed ? "warn" : "",
-    errorish: workspaceError && !workspaceError.includes("remote/sandbox-only") ? "errorish" : "",
-    statusClass: sessionStatusClass(entry),
-    runActive,
-    runStartedAt,
-    lastDur: lastDur || null,
-    runDisplay,
-    additions: diffStats.additions,
-    deletions: diffStats.deletions,
-    promptPreview,
-  };
-}
-
-function sessionCardRenderDigest(card) {
-  if (!card) return "";
-  return [
-    card.sessionId,
-    card.shortId,
-    card.title,
-    card.displayTitle,
-    card.cwd,
-    card.sshHost,
-    card.sandboxed ? "1" : "0",
-    card.selected ? "1" : "0",
-    card.pinned ? "1" : "0",
-    String(card.sortOrder),
-    String(card.presentationVersion),
-    card.presentationBusy ? "1" : "0",
-    card.tone,
-    card.errorish,
-    card.statusClass,
-    card.runActive ? "1" : "0",
-    String(card.runStartedAt || ""),
-    String(card.lastDur || ""),
-    card.additions,
-    card.deletions,
-    card.promptPreview,
-  ].join("\\x1f");
-}
-
-function renderLaunchHostFields() {
-  const remote = Boolean(el.launchSshHost.value.trim());
-  if (remote && state.store && el.launchCwd.value === state.store.root_cwd) {
-    el.launchCwd.value = "~";
-  } else if (!remote && state.store && el.launchCwd.value === "~") {
-    el.launchCwd.value = state.store.root_cwd;
-  }
-  setVisible(el.sandboxFields, !remote);
-}
-
-function setVisible(element, visible) {
-  element.style.display = visible ? "" : "none";
-}
-
-async function loadSnapshot(sessionId, openStream = false) {
-  if (!sessionId) return null;
-  const loadGeneration = state.snapshotLoadGenerationBySession.get(sessionId) || 0;
-  try {
-    const previousMessageCount = effectiveMessageCount(sessionId);
-    const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}`);
-    if (loadGeneration !== (state.snapshotLoadGenerationBySession.get(sessionId) || 0)
-      || !sessionEntryById(sessionId)) return null;
-    sanitizeSnapshotActiveRun(sessionId, snapshot);
-    if (activeRunCountsForSession(sessionId, snapshot.active_run)) {
-      clearRunSubmitting(sessionId);
-      state.activeRunsBySession.set(sessionId, true);
-      if (snapshot.active_run?.started_at_epoch_ms) {
-        state.runStartedAtBySession.set(sessionId, snapshot.active_run.started_at_epoch_ms);
-      }
-    }
-    const previousCardDigest = sessionEntryRenderDigest(sessionEntryById(sessionId));
-    state.snapshots.set(sessionId, snapshot);
-    syncActiveThreadsFromSnapshot(sessionId, snapshot);
-    const cardChanged = previousCardDigest !== sessionEntryRenderDigest(sessionEntryById(sessionId));
-    if (state.selectedId === sessionId && effectiveMessageCount(sessionId, snapshot) > previousMessageCount) {
-      requestChatScrollToBottom();
-    }
-    if (openStream && state.selectedId === sessionId) openEventStream(sessionId);
-    if (state.selectedId === sessionId) {
-      if (sessionHasActiveRun(sessionId, snapshot)) {
-        startLiveTimer();
-      } else if (state.runStartedAtBySession.size === 0) {
-        stopLiveTimer();
-      }
-      requestRender({ shell: false, sessions: cardChanged, inspector: true });
-    }
-    return snapshot;
-  } catch (error) {
-    pushLocalEvent("snapshot_error", error.message, sessionId);
-    if (state.selectedId === sessionId) requestInspectorRender();
-    return null;
-  }
-}
-
-function selectSession(sessionId) {
-  const previousId = state.selectedId;
-  if (previousId && previousId !== sessionId) {
-    clearSessionAttention(previousId);
-  }
-  clearSessionAttention(sessionId);
-  state.selectedId = sessionId;
-  state.activeTab = "chat";
-  state.mobileDetailOpen = true;
-  state.scrollChatToBottom = true;
-  requestRender({ inspector: true });
-  focusMobileSessionDetail(sessionId);
-  openEventStream(sessionId);
-  loadSnapshot(sessionId, false);
-}
-
-function focusMobileSessionDetail(sessionId) {
-  requestAnimationFrame(() => {
-    const mobile = typeof window.matchMedia === "function"
-      && window.matchMedia(PANE_DESKTOP_QUERY).matches === false;
-    if (!mobile || state.selectedId !== sessionId || !state.mobileDetailOpen) return;
-    if (!document.body.classList.contains("detail-open")) return;
-    try {
-      el.mobileBack.focus({ preventScroll: true });
-    } catch (_) {
-      el.mobileBack.focus();
-    }
-  });
-}
-
-function showLaunchOverlay() {
-  if (!el.launchStatus.classList.contains("error")) {
-    setLaunchStatus("", false);
-  }
-  el.launchOverlay.hidden = false;
-  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
-  requestAnimationFrame(() => {
-    el.launchCwd.focus();
-    el.launchCwd.select();
-  });
-}
-
-function hideLaunchOverlay() {
-  el.launchOverlay.hidden = true;
-  state.launchDefaultsRequestGeneration += 1;
-}
-
-function launchLocationFromValues(values) {
-  const sshHost = nullable(values?.ssh_host);
-  return {
-    cwd: sshHost ? (nullable(values?.cwd) || "~") : nullable(values?.cwd),
-    ssh_host: sshHost,
-  };
-}
-
-function launchLocationKey(location) {
-  return JSON.stringify([location?.cwd || null, location?.ssh_host || null]);
-}
-
-async function fetchLaunchModelDefaultsForValues(values, postDefaults = apiPost) {
-  const location = launchLocationFromValues(values);
-  const defaults = await postDefaults("/sessions/launch-defaults", location);
-  return { defaults, location };
-}
-
-function beginLaunchModelDefaultsRequest(showStatus) {
-  const requestGeneration = ++state.launchDefaultsRequestGeneration;
-  state.launchConfiguredBackend = null;
-  state.launchConfiguredBaseUrl = null;
-  renderLaunchModelControls();
-  if (showStatus) setLaunchStatus("refreshing launch defaults", false);
-  return requestGeneration;
-}
-
-function applyLaunchModelDefaults(defaults) {
-  state.launchConfiguredBackend = defaults?.configured_model_backend || null;
-  state.launchConfiguredBaseUrl = defaults?.configured_model_base_url || null;
-  renderLaunchModelControls();
-}
-
-async function refreshLaunchModelDefaults({ showStatus = false, postDefaults = apiPost } = {}) {
-  const requestGeneration = beginLaunchModelDefaultsRequest(showStatus);
-  const values = {
-    cwd: el.launchCwd.value,
-    ssh_host: el.launchSshHost.value,
-  };
-  const expectedLocation = launchLocationFromValues(values);
-  const expectedKey = launchLocationKey(expectedLocation);
-  try {
-    const refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
-    const currentLocation = launchLocationFromValues({
-      cwd: el.launchCwd.value,
-      ssh_host: el.launchSshHost.value,
-    });
-    const applied = requestGeneration === state.launchDefaultsRequestGeneration
-      && !el.launchOverlay.hidden
-      && launchLocationKey(currentLocation) === expectedKey;
-    if (applied) {
-      applyLaunchModelDefaults(refreshed.defaults);
-      if (showStatus && el.launchStatus.textContent === "refreshing launch defaults") {
-        setLaunchStatus("", false);
-      }
-    }
-    return { ...refreshed, applied, requestGeneration };
-  } catch (error) {
-    if (requestGeneration === state.launchDefaultsRequestGeneration
-        && !el.launchOverlay.hidden
-        && launchLocationKey(launchLocationFromValues({
-          cwd: el.launchCwd.value,
-          ssh_host: el.launchSshHost.value,
-        })) === expectedKey) {
-      setLaunchStatus(error.message, true);
-    }
-    throw error;
-  }
-}
-
-function refreshOpenLaunchModelDefaults() {
-  if (el.launchOverlay.hidden) return;
-  refreshLaunchModelDefaults({ showStatus: true }).catch(() => {});
-}
-
-function showDeleteOverlay(sessionId) {
-  if (!sessionId) return;
-  state.pendingDeleteSessionId = sessionId;
-  const entry = sessionEntryById(sessionId);
-  const label = entry ? displaySessionTitle(entry.summary) : shortId(sessionId);
-  el.deleteConfirmText.textContent = `Delete session ${label} (${sessionId})? This permanently removes all threads, episodes, and worksets.`;
-  el.deleteStatus.textContent = "";
-  el.deleteStatus.classList.remove("error");
-  el.deleteOverlay.hidden = false;
-}
-
-function hideDeleteOverlay() {
-  el.deleteOverlay.hidden = true;
-  state.pendingDeleteSessionId = null;
-}
-
-function setDeleteStatus(message, error) {
-  el.deleteStatus.textContent = message || "";
-  el.deleteStatus.classList.toggle("error", Boolean(error));
-}
-
-async function settingsMetadataForSession(sessionId, snapshot, fetchConfig = apiGet) {
-  if (snapshot?.metadata) return snapshot.metadata;
-  return fetchConfig(`/sessions/${encodeURIComponent(sessionId)}/config`);
-}
-
-function rawHeadersFromMetadata(metadata) {
-  if (Object.prototype.hasOwnProperty.call(metadata || {}, "extra_headers_json")) {
-    const raw = metadata.extra_headers_json;
-    if (raw === null || raw === undefined || raw === "") {
-      return { text: "", value: {}, invalid: false };
-    }
-    try {
-      const value = JSON.parse(raw);
-      if (!value || Array.isArray(value) || typeof value !== "object"
-          || Object.values(value).some((entry) => typeof entry !== "string")) {
-        return { text: raw, value: {}, invalid: true };
-      }
-      return { text: JSON.stringify(value, null, 2), value, invalid: false };
-    } catch (_) {
-      return { text: raw, value: {}, invalid: true };
-    }
-  }
-  const value = metadata?.extra_headers || {};
-  return {
-    text: Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "",
-    value,
-    invalid: false,
-  };
-}
-
-function setSettingsSelectRawValue(select, raw, fieldLabel) {
-  for (const option of Array.from(select.querySelectorAll("option[data-raw-invalid]"))) {
-    option.remove();
-  }
-  const value = raw ?? "";
-  if (value && !Array.from(select.options).some((option) => option.value === value)) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = `${value} (unsupported — select a replacement ${fieldLabel})`;
-    option.dataset.rawInvalid = "true";
-    select.append(option);
-  }
-  select.value = value;
-}
-
-function settingsFormStateFromMetadata(metadata) {
-  const initial = settingsValuesFromMetadata(metadata);
-  const managedUrl = managedLaunchBaseUrl(initial.backend);
-  const rawBaseUrl = String(metadata?.base_url ?? "");
-  const normalizedBaseUrl = rawBaseUrl.trim();
-  const restoreBaseUrl = normalizedBaseUrl && !isManagedSettingsBaseUrl(normalizedBaseUrl)
-    ? rawBaseUrl
-    : "";
-  const hasApiKeyEnv = metadata?.api_key_env !== null && metadata?.api_key_env !== undefined;
-  const rawApiKeyEnv = String(metadata?.api_key_env ?? "");
-  return {
-    initial,
-    model: metadata?.model || "",
-    backend: initial.backend,
-    reasoning_effort: metadata?.reasoning_effort || "__clear__",
-    baseUrlControl: managedUrl
-      ? {
-          value: managedUrl,
-          readOnly: true,
-          restoreValue: restoreBaseUrl,
-        }
-      : {
-          value: rawBaseUrl,
-          readOnly: false,
-          restoreValue: restoreBaseUrl,
-        },
-    credentialControl: managedUrl
-      ? {
-          mode: "none",
-          value: "",
-          locked: true,
-          restoreMode: "variable",
-          restoreValue: hasApiKeyEnv ? rawApiKeyEnv : "",
-        }
-      : {
-          mode: hasApiKeyEnv ? "variable" : "none",
-          value: rawApiKeyEnv,
-          locked: false,
-          restoreMode: hasApiKeyEnv ? "variable" : "none",
-          restoreValue: rawApiKeyEnv,
-        },
-    extra_headers: rawHeadersFromMetadata(metadata).text,
-  };
-}
-
-function setSettingsFormInteractive(interactive) {
-  el.settingsForm.inert = !interactive;
-  if (interactive) {
-    el.settingsForm.removeAttribute("aria-busy");
-  } else {
-    el.settingsForm.setAttribute("aria-busy", "true");
-  }
-  el.settingsSubmit.disabled = !interactive;
-}
-
-function resetSettingsForm() {
-  state.settingsInitial = null;
-  state.settingsSessionId = null;
-  state.settingsSubmission = null;
-  state.settingsBaseUrlRestoreValue = "";
-  state.settingsCredentialRestoreMode = "variable";
-  state.settingsCredentialRestoreValue = "";
-
-  el.settingsModel.value = "";
-  setSettingsSelectRawValue(el.settingsBackend, "", "backend");
-  setSettingsSelectRawValue(el.settingsEffort, "", "reasoning effort");
-  el.settingsBaseUrl.value = "";
-  el.settingsBaseUrl.readOnly = false;
-  el.settingsBaseUrl.title = "";
-  el.settingsCredentialMode.value = "";
-  el.settingsCredentialMode.disabled = false;
-  el.settingsCredentialMode.title = "";
-  el.settingsApiKeyEnv.value = "";
-  el.settingsApiKeyEnv.disabled = true;
-  el.settingsApiKeyEnv.required = false;
-  el.settingsApiKeyEnv.placeholder = "not used";
-  el.settingsExtraHeaders.value = "";
-  setSettingsStatus("", false);
-  setSettingsFormInteractive(false);
-}
-
-function populateSettingsForm(metadata, sessionId) {
-  const formState = settingsFormStateFromMetadata(metadata);
-  el.settingsModel.value = formState.model;
-  setSettingsSelectRawValue(el.settingsBackend, formState.backend, "backend");
-  setSettingsSelectRawValue(
-    el.settingsEffort,
-    formState.reasoning_effort,
-    "reasoning effort",
-  );
-  el.settingsBaseUrl.value = formState.baseUrlControl.value;
-  el.settingsBaseUrl.readOnly = formState.baseUrlControl.readOnly;
-  el.settingsBaseUrl.title = formState.baseUrlControl.readOnly
-    ? "Canonical URL for the selected managed backend"
-    : "";
-  state.settingsBaseUrlRestoreValue = formState.baseUrlControl.restoreValue;
-  el.settingsCredentialMode.value = formState.credentialControl.mode;
-  el.settingsCredentialMode.disabled = formState.credentialControl.locked;
-  el.settingsCredentialMode.title = formState.credentialControl.locked
-    ? "Stored credentials are selected automatically for this managed backend"
-    : "";
-  el.settingsApiKeyEnv.value = formState.credentialControl.value;
-  state.settingsCredentialRestoreMode = formState.credentialControl.restoreMode;
-  state.settingsCredentialRestoreValue = formState.credentialControl.restoreValue;
-  el.settingsExtraHeaders.value = formState.extra_headers;
-  state.settingsInitial = formState.initial;
-  state.settingsSessionId = sessionId;
-  renderCredentialControls();
-}
-
-function settingsContextIsCurrent(requestGeneration, sessionId) {
-  return requestGeneration === state.settingsRequestGeneration
-    && state.settingsSessionId === sessionId
-    && state.selectedId === sessionId
-    && !el.settingsOverlay.hidden;
-}
-
-async function showSettingsOverlay() {
-  const sessionId = state.selectedId;
-  if (!sessionId) return;
-  const requestGeneration = ++state.settingsRequestGeneration;
-  resetSettingsForm();
-  el.settingsOverlay.hidden = false;
-  setSettingsStatus("loading persisted settings", false);
-
-  try {
-    const snapshot = state.snapshots.get(sessionId);
-    const metadata = await settingsMetadataForSession(sessionId, snapshot);
-    if (requestGeneration !== state.settingsRequestGeneration
-        || state.selectedId !== sessionId
-        || el.settingsOverlay.hidden) return;
-    populateSettingsForm(metadata, sessionId);
-    setSettingsFormInteractive(true);
-    const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics : [];
-    setSettingsStatus(
-      diagnostics.length > 0
-        ? `Repair required: ${diagnostics.join("; ")}`
-        : (snapshot?.metadata ? "" : "Loaded persisted settings for repair"),
-      diagnostics.length > 0,
-    );
-  } catch (error) {
-    if (requestGeneration === state.settingsRequestGeneration
-        && state.selectedId === sessionId
-        && !el.settingsOverlay.hidden) {
-      setSettingsStatus(error.message, true);
-    }
-  }
-}
-
-function hideSettingsOverlay() {
-  state.settingsRequestGeneration += 1;
-  el.settingsOverlay.hidden = true;
-  resetSettingsForm();
-}
-
-function setSettingsStatus(message, error) {
-  el.settingsStatus.textContent = message || "";
-  el.settingsStatus.classList.toggle("error", Boolean(error));
-}
-
-async function updateSessionConfig(event) {
-  event.preventDefault();
-  const sessionId = state.selectedId;
-  const requestGeneration = state.settingsRequestGeneration;
-  if (!sessionId
-      || !state.settingsInitial
-      || state.settingsSessionId !== sessionId
-      || el.settingsOverlay.hidden
-      || state.settingsSubmission) return;
-
-  let body;
-  try {
-    body = buildSettingsPatch({
-      model: el.settingsModel.value,
-      base_url: el.settingsBaseUrl.value,
-      backend: el.settingsBackend.value,
-      reasoning_effort: el.settingsEffort.value,
-      credential_mode: el.settingsCredentialMode.value,
-      api_key_env: el.settingsApiKeyEnv.value,
-      extra_headers: el.settingsExtraHeaders.value,
-    }, state.settingsInitial);
-  } catch (validationError) {
-    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
-      setSettingsStatus(validationError.message, true);
-    }
-    return;
-  }
-
-  if (Object.keys(body).length === 0) {
-    if (settingsContextIsCurrent(requestGeneration, sessionId)) {
-      setSettingsStatus("No changes", false);
-    }
-    return;
-  }
-
-  const submission = { requestGeneration, sessionId };
-  state.settingsSubmission = submission;
-  setSettingsFormInteractive(false);
-  setSettingsStatus("saving", false);
-
-  try {
-    const response = await fetch(
-      `/sessions/${encodeURIComponent(sessionId)}/config`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!response.ok) {
-      let payload = {};
-      try { payload = await response.json(); } catch (_) {}
-      throw new Error(payload.error || `${response.status} ${response.statusText}`);
-    }
-    if (!settingsContextIsCurrent(requestGeneration, sessionId)
-        || state.settingsSubmission !== submission) return;
-
-    hideSettingsOverlay();
-    // Reconnect SSE and reload snapshot to pick up the new config.
-    openEventStream(sessionId);
-    await loadSnapshot(sessionId, false);
-    await loadSessions({ forceFetch: true });
-  } catch (error) {
-    if (settingsContextIsCurrent(requestGeneration, sessionId)
-        && state.settingsSubmission === submission) {
-      setSettingsStatus(error.message, true);
-    }
-  } finally {
-    if (state.settingsSubmission === submission) {
-      state.settingsSubmission = null;
-      if (settingsContextIsCurrent(requestGeneration, sessionId)) {
-        setSettingsFormInteractive(true);
-      }
-    }
-  }
-}
-
-function showMobileSessions() {
-  setInspectorFullscreen(false);
-  state.mobileDetailOpen = false;
-  renderMobileMode();
-  syncPromptBusy(state.selectedId);
-  const target = sessionCardElement(state.selectedId)?.querySelector("[data-action='select-session']")
-    || el.sessionGrid.querySelector("[data-action='new-session']");
-  if (target) {
-    try {
-      target.focus({ preventScroll: true });
-    } catch (_) {
-      target.focus();
-    }
-  }
-}
-
-async function createSession(event) {
-  event.preventDefault();
-  if (state.launchSubmitting) return;
-  state.launchSubmitting = true;
-  const submittedFormVersion = state.launchFormVersion;
-
-  try {
-    let refreshed;
-    try {
-      refreshed = await refreshLaunchModelDefaults({ showStatus: true });
-    } catch (_) {
-      return;
-    }
-    if (!refreshed.applied) {
-      return;
-    }
-    if (submittedFormVersion !== state.launchFormVersion) {
-      setLaunchStatus("Launch form changed while defaults were refreshing; submit again", true);
-      return;
-    }
-
-    let modelPayload;
-    try {
-      modelPayload = buildLaunchModelPayload({
-        model: el.launchModel.value,
-        base_url: el.launchBaseUrl.value,
-        backend: el.launchBackend.value,
-        reasoning_effort: el.launchEffort.value,
-        credential_mode: el.launchCredentialMode.value,
-        api_key_env: el.launchApiKeyEnv.value,
-        extra_headers: el.launchExtraHeaders.value,
-        configured_backend: refreshed.defaults?.configured_model_backend,
-      });
-    } catch (validationError) {
-      setLaunchStatus(validationError.message, true);
-      return;
-    }
-
-    setLaunchStatus("launching", false);
-    const initialPrompt = el.initialPrompt.value.trim();
-    const body = {
-      ...refreshed.location,
-      ...modelPayload,
-    };
-    if (!refreshed.location.ssh_host) {
-      body.sandbox = {
-        enabled: el.sandboxEnabled.checked,
-        no_mount_cwd: el.sandboxNoMount.checked,
-        image: nullable(el.sandboxImage.value),
-        gpus: csv(el.sandboxGpu.value),
-        workdir: nullable(el.sandboxWorkdir.value),
-        shm_size: nullable(el.sandboxShm.value),
-        mounts: csv(el.sandboxMounts.value),
-        mounts_ro: [],
-      };
-    }
-
-    try {
-      const snapshot = await apiPost("/sessions", body);
-      const sessionId = snapshot.metadata.session_id;
-      state.snapshots.set(sessionId, snapshot);
-      state.selectedId = sessionId;
-      await loadSessions({ forceFetch: true, workspaceStats: true });
-      hideLaunchOverlay();
-      selectSession(sessionId);
-      setLaunchStatus(`launched ${shortId(sessionId)}`, false);
-      if (initialPrompt) {
-        const hadAttention = state.attentionSessions.has(sessionId);
-        markRunSubmitting(sessionId);
-        clearSessionAttention(sessionId);
-        requestChatScrollToBottom();
-        requestRender({ shell: false, sessions: hadAttention, inspector: true });
-        try {
-          await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: initialPrompt });
-          scheduleRunSubmittingGrace(sessionId);
-          el.initialPrompt.value = "";
-          setLaunchStatus(`running ${shortId(sessionId)}`, false);
-          await loadSnapshot(sessionId, false);
-        } catch (error) {
-          clearRunSubmitting(sessionId);
-          state.activeRunsBySession.set(sessionId, false);
-          requestInspectorRender();
-          throw error;
-        }
-      }
-    } catch (error) {
-      setLaunchStatus(error.message, true);
-    }
-  } finally {
-    state.launchSubmitting = false;
-  }
-}
-
-async function submitPrompt(event) {
-  event.preventDefault();
-  const sessionId = state.selectedId;
-  const prompt = el.promptInput.value.trim();
-  if (!sessionId || !prompt) return;
-  if (sessionHasActiveRun(sessionId)) {
-    syncPromptBusy(sessionId);
-    return;
-  }
-
-  const hadAttention = state.attentionSessions.has(sessionId);
-  markRunSubmitting(sessionId);
-  clearSessionAttention(sessionId);
-  el.promptInput.value = "";
-  requestChatScrollToBottom();
-  requestRender({ shell: false, sessions: hadAttention, inspector: true });
-
-  try {
-    const result = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt });
-    scheduleRunSubmittingGrace(sessionId);
-    pushLocalEvent("submit", `${result.display_prompt} -> ${shortId(result.run_id)}`, sessionId);
-    await loadSessions({ forceFetch: true });
-    await loadSnapshot(sessionId, false);
-    requestInspectorRender();
-  } catch (error) {
-    clearRunSubmitting(sessionId);
-    state.activeRunsBySession.set(sessionId, false);
-    stopWaitingLife();
-    pushLocalEvent("submit_error", error.message, sessionId);
-    requestInspectorRender();
-  }
-}
-
-function handlePromptKeydown(event) {
-  if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
-  event.preventDefault();
-  el.promptForm.requestSubmit();
-}
-
-async function cancelActiveRun() {
-  const sessionId = state.selectedId;
-  if (!sessionId) return;
-  try {
-    await apiPost(`/sessions/${encodeURIComponent(sessionId)}/cancel-active-run`, {});
-    pushLocalEvent("cancel", "requested", sessionId);
-    await loadSessions({ forceFetch: true });
-    await loadSnapshot(sessionId, false);
-  } catch (error) {
-    pushLocalEvent("cancel_error", error.message, sessionId);
-  }
-}
-
-async function deleteSession(sessionId) {
-  if (!sessionId) return;
-  showDeleteOverlay(sessionId);
-}
-
-function clearSessionClientState(sessionId) {
-  state.snapshotLoadGenerationBySession.set(
-    sessionId,
-    (state.snapshotLoadGenerationBySession.get(sessionId) || 0) + 1,
-  );
-  state.snapshots.delete(sessionId);
-  state.eventsBySession.delete(sessionId);
-  state.activeThreadsBySession.delete(sessionId);
-  state.attentionSessions.delete(sessionId);
-  state.activeRunsBySession.delete(sessionId);
-  state.terminalRunsBySession.delete(sessionId);
-  clearRunSubmitting(sessionId);
-  state.runStartedAtBySession.delete(sessionId);
-  state.lastSequence.delete(sessionId);
-  state.workspaceSelectedPathBySession.delete(sessionId);
-  for (const entryKey of state.workspaceDiffEntries.keys()) {
-    const [entrySessionId] = JSON.parse(entryKey);
-    if (entrySessionId === sessionId) state.workspaceDiffEntries.delete(entryKey);
-  }
-  state.expandedThreadNamesBySession.delete(sessionId);
-  state.presentationMutations.delete(sessionId);
-  if (state.renameSessionId === sessionId) hideRenameOverlay(false);
-}
-
-async function confirmDeleteSession() {
-  const sessionId = state.pendingDeleteSessionId;
-  if (!sessionId) return;
-  setDeleteStatus("deleting", false);
-  el.confirmDelete.disabled = true;
-  try {
-    await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
-    clearSessionClientState(sessionId);
-    // If the deleted session was selected, pick a new one or clear
-    if (state.selectedId === sessionId) {
-      if (state.eventSource) {
-        state.eventSource.close();
-        state.eventSource = null;
-      }
-      state.selectedId = null;
-      state.transcriptRenderedSessionId = null;
-      state.transcriptRenderedSignature = "";
-    }
-    hideDeleteOverlay();
-    await loadSessions({ forceFetch: true, forceRender: true });
-    if (state.selectedId) {
-      selectSession(state.selectedId);
-    } else {
-      state.mobileDetailOpen = false;
-      setInspectorFullscreen(false);
-      requestRender({ mobile: true, inspector: true });
-    }
-  } catch (error) {
-    pushLocalEvent("delete_error", error.message, sessionId);
-    setDeleteStatus(error.message, true);
-  } finally {
-    el.confirmDelete.disabled = false;
-  }
-}
-
-function clearSessionSequenceEpoch(sessionId) {
-  state.eventsBySession.delete(sessionId);
-  state.activeThreadsBySession.delete(sessionId);
-  state.expandedThreadNamesBySession.delete(sessionId);
-  state.terminalRunsBySession.delete(sessionId);
-  requestRender({
-    shell: false,
-    sessions: true,
-    inspector: state.selectedId === sessionId,
-  });
-}
-
-function openEventStream(sessionId, options = {}) {
-  if (!sessionId) return;
-  if (state.eventSource) state.eventSource.close();
-  const storedPrior = state.lastSequence.get(sessionId);
-  const requestedPriorSequence = options.replayFromBeginning
-    ? null
-    : (Number.isFinite(storedPrior) ? storedPrior : null);
-  const params = requestedPriorSequence !== null
-    ? `?after_sequence_id=${requestedPriorSequence}&limit=256`
-    : "?limit=256";
-  const source = new EventSource(`/sessions/${encodeURIComponent(sessionId)}/events/stream${params}`);
-  state.eventSource = source;
-  let observationFloor = null;
-
-  source.addEventListener("replay_boundary", (event) => {
-    if (state.eventSource !== source) return;
-    try {
-      const payload = JSON.parse(event.data);
-      const boundary = Number(payload.replay_boundary_sequence_id);
-      if (!Number.isSafeInteger(boundary) || boundary < 0) throw new Error("invalid replay boundary");
-      const observedPrior = state.lastSequence.get(sessionId);
-      const priorAtBoundary = Number.isFinite(observedPrior) ? observedPrior : requestedPriorSequence;
-      if (priorAtBoundary === null) {
-        observationFloor = boundary;
-      } else if (priorAtBoundary <= boundary) {
-        observationFloor = priorAtBoundary;
-      } else {
-        clearSessionSequenceEpoch(sessionId);
-        state.lastSequence.delete(sessionId);
-        if (requestedPriorSequence !== null) {
-          // Native EventSource reconnects retain their URL, so replace a stale
-          // cursor-bearing source before hydrating the new sequence epoch.
-          openEventStream(sessionId, { replayFromBeginning: true });
-          return;
-        }
-        // This source already requests the full replay; keep it so repeated
-        // epoch resets cannot create a cursor-free reconnect loop.
-        observationFloor = boundary;
-      }
-    } catch (error) {
-      const observedPrior = state.lastSequence.get(sessionId);
-      observationFloor = Number.isFinite(observedPrior)
-        ? observedPrior
-        : (requestedPriorSequence ?? Number.POSITIVE_INFINITY);
-      pushLocalEvent("stream", error.message || "invalid replay boundary", sessionId);
-    }
-  });
-
-  source.addEventListener("session_event", (event) => {
-    if (state.eventSource !== source) return;
-    let envelope;
-    try {
-      envelope = JSON.parse(event.data);
-    } catch (_) {
-      pushLocalEvent("stream", "invalid session event", sessionId);
-      return;
-    }
-
-    const sequenceId = Number(envelope.sequence_id);
-    if (!Number.isSafeInteger(sequenceId) || sequenceId < 0) return;
-    const lastSequence = state.lastSequence.get(sessionId);
-    if (Number.isFinite(lastSequence) && sequenceId <= lastSequence) return;
-
-    state.lastSequence.set(sessionId, sequenceId);
-    pushEnvelopeForSession(sessionId, envelope);
-    const historicalHydration = observationFloor === null || sequenceId <= observationFloor;
-    const runStarted = !historicalHydration && isRunStartedSessionEvent(envelope);
-    const terminalRun = !historicalHydration && isTerminalSessionEvent(envelope);
-    if (runStarted) {
-      handleRunStarted(sessionId, envelope);
-      loadSessions({ forceFetch: true });
-    }
-    if (terminalRun) {
-      handleTerminalRun(sessionId, envelope);
-      loadSessions({ forceFetch: true });
-    }
-    if (!historicalHydration && shouldRefreshSnapshot(envelope)) {
-      loadSnapshot(sessionId, false);
-    }
-    requestRender({
-      shell: false,
-      sessions: runStarted || terminalRun,
-      inspector: true,
-    });
-  });
-
-  source.addEventListener("replay_gap", (event) => {
-    if (state.eventSource !== source) return;
-    pushLocalEvent("replay_gap", event.data, sessionId);
-  });
-
-  source.addEventListener("lagged", (event) => {
-    if (state.eventSource !== source) return;
-    pushLocalEvent("lagged", event.data, sessionId);
-  });
-
-  source.onerror = () => {
-    if (state.eventSource !== source) return;
-    pushLocalEvent("stream", "connection interrupted", sessionId);
-  };
-}
-
-function isRunStartedSessionEvent(envelope) {
-  return envelope.event?.type === "run_started";
-}
-
-function isTerminalSessionEvent(envelope) {
-  const type = envelope.event?.type;
-  return type === "run_completed" || type === "run_failed";
-}
-
-function isSnapshotSavedSessionEvent(envelope) {
-  return envelope.event?.type === "snapshot_saved";
-}
-
-function shouldRefreshSnapshot(envelope) {
-  if (isRunStartedSessionEvent(envelope) || isTerminalSessionEvent(envelope) || isSnapshotSavedSessionEvent(envelope)) return true;
-  const event = agentEvent(envelope);
-  return event?.type === "thread_started" || event?.type === "thread_finished";
-}
-
-function activeRunFromStartedEnvelope(envelope) {
-  const runId = runIdFromEnvelope(envelope);
-  const submitted = envelope.event?.submitted_user_message || null;
-  return {
-    run_id: runId,
-    client_id: envelope.client_id || submitted?.client_id || null,
-    prompt_preview: envelope.event?.prompt_preview || "",
-    submitted_user_message: submitted ? {
-      ...submitted,
-      run_id: submitted.run_id || runId,
-      client_id: submitted.client_id || envelope.client_id || null,
-    } : null,
-    started_at_epoch_ms: envelope.event?.started_at_epoch_ms || Date.now(),
-  };
-}
-
-function terminalRunIdForSession(sessionId, envelope) {
-  return runIdFromEnvelope(envelope)
-    || activeRunId(state.snapshots.get(sessionId)?.active_run)
-    || activeRunId(sessionEntryById(sessionId)?.active_run)
-    || "";
-}
-
-function runIdFromEnvelope(envelope) {
-  return String(envelope?.run_id || envelope?.event?.run_id || "");
-}
-
-function activeRunId(activeRun) {
-  return String(activeRun?.run_id || activeRun?.id || activeRun?.runId || "");
-}
-
-function sessionEntryById(sessionId) {
+function sessionEntry(sessionId = state.currentId) {
   return state.sessions.find((entry) => entry.summary.session_id === sessionId) || null;
 }
 
-function activeRunMatchesRunId(activeRun, runId) {
-  if (!activeRun) return false;
-  const activeId = activeRunId(activeRun);
-  return !runId || !activeId || activeId === runId;
+function currentSnapshot() { return state.currentId ? state.snapshots.get(state.currentId) || null : null; }
+
+function sessionStatus(entry) {
+  return entry?.active_run ? "running" : "idle";
 }
 
-function activeRunCountsForSession(sessionId, activeRun) {
-  if (!activeRun) return false;
-  const terminal = state.terminalRunsBySession.get(sessionId);
-  if (!terminal) return true;
-  return !activeRunMatchesRunId(activeRun, terminal.runId);
-}
-
-function sanitizeSnapshotActiveRun(sessionId, snapshot) {
-  if (snapshot && activeRunCountsForSession(sessionId, snapshot.active_run) === false) {
-    snapshot.active_run = null;
-  }
-}
-
-function sanitizeSessionListActiveRuns(sessions) {
-  for (const entry of sessions) {
-    if (!activeRunCountsForSession(entry.summary.session_id, entry.active_run)) {
-      entry.active_run = null;
-    }
-  }
-}
-
-function clearCachedActiveRun(sessionId, runId) {
-  const snapshot = state.snapshots.get(sessionId);
-  if (snapshot && activeRunMatchesRunId(snapshot.active_run, runId)) snapshot.active_run = null;
-  const entry = sessionEntryById(sessionId);
-  if (entry && activeRunMatchesRunId(entry.active_run, runId)) entry.active_run = null;
-}
-
-function markRunSubmitting(sessionId) {
-  if (!sessionId) return;
-  clearRunSubmittingTimer(sessionId);
-  state.submittingRunsBySession.add(sessionId);
-}
-
-function scheduleRunSubmittingGrace(sessionId) {
-  if (!sessionId || !state.submittingRunsBySession.has(sessionId)) return;
-  clearRunSubmittingTimer(sessionId);
-  if (typeof setTimeout !== "function") return;
-
-  const timerId = setTimeout(() => expireRunSubmitting(sessionId), SUBMITTING_RUN_GRACE_MS);
-  state.submittingRunTimersBySession.set(sessionId, timerId);
-}
-
-function clearRunSubmitting(sessionId) {
-  if (!sessionId) return;
-  state.submittingRunsBySession.delete(sessionId);
-  clearRunSubmittingTimer(sessionId);
-}
-
-function clearRunSubmittingTimer(sessionId) {
-  const timerId = state.submittingRunTimersBySession.get(sessionId);
-  if (timerId !== undefined && typeof clearTimeout === "function") clearTimeout(timerId);
-  state.submittingRunTimersBySession.delete(sessionId);
-}
-
-function expireRunSubmitting(sessionId) {
-  state.submittingRunTimersBySession.delete(sessionId);
-  if (!state.submittingRunsBySession.delete(sessionId)) return;
-
-  const stillActive = cachedActiveRunCountsForSession(sessionId);
-  state.activeRunsBySession.set(sessionId, stillActive);
-  if (!stillActive && state.selectedId === sessionId) stopWaitingLife();
-  if (state.selectedId === sessionId) requestInspectorRender();
-}
-
-function cachedActiveRunCountsForSession(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  if (!sessionId) return false;
-  return Boolean(activeRunCountsForSession(sessionId, snapshot?.active_run)
-    || state.sessions.some((entry) => entry.summary.session_id === sessionId && activeRunCountsForSession(sessionId, entry.active_run)));
-}
-
-function handleRunStarted(sessionId, envelope) {
-  const activeRun = activeRunFromStartedEnvelope(envelope);
-  state.terminalRunsBySession.delete(sessionId);
-  state.activeRunsBySession.set(sessionId, true);
-  state.runStartedAtBySession.set(sessionId, activeRun.started_at_epoch_ms);
-  clearRunSubmitting(sessionId);
-  clearSessionAttention(sessionId);
-  const snapshot = state.snapshots.get(sessionId);
-  if (snapshot) {
-    snapshot.active_run = activeRun;
-  }
-  const entry = sessionEntryById(sessionId);
-  if (entry) entry.active_run = activeRun;
-  if (state.selectedId === sessionId) {
-    requestChatScrollToBottom();
-  }
-  startLiveTimer();
-}
-
-function handleTerminalRun(sessionId, envelope) {
-  const wasActive = sessionHasActiveRun(sessionId);
-  const runId = terminalRunIdForSession(sessionId, envelope);
-  state.terminalRunsBySession.set(sessionId, {
-    runId,
-    sequenceId: envelope.sequence_id || 0,
-  });
-  state.activeRunsBySession.set(sessionId, false);
-  state.runStartedAtBySession.delete(sessionId);
-  clearRunSubmitting(sessionId);
-  clearCachedActiveRun(sessionId, runId);
-  if (wasActive) state.attentionSessions.add(sessionId);
-  if (state.selectedId === sessionId) {
-    stopWaitingLife();
-  }
-  if (state.runStartedAtBySession.size === 0) {
-    stopLiveTimer();
-  }
-}
-
-function requestRender(options = {}) {
-  const hasShellBits = "shell" in options
-    || "sessions" in options
-    || "mobile" in options;
-  const shell = options.shell === true || (!hasShellBits && options.shell !== false);
-  if (shell || options.sessions) state.renderSessionsPending = true;
-  if (shell || options.mobile) state.renderMobilePending = true;
-  if (options.inspector !== false) state.renderInspectorPending = true;
-
-  const hasPendingRender = state.renderSessionsPending
-    || state.renderMobilePending
-    || state.renderInspectorPending;
-  if (!hasPendingRender || state.renderRafId) return;
-
-  const schedule = typeof requestAnimationFrame === "function"
-    ? requestAnimationFrame
-    : (callback) => setTimeout(callback, 0);
-  state.renderRafId = schedule(flushRender);
-}
-
-function requestInspectorRender() {
-  requestRender({ shell: false, inspector: true });
-}
-
-function requestEventsRender() {
-  requestRender({
-    shell: false,
-    inspector: state.activeTab === "events",
-  });
-}
-
-function flushRender() {
-  state.renderRafId = null;
-  const renderSessionsPending = state.renderSessionsPending;
-  const renderMobilePending = state.renderMobilePending;
-  const renderInspectorPending = state.renderInspectorPending;
-  state.renderSessionsPending = false;
-  state.renderMobilePending = false;
-  state.renderInspectorPending = false;
-
-  if (renderSessionsPending && renderMobilePending) {
-    renderShell();
-  } else {
-    if (renderSessionsPending) renderSessions();
-    if (renderMobilePending) renderMobileMode();
-  }
-  if (renderInspectorPending) renderInspector();
-}
-
-function renderShell() {
-  renderSessions();
-  renderMobileMode();
-}
-
-function selectedSessionIsUsable() {
-  const sessionId = state.selectedId;
-  return Boolean(sessionId && state.snapshots.has(sessionId) && sessionEntryById(sessionId));
-}
-
-function toggleInspectorFullscreen() {
-  if (!selectedSessionIsUsable()) return;
-  setInspectorFullscreen(!state.inspectorFullscreen);
-}
-
-function setInspectorFullscreen(enabled) {
-  const nextEnabled = Boolean(enabled);
-  const inspector = el.fullscreenBtn.closest(".inspector");
-  const focusWouldBeHidden = state.inspectorFullscreen
-    && !nextEnabled
-    && !state.mobileDetailOpen
-    && typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches
-    && inspector?.contains(document.activeElement);
-
-  if (nextEnabled !== state.inspectorFullscreen) cancelPaneResize(true);
-  state.inspectorFullscreen = nextEnabled;
-  renderInspectorFullscreenMode();
-  if (focusWouldBeHidden) {
-    el.sessionGrid.querySelector("[data-action='new-session']")?.focus();
-  }
-}
-
-function renderInspectorFullscreenMode() {
-  const enabled = state.inspectorFullscreen;
-  const label = enabled ? "Exit full screen" : "Enter full screen";
-  document.body.classList.toggle("inspector-fullscreen", enabled);
-  el.fullscreenBtn.setAttribute("aria-label", label);
-  el.fullscreenBtn.setAttribute("title", label);
-  el.fullscreenBtn.setAttribute("aria-pressed", String(enabled));
-  el.fullscreenEnterIcon.hidden = enabled;
-  el.fullscreenExitIcon.hidden = !enabled;
-  syncPaneSplitter();
-}
-
-function renderMobileMode() {
-  document.body.classList.toggle("detail-open", Boolean(state.mobileDetailOpen && state.selectedId));
-  renderInspectorFullscreenMode();
-  if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
-}
-
-function renderSessions() {
-  if (sessionReorderInProgress()) {
-    state.renderSessionsDeferred = true;
+function renderPicker() {
+  const sessions = state.sessions;
+  el.pickerSessionTotal.textContent = sessions.length;
+  if (!sessions.length) {
+    el.sessionGrid.innerHTML = `<div class="empty-picker"><div><strong>No sessions yet</strong>Launch one to start orchestrating.</div></div>`;
     return;
   }
-
-  const focusedControl = focusedSessionControl();
-  const cards = filteredSessions().map(sessionCardViewModel).filter(Boolean);
-  const pinnedCards = cards.filter((card) => card.pinned);
-  const unpinnedCards = cards.filter((card) => !card.pinned);
-  const sections = [];
-  if (pinnedCards.length > 0) sections.push(renderSessionGroup(true, pinnedCards));
-  sections.push(renderSessionGroup(false, unpinnedCards));
-  el.sessionGrid.innerHTML = sections.join("");
-  restorePendingSessionFocus(focusedControl);
-  state.lastSessionsDigest = sessionCardListRenderDigest(cards);
-  state.lastSelectedSessionDigest = sessionCardRenderDigest(cards.find((card) => card.sessionId === state.selectedId));
+  const pinned = sessions.filter((entry) => entry.summary.pinned);
+  const regular = sessions.filter((entry) => !entry.summary.pinned);
+  el.sessionGrid.innerHTML = pinned.length
+    ? [renderSessionGroup("Pinned", pinned), regular.length ? renderSessionGroup("Other sessions", regular) : ""].join("")
+    : `<section class="session-group"><div class="session-grid">${regular.map(renderSessionCard).join("")}</div></section>`;
 }
 
-function renderSessionGroup(pinned, cards) {
-  const label = pinned ? "Pinned sessions" : "Sessions";
-  const groupName = pinned ? "pinned" : "unpinned";
-  const sessionCards = cards.map((card, index) => renderSessionCard(card, index, cards.length)).join("");
-  const body = `${pinned ? "" : renderNewSessionCard()}${sessionCards}`;
-  return `
-    <section class="session-group" data-session-group="${groupName}" aria-label="${label}">
-      <div class="session-card-grid" data-pinned="${pinned}" role="list" aria-label="${label}">
-        ${body}
-      </div>
-    </section>`;
+function renderSessionGroup(title, entries) {
+  return `<section class="session-group"><h2 class="group-heading">${escapeHtml(title)} <span>${entries.length}</span></h2><div class="session-grid">${entries.map(renderSessionCard).join("")}</div></section>`;
 }
 
-function renderNewSessionCard() {
+function renderSessionCard(entry) {
+  const summary = entry.summary;
+  const sessionId = summary.session_id;
+  const status = sessionStatus(entry);
+  const snapshot = state.snapshots.get(sessionId);
+  const branch = snapshot?.workspace?.branch;
+  const location = [branch, basename(summary.cwd)].filter(Boolean).join(" · ") || summary.cwd;
+  const prompt = summary.last_user_prompt || "No prompt submitted";
+  const diff = entry.workspace_diff;
+  const changes = diff && !diff.error ? `+${diff.total_additions || 0} −${diff.total_deletions || 0}` : "no diff";
   return `
-    <div class="new-session-card-item" role="listitem">
-      <button class="session-card new-session-card" data-action="new-session" type="button">
-        <span class="new-session-plus">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 5v14"></path>
-            <path d="M5 12h14"></path>
-          </svg>
-        </span>
-        <span>
-          <strong>New Session</strong>
-          <small>ssh, cwd, sandbox, model, prompt</small>
-        </span>
+    <article class="session-card" data-session-id="${escapeAttr(sessionId)}" data-pinned="${summary.pinned}" draggable="true">
+      <button class="session-select" type="button" data-action="open-session" data-session-id="${escapeAttr(sessionId)}">
+        <span class="card-title-row"><i class="status-dot ${status}"></i><span class="card-title">${escapeHtml(displaySessionTitle(summary))}</span></span>
+        <span class="card-location">${escapeHtml(location)}</span>
+        <span class="card-prompt">${escapeHtml(prompt)}</span>
+        <span class="card-metrics"><span>${escapeHtml(shortModel(summary.model))}</span><span>${summary.visible_message_count || 0} messages</span><span class="changes">${escapeHtml(changes)}</span></span>
       </button>
-    </div>`;
-}
-
-function renderSessionCard(card, index, count) {
-  if (!card) return "";
-  const busy = card.presentationBusy ? " disabled" : "";
-  const pinLabel = card.pinned ? `Unpin ${card.displayTitle}` : `Pin ${card.displayTitle}`;
-  const groupLabel = card.pinned ? "pinned sessions" : "sessions";
-  return `
-    <article class="session-card ${card.tone} ${card.errorish} ${card.selected ? "selected" : ""} ${card.pinned ? "pinned" : ""}" data-session-id="${escapeAttr(card.sessionId)}" data-pinned="${card.pinned}" role="listitem" title="Session ID: ${escapeAttr(card.sessionId)}">
-      <button class="session-card-select" data-action="select-session" type="button" aria-label="Select ${escapeAttr(card.displayTitle)}, session ${escapeAttr(card.sessionId)}">
-        <div class="session-card-head">
-          <div>
-            <h2><span class="status-dot ${card.statusClass}" aria-hidden="true"></span><span class="session-card-title-text">${escapeHtml(card.displayTitle)}${card.sandboxed ? ` <svg class="icon sandbox-icon" viewBox="0 0 24 24" aria-hidden="true"><title>sandbox active</title><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 8h8"></path></svg>` : ""}${card.sshHost ? ` <svg class="icon ssh-icon" viewBox="0 0 24 24" aria-hidden="true"><title>ssh: ${escapeHtml(card.sshHost)}</title><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg>` : ""}</span></h2>
-            <div class="cwd">${escapeHtml(card.cwd)}</div>
-          </div>
-        </div>
-        <div class="telemetry-grid">
-          <div><span>run</span><strong data-run-timer="${escapeAttr(card.sessionId)}" class="run-tile${card.runActive ? " run-tile-active" : ""}">${card.runDisplay}</strong></div>
-          <div><span>add</span><strong>${escapeHtml(card.additions)}</strong></div>
-          <div><span>del</span><strong>${escapeHtml(card.deletions)}</strong></div>
-        </div>
-        <div class="last-prompt">${escapeHtml(card.promptPreview)}</div>
-      </button>
-      <div class="session-card-controls">
-        <button class="session-card-action session-pin-button" data-action="toggle-pin" type="button" aria-label="${escapeAttr(pinLabel)}" title="${escapeAttr(pinLabel)} — ${escapeAttr(card.sessionId)}" aria-pressed="${card.pinned}"${busy}>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg>
+      <div class="card-controls">
+        <button class="card-control" type="button" data-action="toggle-pin" data-session-id="${escapeAttr(sessionId)}" aria-label="${summary.pinned ? "Unpin" : "Pin"} ${escapeAttr(displaySessionTitle(summary))}" aria-pressed="${summary.pinned}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7Z"></path><path d="M12 15v6"></path></svg>
         </button>
-        <button class="session-card-action reorder-handle" data-action="reorder-handle" type="button" aria-label="Reorder ${escapeAttr(card.displayTitle)} in ${groupLabel}; position ${index + 1} of ${count}" title="Reorder ${escapeAttr(card.displayTitle)} — ${escapeAttr(card.sessionId)}" aria-describedby="reorderInstructions"${busy}>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg>
+        <button class="card-control move-handle" type="button" data-action="move-session" data-session-id="${escapeAttr(sessionId)}" aria-label="Move ${escapeAttr(displaySessionTitle(summary))}" aria-describedby="reorderInstructions">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h8M8 12h8M8 17h8"></path></svg>
         </button>
       </div>
     </article>`;
 }
 
 function handleSessionGridClick(event) {
-  const actionTarget = event.target.closest("[data-action]");
-  if (!actionTarget || !el.sessionGrid.contains(actionTarget)) return;
-  const action = actionTarget.dataset.action;
-  const card = actionTarget.closest("[data-session-id]");
-  const sessionId = card?.dataset.sessionId || null;
-
-  if (state.suppressSessionClickUntil > Date.now()
-    && sessionId
-    && sessionId === state.suppressSessionClickSessionId) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-
-  if (action === "new-session") {
-    showLaunchOverlay();
-  } else if (action === "select-session" && sessionId && !sessionReorderInProgress()) {
-    selectSession(sessionId);
-  } else if (action === "toggle-pin" && sessionId) {
-    toggleSessionPin(sessionId, actionTarget);
-  }
+  const action = event.target.closest("[data-action]");
+  if (!action) return;
+  const sessionId = action.dataset.sessionId;
+  if (action.dataset.action === "open-session") openSession(sessionId);
+  if (action.dataset.action === "toggle-pin") toggleSessionPin(sessionId);
 }
 
-function currentSessionSummary(sessionId) {
-  return sessionEntryById(sessionId)?.summary || null;
-}
-
-function sessionGroupEntries(pinned) {
-  return state.sessions.filter((entry) => Boolean(entry.summary.pinned) === Boolean(pinned));
-}
-
-function sessionGroupIds(pinned) {
-  return sessionGroupEntries(pinned).map((entry) => entry.summary.session_id);
-}
-
-function expectedVersionsForSessionIds(sessionIds) {
-  const expectedVersions = {};
-  for (const sessionId of sessionIds) {
-    const summary = currentSessionSummary(sessionId);
-    if (!summary) return null;
-    expectedVersions[sessionId] = Number(summary.presentation_version) || 0;
-  }
-  return expectedVersions;
-}
-
-async function toggleSessionPin(sessionId, button) {
-  if (!sessionId || sessionReorderInProgress() || state.presentationMutations.has(sessionId)) return;
-  const summary = currentSessionSummary(sessionId);
-  if (!summary) return;
-  state.presentationMutations.add(sessionId);
-  setSessionCardActionsDisabled(sessionId, true);
-  if (button) button.setAttribute("aria-busy", "true");
-
+async function toggleSessionPin(sessionId) {
+  const entry = sessionEntry(sessionId);
+  if (!entry) return;
+  const summary = entry.summary;
   try {
-    await apiPut(`/sessions/${encodeURIComponent(sessionId)}/presentation`, {
-      title: typeof summary.title === "string" ? summary.title : "",
-      pinned: !Boolean(summary.pinned),
-      expected_version: Number(summary.presentation_version) || 0,
+    const updated = await apiPut(`/sessions/${encodeURIComponent(sessionId)}/presentation`, {
+      title: summary.title || "",
+      pinned: !summary.pinned,
+      expected_version: summary.presentation_version,
     });
-    state.pendingSessionFocus = { sessionId, action: "toggle-pin" };
-    announceReorder(`${displaySessionTitle(summary)} ${summary.pinned ? "unpinned" : "pinned"}.`);
-  } catch (error) {
-    announceReorder(`Could not ${summary.pinned ? "unpin" : "pin"} ${displaySessionTitle(summary)}: ${error.message}. Reloaded current sessions.`);
-  } finally {
-    state.presentationMutations.delete(sessionId);
-    const loaded = await loadSessions({ forceFetch: true, forceRender: true });
-    if (loaded === null) state.pendingSessionFocus = null;
-  }
-}
-
-function setSessionCardActionsDisabled(sessionId, disabled) {
-  const card = sessionCardElement(sessionId);
-  card?.querySelectorAll(".session-card-action").forEach((button) => {
-    button.disabled = Boolean(disabled);
-  });
-}
-
-function showRenameOverlay() {
-  if (sessionReorderInProgress() || state.presentationMutations.has(state.selectedId)) return;
-  const summary = currentSessionSummary(state.selectedId);
-  if (!summary) return;
-  const active = document.activeElement;
-  state.renameDialogGeneration += 1;
-  state.renameSessionId = summary.session_id;
-  state.renameSubmission = null;
-  state.renameReturnFocus = el.appShell.contains(active) && active !== document.body
-    ? active
-    : el.renameSessionBtn;
-  el.renameTitleInput.value = typeof summary.title === "string" ? summary.title : "";
-  setRenameStatus("", false);
-  el.renameForm.removeAttribute("aria-busy");
-  el.confirmRename.disabled = false;
-  el.appShell.setAttribute("inert", "");
-  el.renameOverlay.hidden = false;
-  const dialogGeneration = state.renameDialogGeneration;
-  const sessionId = state.renameSessionId;
-  requestAnimationFrame(() => {
-    if (el.renameOverlay.hidden
-      || state.renameDialogGeneration !== dialogGeneration
-      || state.renameSessionId !== sessionId
-      || el.renameOverlay.contains(document.activeElement)) return;
-    el.renameTitleInput.focus();
-    el.renameTitleInput.select();
-  });
-}
-
-function hideRenameOverlay(restoreFocus = false) {
-  const returnFocus = state.renameReturnFocus;
-  state.renameDialogGeneration += 1;
-  state.renameSubmission = null;
-  state.renameReturnFocus = null;
-  el.renameOverlay.hidden = true;
-  el.appShell.removeAttribute("inert");
-  state.renameSessionId = null;
-  el.renameForm.removeAttribute("aria-busy");
-  setRenameStatus("", false);
-  if (!restoreFocus) return;
-  const target = returnFocus?.isConnected && !returnFocus.disabled
-    ? returnFocus
-    : (!el.renameSessionBtn.disabled ? el.renameSessionBtn : null);
-  target?.focus();
-}
-
-function containRenameDialogFocus(event) {
-  if (event.key !== "Tab" || el.renameOverlay.hidden) return;
-  const focusable = Array.from(el.renameOverlay.querySelectorAll(
-    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
-  )).filter((target) => !target.hidden && target.getAttribute("aria-hidden") !== "true");
-  if (focusable.length === 0) {
-    event.preventDefault();
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && (document.activeElement === first || !el.renameOverlay.contains(document.activeElement))) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
-function setRenameStatus(message, error) {
-  el.renameStatus.textContent = message || "";
-  el.renameStatus.classList.toggle("error", Boolean(error));
-}
-
-function renameSubmissionIsCurrent(submission) {
-  return state.renameSubmission === submission
-    && state.renameDialogGeneration === submission.dialogGeneration
-    && state.renameSessionId === submission.sessionId
-    && !el.renameOverlay.hidden;
-}
-
-async function renameSelectedSession(event) {
-  event.preventDefault();
-  const sessionId = state.renameSessionId;
-  const summary = currentSessionSummary(sessionId);
-  if (!sessionId || !summary || state.presentationMutations.has(sessionId)) return;
-  const title = el.renameTitleInput.value;
-  const normalized = title.trim();
-  if (Array.from(normalized).length > SESSION_TITLE_MAX_CHARS) {
-    setRenameStatus(`Title must be at most ${SESSION_TITLE_MAX_CHARS} characters.`, true);
-    el.renameTitleInput.focus();
-    return;
-  }
-
-  const submission = {
-    dialogGeneration: state.renameDialogGeneration,
-    sessionId,
-  };
-  state.renameSubmission = submission;
-  state.presentationMutations.add(sessionId);
-  el.renameForm.setAttribute("aria-busy", "true");
-  el.confirmRename.disabled = true;
-  setRenameStatus("saving", false);
-  try {
-    await apiPut(`/sessions/${encodeURIComponent(sessionId)}/presentation`, {
-      title,
-      pinned: Boolean(summary.pinned),
-      expected_version: Number(summary.presentation_version) || 0,
-    });
-    if (renameSubmissionIsCurrent(submission)) hideRenameOverlay(true);
-  } catch (error) {
-    if (renameSubmissionIsCurrent(submission)) setRenameStatus(error.message, true);
-  } finally {
-    state.presentationMutations.delete(sessionId);
-    if (renameSubmissionIsCurrent(submission)) {
-      state.renameSubmission = null;
-      el.renameForm.removeAttribute("aria-busy");
-      el.confirmRename.disabled = false;
-    }
-    await loadSessions({ forceFetch: true, forceRender: true });
-  }
-}
-
-function sessionReorderInProgress() {
-  return Boolean(state.sessionReorder);
-}
-
-function sessionCardElement(sessionId) {
-  return Array.from(el.sessionGrid.querySelectorAll("article[data-session-id]"))
-    .find((card) => card.dataset.sessionId === sessionId) || null;
-}
-
-function sessionGroupGridForCard(card) {
-  return card?.closest(".session-card-grid") || null;
-}
-
-function announceReorder(message) {
-  el.reorderLiveRegion.textContent = "";
-  requestAnimationFrame(() => {
-    el.reorderLiveRegion.textContent = message || "";
-  });
-}
-
-function sessionPositionAnnouncement(sessionId, position, count, pinned, suffix = "") {
-  const summary = currentSessionSummary(sessionId);
-  const title = summary ? displaySessionTitle(summary) : shortId(sessionId);
-  const group = pinned ? "pinned sessions" : "sessions";
-  return `${title}, position ${position + 1} of ${count} in ${group}.${suffix ? ` ${suffix}` : ""}`;
+    entry.summary = updated;
+    await loadSessions({ workspaceStats: false });
+    const card = el.sessionGrid.querySelector(`[data-session-id="${cssEscape(sessionId)}"] .move-handle`);
+    card?.focus();
+  } catch (error) { showToast(error.message, true); }
 }
 
 function handleSessionGridKeydown(event) {
-  const handle = event.target.closest(".reorder-handle");
-  if (!handle || !el.sessionGrid.contains(handle)) return;
-  const card = handle.closest("article[data-session-id]");
-  const sessionId = card?.dataset.sessionId;
-  if (!sessionId) return;
-
-  const reorder = state.sessionReorder;
-  if (!reorder) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      startKeyboardSessionReorder(sessionId);
-    }
-    return;
-  }
-  if (reorder.kind !== "keyboard" || reorder.sessionId !== sessionId) return;
-
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    commitKeyboardSessionReorder();
-    return;
-  }
-
-  let nextIndex = reorder.currentIds.indexOf(sessionId);
-  if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex -= 1;
-  else if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex += 1;
-  else if (event.key === "Home") nextIndex = 0;
-  else if (event.key === "End") nextIndex = reorder.currentIds.length - 1;
-  else return;
-
+  const handle = event.target.closest('[data-action="move-session"]');
+  if (!handle) return;
+  const keys = ["ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight", "Home", "End"];
+  if (!keys.includes(event.key)) return;
   event.preventDefault();
-  moveKeyboardSessionTo(nextIndex);
+  const id = handle.dataset.sessionId;
+  const entry = sessionEntry(id);
+  if (!entry) return;
+  const group = orderedPresentationGroup(entry.summary.pinned);
+  const index = group.findIndex((item) => item.summary.session_id === id);
+  let next = index;
+  if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = group.length - 1;
+  else next += ["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1;
+  next = Math.max(0, Math.min(group.length - 1, next));
+  if (next !== index) reorderSessionGroup(entry.summary.pinned, id, group[next].summary.session_id, next > index);
 }
 
-function startKeyboardSessionReorder(sessionId) {
-  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
-  const summary = currentSessionSummary(sessionId);
-  if (!summary) return;
-  const pinned = Boolean(summary.pinned);
-  const originalIds = sessionGroupIds(pinned);
-  const card = sessionCardElement(sessionId);
-  const grid = sessionGroupGridForCard(card);
-  if (!card || !grid) return;
-
-  state.sessionsLoadGeneration += 1;
-  state.sessionReorder = {
-    kind: "keyboard",
-    sessionId,
-    pinned,
-    originalIds,
-    currentIds: originalIds.slice(),
-    card,
-    grid,
-  };
-  card.classList.add("is-reordering", "keyboard-reordering");
-  grid.classList.add("is-reordering");
-  document.body.classList.add("session-reordering");
-  const position = originalIds.indexOf(sessionId);
-  announceReorder(sessionPositionAnnouncement(sessionId, position, originalIds.length, pinned, "Use arrow keys, Home, or End, then Enter or Space to save."));
+function handleSessionDragStart(event) {
+  const card = event.target.closest(".session-card");
+  if (!card) return;
+  state.draggedSessionId = card.dataset.sessionId;
+  card.classList.add("is-dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", state.draggedSessionId);
 }
 
-function moveKeyboardSessionTo(rawIndex) {
-  const reorder = state.sessionReorder;
-  if (!reorder || reorder.kind !== "keyboard") return;
-  const currentIndex = reorder.currentIds.indexOf(reorder.sessionId);
-  const nextIndex = clampInt(rawIndex, 0, reorder.currentIds.length - 1);
-  if (nextIndex === currentIndex) return;
-  reorder.currentIds.splice(currentIndex, 1);
-  reorder.currentIds.splice(nextIndex, 0, reorder.sessionId);
-  reorderGroupCardsDom(reorder.grid, reorder.currentIds);
-  updateGroupCardPositionControls(reorder.grid);
-  reorder.card.querySelector(".reorder-handle")?.focus();
-  announceReorder(sessionPositionAnnouncement(reorder.sessionId, nextIndex, reorder.currentIds.length, reorder.pinned));
+function handleSessionDragOver(event) {
+  const card = event.target.closest(".session-card");
+  const dragged = sessionEntry(state.draggedSessionId);
+  const target = sessionEntry(card?.dataset.sessionId);
+  if (!card || !dragged || !target || dragged.summary.pinned !== target.summary.pinned) return;
+  event.preventDefault();
+  card.classList.add("is-drop-target");
 }
 
-function commitKeyboardSessionReorder() {
-  const reorder = state.sessionReorder;
-  if (!reorder || reorder.kind !== "keyboard") return;
-  const ids = reorder.currentIds.slice();
-  cleanupSessionReorderDom(reorder, false);
-  reorder.kind = "committing";
-  submitSessionOrder(reorder, ids);
-}
+function handleSessionDragLeave(event) { event.target.closest(".session-card")?.classList.remove("is-drop-target"); }
 
-function handleSessionPointerDown(event) {
-  const handle = event.target.closest(".reorder-handle");
-  if (!handle || !el.sessionGrid.contains(handle) || handle.disabled) return;
-  if (event.pointerType === "mouse" && event.button !== 0) return;
-  if (sessionReorderInProgress() || state.presentationMutations.size > 0) return;
-  const card = handle.closest("article[data-session-id]");
-  const grid = sessionGroupGridForCard(card);
-  const sessionId = card?.dataset.sessionId;
-  const summary = currentSessionSummary(sessionId);
-  if (!card || !grid || !summary) return;
-
+function handleSessionDrop(event) {
+  const card = event.target.closest(".session-card");
+  const dragged = sessionEntry(state.draggedSessionId);
+  const target = sessionEntry(card?.dataset.sessionId);
+  if (!card || !dragged || !target || dragged.summary.pinned !== target.summary.pinned) return;
+  event.preventDefault();
   const rect = card.getBoundingClientRect();
-  state.sessionsLoadGeneration += 1;
-  state.sessionReorder = {
-    kind: "pointer-pending",
-    pointerId: event.pointerId,
-    pointerType: event.pointerType,
-    sessionId,
-    pinned: Boolean(summary.pinned),
-    originalIds: sessionGroupIds(Boolean(summary.pinned)),
-    card,
-    grid,
-    handle,
-    startX: event.clientX,
-    startY: event.clientY,
-    offsetX: event.clientX - rect.left,
-    offsetY: event.clientY - rect.top,
-    cardRect: rect,
-    placeholder: null,
-  };
-  try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+  const after = event.clientY > rect.top + rect.height / 2;
+  reorderSessionGroup(dragged.summary.pinned, dragged.summary.session_id, target.summary.session_id, after);
+  clearSessionDragState();
 }
 
-function handleSessionPointerMove(event) {
-  const reorder = state.sessionReorder;
-  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
-  if (reorder.kind === "pointer-pending") {
-    const distance = Math.hypot(event.clientX - reorder.startX, event.clientY - reorder.startY);
-    if (distance < REORDER_DRAG_THRESHOLD_PX) return;
-    beginPointerSessionReorder(reorder);
-  }
-  if (reorder.kind !== "pointer") return;
-  event.preventDefault();
-  positionDraggedSessionCard(reorder, event.clientX, event.clientY);
-  positionSessionPlaceholder(reorder, event.clientX, event.clientY);
+function clearSessionDragState() {
+  state.draggedSessionId = null;
+  for (const card of el.sessionGrid.querySelectorAll(".session-card")) card.classList.remove("is-dragging", "is-drop-target");
 }
 
-function beginPointerSessionReorder(reorder) {
-  if (state.sessionReorder !== reorder || reorder.kind !== "pointer-pending") return;
-  const placeholder = document.createElement("div");
-  placeholder.className = "session-card-placeholder";
-  placeholder.style.minHeight = `${Math.max(1, Math.round(reorder.cardRect.height))}px`;
-  placeholder.setAttribute("aria-hidden", "true");
-  const marker = document.createElement("span");
-  marker.className = "session-drop-marker";
-  placeholder.append(marker);
-  reorder.grid.insertBefore(placeholder, reorder.card);
-  reorder.placeholder = placeholder;
-  reorder.kind = "pointer";
-  reorder.card.classList.add("is-reordering", "is-dragging");
-  reorder.card.setAttribute("aria-grabbed", "true");
-  reorder.grid.classList.add("is-reordering", "is-dragging");
-  document.body.classList.add("session-reordering");
-  Object.assign(reorder.card.style, {
-    position: "fixed",
-    left: `${reorder.cardRect.left}px`,
-    top: `${reorder.cardRect.top}px`,
-    width: `${reorder.cardRect.width}px`,
-    height: `${reorder.cardRect.height}px`,
-    margin: "0",
-    zIndex: "1000",
-  });
-  announceReorder(sessionPositionAnnouncement(
-    reorder.sessionId,
-    reorder.originalIds.indexOf(reorder.sessionId),
-    reorder.originalIds.length,
-    reorder.pinned,
-    "Dragging. Drop within this group or press Escape to cancel.",
-  ));
-}
+function orderedPresentationGroup(pinned) { return state.sessions.filter((entry) => entry.summary.pinned === pinned); }
 
-function positionDraggedSessionCard(reorder, clientX, clientY) {
-  reorder.card.style.left = `${Math.round(clientX - reorder.offsetX)}px`;
-  reorder.card.style.top = `${Math.round(clientY - reorder.offsetY)}px`;
-}
-
-function positionSessionPlaceholder(reorder, clientX, clientY) {
-  const gridRect = reorder.grid.getBoundingClientRect();
-  if (clientX < gridRect.left || clientX > gridRect.right || clientY < gridRect.top || clientY > gridRect.bottom) return;
-  const candidates = Array.from(reorder.grid.querySelectorAll(":scope > article[data-session-id]"))
-    .filter((card) => card !== reorder.card);
-  let before = null;
-  for (const candidate of candidates) {
-    const rect = candidate.getBoundingClientRect();
-    const beforeRow = clientY < rect.top + rect.height / 2;
-    const beforeInRow = clientY <= rect.bottom && clientX < rect.left + rect.width / 2;
-    if (beforeRow || beforeInRow) {
-      before = candidate;
-      break;
-    }
-  }
-  if (before) reorder.grid.insertBefore(reorder.placeholder, before);
-  else reorder.grid.append(reorder.placeholder);
-
-  const ids = sessionIdsAtPointerPlaceholder(reorder);
-  const position = ids.indexOf(reorder.sessionId);
-  if (position >= 0 && position !== reorder.lastAnnouncedPosition) {
-    reorder.lastAnnouncedPosition = position;
-    announceReorder(sessionPositionAnnouncement(reorder.sessionId, position, ids.length, reorder.pinned));
-  }
-}
-
-function sessionIdsAtPointerPlaceholder(reorder) {
-  const ids = [];
-  for (const child of reorder.grid.children) {
-    if (child === reorder.card) continue;
-    if (child === reorder.placeholder) ids.push(reorder.sessionId);
-    else if (child.matches?.("article[data-session-id]")) ids.push(child.dataset.sessionId);
-  }
-  return ids;
-}
-
-function pointerIsInsideSessionGroup(reorder, clientX, clientY) {
-  const rect = reorder.grid?.getBoundingClientRect();
-  return Boolean(rect
-    && clientX >= rect.left
-    && clientX <= rect.right
-    && clientY >= rect.top
-    && clientY <= rect.bottom);
-}
-
-function handleSessionPointerUp(event) {
-  const reorder = state.sessionReorder;
-  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
-  if (reorder.kind === "pointer-pending") {
-    state.sessionReorder = null;
-    releaseSessionPointerCapture(reorder);
-    flushDeferredSessionLoad(false);
-    return;
-  }
-
-  event.preventDefault();
-  state.suppressSessionClickUntil = Date.now() + 600;
-  state.suppressSessionClickSessionId = reorder.sessionId;
-  if (!pointerIsInsideSessionGroup(reorder, event.clientX, event.clientY)) {
-    cancelSessionReorder();
-    return;
-  }
-
-  const ids = sessionIdsAtPointerPlaceholder(reorder);
-  cleanupSessionReorderDom(reorder, false);
-  reorder.kind = "committing";
-  reorder.currentIds = ids;
-  releaseSessionPointerCapture(reorder);
-  submitSessionOrder(reorder, ids);
-}
-
-function handleSessionPointerCancel(event) {
-  const reorder = state.sessionReorder;
-  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
-  cancelSessionReorder();
-}
-
-function handleSessionLostPointerCapture(event) {
-  const reorder = state.sessionReorder;
-  if (!reorder || !reorder.kind.startsWith("pointer") || reorder.pointerId !== event.pointerId) return;
-  if (!reorder.pointerCaptureReleased) cancelSessionReorder();
-}
-
-function cancelPointerSessionReorder() {
-  const reorder = state.sessionReorder;
-  if (!reorder || !reorder.kind.startsWith("pointer")) return false;
-  return cancelSessionReorder();
-}
-
-function releaseSessionPointerCapture(reorder) {
-  reorder.pointerCaptureReleased = true;
+async function reorderSessionGroup(pinned, movedId, targetId, after) {
+  const group = orderedPresentationGroup(pinned);
+  const from = group.findIndex((entry) => entry.summary.session_id === movedId);
+  let to = group.findIndex((entry) => entry.summary.session_id === targetId);
+  if (from < 0 || to < 0) return;
+  const [moved] = group.splice(from, 1);
+  if (from < to) to -= 1;
+  if (after) to += 1;
+  group.splice(Math.max(0, Math.min(group.length, to)), 0, moved);
+  const other = orderedPresentationGroup(!pinned);
+  state.sessions = pinned ? [...group, ...other] : [...other, ...group];
+  renderPicker();
+  const ids = group.map((entry) => entry.summary.session_id);
+  const expected = Object.fromEntries(group.map((entry) => [entry.summary.session_id, entry.summary.presentation_version]));
   try {
-    if (reorder.handle?.hasPointerCapture(reorder.pointerId)) {
-      reorder.handle.releasePointerCapture(reorder.pointerId);
-    }
-  } catch (_) {}
-}
-
-function cancelSessionReorder() {
-  const reorder = state.sessionReorder;
-  if (!reorder || reorder.kind === "committing") return false;
-  releaseSessionPointerCapture(reorder);
-  cleanupSessionReorderDom(reorder, true);
-  state.sessionReorder = null;
-  state.pendingSessionFocus = { sessionId: reorder.sessionId, action: "reorder-handle" };
-  announceReorder(`Reorder cancelled for ${displaySessionTitle(currentSessionSummary(reorder.sessionId) || { session_id: reorder.sessionId })}.`);
-  flushDeferredSessionLoad(true);
-  return true;
-}
-
-function cleanupSessionReorderDom(reorder, restoreOriginal) {
-  if (reorder.kind === "pointer" && reorder.placeholder) {
-    reorder.grid.insertBefore(reorder.card, reorder.placeholder);
-    reorder.placeholder.remove();
-    reorder.placeholder = null;
-  }
-  if (reorder.card) {
-    reorder.card.classList.remove("is-reordering", "is-dragging", "keyboard-reordering");
-    reorder.card.removeAttribute("aria-grabbed");
-    for (const property of ["position", "left", "top", "width", "height", "margin", "z-index"]) {
-      reorder.card.style.removeProperty(property);
-    }
-  }
-  reorder.grid?.classList.remove("is-reordering", "is-dragging");
-  document.body.classList.remove("session-reordering");
-  if (restoreOriginal && reorder.grid && reorder.originalIds) {
-    reorderGroupCardsDom(reorder.grid, reorder.originalIds);
-    updateGroupCardPositionControls(reorder.grid);
-  }
-}
-
-function reorderGroupCardsDom(grid, sessionIds) {
-  const cards = new Map(
-    Array.from(grid?.querySelectorAll(":scope > article[data-session-id]") || [])
-      .map((card) => [card.dataset.sessionId, card]),
-  );
-  for (const sessionId of sessionIds) {
-    const card = cards.get(sessionId);
-    if (card) grid.append(card);
-  }
-}
-
-function updateGroupCardPositionControls(grid) {
-  const cards = Array.from(grid?.querySelectorAll(":scope > article[data-session-id]") || []);
-  cards.forEach((card, index) => {
-    const summary = currentSessionSummary(card.dataset.sessionId);
-    const title = summary ? displaySessionTitle(summary) : shortId(card.dataset.sessionId);
-    const pinned = card.dataset.pinned === "true";
-    const handle = card.querySelector(".reorder-handle");
-    if (handle) {
-      handle.setAttribute("aria-label", `Reorder ${title} in ${pinned ? "pinned sessions" : "sessions"}; position ${index + 1} of ${cards.length}`);
-    }
-  });
-}
-
-function sessionOrdersMatch(left, right) {
-  return left.length === right.length && left.every((sessionId, index) => sessionId === right[index]);
-}
-
-async function submitSessionOrder(reorder, sessionIds) {
-  if (sessionOrdersMatch(sessionIds, reorder.originalIds || [])) {
-    await finishSessionReorder(reorder, true, null, sessionIds, true);
-    return;
-  }
-
-  const expectedVersions = expectedVersionsForSessionIds(sessionIds);
-  if (!expectedVersions) {
-    announceReorder("Could not reorder sessions because the session list changed. Reloading.");
-    await finishSessionReorder(reorder, false);
-    return;
-  }
-
-  let succeeded = false;
-  let failure = null;
-  try {
-    await apiPut("/sessions/order", {
-      pinned: reorder.pinned,
-      session_ids: sessionIds,
-      expected_versions: expectedVersions,
-    });
-    succeeded = true;
+    const result = await apiPut("/sessions/order", { pinned, session_ids: ids, expected_versions: expected });
+    const updates = new Map(result.sessions.map((summary) => [summary.session_id, summary]));
+    for (const entry of state.sessions) if (updates.has(entry.summary.session_id)) entry.summary = updates.get(entry.summary.session_id);
+    renderPicker();
+    el.reorderLive.textContent = `Moved ${displaySessionTitle(moved.summary)} to position ${group.findIndex((entry) => entry.summary.session_id === movedId) + 1}.`;
+    el.sessionGrid.querySelector(`[data-session-id="${cssEscape(movedId)}"] .move-handle`)?.focus();
   } catch (error) {
-    failure = error;
-  }
-  await finishSessionReorder(reorder, succeeded, failure, sessionIds);
-}
-
-async function finishSessionReorder(reorder, succeeded, failure = null, sessionIds = null, unchanged = false) {
-  if (state.sessionReorder !== reorder) return;
-  if (!succeeded) cleanupSessionReorderDom(reorder, true);
-  else cleanupSessionReorderDom(reorder, false);
-  state.sessionReorder = null;
-  state.pendingSessionFocus = { sessionId: reorder.sessionId, action: "reorder-handle" };
-  const finalIds = sessionIds || reorder.originalIds || [];
-  const position = finalIds.indexOf(reorder.sessionId);
-  if (unchanged) {
-    announceReorder(sessionPositionAnnouncement(reorder.sessionId, Math.max(0, position), finalIds.length, reorder.pinned, "Order unchanged."));
-  } else if (succeeded) {
-    announceReorder(sessionPositionAnnouncement(reorder.sessionId, Math.max(0, position), finalIds.length, reorder.pinned, "Saved."));
-  } else if (failure) {
-    announceReorder(`Could not reorder ${displaySessionTitle(currentSessionSummary(reorder.sessionId) || { session_id: reorder.sessionId })}: ${failure.message}. Reloaded current order.`);
-  }
-  await flushDeferredSessionLoad(!unchanged);
-  restorePendingSessionFocus();
-}
-
-async function flushDeferredSessionLoad(forceReload) {
-  const deferred = state.deferredSessionLoadOptions;
-  state.deferredSessionLoadOptions = null;
-  const renderDeferred = state.renderSessionsDeferred;
-  state.renderSessionsDeferred = false;
-  if (forceReload || deferred) {
-    const options = mergeSessionLoadOptions(deferred, {
-      forceFetch: Boolean(forceReload),
-      forceRender: Boolean(forceReload || renderDeferred),
-      workspaceStats: false,
-      inspector: false,
-    });
-    const loaded = await loadSessions(options);
-    if (loaded === null) state.pendingSessionFocus = null;
-  } else if (renderDeferred) {
-    requestRender({ shell: false, sessions: true });
+    showToast(error.message, true);
+    loadSessions({ workspaceStats: false });
   }
 }
 
-function focusedSessionControl() {
-  const active = document.activeElement;
-  if (!(active instanceof Element) || !el.sessionGrid.contains(active)) return null;
-  const actionTarget = active.closest("[data-action]");
-  if (!actionTarget) return null;
-  return {
-    sessionId: actionTarget.closest("article[data-session-id]")?.dataset.sessionId || null,
-    action: actionTarget.dataset.action || null,
-  };
-}
-
-function sessionControlForFocus(descriptor) {
-  if (!descriptor?.action) return null;
-  if (!descriptor.sessionId) {
-    return Array.from(el.sessionGrid.querySelectorAll("[data-action]"))
-      .find((target) => target.dataset.action === descriptor.action) || null;
+function syncRouteFromHash() {
+  const match = window.location.hash.match(/^#session\/(.+)$/);
+  if (!match) {
+    if (state.currentId) showPicker(false);
+    return;
   }
-  const card = sessionCardElement(descriptor.sessionId);
-  return Array.from(card?.querySelectorAll("[data-action]") || [])
-    .find((target) => target.dataset.action === descriptor.action) || null;
+  const sessionId = decodeURIComponent(match[1]);
+  if (sessionEntry(sessionId) && state.currentId !== sessionId) openSession(sessionId, false);
 }
 
-function restorePendingSessionFocus(fallback = null) {
-  const pending = state.pendingSessionFocus;
-  const descriptor = pending || fallback;
-  if (!descriptor) return;
-  const target = sessionControlForFocus(descriptor);
-  if (pending) state.pendingSessionFocus = null;
-  if (!target || target.disabled) return;
+function openSession(sessionId, updateHash = true) {
+  if (!sessionEntry(sessionId)) return;
+  state.currentId = sessionId;
+  state.targetedThread = null;
+  state.focusView = null;
+  state.settingsFocus = null;
+  el.sessionPicker.hidden = true;
+  el.sessionWorkspace.hidden = false;
+  if (updateHash) history.pushState(null, "", `#session/${encodeURIComponent(sessionId)}`);
+  renderWorkspace();
+  loadSnapshot(sessionId, true);
+  connectEventStream(sessionId);
+}
+
+function showPicker(updateHash = true) {
+  state.currentId = null;
+  state.targetedThread = null;
+  state.focusView = null;
+  state.settingsFocus = null;
+  if (state.eventSource) state.eventSource.close();
+  state.eventSource = null;
+  closeDrawer();
+  el.sessionWorkspace.hidden = true;
+  el.sessionPicker.hidden = false;
+  if (updateHash) history.pushState(null, "", window.location.pathname);
+  renderPicker();
+}
+
+async function loadSnapshot(sessionId, announce = false) {
+  if (!sessionId) return null;
   try {
-    target.focus({ preventScroll: true });
-  } catch (_) {
-    target.focus();
-  }
-}
-
-function paneSplitterIsUsable() {
-  return Boolean(state.paneDesktopMedia?.matches && !state.inspectorFullscreen);
-}
-
-function paneLayoutMetrics() {
-  const boardRect = el.sessionBoard.getBoundingClientRect();
-  const inspectorRect = el.sessionInspector.getBoundingClientRect();
-  const splitterWidth = el.paneSplitter.getBoundingClientRect().width;
-  const paneWidth = boardRect.width + inspectorRect.width;
-  if (!Number.isFinite(paneWidth) || paneWidth <= 0) return null;
-  let minBoard = Math.min(PANE_BOARD_MIN_PX, paneWidth / 2);
-  let maxBoard = paneWidth - Math.min(PANE_INSPECTOR_MIN_PX, paneWidth / 2);
-  if (maxBoard < minBoard) {
-    minBoard = paneWidth / 2;
-    maxBoard = paneWidth / 2;
-  }
-  return {
-    boardLeft: boardRect.left,
-    paneWidth,
-    splitterWidth,
-    minRatio: minBoard / paneWidth,
-    maxRatio: maxBoard / paneWidth,
-  };
-}
-
-function syncPaneSplitter() {
-  if (!el.paneSeparator || !state.paneDesktopMedia) return;
-  const usable = paneSplitterIsUsable();
-  el.paneSeparator.tabIndex = usable ? 0 : -1;
-  el.paneSeparator.setAttribute("aria-disabled", String(!usable));
-  if (usable) applyPaneRatio(state.paneRatio);
-}
-
-function applyPaneRatio(ratio) {
-  if (!paneSplitterIsUsable()) return;
-  const metrics = paneLayoutMetrics();
-  if (!metrics) return;
-  const nextRatio = Math.min(metrics.maxRatio, Math.max(metrics.minRatio, ratio));
-  state.paneRatio = nextRatio;
-  const boardWidth = Math.round(metrics.paneWidth * nextRatio);
-  document.documentElement.style.setProperty("--board-width", `${boardWidth}px`);
-  const minPercent = Math.round(metrics.minRatio * 100);
-  const maxPercent = Math.round(metrics.maxRatio * 100);
-  const valuePercent = Math.round(nextRatio * 100);
-  el.paneSeparator.setAttribute("aria-valuemin", String(minPercent));
-  el.paneSeparator.setAttribute("aria-valuemax", String(maxPercent));
-  el.paneSeparator.setAttribute("aria-valuenow", String(valuePercent));
-  el.paneSeparator.setAttribute("aria-valuetext", `${valuePercent}% session matrix width`);
-}
-
-function adjustPaneRatio(delta) {
-  if (!paneSplitterIsUsable()) return;
-  applyPaneRatio(state.paneRatio + delta);
-}
-
-function handlePaneKeydown(event) {
-  if (!paneSplitterIsUsable()) return;
-  const step = event.shiftKey ? 0.1 : PANE_KEYBOARD_STEP;
-  if (event.key === "ArrowLeft") adjustPaneRatio(-step);
-  else if (event.key === "ArrowRight") adjustPaneRatio(step);
-  else if (event.key === "Home") {
-    const metrics = paneLayoutMetrics();
-    if (metrics) applyPaneRatio(metrics.minRatio);
-  } else if (event.key === "End") {
-    const metrics = paneLayoutMetrics();
-    if (metrics) applyPaneRatio(metrics.maxRatio);
-  } else return;
-  event.preventDefault();
-}
-
-function handlePanePointerDown(event) {
-  if (!paneSplitterIsUsable() || (event.pointerType === "mouse" && event.button !== 0)) return;
-  state.paneResize = {
-    pointerId: event.pointerId,
-    startRatio: state.paneRatio,
-  };
-  el.paneSplitter.classList.add("is-resizing");
-  try { el.paneSeparator.setPointerCapture(event.pointerId); } catch (_) {}
-  event.preventDefault();
-}
-
-function handlePanePointerMove(event) {
-  const resize = state.paneResize;
-  if (!resize || resize.pointerId !== event.pointerId || !paneSplitterIsUsable()) return;
-  const metrics = paneLayoutMetrics();
-  if (!metrics) return;
-  event.preventDefault();
-  applyPaneRatio((event.clientX - metrics.boardLeft - metrics.splitterWidth / 2) / metrics.paneWidth);
-}
-
-function handlePanePointerUp(event) {
-  if (!state.paneResize || state.paneResize.pointerId !== event.pointerId) return;
-  finishPaneResize();
-}
-
-function handlePanePointerCancel(event) {
-  if (!state.paneResize || state.paneResize.pointerId !== event.pointerId) return;
-  cancelPaneResize(true);
-}
-
-function finishPaneResize() {
-  const resize = state.paneResize;
-  if (!resize) return;
-  try {
-    if (el.paneSeparator.hasPointerCapture(resize.pointerId)) {
-      el.paneSeparator.releasePointerCapture(resize.pointerId);
-    }
-  } catch (_) {}
-  state.paneResize = null;
-  el.paneSplitter.classList.remove("is-resizing");
-}
-
-function cancelPaneResize(restoreStart) {
-  const resize = state.paneResize;
-  if (!resize) return false;
-  finishPaneResize();
-  if (restoreStart) {
-    state.paneRatio = resize.startRatio;
-    if (paneSplitterIsUsable()) applyPaneRatio(resize.startRatio);
-  }
-  return true;
-}
-
-function renderInspector() {
-  const sessionId = state.selectedId;
-  const selectedEntry = sessionEntryById(sessionId);
-  const selectedTitle = selectedEntry ? displaySessionTitle(selectedEntry.summary) : (sessionId ? shortId(sessionId) : null);
-  const snapshot = selectedSessionIsUsable() ? state.snapshots.get(sessionId) : null;
-  if (!sessionId || !snapshot) {
-    el.inspectorTitle.textContent = selectedTitle || "No session selected";
-    el.inspectorTitle.title = sessionId || "";
-    el.inspectorMeta.textContent = sessionId
-      ? "Snapshot unavailable. Open settings to repair the persisted model configuration."
-      : "Launch or select a session.";
-    el.snapModel.textContent = "--";
-    el.snapBackend.textContent = "--";
-    el.snapMessages.textContent = "0";
-    el.snapRun.textContent = "idle";
-    el.snapTokens.textContent = "--";
-    el.snapContext.textContent = "--";
-    el.cancelRun.disabled = true;
-    el.deleteSessionBtn.disabled = !selectedEntry;
-    el.renameSessionBtn.disabled = !selectedEntry;
-    el.fullscreenBtn.disabled = true;
-    el.settingsBtn.disabled = !selectedEntry;
-    el.transcript.innerHTML = `<div class="empty-state">No selected session.</div>`;
-    state.transcriptRenderedSessionId = null;
-    el.threadsView.innerHTML = "";
-    el.worksetsView.innerHTML = "";
-    el.workspaceView.innerHTML = "";
-    renderTabs();
-    syncPromptBusy(sessionId, snapshot);
-    return;
-  }
-
-  const metadata = snapshot.metadata;
-  const runActive = sessionHasActiveRun(metadata.session_id, snapshot);
-  el.inspectorTitle.textContent = selectedEntry
-    ? displaySessionTitle(selectedEntry.summary)
-    : shortId(metadata.session_id);
-  el.inspectorTitle.title = metadata.session_id;
-  el.inspectorMeta.textContent = metadata.cwd;
-  el.snapModel.textContent = metadata.model;
-  el.snapBackend.textContent = metadata.backend;
-  el.snapMessages.textContent = effectiveMessageCount(metadata.session_id, snapshot);
-  if (runActive) {
-    const startedAt = state.runStartedAtBySession.get(metadata.session_id)
-      || snapshot.active_run?.started_at_epoch_ms;
-    el.snapRun.textContent = startedAt
-      ? formatRuntime(Date.now() - startedAt)
-      : "active";
-  } else {
-    const lastDur = snapshot.response_timing?.last_response_duration_ms;
-    el.snapRun.textContent = lastDur != null ? formatDuration(lastDur) : "idle";
-  }
-  el.cancelRun.disabled = !runActive;
-  el.deleteSessionBtn.disabled = false;
-  el.renameSessionBtn.disabled = false;
-  el.fullscreenBtn.disabled = false;
-  el.settingsBtn.disabled = false;
-
-  const tokenUsage = snapshot.response_timing?.cumulative_token_usage
-    ?? snapshot.response_timing?.last_token_usage;
-  if (tokenUsage) {
-    const cacheRead = tokenUsage.cache_read_tokens > 0 ? ` R${formatTokens(tokenUsage.cache_read_tokens)}` : "";
-    el.snapTokens.textContent = `↑${formatTokens(tokenUsage.input_tokens)}${cacheRead} ↓${formatTokens(tokenUsage.output_tokens)}`;
-    el.snapContext.textContent = formatTokens(tokenUsage.total_tokens);
-  } else {
-    el.snapTokens.textContent = "--";
-    el.snapContext.textContent = "--";
-  }
-
-  renderTabs();
-  syncPromptBusy(metadata.session_id, snapshot);
-  renderActiveInspectorPanel(snapshot);
-}
-
-function renderActiveInspectorPanel(snapshot) {
-  switch (state.activeTab) {
-    case "events":
-      renderEvents(snapshot);
-      break;
-    case "threads":
-      renderThreads(snapshot);
-      break;
-    case "worksets":
-      renderWorksets(snapshot);
-      break;
-    case "workspace":
-      renderWorkspace(snapshot);
-      break;
-    case "chat":
-    default:
-      renderTranscript(snapshot.metadata.session_id, snapshot.messages, snapshot);
-      break;
-  }
-}
-
-function renderTranscript(sessionId, messages, snapshot = state.snapshots.get(sessionId)) {
-  const transcriptMessages = [
-    ...(messages || []),
-    ...effectivePendingMessages(sessionId, snapshot),
-  ];
-  const visibleMessages = transcriptMessages.slice(-80);
-
-  const durationArr = snapshot?.response_timing?.response_durations_ms;
-  const durations = Array.isArray(durationArr) ? durationArr : [];
-  const offset = transcriptMessages.length - visibleMessages.length;
-  const durationByTranscriptIdx = new Map();
-  let responseIdx = 0;
-  transcriptMessages.forEach((message, idx) => {
-    if (message.role === "assistant" && !(message.tool_calls?.length > 0) && !message.pending) {
-      const dur = durations[responseIdx];
-      if (dur != null) durationByTranscriptIdx.set(idx, dur);
-      responseIdx++;
-    }
-  });
-
-  const messageSig = transcriptMessagesSignature(visibleMessages);
-  const durationSig = JSON.stringify(durations);
-  const signature = `${messageSig}|${durationSig}`;
-  if (state.transcriptRenderedSessionId === sessionId
-    && state.transcriptRenderedSignature === signature) {
-    scrollTranscriptToBottomIfRequested();
-    return;
-  }
-
-  state.transcriptRenderedSessionId = sessionId;
-  state.transcriptRenderedSignature = signature;
-  if (visibleMessages.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "No messages yet.";
-    el.transcript.replaceChildren(empty);
-    scrollTranscriptToBottomIfRequested();
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  visibleMessages.forEach((message, index) => {
-    const role = message.role || "unknown";
-    const body = messageDisplayText(message);
-    const row = document.createElement("div");
-    row.className = "message-row";
-    if (message.pending) row.classList.add("pending");
-
-    const meta = document.createElement("div");
-    meta.className = "message-meta";
-
-    const metaLeft = document.createElement("span");
-    metaLeft.className = "message-meta-left";
-
-    const roleElement = document.createElement("span");
-    roleElement.className = "message-role";
-    const roleClass = safeClassToken(role);
-    if (roleClass) roleElement.classList.add(roleClass);
-    roleElement.textContent = role;
-    metaLeft.append(roleElement);
-
-    const transcriptIdx = offset + index;
-    const durationMs = durationByTranscriptIdx.get(transcriptIdx);
-    if (durationMs != null) {
-      const sep = document.createElement("span");
-      sep.className = "message-meta-sep";
-      sep.textContent = "•";
-      const durationElement = document.createElement("span");
-      durationElement.className = "message-duration";
-      durationElement.textContent = formatDuration(durationMs);
-      metaLeft.append(sep, durationElement);
-    }
-
-    const markerElement = document.createElement("span");
-    markerElement.textContent = message.pending ? "submitted" : `#${index + 1}`;
-
-    meta.append(metaLeft, markerElement);
-
-    const bodyElement = document.createElement("div");
-    bodyElement.className = "message-body markdown";
-    if (!body) bodyElement.classList.add("muted");
-    bodyElement.append(renderMarkdownFragment(body || "[empty]"));
-
-    row.append(meta, bodyElement);
-    fragment.append(row);
-  });
-
-  el.transcript.replaceChildren(fragment);
-  scrollTranscriptToBottomIfRequested();
-}
-
-function transcriptMessagesSignature(messages) {
-  return JSON.stringify((messages || []).map((message) => [
-    message.id || "",
-    message.role || "",
-    message.pending ? 1 : 0,
-    message.run_id || "",
-    message.client_id || "",
-    messageDisplayText(message),
-  ]));
-}
-
-function scrollTranscriptToBottomIfRequested() {
-  if (!state.scrollChatToBottom) return;
-  state.scrollChatToBottom = false;
-  requestAnimationFrame(() => {
-    el.transcript.scrollTop = el.transcript.scrollHeight;
-  });
-}
-
-const SUBMITTING_RUN_GRACE_MS = 15000;
-const WAITING_LIFE_TICK_MS = 75;
-const WAITING_LIFE_MAX_CATCHUP_STEPS = 2;
-const WAITING_LIFE_SIZE_CHECK_MS = 500;
-const WAITING_LIFE_SQUARE_SCALE = 0.29;
-const WAITING_LIFE_LED_BLOOM_SCALE = 2.6;
-const WAITING_LIFE_LED_AFTERIMAGE_SCALE = 1.7;
-const WAITING_LIFE_LED_BLOOM_FILL = "rgba(145, 205, 255, 0.08)";
-const WAITING_LIFE_LED_BORN_BLOOM_FILL = "rgba(215, 240, 255, 0.12)";
-const WAITING_LIFE_LED_AFTERIMAGE_FILL = "rgba(80, 155, 230, 0.045)";
-const WAITING_LIFE_MOBILE_QUERY = "(max-width: 1179px)";
-const WAITING_LIFE_PATTERNS = [
-  {
-    name: "glider",
-    width: 3,
-    height: 3,
-    cells: [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]],
-  },
-  {
-    name: "r-pentomino",
-    width: 3,
-    height: 3,
-    cells: [[1, 0], [2, 0], [0, 1], [1, 1], [1, 2]],
-  },
-  {
-    name: "acorn",
-    width: 7,
-    height: 3,
-    cells: [[1, 0], [3, 1], [0, 2], [1, 2], [4, 2], [5, 2], [6, 2]],
-  },
-  {
-    name: "lwss",
-    width: 5,
-    height: 4,
-    cells: [[1, 0], [2, 0], [3, 0], [4, 0], [0, 1], [4, 1], [4, 2], [0, 3], [3, 3]],
-  },
-];
-
-function waitingLifeSeedKey(sessionId, snapshot, messages) {
-  const activeRun = snapshot?.active_run;
-  const prompt = activeRun?.prompt_preview
-    || latestPendingUserPrompt(sessionId)
-    || latestUserPromptFromMessages(messages || snapshot?.messages || [])
-    || "";
-  return [
-    "life-generator-v1",
-    sessionId || "",
-    activeRun?.run_id || "",
-    prompt,
-  ].join("|");
-}
-
-function latestUserPromptFromMessages(messages) {
-  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === "user") return messageDisplayText(message);
-  }
-  return "";
-}
-
-function chatPanelIsVisible(sessionId) {
-  if (!sessionId || state.selectedId !== sessionId || state.activeTab !== "chat") return false;
-  const mobileMode = typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia(WAITING_LIFE_MOBILE_QUERY).matches;
-  return !mobileMode || Boolean(state.mobileDetailOpen || state.inspectorFullscreen);
-}
-
-function waitingLifeIsStillActive(life) {
-  if (!life?.canvas || !life.canvas.isConnected) return false;
-  if (!chatPanelIsVisible(life.sessionId)) return false;
-  if (!el.promptForm?.isConnected) return false;
-
-  const promptLife = el.promptLife?.isConnected
-    ? el.promptLife
-    : el.promptForm.querySelector(".prompt-life");
-  if (!promptLife || promptLife.hidden || promptLife.getAttribute("aria-hidden") === "true") return false;
-  if (!el.promptForm.contains(promptLife)) return false;
-
-  const promptCanvas = el.promptLifeCanvas?.isConnected && promptLife.contains(el.promptLifeCanvas)
-    ? el.promptLifeCanvas
-    : promptLife.querySelector(".prompt-life-canvas");
-  if (promptCanvas !== life.canvas || !promptLife.contains(life.canvas)) return false;
-  return promptLife.dataset.sessionId === life.sessionId;
-}
-
-function syncWaitingLife(canvas, sessionId, seedKey, runActive) {
-  if (!runActive || !canvas || !canvas.isConnected || !chatPanelIsVisible(sessionId)) {
-    stopWaitingLife();
-    return;
-  }
-
-  const current = state.waitingLife;
-  const sameVisibleLife = current
-    && current.canvas === canvas
-    && current.sessionId === sessionId;
-  let created = false;
-  if (!sameVisibleLife) {
-    stopWaitingLife();
-    state.waitingLife = createWaitingLife(canvas, sessionId, seedKey);
-    created = true;
-  }
-
-  const life = state.waitingLife;
-  const shouldCheckSize = created || !life.field || life.sizeDirty;
-  const resized = shouldCheckSize ? ensureWaitingLifeSize(life) : false;
-  if (resized || created) {
-    drawLifeField(life);
-    scheduleWaitingLifePostLayoutDraw(life);
-  }
-  if (life.rafId) return;
-
-  life.lastTime = performanceNow();
-  life.rafId = requestAnimationFrame(tickWaitingLife);
-}
-
-function createWaitingLife(canvas, sessionId, seedKey) {
-  const life = {
-    canvas,
-    context: canvas.getContext("2d"),
-    sessionId,
-    seedKey,
-    rafId: null,
-    lastTime: 0,
-    accumulator: 0,
-    pixelWidth: 0,
-    pixelHeight: 0,
-    dpr: 1,
-    cols: 0,
-    rows: 0,
-    field: null,
-    postLayoutRafId: null,
-    sizeDirty: true,
-    lastSizeCheck: 0,
-    resizeObserver: null,
-  };
-
-  if (typeof ResizeObserver === "function") {
-    try {
-      life.resizeObserver = new ResizeObserver(() => markWaitingLifeSizeDirty(life));
-      life.resizeObserver.observe(canvas);
-    } catch (_) {
-      life.resizeObserver = null;
-    }
-  }
-
-  return life;
-}
-
-function markWaitingLifeSizeDirty(life) {
-  if (!life || state.waitingLife !== life) return;
-  life.sizeDirty = true;
-  scheduleWaitingLifePostLayoutDraw(life);
-}
-
-function stopWaitingLife() {
-  const life = state.waitingLife;
-  if (life?.rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.rafId);
-  if (life?.postLayoutRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(life.postLayoutRafId);
-  if (life?.resizeObserver) life.resizeObserver.disconnect();
-  state.waitingLife = null;
-}
-
-function scheduleWaitingLifePostLayoutDraw(life) {
-  if (!life || life.postLayoutRafId || typeof requestAnimationFrame !== "function") return;
-  life.postLayoutRafId = requestAnimationFrame(() => {
-    if (state.waitingLife !== life) return;
-    life.postLayoutRafId = null;
-    if (!waitingLifeIsStillActive(life)) {
-      stopWaitingLife();
-      return;
-    }
-    const resized = ensureWaitingLifeSize(life);
-    if (resized) drawLifeField(life);
-  });
-}
-
-function tickWaitingLife(time) {
-  const life = state.waitingLife;
-  if (!life) return;
-  life.rafId = null;
-
-  if (!waitingLifeIsStillActive(life)) {
-    stopWaitingLife();
-    return;
-  }
-
-  const now = Number.isFinite(time) ? time : performanceNow();
-  const lastTime = Number.isFinite(life.lastTime) ? life.lastTime : now;
-  const lastSizeCheck = Number.isFinite(life.lastSizeCheck) ? life.lastSizeCheck : 0;
-  const hasResizeObserver = Boolean(life.resizeObserver);
-  const dprChanged = waitingLifeDevicePixelRatioChanged(life);
-  const shouldCheckSize = !life.field
-    || life.sizeDirty
-    || dprChanged
-    || (!hasResizeObserver && now - lastSizeCheck >= WAITING_LIFE_SIZE_CHECK_MS);
-  const resized = shouldCheckSize ? ensureWaitingLifeSize(life, now) : false;
-  const elapsed = Math.min(Math.max(0, now - lastTime), 500);
-  life.lastTime = now;
-  life.accumulator = Number.isFinite(life.accumulator) ? life.accumulator + elapsed : elapsed;
-
-  const tickMs = WAITING_LIFE_TICK_MS;
-  let stepped = false;
-  let steps = 0;
-  while (life.accumulator >= tickMs && steps < WAITING_LIFE_MAX_CATCHUP_STEPS) {
-    stepLifeField(life.field);
-    life.accumulator -= tickMs;
-    stepped = true;
-    steps += 1;
-  }
-  if (life.accumulator >= tickMs) life.accumulator %= tickMs;
-
-  if (stepped || resized) drawLifeField(life);
-  life.rafId = requestAnimationFrame(tickWaitingLife);
-}
-
-function ensureWaitingLifeSize(life, now = performanceNow()) {
-  life.lastSizeCheck = Number.isFinite(now) ? now : performanceNow();
-  const rect = life.canvas.getBoundingClientRect();
-  const cssWidth = Math.max(1, Math.round(rect.width || life.canvas.clientWidth || life.canvas.width || 320));
-  const cssHeight = Math.max(1, Math.round(rect.height || life.canvas.clientHeight || life.canvas.height || 96));
-  const dpr = waitingLifeDevicePixelRatio();
-  const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
-  const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
-  const cols = clampInt(Math.ceil(cssWidth / 6), 24, 192);
-  const rows = clampInt(Math.ceil(cssHeight / 6), 10, 44);
-
-  if (life.pixelWidth === pixelWidth
-    && life.pixelHeight === pixelHeight
-    && life.cols === cols
-    && life.rows === rows
-    && life.field) {
-    life.dpr = dpr;
-    life.sizeDirty = false;
-    return false;
-  }
-
-  life.canvas.width = pixelWidth;
-  life.canvas.height = pixelHeight;
-  life.pixelWidth = pixelWidth;
-  life.pixelHeight = pixelHeight;
-  life.dpr = dpr;
-  life.cols = cols;
-  life.rows = rows;
-  life.field = createLifeField(cols, rows, `${life.seedKey}|${cols}x${rows}`);
-  life.accumulator = 0;
-  life.sizeDirty = false;
-  return true;
-}
-
-function waitingLifeDevicePixelRatio() {
-  return Math.max(1, Math.min(2, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1));
-}
-
-function waitingLifeDevicePixelRatioChanged(life) {
-  return Math.abs(waitingLifeDevicePixelRatio() - (Number.isFinite(life?.dpr) ? life.dpr : 1)) > 0.001;
-}
-
-function performanceNow() {
-  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
-}
-
-function createLifeField(cols, rows, seedKey) {
-  const field = {
-    cols,
-    rows,
-    cells: new Uint8Array(cols * rows),
-    next: new Uint8Array(cols * rows),
-    changed: new Uint8Array(cols * rows),
-    rng: mulberry32(fnv1a32(seedKey)),
-    generation: 0,
-    aliveCount: 0,
-  };
-  seedLifeField(field);
-  return field;
-}
-
-function seedLifeField(field) {
-  const rng = field.rng;
-  for (let index = 0; index < field.cells.length; index += 1) {
-    if (rng() < 0.01) setLifeCell(field, index % field.cols, Math.floor(index / field.cols), 1);
-  }
-
-  const methuselahs = WAITING_LIFE_PATTERNS.filter((pattern) => pattern.name === "r-pentomino" || pattern.name === "acorn");
-  for (let index = 0, count = randomRangeInclusive(rng, 2, 5); index < count; index += 1) {
-    placeLifePattern(field, randomChoice(rng, methuselahs), randomInt(rng, field.cols), randomInt(rng, field.rows), randomInt(rng, 4), rng() < 0.5, rng);
-  }
-
-  const movers = WAITING_LIFE_PATTERNS.filter((pattern) => pattern.name === "glider" || pattern.name === "lwss");
-  for (let index = 0, count = randomRangeInclusive(rng, 2, 4); index < count; index += 1) {
-    const pattern = randomChoice(rng, movers);
-    const x = randomInt(rng, field.cols);
-    const y = randomInt(rng, field.rows);
-    const rotation = randomInt(rng, 4);
-    const flip = rng() < 0.5;
-    placeLifePattern(field, pattern, x, y, rotation, flip, rng);
-    placeLifePattern(field, pattern, (field.cols - x) % field.cols, (field.rows - y) % field.rows, (rotation + 2) % 4, flip, rng);
-  }
-
-  for (let index = 0, count = randomRangeInclusive(rng, 2, 4); index < count; index += 1) {
-    placeLifeBlob(field, randomInt(rng, field.cols), randomInt(rng, field.rows), randomRangeInclusive(rng, 4, 6), rng);
-  }
-
-  field.aliveCount = 0;
-  for (let index = 0; index < field.cells.length; index += 1) {
-    if (field.cells[index]) {
-      field.changed[index] = 1;
-      field.aliveCount += 1;
-    }
-  }
-}
-
-function placeLifePattern(field, pattern, originX, originY, rotation, flip, rng) {
-  for (const [cellX, cellY] of pattern.cells) {
-    let [x, y] = rotateLifePatternCell(cellX, cellY, pattern, rotation);
-    if (flip) x = pattern.width - 1 - x;
-
-    const mutate = rng() < 0.05;
-    if (mutate && rng() < 0.5) continue;
-    setLifeCell(field, originX + x, originY + y, 1);
-    if (mutate && rng() < 0.3) {
-      setLifeCell(field, originX + x + randomRangeInclusive(rng, -1, 1), originY + y + randomRangeInclusive(rng, -1, 1), 1);
-    }
-  }
-}
-
-function rotateLifePatternCell(x, y, pattern, rotation) {
-  switch (rotation % 4) {
-    case 1:
-      return [pattern.height - 1 - y, x];
-    case 2:
-      return [pattern.width - 1 - x, pattern.height - 1 - y];
-    case 3:
-      return [y, pattern.width - 1 - x];
-    default:
-      return [x, y];
-  }
-}
-
-function placeLifeBlob(field, originX, originY, size, rng) {
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      if (rng() < 0.5) setLifeCell(field, originX + x, originY + y, 1);
-    }
-  }
-}
-
-function setLifeCell(field, rawX, rawY, alive) {
-  const x = wrapIndex(rawX, field.cols);
-  const y = wrapIndex(rawY, field.rows);
-  const index = y * field.cols + x;
-  field.cells[index] = alive ? 1 : 0;
-}
-
-function stepLifeField(field) {
-  if (!field) return;
-  let aliveCount = 0;
-  for (let y = 0; y < field.rows; y += 1) {
-    for (let x = 0; x < field.cols; x += 1) {
-      const index = y * field.cols + x;
-      const alive = field.cells[index] === 1;
-      const neighbors = countLifeNeighbors(field, x, y);
-      const nextAlive = alive
-        ? neighbors === 2 || neighbors === 3 || neighbors === 6
-        : neighbors === 3;
-      field.next[index] = nextAlive ? 1 : 0;
-      field.changed[index] = alive === nextAlive ? 0 : 1;
-      if (nextAlive) aliveCount += 1;
-    }
-  }
-
-  const previous = field.cells;
-  field.cells = field.next;
-  field.next = previous;
-  field.generation += 1;
-  field.aliveCount = aliveCount;
-}
-
-function countLifeNeighbors(field, x, y) {
-  let count = 0;
-  for (let dy = -1; dy <= 1; dy += 1) {
-    for (let dx = -1; dx <= 1; dx += 1) {
-      if (dx === 0 && dy === 0) continue;
-      const neighborX = wrapIndex(x + dx, field.cols);
-      const neighborY = wrapIndex(y + dy, field.rows);
-      count += field.cells[neighborY * field.cols + neighborX];
-    }
-  }
-  return count;
-}
-
-function drawLifeField(life) {
-  if (!life?.context || !life.field) return;
-  const { context, field } = life;
-  const cellSize = Math.max(1, Math.max(life.pixelWidth / field.cols, life.pixelHeight / field.rows));
-  const squareSize = Math.max(0.5, cellSize * WAITING_LIFE_SQUARE_SCALE);
-  const inset = (cellSize - squareSize) / 2;
-  const bloomSquareSize = Math.max(
-    squareSize,
-    Math.min(cellSize, squareSize * WAITING_LIFE_LED_BLOOM_SCALE),
-  );
-  const bloomInset = (cellSize - bloomSquareSize) / 2;
-  const afterimageSquareSize = Math.max(
-    squareSize,
-    Math.min(cellSize, squareSize * WAITING_LIFE_LED_AFTERIMAGE_SCALE),
-  );
-  const afterimageInset = (cellSize - afterimageSquareSize) / 2;
-  const offsetX = Math.min(0, (life.pixelWidth - cellSize * field.cols) / 2);
-  const offsetY = Math.min(0, (life.pixelHeight - cellSize * field.rows) / 2);
-
-  context.save();
-  context.clearRect(0, 0, life.pixelWidth, life.pixelHeight);
-  context.shadowBlur = 0;
-  context.shadowColor = "transparent";
-  context.globalCompositeOperation = "source-over";
-  context.imageSmoothingEnabled = false;
-
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, afterimageSquareSize, afterimageInset, "dead", WAITING_LIFE_LED_AFTERIMAGE_FILL);
-  context.globalCompositeOperation = "lighter";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "alive", WAITING_LIFE_LED_BLOOM_FILL);
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, bloomSquareSize, bloomInset, "born", WAITING_LIFE_LED_BORN_BLOOM_FILL);
-  context.globalCompositeOperation = "source-over";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "dead", "rgba(80, 150, 215, 0.055)");
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "alive", "rgba(255, 255, 255, 0.68)");
-  context.globalCompositeOperation = "lighter";
-  drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, "born", "rgba(255, 255, 255, 0.34)");
-
-  context.restore();
-}
-
-function drawLifeSquares(context, field, offsetX, offsetY, cellSize, squareSize, inset, mode, fillStyle) {
-  context.fillStyle = fillStyle;
-  for (let y = 0; y < field.rows; y += 1) {
-    const rowOffset = y * field.cols;
-    const top = offsetY + y * cellSize + inset;
-    for (let x = 0; x < field.cols; x += 1) {
-      const index = rowOffset + x;
-      const alive = field.cells[index] === 1;
-      const changed = field.changed[index] === 1;
-      if (mode === "alive" && !alive) continue;
-      if (mode === "born" && (!alive || !changed)) continue;
-      if (mode === "dead" && (alive || !changed)) continue;
-      context.fillRect(offsetX + x * cellSize + inset, top, squareSize, squareSize);
-    }
-  }
-}
-
-function fnv1a32(value) {
-  let hash = 0x811c9dc5;
-  const text = String(value ?? "");
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
-function mulberry32(seed) {
-  let stateValue = seed >>> 0;
-  return () => {
-    stateValue = (stateValue + 0x6d2b79f5) >>> 0;
-    let mixed = stateValue;
-    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
-    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function randomInt(rng, max) {
-  if (max <= 0) return 0;
-  return Math.floor(rng() * max);
-}
-
-function randomRangeInclusive(rng, min, max) {
-  return min + randomInt(rng, max - min + 1);
-}
-
-function randomChoice(rng, items) {
-  return items[randomInt(rng, items.length)];
-}
-
-function wrapIndex(value, size) {
-  return ((value % size) + size) % size;
-}
-
-function clampInt(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function renderMarkdownFragment(text) {
-  const normalized = String(text ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  const renderer = getMarkdownRenderer();
-  if (!renderer || typeof window.DOMPurify?.sanitize !== "function") {
-    return renderPlainTextFragment(normalized);
-  }
-
-  const html = renderer.render(normalized);
-  const sanitized = window.DOMPurify.sanitize(html, {
-    ALLOW_ARIA_ATTR: false,
-    ALLOW_DATA_ATTR: false,
-    ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR,
-    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
-    FORBID_ATTR: MARKDOWN_FORBID_ATTR,
-    FORBID_TAGS: MARKDOWN_FORBID_TAGS,
-    RETURN_DOM_FRAGMENT: true,
-  });
-  return hardenMarkdownFragment(sanitized);
-}
-
-function getMarkdownRenderer() {
-  if (markdownRenderer) return markdownRenderer;
-  if (typeof window === "undefined" || typeof window.markdownit !== "function") return null;
-
-  markdownRenderer = window.markdownit({
-    html: false,
-    breaks: true,
-    linkify: false,
-    typographer: false,
-  });
-  markdownRenderer.validateLink = (target) => Boolean(safeMarkdownLinkHref(target));
-  markdownRenderer.renderer.rules.image = renderMarkdownImageToken;
-  return markdownRenderer;
-}
-
-function renderMarkdownImageToken(tokens, index, options, env, renderer) {
-  const token = tokens[index];
-  const target = token.attrGet("src") || "";
-  const alt = renderer.renderInlineAsText(token.children || [], options, env) || "image";
-  const text = `image: ${alt}${target ? ` <${target}>` : ""}`;
-  return `<span class="md-image-text">${escapeHtml(text)}</span>`;
-}
-
-function renderPlainTextFragment(text) {
-  const fragment = document.createDocumentFragment();
-  String(text ?? "").split("\n").forEach((line, index) => {
-    if (index > 0) fragment.append(document.createElement("br"));
-    fragment.append(document.createTextNode(line));
-  });
-  return fragment;
-}
-
-function hardenMarkdownFragment(fragment) {
-  if (!fragment || typeof fragment.querySelectorAll !== "function") {
-    return renderPlainTextFragment("");
-  }
-
-  fragment.querySelectorAll("*").forEach((element) => {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith("on") || MARKDOWN_FORBID_ATTR.includes(name)) {
-        element.removeAttribute(attribute.name);
-      }
-    }
-
-    const tag = element.tagName.toLowerCase();
-    if (tag === "a") {
-      const href = safeMarkdownLinkHref(element.getAttribute("href") || "");
-      if (!href) {
-        element.replaceWith(document.createTextNode(element.textContent || ""));
-        return;
-      }
-      element.setAttribute("href", href);
-      element.setAttribute("target", "_blank");
-      element.setAttribute("rel", "noopener noreferrer");
-    } else {
-      element.removeAttribute("href");
-      element.removeAttribute("target");
-      element.removeAttribute("rel");
-    }
-
-    if (tag === "span" && element.classList.contains("md-image-text")) {
-      element.className = "md-image-text";
-    } else {
-      element.removeAttribute("class");
-    }
-
-    if (tag === "ol") {
-      const start = element.getAttribute("start");
-      if (start && !/^[1-9][0-9]{0,5}$/.test(start)) element.removeAttribute("start");
-    } else {
-      element.removeAttribute("start");
-    }
-  });
-
-  return fragment;
-}
-
-function safeMarkdownLinkHref(target) {
-  const raw = String(target || "");
-  if (!raw || /[\s\u0000-\u001f\u007f]/.test(raw)) return null;
-  const trimmed = raw.trim();
-  const protocolMatch = trimmed.match(/^([a-z][a-z0-9+.-]*):/i);
-  if (!protocolMatch) return null;
-  const protocol = `${protocolMatch[1].toLowerCase()}:`;
-  if (!SAFE_MARKDOWN_LINK_PROTOCOLS.has(protocol)) return null;
-
-  try {
-    const url = new URL(trimmed);
-    return SAFE_MARKDOWN_LINK_PROTOCOLS.has(url.protocol) ? url.href : null;
-  } catch (_) {
+    const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}`);
+    state.snapshots.set(sessionId, snapshot);
+    if (state.currentId === sessionId) renderWorkspace();
+    if (announce) showToast("Session refreshed");
+    return snapshot;
+  } catch (error) {
+    showToast(error.message, true);
     return null;
   }
 }
 
-function renderEvents(snapshot) {
-  const sessionId = snapshot?.metadata?.session_id || state.selectedId;
-  const events = getSessionEvents(sessionId);
-  el.eventStreamStatus.textContent = eventStreamStatus(events);
-  const previousScrollTop = el.eventLog.scrollTop;
-  el.eventLog.innerHTML = renderGroupedEventStreams(snapshot, events);
-  el.eventLog.scrollTop = previousScrollTop;
-}
-
-function eventStreamStatus(events) {
-  const notices = events.filter((envelope) => envelope.local).slice(0, 40);
-  if (notices.some((envelope) => envelope.event?.type === "replay_gap")) {
-    return "Replay gap · lifecycle may be incomplete";
-  }
-  if (notices.some((envelope) => envelope.event?.type === "lagged")) {
-    return "Lag detected · lifecycle may be incomplete";
-  }
-  const interruptedIndex = events.findIndex((envelope) => envelope.local && envelope.event?.type === "stream");
-  const latestServerIndex = events.findIndex((envelope) => !envelope.local);
-  if (interruptedIndex >= 0 && (latestServerIndex < 0 || interruptedIndex < latestServerIndex)) {
-    return "Reconnecting · stream interrupted";
-  }
-  if (state.eventSource?.readyState === 1) return "Live";
-  if (state.eventSource?.readyState === 0) return "Connecting";
-  return "Snapshot · stream unavailable";
-}
-
-function indexedEventEvidence(events) {
-  return events.map((envelope, index) => ({
-    envelope,
-    index,
-    event: agentEvent(envelope),
-    runId: runIdFromEnvelope(envelope),
-  }));
-}
-
-function workerNameForEnvelope(envelope) {
-  const event = agentEvent(envelope);
-  if (!event) return null;
-  if (["thread_started", "thread_finished", "thread_log"].includes(event.type)) {
-    return event.name || null;
-  }
-  return event.thread_name || null;
-}
-
-function evidenceIsNewer(left, right) {
-  if (!left) return false;
-  if (!right) return true;
-  const leftSequence = Number(left.envelope?.sequence_id);
-  const rightSequence = Number(right.envelope?.sequence_id);
-  if (Number.isSafeInteger(leftSequence) && Number.isSafeInteger(rightSequence)) {
-    return leftSequence > rightSequence;
-  }
-  return left.index < right.index;
-}
-
-function evidenceRunsMatch(left, right) {
-  return !left?.runId || !right?.runId || left.runId === right.runId;
-}
-
-function currentRunIdForEvents(snapshot, evidence) {
-  const active = String(snapshot?.active_run?.run_id || "");
-  if (active) return active;
-  const canonical = evidence.find((item) => item.envelope.event?.type === "run_started");
-  return canonical?.runId || "";
-}
-
-function latestEpisode(episodes) {
-  return [...(episodes || [])].sort((left, right) => {
-    const leftId = Number(left?.id);
-    const rightId = Number(right?.id);
-    if (Number.isFinite(leftId) && Number.isFinite(rightId)) return rightId - leftId;
-    return String(right?.created_at || "").localeCompare(String(left?.created_at || ""));
-  })[0] || null;
-}
-
-function selectThreadDispatch(items, currentRunId, snapshotActive) {
-  const starts = items.filter((item) => item.event?.type === "thread_started");
-  const finishes = items.filter((item) => item.event?.type === "thread_finished");
-  let start = null;
-  let finish = null;
-
-  if (currentRunId) {
-    start = starts.find((item) => item.runId === currentRunId) || null;
-    finish = finishes.find((item) => item.runId === currentRunId) || null;
-    if (start && finish && (!evidenceIsNewer(finish, start) || !evidenceRunsMatch(start, finish))) {
-      finish = null;
-    }
-    if (start || finish || snapshotActive) {
-      return { start, finish, runId: currentRunId };
-    }
-  }
-
-  start = starts[0] || null;
-  finish = finishes[0] || null;
-  if (start && finish) {
-    if (evidenceIsNewer(finish, start) && evidenceRunsMatch(start, finish)) {
-      return { start, finish, runId: finish.runId || start.runId };
-    }
-    return { start, finish: null, runId: start.runId };
-  }
-  return {
-    start,
-    finish,
-    runId: start?.runId || finish?.runId || "",
-  };
-}
-
-function dispatchActivity(items, dispatch) {
-  let scoped = items;
-  if (dispatch.runId) {
-    const matching = items.filter((item) => !item.runId || item.runId === dispatch.runId);
-    if (matching.length > 0) scoped = matching;
-  }
-  if (dispatch.start && dispatch.finish) {
-    scoped = scoped.filter((item) => item.index >= dispatch.finish.index && item.index <= dispatch.start.index);
-  } else if (dispatch.start) {
-    scoped = scoped.filter((item) => item.index <= dispatch.start.index);
-  }
-  return scoped;
-}
-
-function classifyWorkerThread({ items, dispatch, snapshotActive, retained, persisted }) {
-  if (dispatch.finish) {
-    const event = dispatch.finish.event;
-    if (event.timed_out) return { area: "finished", label: "Timed out", tone: "danger" };
-    if (Number(event.exit_code) !== 0) return { area: "finished", label: "Failed", tone: "danger" };
-    return { area: "finished", label: "Finished", tone: "finished" };
-  }
-  const threadError = items.find((item) => item.event?.type === "error");
-  if (dispatch.start) {
-    const terminalError = threadError
-      && evidenceIsNewer(threadError, dispatch.start);
-    if (terminalError) {
-      return { area: "finished", label: "Dispatch error", tone: "danger", error: threadError };
-    }
-    return { area: "running", label: "Running", tone: "running" };
-  }
-  if (snapshotActive) return { area: "queued", label: "Active — execution not confirmed", tone: "queued" };
-  if (threadError) return { area: "finished", label: "Dispatch error", tone: "danger", error: threadError };
-  const hasUnterminatedEvidence = items.some((item) => [
-    "run_started", "model_call_started", "tool_call_started", "tool_call_finished",
-    "thread_log", "assistant_message", "run_finished",
-  ].includes(item.event?.type));
-  if (hasUnterminatedEvidence) return { area: "finished", label: "Outcome not observed", tone: "unknown" };
-  if (retained || persisted) return { area: "finished", label: "Retained history", tone: "history" };
-  return { area: "finished", label: "Outcome not observed", tone: "unknown" };
-}
-
-function workerCurrentOperation(classification, activity, finish) {
-  if (finish) {
-    if (finish.event.timed_out) return finish.event.timeout_reason || `Exit ${finish.event.exit_code}`;
-    if (Number(finish.event.exit_code) !== 0) return `Exit ${finish.event.exit_code}`;
-    return "Exited successfully";
-  }
-  if (classification.area === "queued") return "Execution not confirmed from the available lifecycle stream";
-  if (classification.label === "Dispatch error") {
-    return classification.error?.event?.message || "Worker finish was not emitted";
-  }
-  if (classification.label === "Retained history") return "Lifecycle unavailable";
-  if (classification.label === "Outcome not observed") return "Finish outcome was not observed";
-
-  const latest = activity.find((item) => item.event?.type !== "thread_started");
-  const event = latest?.event;
-  if (!event) return "Worker started";
-  switch (event.type) {
-    case "model_call_started": return `Model call · iteration ${event.iteration}`;
-    case "tool_call_started": return `Tool · ${event.name || "unknown"}`;
-    case "tool_call_finished": return `${event.is_error ? "Tool error" : "Tool result"} · ${event.name || "unknown"}`;
-    case "assistant_message": return "Response observed";
-    case "error": return `Error · ${event.message || "unknown error"}`;
-    case "thread_log": return `Diagnostics · ${event.line || ""}`;
-    case "run_started": return "Agent started";
-    case "run_finished": return "Agent response complete";
-    default: return event.type.replaceAll("_", " ");
-  }
-}
-
-function deriveThreadPresentations(snapshot, evidence) {
-  const activeNames = new Set(snapshot?.active_threads || []);
-  const persistedByName = new Map((snapshot?.threads || []).map((thread) => [thread.name, thread]));
-  const names = new Set([
-    ...activeNames,
-    ...persistedByName.keys(),
-    ...Object.keys(snapshot?.thread_episodes || {}),
-  ]);
-  const byName = new Map();
-  for (const item of evidence) {
-    const name = workerNameForEnvelope(item.envelope);
-    if (!name) continue;
-    names.add(name);
-    if (!byName.has(name)) byName.set(name, []);
-    byName.get(name).push(item);
-  }
-
-  const currentRunId = currentRunIdForEvents(snapshot, evidence);
-  return Array.from(names).map((name) => {
-    const items = byName.get(name) || [];
-    const persisted = persistedByName.get(name) || null;
-    const episodes = snapshot?.thread_episodes?.[name] || [];
-    const retained = latestEpisode(episodes);
-    const dispatch = selectThreadDispatch(items, currentRunId, activeNames.has(name));
-    const activity = dispatchActivity(items, dispatch);
-    const classification = classifyWorkerThread({
-      items: activity.length > 0 ? activity : items,
-      dispatch,
-      snapshotActive: activeNames.has(name),
-      retained,
-      persisted,
-    });
-    const observedEvidence = activity.find((item) => item.event?.type === "assistant_message")
-      || (!dispatch.runId ? items.find((item) => item.event?.type === "assistant_message") : null);
-    const observed = observedEvidence?.event?.content
-      ? { content: observedEvidence.event.content, evidence: observedEvidence }
-      : null;
-    const startEvent = dispatch.start?.event;
-    const action = startEvent?.action || retained?.action || persisted?.latest_action || "No action available";
-    const sources = startEvent?.source_threads || [];
-    return {
-      key: `worker:${name}`,
-      name,
-      action,
-      sources,
-      episodes,
-      retained,
-      observed,
-      persisted,
-      snapshotActive: activeNames.has(name),
-      dispatch,
-      classification,
-      activity,
-      items,
-      currentOperation: workerCurrentOperation(classification, activity, dispatch.finish),
-      latestIndex: Math.min(...items.map((item) => item.index), Number.MAX_SAFE_INTEGER),
-    };
-  }).sort((left, right) => left.latestIndex - right.latestIndex || left.name.localeCompare(right.name));
-}
-
-function deriveOrchestratorPresentation(snapshot, evidence) {
-  const canonical = evidence.filter((item) => ["run_started", "run_completed", "run_failed"].includes(item.envelope.event?.type));
-  const activeRunId = String(snapshot?.active_run?.run_id || "");
-  const scopedCanonical = activeRunId
-    ? canonical.filter((item) => !item.runId || item.runId === activeRunId)
-    : canonical;
-  const latestLifecycle = activeRunId ? (scopedCanonical[0] || null) : (canonical[0] || null);
-  const event = latestLifecycle?.envelope?.event;
-  let label = "No active run observed";
-  let tone = "history";
-  if (event?.type === "run_completed") { label = "Completed"; tone = "finished"; }
-  else if (event?.type === "run_failed") { label = "Failed"; tone = "danger"; }
-  else if (event?.type === "run_started" || snapshot?.active_run) { label = "Running"; tone = "running"; }
-
-  const allActivity = evidence.filter((item) => item.envelope.local || !workerNameForEnvelope(item.envelope));
-  const runId = latestLifecycle?.runId || activeRunId;
-  const activity = allActivity.filter((item) => {
-    if (item.envelope.local) return false;
-    if (runId && item.runId && item.runId !== runId) return false;
-    return true;
+function connectEventStream(sessionId) {
+  if (state.eventSource) state.eventSource.close();
+  const after = state.lastSequence.get(sessionId);
+  const query = after ? `?after_sequence_id=${encodeURIComponent(after)}&limit=512` : "?limit=512";
+  const source = new EventSource(`/sessions/${encodeURIComponent(sessionId)}/events/stream${query}`);
+  state.eventSource = source;
+  source.addEventListener("session_event", (event) => {
+    if (state.eventSource !== source) return;
+    let envelope;
+    try { envelope = JSON.parse(event.data); } catch (_) { return; }
+    const sequence = Number(envelope.sequence_id || 0);
+    if (sequence && sequence <= (state.lastSequence.get(sessionId) || 0)) return;
+    if (sequence) state.lastSequence.set(sessionId, sequence);
+    const list = state.events.get(sessionId) || [];
+    list.push(envelope);
+    if (list.length > 768) list.splice(0, list.length - 768);
+    state.events.set(sessionId, list);
+    if (state.currentId === sessionId) renderWorkspace();
+    if (eventNeedsSnapshot(envelope)) scheduleSnapshot(sessionId);
+    if (["run_started", "run_completed", "run_failed"].includes(envelope.event?.type)) loadSessions({ workspaceStats: false });
   });
-  return {
-    label,
-    tone,
-    activity,
+  source.addEventListener("replay_gap", () => loadSnapshot(sessionId, false));
+  source.onerror = () => {
+    if (state.eventSource === source && state.currentId === sessionId) {
+      // EventSource reconnects automatically; the live state is represented by the tiles, not extra chrome.
+    }
   };
 }
 
-function renderGroupedEventStreams(snapshot, events) {
-  const evidence = indexedEventEvidence(events);
-  const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);
-  const threads = deriveThreadPresentations(snapshot, evidence);
-  const areas = {
-    running: threads.filter((thread) => thread.classification.area === "running"),
-    queued: threads.filter((thread) => thread.classification.area === "queued"),
-    finished: threads.filter((thread) => thread.classification.area === "finished"),
-  };
-  return `
-    <div class="event-stream-stack">
-      ${renderEventStreamArea("Orchestrator", [orchestrator], "orchestrator")}
-      ${renderEventStreamArea("Running", areas.running, "running")}
-      ${renderEventStreamArea("Queued", areas.queued, "queued")}
-      ${renderEventStreamArea("Finished", areas.finished, "finished")}
-    </div>`;
+function eventNeedsSnapshot(envelope) {
+  const type = envelope.event?.type;
+  if (["run_started", "run_completed", "run_failed", "snapshot_saved"].includes(type)) return true;
+  const agent = agentEvent(envelope);
+  return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(agent?.type);
 }
 
-function renderEventStreamArea(title, streams, area) {
-  const orderedStreams = area === "orchestrator" ? [...streams] : orderedThreadsByName(streams);
-  const count = area === "orchestrator" ? "" : `<span>${orderedStreams.length}</span>`;
-  const content = orderedStreams.length > 0
-    ? `<div class="event-stream-tile-grid">${orderedStreams.map((stream) => area === "orchestrator"
-      ? renderDenseEventStream("Orchestrator", stream.label, stream.activity, stream.tone, "No orchestrator events captured.")
-      : renderDenseEventStream(stream.name, stream.classification.label, stream.items, stream.classification.tone,
-        stream.classification.area === "queued" ? stream.currentOperation : "No captured lifecycle events for this thread."))
-      .join("")}</div>`
-    : `<div class="event-stream-area-empty">None</div>`;
-  return `
-    <section class="event-stream-area event-stream-area-${area}" aria-labelledby="event-stream-${area}-title">
-      <h3 id="event-stream-${area}-title" class="event-stream-area-title"><span>${title}</span>${count}</h3>
-      ${content}
-    </section>`;
+function scheduleSnapshot(sessionId) {
+  window.clearTimeout(state.snapshotTimer);
+  state.snapshotTimer = window.setTimeout(() => loadSnapshot(sessionId, false), 120);
 }
 
-function renderDenseEventStream(name, status, items, tone, emptyText) {
-  return `
-    <article class="event-thread-stream event-tone-${tone}">
-      <header class="event-thread-header">
-        <h4>${escapeHtml(name)}</h4>
-        <span>${escapeHtml(status)}</span>
-      </header>
-      ${items.length > 0 ? `<ol class="event-stream-rows">${items.map(renderDenseEventRow).join("")}</ol>`
-        : `<div class="event-stream-state">${escapeHtml(emptyText)}</div>`}
-    </article>`;
+function agentEvent(envelope) { return envelope?.event?.type === "agent" ? envelope.event.event : null; }
+
+function renderWorkspace() {
+  const entry = sessionEntry();
+  const snapshot = currentSnapshot();
+  if (!entry) return;
+  const summary = entry.summary;
+  const workspace = snapshot?.workspace;
+  el.sessionTitle.textContent = displaySessionTitle(summary);
+  el.sessionLocation.textContent = [workspace?.branch, summary.cwd].filter(Boolean).join(" · ");
+  el.metricModel.textContent = shortModel(snapshot?.metadata?.model || summary.model);
+  const usage = snapshot?.response_timing?.cumulative_token_usage || snapshot?.response_timing?.last_token_usage;
+  el.metricContext.textContent = formatNumber(usage?.orchestrator_context_tokens);
+  el.metricTokens.textContent = formatNumber((usage?.input_tokens || 0) + (usage?.output_tokens || 0));
+  const diff = workspace && !workspace.error ? workspace : entry.workspace_diff;
+  el.metricChanges.textContent = diff && !diff.error ? `+${diff.total_additions || 0} −${diff.total_deletions || 0}` : "—";
+  const active = Boolean(snapshot?.active_run || entry.active_run);
+  el.stopRun.hidden = !active;
+  renderOverview(snapshot);
+  renderThreads(snapshot);
+  renderComposerTarget();
+  if (state.focusView?.type !== "settings" || !el.focusContent.querySelector("#settingsForm")) renderFocusView(snapshot);
 }
 
-function renderDenseEventRow(item) {
-  const kind = eventKind(item.envelope);
-  const rawDetail = String(eventDetail(item.envelope) ?? "");
-  const detail = rawDetail.length > 360 ? `${rawDetail.slice(0, 359)}…` : rawDetail;
-  const isError = kind === "error" || kind === "run_failed" || (kind === "tool_call_finished" && item.event?.is_error);
-  return `
-    <li class="event-stream-row${isError ? " is-error" : ""}">
-      <span class="event-stream-sequence">${item.envelope.sequence_id ? `#${item.envelope.sequence_id}` : "local"}</span>
-      <span class="event-stream-kind">${escapeHtml(kind)}</span>
-      <span class="event-stream-detail">${escapeHtml(detail)}</span>
-    </li>`;
-}
-
-function threadCardDomId(sessionId, key) {
-  let hash = 2166136261;
-  const value = `${sessionId}:${key}`;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+function renderOverview(snapshot) {
+  const overview = snapshot?.overview;
+  const generating = state.overviewGenerationId === state.currentId;
+  const action = overview ? "Regenerate" : "Generate";
+  el.refreshSession.disabled = generating;
+  el.refreshSession.classList.toggle("is-generating", generating);
+  el.refreshSession.setAttribute("aria-label", generating ? "Generating overview" : `${action} overview`);
+  el.refreshSession.title = generating ? "Generating overview" : `${action} from current session state`;
+  if (generating) el.refreshSession.setAttribute("aria-busy", "true");
+  else el.refreshSession.removeAttribute("aria-busy");
+  el.generatedOverview.classList.toggle("is-empty", !overview);
+  if (!overview) {
+    el.generatedOverview.innerHTML = `<p class="overview-empty">${generating ? "Generating current state…" : "Not generated."}</p>`;
+  } else {
+    el.generatedOverview.innerHTML = `<p class="overview-copy">${escapeHtml(overview.summary || overview.status || "")}</p>`;
   }
-  return `thread-card-${(hash >>> 0).toString(36)}`;
+  renderOrchestratorLedger(snapshot);
 }
 
-function tokenUsageSummary(usage) {
-  const parts = [];
-  if (usage.input_tokens != null) parts.push(`Input ${formatTokens(usage.input_tokens)}`);
-  if (usage.cache_read_tokens) parts.push(`Cache ${formatTokens(usage.cache_read_tokens)}`);
-  if (usage.output_tokens != null) parts.push(`Output ${formatTokens(usage.output_tokens)}`);
-  return parts.join(" · ");
-}
-
-function activityLabel(item) {
-  const event = item.event;
-  const kind = event?.type || eventKind(item.envelope);
-  if (event?.type === "thread_started") return `Assigned · ${event.action || "No action"}`;
-  if (event?.type === "thread_finished") {
-    return event.timed_out ? `Timed out · ${event.timeout_reason || `exit ${event.exit_code}`}` : `Finished · exit ${event.exit_code}`;
+async function generateOverview() {
+  if (!state.currentId || el.refreshSession.disabled) return;
+  const sessionId = state.currentId;
+  state.overviewGenerationId = sessionId;
+  renderOverview(currentSnapshot());
+  try {
+    const overview = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/overview`);
+    const snapshot = state.snapshots.get(sessionId);
+    if (snapshot) snapshot.overview = overview;
+    showToast("Overview generated from current session state");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    if (state.overviewGenerationId === sessionId) state.overviewGenerationId = null;
+    if (state.currentId === sessionId) renderOverview(state.snapshots.get(sessionId));
   }
-  if (event?.type === "tool_call_started") return `Tool started · ${event.name || "unknown"} · ${event.args_preview || ""}`;
-  if (event?.type === "tool_call_finished") return `${event.is_error ? "Tool error" : "Tool preview"} · ${event.name || "unknown"} · ${event.content_preview || ""}`;
-  if (event?.type === "assistant_message") return "Assistant response emitted";
-  if (event?.type === "thread_log") return `Diagnostics · ${event.line || ""}`;
-  if (event?.type === "error") return `Error · ${event.message || ""}`;
-  if (event?.type === "model_call_started") return `Model call · iteration ${event.iteration}`;
-  if (event?.type === "run_started") return `Agent started · ${event.prompt_preview || ""}`;
-  if (event?.type === "run_finished") return "Agent response complete";
-  return `${kind} · ${eventDetail(item.envelope)}`;
 }
 
-function renderThreadActivity(activity) {
-  if (!activity || activity.length === 0) return `<div class="thread-detail-empty">No lifecycle activity available.</div>`;
-  return `<ol class="thread-activity-list">${[...activity].reverse().map((item) => `
-    <li>
-      <span>${item.envelope.sequence_id ? `#${item.envelope.sequence_id}` : "local"}</span>
-      <div>${escapeHtml(activityLabel(item))}</div>
-    </li>`).join("")}</ol>`;
+function renderOrchestratorLedger(snapshot) {
+  const active = Boolean(snapshot?.active_run);
+  el.orchestratorState.textContent = active ? "Active" : "Idle";
+  el.orchestratorState.classList.toggle("is-active", active);
+  el.orchestratorLedger.innerHTML = renderActionRows(
+    buildOrchestratorActions(snapshot),
+    "No orchestrator activity recorded",
+  );
 }
 
-function expandedThreadCards(sessionId) {
-  let expanded = state.expandedThreadNamesBySession.get(sessionId);
-  if (!expanded) {
-    expanded = new Set();
-    state.expandedThreadNamesBySession.set(sessionId, expanded);
-  }
-  return expanded;
-}
+function buildOrchestratorActions(snapshot) {
+  const actions = [];
+  const calls = new Map();
+  const observedSteering = new Set();
+  const events = state.events.get(state.currentId) || [];
+  for (const envelope of events) {
+    const sessionEvent = envelope?.event;
+    if (sessionEvent?.type === "run_started") {
+      actions.push({ name: "run", result: "started", state: "live", detail: compactActionDetail(sessionEvent.prompt_preview) });
+    }
+    if (sessionEvent?.type === "run_completed") {
+      actions.push({ name: "run", result: "complete", state: "done", detail: compactActionDetail(sessionEvent.response) });
+    }
+    if (sessionEvent?.type === "run_failed") {
+      actions.push({ name: "run", result: "failed", state: "error", detail: compactActionDetail(sessionEvent.message) });
+    }
 
-function handleThreadClick(event) {
-  const button = event.target.closest("button[data-thread-key]");
-  if (!button || !el.threadsView.contains(button)) return;
-  const sessionId = state.selectedId;
-  const key = button.dataset.threadKey;
-  if (!sessionId || !key) return;
-  const expanded = expandedThreadCards(sessionId);
-  if (expanded.has(key)) expanded.delete(key);
-  else expanded.add(key);
-  requestInspectorRender();
-}
-
-function renderThreads(snapshot) {
-  const sessionId = snapshot.metadata.session_id;
-  const events = getSessionEvents(sessionId);
-  const evidence = indexedEventEvidence(events);
-  const threads = deriveThreadPresentations(snapshot, evidence);
-  const live = state.activeThreadsBySession.get(sessionId) || new Map();
-  const areas = {
-    running: threads.filter((thread) => thread.classification.area === "running"),
-    queued: threads.filter((thread) => thread.classification.area === "queued"),
-    finished: threads.filter((thread) => thread.classification.area === "finished"),
-  };
-  const focusedKey = el.threadsView.contains(document.activeElement)
-    ? document.activeElement?.dataset?.threadKey || null
-    : null;
-  const previousScrollTop = el.threadsView.scrollTop;
-
-  el.threadsView.innerHTML = `
-    <div class="thread-lifecycle-stack">
-      ${renderThreadTileArea("Running", areas.running, "running", snapshot, live)}
-      ${renderThreadTileArea("Queued", areas.queued, "queued", snapshot, live)}
-      ${renderThreadTileArea("Finished", areas.finished, "finished", snapshot, live)}
-    </div>`;
-  el.threadsView.scrollTop = previousScrollTop;
-
-  if (focusedKey) {
-    const replacement = Array.from(el.threadsView.querySelectorAll("button[data-thread-key]"))
-      .find((button) => button.dataset.threadKey === focusedKey);
-    if (replacement) {
-      try { replacement.focus({ preventScroll: true }); } catch (_) { replacement.focus(); }
+    const event = agentEvent(envelope);
+    if (!event || eventThreadName(event)) continue;
+    if (event.type === "model_call_started") actions.push({ name: "model", result: `turn ${event.iteration}`, state: "live" });
+    if (event.type === "tool_call_started") {
+      const action = {
+        name: event.name || "tool",
+        result: "running",
+        state: "live",
+        callId: event.call_id,
+        detail: formatToolArguments(event.args_detail, event.args_preview),
+      };
+      actions.push(action);
+      calls.set(event.call_id, action);
+    }
+    if (event.type === "tool_call_finished") {
+      const existing = calls.get(event.call_id);
+      if (existing) {
+        existing.result = event.is_error ? "failed" : "done";
+        existing.state = event.is_error ? "error" : "done";
+      } else {
+        actions.push({
+          name: event.name || "tool",
+          result: event.is_error ? "failed" : "done",
+          state: event.is_error ? "error" : "done",
+          detail: compactActionDetail(event.content_preview),
+        });
+      }
+    }
+    if (event.type === "assistant_message") actions.push({ name: "response", result: "ready", state: "done", detail: compactActionDetail(event.content) });
+    if (event.type === "error") actions.push({ name: "error", result: "failed", state: "error", detail: compactActionDetail(event.message) });
+    if (event.type === "orchestrator_steering_queued") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "queued", state: "live", detail: compactActionDetail(event.instruction_preview) });
+    }
+    if (event.type === "orchestrator_steering_delivered") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "delivered", state: "done", detail: compactActionDetail(event.instruction_preview) });
+    }
+    if (event.type === "orchestrator_steering_expired") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "expired", state: "error", detail: compactActionDetail(event.instruction_preview) });
     }
   }
+  for (const record of snapshot?.thread_steering || []) {
+    if (record.thread_name !== ORCHESTRATOR_STEERING_TARGET || observedSteering.has(record.id)) continue;
+    actions.push({
+      name: "steering",
+      result: record.status,
+      state: record.status === "queued" ? "live" : record.status === "expired" ? "error" : "done",
+      detail: compactActionDetail(record.instruction),
+    });
+  }
+  if (actions.length) return actions.slice(-ACTION_LEDGER_LIMIT);
+  return buildPersistedOrchestratorActions(snapshot?.messages || []);
 }
 
-function compareThreadTilesByName(left, right) {
-  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+function buildPersistedOrchestratorActions(messages) {
+  const actions = [];
+  const calls = new Map();
+  for (const message of messages) {
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      for (const call of message.tool_calls) {
+        const action = {
+          name: call.function?.name || "tool",
+          result: "called",
+          state: "done",
+          detail: formatToolArguments(call.function?.arguments, ""),
+        };
+        actions.push(action);
+        if (call.id) calls.set(call.id, action);
+      }
+    } else if (message.role === "tool") {
+      const existing = calls.get(message.tool_call_id);
+      if (existing) existing.result = "done";
+    } else if (message.role === "assistant" && message.content) {
+      actions.push({ name: "response", result: "sent", state: "done", detail: compactActionDetail(message.content) });
+    }
+  }
+  return actions.slice(-ACTION_LEDGER_LIMIT);
 }
 
-function orderedThreadsByName(threads) {
-  return [...threads].sort(compareThreadTilesByName);
+function openFocusView(type, name = null) {
+  const workspace = currentSnapshot()?.workspace;
+  const path = type === "workspace" ? workspace?.changed_files?.[0]?.path || null : null;
+  state.focusView = { type, name, path };
+  if (type === "settings") state.settingsFocus = { sessionId: state.currentId, status: "loading", config: null, error: null };
+  if (type === "thread") {
+    const thread = buildThreadModels().find((item) => item.name === name);
+    state.targetedThread = thread && ["running", "queued"].includes(thread.state) ? name : null;
+  } else state.targetedThread = null;
+  renderThreads(currentSnapshot());
+  renderFocusView(currentSnapshot());
+  if (type === "settings") loadFocusSettings();
 }
 
-function orderedThreadTiles(tiles) {
-  return orderedThreadsByName(tiles);
+function closeFocusView() {
+  const returnTarget = state.focusView?.type === "thread"
+    ? el.threadGrid.querySelector(`[data-focus-thread="${cssEscape(state.focusView.name)}"]`)
+    : state.focusView?.type === "orchestrator" ? el.expandOrchestrator : el.promptInput;
+  state.focusView = null;
+  renderFocusView(currentSnapshot());
+  returnTarget?.focus();
 }
 
-function renderThreadTileArea(title, tiles, area, snapshot, live) {
-  const orderedTiles = orderedThreadTiles(tiles);
-  const content = orderedTiles.length > 0
-    ? `<ol class="thread-tile-grid">${orderedTiles.map((tile) => renderWorkerThreadTile(tile, snapshot, live.get(tile.name))).join("")}</ol>`
-    : `<div class="thread-area-empty">None</div>`;
-  return `
-    <section class="thread-lifecycle-area thread-area-${area}" aria-labelledby="thread-area-${area}-title">
-      <h3 id="thread-area-${area}-title" class="thread-area-title"><span>${title}</span><span>${orderedTiles.length}</span></h3>
-      ${content}
-    </section>`;
-}
-
-function renderThreadDisclosure(key, expanded, controlsId) {
-  return `
-    <button type="button" class="thread-card-disclosure" data-thread-key="${escapeAttr(key)}"
-      aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeAttr(controlsId)}">
-      ${expanded ? "Hide details" : "Details"}
-    </button>`;
-}
-
-function renderWorkerThreadTile(tile, snapshot, liveThread) {
-  const sessionId = snapshot.metadata.session_id;
-  const expanded = expandedThreadCards(sessionId).has(tile.key);
-  const detailId = `${threadCardDomId(sessionId, tile.key)}-details`;
-  const classes = ["thread-tile-cell", expanded ? "is-expanded" : ""].filter(Boolean).join(" ");
-  const episodeCount = tile.persisted?.episode_count ?? tile.episodes.length;
-  const preview = tile.retained?.content || "No retained output.";
-  const action = tile.action === "No action available" && liveThread?.action
-    ? liveThread.action
-    : tile.action;
-  return `
-    <li class="${classes}">
-      <article class="thread-pulse-card thread-tone-${tile.classification.tone}" aria-labelledby="${detailId}-title">
-        <header class="thread-card-header">
-          <h4 id="${detailId}-title" title="${escapeAttr(tile.name)}">${escapeHtml(tile.name)}</h4>
-          <span class="thread-card-status">${escapeHtml(tile.classification.label)}</span>
-        </header>
-        <div class="thread-card-action">${escapeHtml(action)}</div>
-        <div class="thread-card-operation">${escapeHtml(tile.currentOperation)}</div>
-        <div class="thread-response-preview">
-          <div class="thread-response-label">Latest retained output · ${episodeCount} episode${episodeCount === 1 ? "" : "s"}</div>
-          <div class="thread-response-excerpt">${escapeHtml(preview)}</div>
-        </div>
-        <footer class="thread-card-footer">
-          <span>${tile.sources.length > 0 ? `${tile.sources.length} source${tile.sources.length === 1 ? "" : "s"}` : tile.persisted ? "Stored thread" : "Observed thread"}</span>
-          ${renderThreadDisclosure(tile.key, expanded, detailId)}
-        </footer>
-        ${expanded ? renderWorkerThreadDetails(tile, liveThread, detailId, sessionId) : ""}
-      </article>
-    </li>`;
-}
-
-function renderWorkerThreadDetails(tile, liveThread, detailId, sessionId) {
-  const finish = tile.dispatch.finish?.event;
-  const metadataRows = [
-    ["session", tile.persisted?.session_id || sessionId],
-    ["created", tile.persisted?.created_at],
-    ["updated", tile.persisted?.updated_at],
-    ["latest action", tile.persisted?.latest_action],
-    ["live action", liveThread?.action || tile.dispatch.start?.event?.action],
-    ["sources", liveThread?.source_threads || tile.sources],
-    ["started seq", liveThread?.started_sequence_id ?? liveThread?.started_sequence ?? tile.dispatch.start?.envelope?.sequence_id],
-    ["finished seq", liveThread?.finished_sequence_id ?? liveThread?.finished_sequence ?? tile.dispatch.finish?.envelope?.sequence_id],
-    ["exit code", liveThread?.exit_code ?? finish?.exit_code],
-    ["timed out", liveThread?.timed_out ?? finish?.timed_out],
-    ["timeout reason", finish?.timeout_reason],
-    ["error", tile.classification.error?.event?.message],
-    ["usage", finish?.usage ? tokenUsageSummary(finish.usage) : null],
-    ["last log", liveThread?.last_log],
-  ];
-  return `
-    <div id="${detailId}" class="thread-card-details">
-      <section aria-label="Thread metadata">
-        <h5>Metadata and outcome</h5>
-        ${renderDetailRows(metadataRows)}
-      </section>
-      <section aria-label="Observed thread activity">
-        <h5>Observed activity</h5>
-        ${renderThreadActivity(tile.activity)}
-      </section>
-      <section class="thread-retained-section" aria-label="Retained episodes">
-        <h5>Retained episodes (${tile.episodes.length})</h5>
-        ${tile.episodes.length === 0
-          ? `<div class="thread-detail-empty">No retained episodes.</div>`
-          : `<div class="dense-sublist">${tile.episodes.map(renderThreadEpisode).join("")}</div>`}
-      </section>
-    </div>`;
-}
-
-function renderWorksets(snapshot) {
-  const worksets = snapshot.worksets?.items || [];
-  if (snapshot.worksets?.error) {
-    el.worksetsView.innerHTML = `<div class="empty-state">${escapeHtml(snapshot.worksets.error)}</div>`;
+function renderFocusView(snapshot) {
+  const view = state.focusView;
+  el.sessionLayout.classList.toggle("is-focused", Boolean(view));
+  el.focusPanel.classList.toggle("is-thread", view?.type === "thread");
+  el.focusPanel.classList.toggle("is-orchestrator", view?.type === "orchestrator");
+  el.focusPanel.classList.toggle("is-workspace", view?.type === "workspace");
+  el.focusPanel.classList.toggle("is-settings", view?.type === "settings");
+  el.focusPanel.hidden = !view;
+  if (!view) {
+    el.focusContent.innerHTML = "";
     return;
   }
-  if (worksets.length === 0) {
-    el.worksetsView.innerHTML = `<div class="empty-state">No worksets.</div>`;
-    return;
+  const priorScroller = view.type === "orchestrator" ? el.focusContent.querySelector(".focus-chat") : el.focusContent;
+  const wasNearBottom = priorScroller ? priorScroller.scrollHeight - priorScroller.scrollTop - priorScroller.clientHeight < 80 : true;
+  const previousScroll = priorScroller?.scrollTop || 0;
+  const priorEpisodeDetails = view.type === "thread" ? [...el.focusContent.querySelectorAll(".focus-episode")] : [];
+  const openEpisodeIndices = new Set(priorEpisodeDetails.filter((episode) => episode.open).map((episode) => episode.dataset.episodeIndex));
+  if (view.type === "orchestrator") {
+    const active = Boolean(snapshot?.active_run);
+    el.focusTitle.textContent = "Orchestrator";
+    el.focusState.textContent = active ? "Active" : "Idle";
+    el.focusState.classList.toggle("is-active", active);
+    el.focusContent.innerHTML = renderOrchestratorConversation(snapshot);
+  } else if (view.type === "thread") {
+    const model = buildThreadModels(snapshot).find((thread) => thread.name === view.name);
+    el.focusTitle.textContent = view.name || "Thread";
+    el.focusState.textContent = model?.state || "finished";
+    el.focusState.classList.toggle("is-active", model?.state === "running");
+    el.focusContent.innerHTML = renderThreadFocus(view.name, model, snapshot);
+    if (priorEpisodeDetails.length) {
+      for (const episode of el.focusContent.querySelectorAll(".focus-episode")) {
+        episode.open = openEpisodeIndices.has(episode.dataset.episodeIndex);
+      }
+    }
+  } else if (view.type === "workspace") {
+    const workspace = snapshot?.workspace;
+    el.focusTitle.textContent = "Workspace";
+    el.focusState.textContent = workspace?.branch || "Working tree";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = renderWorkspaceFocus(workspace, view.path);
+    if (view.path) loadFocusWorkspaceDiff(view.path);
+  } else {
+    el.focusTitle.textContent = "settings";
+    el.focusState.textContent = "model configuration";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = renderFocusSettings();
   }
+  if (view.type === "orchestrator") {
+    requestAnimationFrame(() => {
+      const scroller = el.focusContent.querySelector(".focus-chat");
+      if (scroller) scroller.scrollTop = wasNearBottom ? scroller.scrollHeight : previousScroll;
+    });
+  }
+}
 
-  el.worksetsView.innerHTML = worksets.map((workset) => {
+async function loadFocusSettings() {
+  const sessionId = state.currentId;
+  if (!sessionId || state.focusView?.type !== "settings") return;
+  try {
+    const config = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/config`);
+    if (state.currentId !== sessionId) return;
+    state.settingsFocus = { sessionId, status: "ready", config, error: null };
+  } catch (error) {
+    if (state.currentId !== sessionId) return;
+    state.settingsFocus = { sessionId, status: "error", config: null, error: error.message };
+  }
+  if (state.focusView?.type === "settings") renderFocusView(currentSnapshot());
+}
+
+function renderFocusSettings() {
+  const settings = state.settingsFocus;
+  if (!settings || settings.sessionId !== state.currentId || settings.status === "loading") {
+    return `<div class="focus-settings-layout"><div class="focus-empty">loading configuration…</div></div>`;
+  }
+  if (settings.status === "error") {
+    return `<div class="focus-settings-layout"><div class="focus-empty">${escapeHtml(settings.error)}</div></div>`;
+  }
+  const config = settings.config;
+  return `<div class="focus-settings-layout"><form id="settingsForm" class="settings-form focus-settings-form">
+    <label class="field"><span>backend</span><select name="backend">${backendOptions(config.backend)}</select></label>
+    <label class="field"><span>reasoning</span><select name="reasoning_effort">${effortOptions(config.reasoning_effort)}</select></label>
+    <label class="field"><span>model</span><input name="model" value="${escapeAttr(config.model || "")}"></label>
+    <label class="field"><span>base url</span><input name="base_url" value="${escapeAttr(config.base_url || "")}"></label>
+    <label class="field"><span>api key environment variable</span><input name="api_key_env" value="${escapeAttr(config.api_key_env || "")}"></label>
+    <label class="field"><span>extra headers</span><input name="extra_headers" value="${escapeAttr(JSON.stringify(config.extra_headers || {}))}"></label>
+    <div class="settings-actions"><span id="settingsStatus" class="form-status"></span><button class="button button-primary" type="submit">save settings</button></div>
+  </form></div>`;
+}
+
+function renderOrchestratorConversation(snapshot) {
+  const messages = (snapshot?.messages || []).filter((message) => message.role !== "system");
+  const transcript = messages.map(renderFocusMessage).join("");
+  const liveActions = snapshot?.active_run ? buildOrchestratorActions(snapshot) : [];
+  const live = `<section class="focus-live"><div class="focus-column-heading"><span>Live activity</span><strong>${snapshot?.active_run ? "active" : "idle"}</strong></div>${renderFocusActions(liveActions)}</section>`;
+  return `<div class="focus-orchestrator-layout"><div class="focus-orchestrator-sidebar"><aside class="focus-worksets">${renderFocusWorksets(snapshot)}</aside>${live}</div><section class="focus-chat"><div class="focus-conversation">${transcript || `<div class="focus-empty">The conversation starts here.</div>`}</div></section></div>`;
+}
+
+function renderFocusWorksets(snapshot) {
+  const worksets = snapshot?.worksets?.items || [];
+  const content = worksets.length ? worksets.map((workset) => {
     const items = workset.items || [];
-    return `
-      <div class="dense-item workset-row">
-        <div class="dense-title"><span>${escapeHtml(workset.id)}</span><span>${escapeHtml(workset.status)}</span></div>
-        <div class="dense-meta"><span>${items.length} items</span><span>updated ${escapeHtml(formatDetailValue(workset.updated_at))}</span></div>
-        ${renderDetailRows([
-          ["session", workset.session_id],
-          ["created", workset.created_at],
-          ["updated", workset.updated_at],
-          ["summary", workset.summary],
-          ["goal", workset.goal],
-          ["verification", workset.verification_recipe],
-        ])}
-        <div class="dense-section-title">items</div>
-        ${items.length === 0
-          ? `<div class="dense-body muted">No workset items.</div>`
-          : `<div class="dense-sublist">${items.map(renderWorksetItem).join("")}</div>`}
-      </div>`;
+    const done = items.filter((item) => isDoneStatus(item.status)).length;
+    const percent = items.length ? Math.round(done / items.length * 100) : 0;
+    return `<article class="focus-workset"><header><strong>${escapeHtml(workset.id)}</strong><span>${done}/${items.length}</span></header><p>${escapeHtml(workset.goal || workset.summary || "")}</p><div class="progress-track"><i style="width:${percent}%"></i></div><ol>${items.map((item) => `<li class="${isDoneStatus(item.status) ? "is-done" : ""}"><span>${isDoneStatus(item.status) ? "●" : "○"}</span><div><strong>${escapeHtml(item.title)}</strong><em>${escapeHtml(item.status || "pending")}</em></div></li>`).join("")}</ol></article>`;
+  }).join("") : `<div class="focus-empty">No worksets defined.</div>`;
+  return `<div class="focus-column-heading"><span>Worksets</span><strong>${worksets.length}</strong></div>${content}`;
+}
+
+function isDoneStatus(status) {
+  return ["complete", "completed", "done", "verified"].includes(String(status || "").toLowerCase());
+}
+
+function renderWorkspaceFocus(workspace, selectedPath) {
+  if (!workspace || workspace.error) return `<div class="focus-empty">${escapeHtml(workspace?.error || "Workspace data is unavailable.")}</div>`;
+  const files = workspace.changed_files || [];
+  const key = selectedPath ? `${state.currentId}:${selectedPath}` : null;
+  const cached = key ? state.workspaceDiffs.get(key) : null;
+  const detail = selectedPath
+    ? renderWorkspaceFocusDiff(selectedPath, cached)
+    : `<div class="focus-empty">${files.length ? "Select a changed file." : "Working tree clean."}</div>`;
+  return `<div class="focus-workspace-layout"><aside class="focus-files"><div class="focus-column-heading"><span>${escapeHtml(workspace.branch || "detached")}</span><strong>${files.length}</strong></div><div class="focus-workspace-totals"><span>+${workspace.total_additions || 0}</span><span>−${workspace.total_deletions || 0}</span></div><div class="focus-file-list">${files.map((file) => `<button class="focus-file ${file.path === selectedPath ? "is-selected" : ""}" type="button" data-focus-workspace-file="${escapeAttr(file.path)}"><span>${escapeHtml(file.status || "M")}</span><strong>${escapeHtml(file.path)}</strong><em>+${file.additions ?? "—"} −${file.deletions ?? "—"}</em></button>`).join("")}</div></aside><section class="focus-diff"><div class="focus-column-heading"><span>${selectedPath ? escapeHtml(selectedPath) : "Diff"}</span></div>${detail}</section></div>`;
+}
+
+function renderWorkspaceFocusDiff(path, cached) {
+  if (!cached || cached.status === "loading") return `<div class="focus-empty">Loading ${escapeHtml(path)}…</div>`;
+  if (cached.status === "error") return `<div class="focus-empty">${escapeHtml(cached.message)}</div>`;
+  const lines = [];
+  for (const section of cached.diff.sections || []) for (const hunk of section.hunks || []) for (const line of hunk.lines || []) lines.push(line);
+  return lines.length ? `<div class="diff-view focus-diff-view">${lines.map(renderDiffLine).join("")}</div>` : `<div class="focus-empty">No inline diff for this file.</div>`;
+}
+
+function renderDiffLine(line) {
+  const kind = ["addition", "insert"].includes(line.kind) ? "add" : ["deletion", "delete"].includes(line.kind) ? "remove" : "";
+  return `<div class="diff-line ${kind}"><span>${line.old_lineno ?? ""}</span><span>${line.new_lineno ?? ""}</span><code>${escapeHtml(line.content || "")}</code></div>`;
+}
+
+function handleFocusClick(event) {
+  const file = event.target.closest("[data-focus-workspace-file]");
+  if (!file || state.focusView?.type !== "workspace") return;
+  state.focusView.path = file.dataset.focusWorkspaceFile;
+  renderFocusView(currentSnapshot());
+}
+
+async function loadFocusWorkspaceDiff(path) {
+  if (!state.currentId || state.focusView?.type !== "workspace" || state.focusView.path !== path) return;
+  const key = `${state.currentId}:${path}`;
+  if (state.workspaceDiffs.has(key)) return;
+  state.workspaceDiffs.set(key, { status: "loading" });
+  try {
+    const diff = await apiGet(`/sessions/${encodeURIComponent(state.currentId)}/workspace/diff?path=${encodeURIComponent(path)}&stage=all&context=3`);
+    state.workspaceDiffs.set(key, { status: "ready", diff });
+  } catch (error) {
+    state.workspaceDiffs.set(key, { status: "error", message: error.message });
+  }
+  if (state.focusView?.type === "workspace" && state.focusView.path === path) renderFocusView(currentSnapshot());
+}
+
+function renderFocusMessage(message) {
+  const role = message.role || "message";
+  const label = role === "user" ? "You" : role === "assistant" ? "Orchestrator" : "Tool result";
+  const copy = message.content
+    ? `<div class="focus-message-copy">${renderFocusMarkdown(message.content)}</div>`
+    : "";
+  const calls = (message.tool_calls || []).map((call) => {
+    const name = call.function?.name || "tool";
+    return `<div class="focus-tool-call"><div><span>Tool call</span><strong>${escapeHtml(name)}</strong></div><pre>${escapeHtml(formatFocusArguments(call.function?.arguments))}</pre></div>`;
+  }).join("");
+  if (!copy && !calls && role !== "tool") return "";
+  return `<article class="focus-message" data-role="${escapeAttr(role)}"><span class="focus-message-role">${label}</span><div class="focus-message-body">${copy || `<div class="focus-message-copy">${renderFocusMarkdown(messageText(message) || "[empty]")}</div>`}${calls}</div></article>`;
+}
+
+function renderThreadFocus(name, model, snapshot) {
+  const actions = model?.actions ? [...model.actions] : [];
+  if (!actions.some((action) => action.name === "dispatch") && model?.record?.latest_action) {
+    actions.unshift({ name: "dispatch", result: model.state === "running" ? "active" : "recorded", state: model.state === "running" ? "live" : "done", detail: model.record.latest_action });
+  }
+  const episodes = snapshot?.thread_episodes?.[name] || [];
+  const episodeHtml = renderThreadEpisodes(episodes);
+  return `<div class="focus-thread-layout"><section class="focus-activity"><h3>Activity</h3>${renderFocusActions(actions)}</section><section class="focus-episodes"><h3>Episodes</h3>${episodeHtml}</section></div>`;
+}
+
+function renderThreadEpisodes(episodes) {
+  if (!episodes.length) return `<div class="focus-empty">No retained episodes yet.</div>`;
+  return episodes.map((episode, index) => {
+    const prompt = episode.action || "No prompt retained.";
+    const response = episode.content || "No retained response.";
+    const isLatest = index === episodes.length - 1;
+    return `<details class="focus-episode" data-episode-index="${index}"${isLatest ? " open" : ""}>
+      <summary><span>Episode ${index + 1}</span><strong>${escapeHtml(prompt)}</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
+      <div class="focus-episode-body">
+        <section class="focus-episode-prompt"><span>Prompt</span><p>${escapeHtml(prompt)}</p></section>
+        <section class="focus-episode-response"><span>Response</span><div class="focus-episode-copy">${renderFocusMarkdown(response)}</div></section>
+      </div>
+    </details>`;
   }).join("");
 }
 
-function renderThreadEpisode(episode) {
-  return `
-    <div class="dense-subitem">
-      ${renderDetailRows([
-        ["episode", episode.id],
-        ["session", episode.session_id],
-        ["created", episode.created_at],
-        ["action", episode.action],
-      ])}
-      <div class="dense-body">${escapeHtml(episode.content || "")}</div>
-    </div>`;
+function renderFocusActions(actions) {
+  if (!actions.length) return `<div class="focus-empty">Awaiting activity.</div>`;
+  return `<ol class="focus-action-list">${actions.map((action) => {
+    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
+    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${action.detail ? `<p>${escapeHtml(action.detail)}</p>` : ""}</li>`;
+  }).join("")}</ol>`;
 }
 
-function renderWorksetItem(item, index) {
-  return `
-    <div class="dense-subitem">
-      <div class="dense-title dense-title-compact"><span>${index + 1}. ${escapeHtml(formatDetailValue(item.title))}</span><span>${escapeHtml(formatDetailValue(item.role))}</span></div>
-      ${renderDetailRows([
-        ["scope", item.scope],
-        ["description", item.description],
-        ["depends on", item.depends_on],
-        ["acceptance", item.acceptance],
-        ["notes", item.notes],
-        ["updated", item.updated_at],
-      ])}
-    </div>`;
+function formatFocusArguments(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "No arguments";
+  try { return JSON.stringify(JSON.parse(raw), null, 2); }
+  catch (_) { return raw; }
 }
 
-function renderDetailRows(rows) {
-  return `<div class="dense-detail-grid">${rows.map(([label, value]) => renderDetailRow(label, value)).join("")}</div>`;
+function renderFocusMarkdown(value) {
+  if (typeof window.markdownit !== "function" || !window.DOMPurify) return escapeHtml(value);
+  focusMarkdownRenderer ||= window.markdownit({ html: false, linkify: true, typographer: false });
+  return window.DOMPurify.sanitize(focusMarkdownRenderer.render(String(value || "")), {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ["img", "style", "script", "iframe", "object", "embed", "form", "input", "button"],
+    FORBID_ATTR: ["style", "id", "name"],
+  });
 }
 
-function renderDetailRow(label, value) {
-  return `
-    <div class="dense-detail-row">
-      <span>${escapeHtml(label)}</span>
-      <span>${escapeHtml(formatDetailValue(value))}</span>
-    </div>`;
-}
-
-function formatDetailValue(value) {
-  if (Array.isArray(value)) {
-    return value.length ? value.map(formatDetailValue).join(", ") : "--";
+function buildThreadModels(snapshot = currentSnapshot()) {
+  const names = new Set([
+    ...(snapshot?.threads || []).map((thread) => thread.name),
+    ...Object.keys(snapshot?.thread_episodes || {}),
+    ...Object.keys(snapshot?.thread_events || {}),
+    ...(snapshot?.active_threads || []),
+    ...(snapshot?.thread_steering || [])
+      .filter((record) => record.thread_name !== ORCHESTRATOR_STEERING_TARGET)
+      .map((record) => record.thread_name),
+  ]);
+  const liveEvents = state.events.get(state.currentId) || [];
+  for (const envelope of liveEvents) {
+    const event = agentEvent(envelope);
+    const name = eventThreadName(event);
+    if (name) names.add(name);
   }
-  if (value === null || value === undefined || value === "") return "--";
-  if (typeof value === "object") return JSON.stringify(value, null, 2);
-  return String(value);
+  const active = new Set(snapshot?.active_threads || []);
+  return [...names].map((name) => {
+    const currentEvents = liveEvents.filter((envelope) => eventThreadName(agentEvent(envelope)) === name);
+    const persistedEvents = (snapshot?.thread_events?.[name] || []).map((event, index) => ({
+      sequence_id: index + 1,
+      event: { type: "agent", event },
+    }));
+    const threadEvents = currentEvents.length ? currentEvents : persistedEvents;
+    const lastStarted = lastSequenceOfType(threadEvents, "thread_started");
+    const lastFinished = lastSequenceOfType(threadEvents, "thread_finished");
+    let threadState = "finished";
+    if (lastFinished > 0 && lastFinished >= lastStarted) threadState = "finished";
+    else if (active.has(name)) threadState = lastStarted > lastFinished ? "running" : "queued";
+    const record = (snapshot?.threads || []).find((thread) => thread.name === name);
+    const actions = buildThreadActions(name, threadEvents, snapshot);
+    return {
+      name,
+      state: threadState,
+      record,
+      actions: actions.length ? actions : buildRetainedThreadActions(name, record, snapshot),
+    };
+  }).sort((a, b) => {
+    const rank = { running: 0, queued: 1, finished: 2 };
+    if (rank[a.state] !== rank[b.state]) return rank[a.state] - rank[b.state];
+    return String(b.record?.updated_at || "").localeCompare(String(a.record?.updated_at || "")) || a.name.localeCompare(b.name);
+  });
 }
 
-function handleWorkspaceFileClick(event) {
-  const button = event.target.closest("button[data-workspace-path]");
-  if (!button || !el.workspaceView.contains(button) || button.disabled) return;
-
-  const sessionId = state.selectedId;
-  const path = button.dataset.workspacePath;
-  if (!sessionId || !path) return;
-
-  const selectedPath = state.workspaceSelectedPathBySession.get(sessionId);
-  if (selectedPath === path) {
-    state.workspaceSelectedPathBySession.delete(sessionId);
-    clearResolvedWorkspaceDiff(sessionId, path);
-    requestInspectorRender();
-    return;
-  }
-
-  if (selectedPath) clearResolvedWorkspaceDiff(sessionId, selectedPath);
-  state.workspaceSelectedPathBySession.set(sessionId, path);
-  requestWorkspaceDiff(sessionId, path);
-  requestInspectorRender();
-}
-
-function requestWorkspaceDiff(sessionId, path) {
-  if (!sessionId || !path) return null;
-
-  const entryKey = workspaceDiffEntryKey(sessionId, path);
-  const entry = state.workspaceDiffEntries.get(entryKey);
-  if (entry?.status === "loading") return entry;
-
-  const requestId = ++state.workspaceDiffRequestSeq;
-  const loadingEntry = { status: "loading", requestId };
-  state.workspaceDiffEntries.set(entryKey, loadingEntry);
-  loadWorkspaceDiff(sessionId, path, entryKey, requestId);
-  return loadingEntry;
-}
-
-async function loadWorkspaceDiff(sessionId, path, entryKey = workspaceDiffEntryKey(sessionId, path), requestId = ++state.workspaceDiffRequestSeq) {
-  state.workspaceDiffEntries.set(entryKey, { status: "loading", requestId });
-
-  try {
-    const params = new URLSearchParams({
-      path,
-      stage: WORKSPACE_DIFF_STAGE,
-      context: String(WORKSPACE_DIFF_CONTEXT),
-    });
-    const payload = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/workspace/diff?${params.toString()}`);
-    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
-    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
-      state.workspaceDiffEntries.delete(entryKey);
-      return;
-    }
-    state.workspaceDiffEntries.set(entryKey, { status: "ready", payload });
-  } catch (error) {
-    if (!workspaceDiffRequestIsCurrent(entryKey, requestId)) return;
-    if (state.workspaceSelectedPathBySession.get(sessionId) !== path) {
-      state.workspaceDiffEntries.delete(entryKey);
-      return;
-    }
-    state.workspaceDiffEntries.set(entryKey, {
-      status: "error",
-      error: error.message || String(error),
-    });
-  }
-
-  if (state.selectedId === sessionId && state.activeTab === "workspace") requestInspectorRender();
-}
-
-function workspaceDiffRequestIsCurrent(entryKey, requestId) {
-  const entry = state.workspaceDiffEntries.get(entryKey);
-  return entry?.status === "loading" && entry.requestId === requestId;
-}
-
-function clearResolvedWorkspaceDiff(sessionId, path) {
-  const entryKey = workspaceDiffEntryKey(sessionId, path);
-  const entry = state.workspaceDiffEntries.get(entryKey);
-  if (entry?.status !== "loading") state.workspaceDiffEntries.delete(entryKey);
-}
-
-function workspaceDiffEntryKey(sessionId, path) {
-  return JSON.stringify([sessionId, path, WORKSPACE_DIFF_STAGE, WORKSPACE_DIFF_CONTEXT]);
-}
-
-function renderWorkspace(snapshot) {
-  const sessionId = snapshot.metadata?.session_id || state.selectedId;
-
-  const workspace = snapshot.workspace;
-  if (!workspace) {
-    el.workspaceView.innerHTML = `<div class="empty-state">No workspace snapshot.</div>`;
-    return;
-  }
-  if (workspace.error) {
-    el.workspaceView.innerHTML = `<div class="empty-state">${escapeHtml(workspace.error)}</div>`;
-    return;
-  }
-
-  const files = workspace.changed_files || [];
-  const visibleFiles = files.slice(0, WORKSPACE_FILE_LIMIT);
-  let selectedPath = sessionId ? state.workspaceSelectedPathBySession.get(sessionId) : null;
-  if (selectedPath && !visibleFiles.some((file) => file.path === selectedPath && workspaceFileIsExpandable(file))) {
-    clearResolvedWorkspaceDiff(sessionId, selectedPath);
-    state.workspaceSelectedPathBySession.delete(sessionId);
-    selectedPath = null;
-  }
-
-  const header = `
-    <div class="dense-item workspace-summary">
-      <div class="dense-title"><span>${escapeHtml(workspace.repo_label || "workspace")}</span><span>${escapeHtml(workspace.branch || "detached")}</span></div>
-      <div class="dense-meta"><span>${files.length} files</span><span>+${workspace.total_additions} -${workspace.total_deletions}</span></div>
-    </div>`;
-  const rows = files.length === 0
-    ? `<div class="empty-state">Working tree clean.</div>`
-    : visibleFiles.map((file, index) => renderWorkspaceFile(sessionId, file, selectedPath, index)).join("");
-  const limitNotice = files.length > visibleFiles.length
-    ? `<div class="workspace-limit">Showing first ${WORKSPACE_FILE_LIMIT} of ${files.length} changed files.</div>`
-    : "";
-  el.workspaceView.innerHTML = header + rows + limitNotice;
-}
-
-function renderWorkspaceFile(sessionId, file, selectedPath, index) {
-  const path = file?.path || "";
-  const status = file?.status || "";
-  const additions = file?.additions ?? 0;
-  const deletions = file?.deletions ?? 0;
-  const unsupportedReason = workspaceFileUnsupportedReason(file);
-  const regionId = `workspace-diff-${index}`;
-
-  if (unsupportedReason) {
-    return `
-      <div class="workspace-file-block">
-        <button type="button" class="dense-item workspace-file unsupported" disabled aria-disabled="true" title="${escapeAttr(unsupportedReason)}">
-          <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
-          <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span><span class="workspace-file-affordance">${escapeHtml(workspaceFileUnsupportedLabel(file))}</span></span>
-        </button>
-      </div>`;
-  }
-
-  const isSelected = path === selectedPath;
-  return `
-    <div class="workspace-file-block">
-      <button type="button" class="dense-item workspace-file ${isSelected ? "selected" : ""}" data-workspace-path="${escapeAttr(path)}" aria-expanded="${isSelected ? "true" : "false"}"${isSelected ? ` aria-controls="${escapeAttr(regionId)}"` : ""}>
-        <span class="dense-title"><span>${escapeHtml(path)}</span><span>${escapeHtml(status)}</span></span>
-        <span class="dense-meta"><span>+${additions}</span><span>-${deletions}</span></span>
-      </button>
-      ${isSelected ? renderWorkspaceDiff(sessionId, path, regionId) : ""}
-    </div>`;
-}
-
-function workspaceFileIsExpandable(file) {
-  return !workspaceFileUnsupportedReason(file);
-}
-
-function workspaceFileUnsupportedReason(file) {
-  if (workspaceFileHasPathPair(file)) return null;
-
-  const kind = workspaceFileUnsupportedKind(file);
-  if (!kind) return null;
-
-  return `${kind} diff unavailable: workspace data does not include separate old/new paths.`;
-}
-
-function workspaceFileUnsupportedLabel(file) {
-  const kind = workspaceFileUnsupportedKind(file);
-  return kind ? `${kind.toLowerCase()} unsupported` : "unsupported";
-}
-
-function workspaceFileUnsupportedKind(file) {
-  const status = String(file?.status || "").toUpperCase();
-  if (status.includes("C")) return "Copy";
-  if (status.includes("R")) return "Rename";
-  if (/\s(?:->|=>)\s/.test(String(file?.path || ""))) return "Rename/copy";
+function eventThreadName(event) {
+  if (!event) return null;
+  if (event.thread_name) return event.thread_name;
+  if (["thread_started", "thread_log", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(event.type)) return event.name || null;
   return null;
 }
 
-function workspaceFileHasPathPair(file) {
-  return Boolean(file?.old_path && file?.path && file.old_path !== file.path);
+function lastSequenceOfType(events, type) {
+  let sequence = 0;
+  for (const envelope of events) if (agentEvent(envelope)?.type === type) sequence = Math.max(sequence, Number(envelope.sequence_id || 0));
+  return sequence;
 }
 
-function renderWorkspaceDiff(sessionId, path, regionId) {
-  const entry = state.workspaceDiffEntries.get(workspaceDiffEntryKey(sessionId, path));
-
-  if (!entry) {
-    return `
-      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
-        <div class="diff-state">Diff is not loaded. Close and reopen this row to fetch it.</div>
-      </section>`;
-  }
-  if (entry.status === "loading") {
-    return `
-      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-live="polite" aria-label="Diff for ${escapeAttr(path)}">
-        <div class="diff-state">Loading diff...</div>
-      </section>`;
-  }
-  if (entry.status === "error") {
-    return `
-      <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
-        <div class="diff-state error">Failed to load diff: ${escapeHtml(entry.error)}. Close and reopen this row to retry.</div>
-      </section>`;
-  }
-  return renderWorkspaceDiffPayload(entry.payload, path, regionId);
-}
-
-function renderWorkspaceDiffPayload(payload, fallbackPath, regionId) {
-  const path = payload?.path || fallbackPath;
-  const oldPath = payload?.old_path && payload.old_path !== path ? payload.old_path : null;
-  const title = oldPath ? `${oldPath} -> ${path}` : path;
-  const sections = Array.isArray(payload?.sections) ? payload.sections : [];
-  const rootError = payload?.error ? renderDiffState(payload.error, "error") : "";
-  const body = sections.length
-    ? sections.map((section) => renderWorkspaceDiffSection(section, path)).join("")
-    : renderDiffState("No diff sections returned.", "muted");
-
-  return `
-    <section id="${escapeAttr(regionId)}" class="diff-viewer" role="region" aria-label="Diff for ${escapeAttr(path)}">
-      <div class="diff-viewer-title"><span>${escapeHtml(title)}</span><span>${sections.length} section${sections.length === 1 ? "" : "s"}</span></div>
-      ${rootError}${body}
-    </section>`;
-}
-
-function renderWorkspaceDiffSection(section, path) {
-  const stage = section?.stage || "diff";
-  const status = section?.status || "changed";
-  const additions = section?.additions ?? 0;
-  const deletions = section?.deletions ?? 0;
-  const hunks = Array.isArray(section?.hunks) ? section.hunks : [];
-  const flags = [
-    section?.binary ? "binary" : null,
-    section?.too_large ? "too large" : null,
-    section?.truncated ? "truncated" : null,
-  ].filter(Boolean);
-  const meta = [`${additions} additions`, `${deletions} deletions`, ...flags];
-  const messages = [];
-  if (section?.error) messages.push(renderDiffState(section.error, "error"));
-  if (section?.binary) messages.push(renderDiffState("Binary or non-UTF-8 content; inline hunks are unavailable.", "muted"));
-  if (section?.too_large) messages.push(renderDiffState("File is too large for inline diff rendering.", "muted"));
-  if (section?.truncated) messages.push(`<div class="diff-warning">Diff was truncated by the backend.</div>`);
-
-  let body = messages.join("");
-  if (!section?.error && !section?.binary && !section?.too_large) {
-    body += hunks.length
-      ? renderWorkspaceDiffTable(path, stage, hunks)
-      : renderDiffState("No hunks for this section.", "muted");
-  }
-
-  return `
-    <div class="diff-section">
-      <div class="diff-section-head">
-        <div><span class="diff-section-stage">${escapeHtml(stage)}</span><span>${escapeHtml(status)}</span></div>
-        <div>${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
-      </div>
-      ${body}
-    </div>`;
-}
-
-function renderWorkspaceDiffTable(path, stage, hunks) {
-  return `
-    <div class="diff-table-wrap">
-      <table class="diff-table">
-        <caption>${escapeHtml(path)} ${escapeHtml(stage)} unified diff</caption>
-        <thead>
-          <tr><th scope="col">Old</th><th scope="col">New</th><th scope="col">Mark</th><th scope="col">Content</th></tr>
-        </thead>
-        ${hunks.map(renderWorkspaceDiffHunk).join("")}
-      </table>
-    </div>`;
-}
-
-function renderWorkspaceDiffHunk(hunk) {
-  const lines = Array.isArray(hunk?.lines) ? hunk.lines : [];
-  const oldStart = hunk?.old_start ?? 0;
-  const oldLines = hunk?.old_lines ?? 0;
-  const newStart = hunk?.new_start ?? 0;
-  const newLines = hunk?.new_lines ?? 0;
-  const hunkLabel = `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@${hunk?.function_context ? ` ${hunk.function_context}` : ""}`;
-  return `
-    <tbody>
-      <tr class="diff-line hunk">
-        <td class="diff-gutter old">${escapeHtml(oldStart)}</td>
-        <td class="diff-gutter new">${escapeHtml(newStart)}</td>
-        <td class="diff-marker">@@</td>
-        <td class="diff-code">${escapeHtml(hunkLabel)}</td>
-      </tr>
-      ${lines.map(renderWorkspaceDiffLine).join("")}
-    </tbody>`;
-}
-
-function renderWorkspaceDiffLine(line) {
-  const kind = line?.kind || "context";
-  const lineClass = kind === "insert" ? "add" : kind === "delete" ? "del" : "context";
-  const marker = kind === "insert" ? "+" : kind === "delete" ? "-" : " ";
-  const markerLabel = kind === "insert" ? "added" : kind === "delete" ? "deleted" : "context";
-  const oldLine = line?.old_lineno ?? "";
-  const newLine = line?.new_lineno ?? "";
-  const noNewline = line?.has_trailing_newline === false
-    ? `<span class="diff-no-newline"> No newline at end of file</span>`
-    : "";
-
-  return `
-    <tr class="diff-line ${lineClass}">
-      <td class="diff-gutter old">${escapeHtml(oldLine)}</td>
-      <td class="diff-gutter new">${escapeHtml(newLine)}</td>
-      <td class="diff-marker" aria-label="${escapeAttr(markerLabel)}">${marker === " " ? "&nbsp;" : escapeHtml(marker)}</td>
-      <td class="diff-code">${escapeHtml(line?.content ?? "")}${noNewline}</td>
-    </tr>`;
-}
-
-function renderDiffState(message, tone) {
-  return `<div class="diff-state ${tone === "error" ? "error" : ""}">${escapeHtml(message)}</div>`;
-}
-
-function renderTabs() {
-  el.tabs.querySelectorAll("button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.tab === state.activeTab);
-  });
-  document.querySelectorAll(".tab-panel").forEach((panel) => {
-    panel.classList.toggle("active", panel.id === `tab-${state.activeTab}`);
-  });
-  if (!chatPanelIsVisible(state.selectedId)) stopWaitingLife();
-}
-
-function filteredSessions() {
-  return state.sessions;
-}
-
-function getSessionEvents(sessionId) {
-  if (!sessionId) return [];
-  return state.eventsBySession.get(sessionId) || [];
-}
-
-function serverSubmittedUserMessages(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  const activeRun = snapshot?.active_run;
-  const submitted = activeRun?.submitted_user_message;
-  if (!submitted || !submitted.content) return [];
-  const runId = String(submitted.run_id || activeRunId(activeRun) || "");
-  return [{
-    id: `server-pending-${runId || submitted.submitted_at_epoch_ms || sessionId}`,
-    role: "user",
-    content: submitted.content,
-    pending: true,
-    run_id: runId,
-    client_id: submitted.client_id || activeRun?.client_id || null,
-    baselineUserCount: Number.isInteger(submitted.baseline_user_message_count) ? submitted.baseline_user_message_count : null,
-    submitted_at_epoch_ms: submitted.submitted_at_epoch_ms || activeRun?.started_at_epoch_ms || null,
-  }];
-}
-
-function effectivePendingMessages(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  const canonicalMessages = snapshot?.messages || [];
-  return serverSubmittedUserMessages(sessionId, snapshot)
-    .filter((message) => !pendingMessageCoveredByCanonical(message, canonicalMessages));
-}
-
-function latestPendingUserPrompt(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  const pending = effectivePendingMessages(sessionId, snapshot);
-  const message = pending.at(-1);
-  return message ? messageDisplayText(message) : null;
-}
-
-function pendingMessageCoveredByCanonical(pendingMessage, canonicalMessages) {
-  const baseline = pendingMessage?.baselineUserCount;
-  if (!Number.isInteger(baseline)) return false;
-  const userMessages = (canonicalMessages || []).filter((message) => message.role === "user");
-  for (let index = baseline; index < userMessages.length; index += 1) {
-    if (pendingMessagesMatch(userMessages[index], pendingMessage)) return true;
-  }
-  return false;
-}
-
-function pendingMessagesMatch(left, right) {
-  const leftRunId = String(left?.run_id || "");
-  const rightRunId = String(right?.run_id || "");
-  if (leftRunId && rightRunId && leftRunId === rightRunId) return true;
-  return messageText(left) === messageText(right);
-}
-
-function effectiveMessageCount(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  return (snapshot?.messages?.length || 0) + effectivePendingMessages(sessionId, snapshot).length;
-}
-
-function requestChatScrollToBottom() {
-  state.scrollChatToBottom = true;
-}
-
-function syncPromptBusy(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  const hasSession = Boolean(sessionId);
-  const hasUsableSession = Boolean(sessionId && snapshot);
-  const busy = hasSession && sessionHasActiveRun(sessionId, snapshot);
-  const disabled = !hasUsableSession || busy;
-  const showLife = busy && chatPanelIsVisible(sessionId);
-  el.promptForm.classList.toggle("busy", busy);
-  el.promptForm.dataset.busyText = busy && !showLife ? "Awaiting orchestrator reply." : "";
-  el.promptForm.setAttribute("aria-busy", busy ? "true" : "false");
-  el.promptInput.disabled = disabled;
-  el.promptInput.hidden = showLife;
-  el.promptInput.setAttribute("aria-busy", busy ? "true" : "false");
-  const submitButton = el.promptForm.querySelector(".prompt-submit");
-  if (submitButton) {
-    submitButton.disabled = disabled;
-    submitButton.setAttribute("aria-disabled", disabled ? "true" : "false");
-  }
-  syncPromptLife(sessionId, snapshot, showLife);
-}
-
-function ensurePromptLifeElement() {
-  let promptLife = el.promptLife && el.promptLife.isConnected
-    ? el.promptLife
-    : el.promptForm.querySelector(".prompt-life");
-
-  if (!promptLife) {
-    promptLife = document.createElement("div");
-    promptLife.className = "prompt-life life-waiting";
-    promptLife.hidden = true;
-    promptLife.setAttribute("role", "status");
-    promptLife.setAttribute("aria-live", "polite");
-    promptLife.setAttribute("aria-atomic", "true");
-  } else {
-    promptLife.classList.add("prompt-life", "life-waiting");
-    promptLife.setAttribute("role", promptLife.getAttribute("role") || "status");
-    promptLife.setAttribute("aria-live", promptLife.getAttribute("aria-live") || "polite");
-    promptLife.setAttribute("aria-atomic", promptLife.getAttribute("aria-atomic") || "true");
-  }
-
-  promptLife.style.background = "transparent";
-
-  let canvas = promptLife.querySelector(".prompt-life-canvas");
-  if (!canvas) {
-    canvas = document.createElement("canvas");
-    canvas.className = "prompt-life-canvas life-waiting-canvas";
-    canvas.setAttribute("aria-hidden", "true");
-    promptLife.prepend(canvas);
-  } else {
-    canvas.classList.add("prompt-life-canvas", "life-waiting-canvas");
-    canvas.setAttribute("aria-hidden", "true");
-  }
-  canvas.style.background = "transparent";
-
-  let label = promptLife.querySelector(".prompt-life-label");
-  if (!label) {
-    label = document.createElement("div");
-    label.className = "prompt-life-label life-waiting-label";
-    promptLife.append(label);
-  } else {
-    label.classList.add("prompt-life-label", "life-waiting-label");
-  }
-  label.textContent = "Awaiting orchestrator reply.";
-
-  const submitButton = el.promptForm.querySelector(".prompt-submit");
-  if (promptLife.parentElement !== el.promptForm || promptLife.nextElementSibling !== submitButton) {
-    if (submitButton && submitButton.parentElement === el.promptForm) {
-      el.promptForm.insertBefore(promptLife, submitButton);
-    } else if (el.promptInput.parentElement === el.promptForm) {
-      el.promptInput.insertAdjacentElement("afterend", promptLife);
-    } else {
-      el.promptForm.append(promptLife);
+function buildThreadActions(name, events, snapshot) {
+  const actions = [];
+  const calls = new Map();
+  const observedSteering = new Set();
+  const episodes = snapshot?.thread_episodes?.[name] || [];
+  const latestEpisode = episodes.at(-1);
+  for (const envelope of events) {
+    const event = agentEvent(envelope);
+    if (!event) continue;
+    if (event.type === "thread_started") actions.push({ name: "dispatch", result: "started", state: "live", detail: compactActionDetail(event.action) });
+    if (event.type === "tool_call_started") {
+      const action = {
+        name: event.name || "tool",
+        result: "running",
+        state: "live",
+        callId: event.call_id,
+        detail: formatToolArguments(event.args_detail, event.args_preview),
+      };
+      actions.push(action);
+      calls.set(event.call_id, action);
+    }
+    if (event.type === "tool_call_finished") {
+      const existing = calls.get(event.call_id);
+      if (existing) {
+        existing.result = event.is_error ? "failed" : "done";
+        existing.state = event.is_error ? "error" : "done";
+      } else actions.push({ name: event.name || "tool", result: event.is_error ? "failed" : "done", state: event.is_error ? "error" : "done", detail: compactActionDetail(event.content_preview) });
+    }
+    if (event.type === "thread_steering_queued") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "queued", state: "live", detail: compactActionDetail(event.instruction_preview) });
+    }
+    if (event.type === "thread_steering_delivered") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "delivered", state: "done", detail: compactActionDetail(event.instruction_preview) });
+    }
+    if (event.type === "thread_steering_expired") {
+      observedSteering.add(event.steering_id);
+      actions.push({ name: "steering", result: "expired", state: "error", detail: compactActionDetail(event.instruction_preview) });
+    }
+    if (event.type === "assistant_message") actions.push({ name: "response", result: "returned", state: "done", detail: compactActionDetail(event.content) });
+    if (event.type === "error") actions.push({ name: "error", result: "failed", state: "error", detail: compactActionDetail(event.message) });
+    if (event.type === "thread_finished") {
+      const succeeded = event.exit_code === 0 && !event.timed_out;
+      actions.push({
+        name: "thread",
+        result: event.timed_out ? "timed out" : succeeded ? "returned" : `exit ${event.exit_code}`,
+        state: succeeded ? "done" : "error",
+        detail: compactActionDetail(event.timeout_reason || latestEpisode?.content || ""),
+      });
     }
   }
-
-  el.promptLife = promptLife;
-  el.promptLifeCanvas = canvas;
-  el.promptLifeLabel = label;
-  return promptLife;
+  for (const record of snapshot?.thread_steering || []) {
+    if (record.thread_name !== name || observedSteering.has(record.id)) continue;
+    actions.push({
+      name: "steering",
+      result: record.status,
+      state: record.status === "queued" ? "live" : record.status === "expired" ? "error" : "done",
+      detail: compactActionDetail(record.instruction),
+    });
+  }
+  return actions;
 }
 
-function syncPromptLife(sessionId, snapshot, showLife) {
-  const promptLife = ensurePromptLifeElement();
-  promptLife.hidden = !showLife;
-  promptLife.setAttribute("aria-hidden", showLife ? "false" : "true");
-  if (!showLife) {
-    delete promptLife.dataset.sessionId;
-    stopWaitingLife();
+function buildRetainedThreadActions(name, record, snapshot) {
+  const actions = [];
+  if (record?.latest_action) {
+    actions.push({ name: "dispatch", result: "recorded", state: "done", detail: compactActionDetail(record.latest_action) });
+  }
+  const episodes = snapshot?.thread_episodes?.[name] || [];
+  for (const episode of episodes.slice(-3)) {
+    actions.push({ name: "response", result: "retained", state: "done", detail: compactActionDetail(episode.content) });
+  }
+  const latestEpisode = episodes.at(-1);
+  if (latestEpisode) actions.push({ name: "thread", result: "returned", state: "done", detail: compactActionDetail(latestEpisode.content) });
+  return actions;
+}
+
+function renderThreads(snapshot) {
+  const models = buildThreadModels(snapshot);
+  if (state.targetedThread && !models.some((thread) => thread.name === state.targetedThread && ["running", "queued"].includes(thread.state))) state.targetedThread = null;
+  el.threadGrid.innerHTML = models.length ? models.map(renderThreadTile).join("") : `<p class="thread-board-empty">Threads appear here when work is dispatched.</p>`;
+  renderComposerTarget();
+}
+
+function renderThreadTile(thread) {
+  const selected = state.targetedThread === thread.name;
+  const available = ["running", "queued"].includes(thread.state);
+  const label = available ? `Target ${thread.name} for steering` : `Open ${thread.name} fullscreen`;
+  const ledger = `<ol class="action-ledger">${renderActionRows(thread.actions, "Awaiting first action")}</ol>`;
+  return `<article class="thread-tile ${selected ? "is-selected" : ""}" data-state="${thread.state}"><header class="thread-tile-head"><button class="thread-select" type="button" data-thread-name="${escapeAttr(thread.name)}" data-thread-state="${thread.state}" aria-pressed="${selected}" aria-label="${escapeAttr(label)}"><span class="thread-name">${escapeHtml(thread.name)}</span><span class="thread-state">${thread.state}</span></button><button class="expand-button thread-expand" type="button" data-focus-thread="${escapeAttr(thread.name)}" aria-label="Open ${escapeAttr(thread.name)} fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg></button></header>${ledger}</article>`;
+}
+
+function renderActionRows(actions, emptyLabel) {
+  const visible = actions.slice(-ACTION_LEDGER_LIMIT);
+  const placeholders = Array.from({ length: ACTION_LEDGER_LIMIT - visible.length }, (_, index) => {
+    const label = !visible.length && index === ACTION_LEDGER_LIMIT - 1 ? emptyLabel : "";
+    return `<li class="action-row is-placeholder" aria-hidden="true">${label ? `<span class="action-detail">${escapeHtml(label)}</span>` : ""}</li>`;
+  });
+  const rows = visible.map((action) => {
+    const rowClass = action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : "";
+    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
+    const detail = action.detail ? `<span class="action-detail">${escapeHtml(action.detail)}</span>` : "";
+    return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}"><span class="action-mark">${marker}</span><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
+  });
+  return placeholders.concat(rows).join("");
+}
+
+function formatToolArguments(argsDetail, argsPreview) {
+  const raw = String(argsDetail || argsPreview || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return compactActionDetail(raw);
+    const priority = ["cmd", "path", "name", "action", "query", "prompt", "workdir"];
+    const rank = (key) => {
+      const index = priority.indexOf(key);
+      return index === -1 ? priority.length : index;
+    };
+    const entries = Object.entries(parsed).sort(([a], [b]) => rank(a) - rank(b));
+    return compactActionDetail(entries.map(([key, value]) => `${key}: ${formatArgumentValue(value)}`).join(" · "));
+  } catch (_) {
+    return compactActionDetail(raw);
+  }
+}
+
+function formatArgumentValue(value) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function compactActionDetail(value, maxChars = 320) {
+  const compact = String(value || "").split(/\s+/).filter(Boolean).join(" ");
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars - 1)}…`;
+}
+
+function handleThreadClick(event) {
+  const expand = event.target.closest("[data-focus-thread]");
+  if (expand) {
+    openFocusView("thread", expand.dataset.focusThread);
     return;
   }
-
-  promptLife.dataset.sessionId = sessionId || "";
-  syncWaitingLife(
-    el.promptLifeCanvas,
-    sessionId,
-    waitingLifeSeedKey(sessionId, snapshot, snapshot?.messages),
-    true,
-  );
+  const button = event.target.closest("[data-thread-name]");
+  if (!button) return;
+  const name = button.dataset.threadName;
+  if (["running", "queued"].includes(button.dataset.threadState)) {
+    state.targetedThread = state.targetedThread === name ? null : name;
+    renderThreads(currentSnapshot());
+    if (state.targetedThread) el.promptInput.focus();
+  } else openFocusView("thread", name);
 }
 
-function pushEnvelopeForSession(sessionId, envelope) {
-  const events = getSessionEvents(sessionId).slice();
-  events.unshift(envelope);
-  state.eventsBySession.set(sessionId, events.slice(0, 320));
-  observeThreadEvent(sessionId, envelope);
+function renderComposerTarget() {
+  const targeted = Boolean(state.targetedThread);
+  const orchestratorActive = Boolean(currentSnapshot()?.active_run);
+  el.composerTarget.hidden = !targeted;
+  el.composerTargetName.textContent = state.targetedThread || "";
+  el.promptInput.placeholder = targeted
+    ? `Steer ${state.targetedThread} after its current action`
+    : orchestratorActive ? "Steer the orchestrator · / for commands" : "Message the orchestrator · / for commands";
+  el.promptInput.setAttribute("aria-label", targeted ? `Steer thread ${state.targetedThread}` : orchestratorActive ? "Steer the orchestrator" : "Message the orchestrator");
 }
 
-function pushLocalEvent(kind, detail, sessionId = state.selectedId) {
-  if (!sessionId) return;
-  pushEnvelopeForSession(sessionId, {
-    local: true,
-    sequence_id: null,
-    session_id: sessionId,
-    event: { type: kind, detail },
-  });
-  requestEventsRender();
+function clearThreadTarget() {
+  state.targetedThread = null;
+  renderThreads(currentSnapshot());
+  el.promptInput.focus();
 }
 
-function eventKind(envelope) {
-  if (envelope.local) return envelope.event.type;
-  const event = envelope.event || {};
-  if (event.type === "agent") return event.event?.type || "agent";
-  return event.type || "event";
-}
-
-function agentEvent(envelope) {
-  const event = envelope.event || {};
-  return event.type === "agent" ? event.event || null : null;
-}
-
-function observeThreadEvent(sessionId, envelope) {
-  const event = agentEvent(envelope);
-  if (!event || !event.name) return;
-  if (!["thread_started", "thread_finished", "thread_log"].includes(event.type)) return;
-
-  const threads = new Map(state.activeThreadsBySession.get(sessionId) || []);
-  const existing = threads.get(event.name) || {
-    name: event.name,
-    status: "pending",
-    action: "waiting",
-    source_threads: [],
-  };
-
-  if (event.type === "thread_started") {
-    threads.set(event.name, {
-      ...existing,
-      status: "active",
-      action: event.action || existing.action,
-      source_threads: event.source_threads || [],
-      started_sequence_id: envelope.sequence_id,
-    });
-  } else if (event.type === "thread_finished") {
-    threads.set(event.name, {
-      ...existing,
-      status: event.timed_out ? "timed out" : "finished",
-      exit_code: event.exit_code,
-      timed_out: event.timed_out,
-      finished_sequence_id: envelope.sequence_id,
-    });
-  } else if (event.type === "thread_log") {
-    threads.set(event.name, {
-      ...existing,
-      last_log: event.line || "",
-    });
-  }
-
-  state.activeThreadsBySession.set(sessionId, threads);
-}
-
-function syncActiveThreadsFromSnapshot(sessionId, snapshot) {
-  const activeNames = new Set(snapshot.active_threads || []);
-  const threads = new Map(state.activeThreadsBySession.get(sessionId) || []);
-  for (const name of activeNames) {
-    if (!threads.has(name)) {
-      threads.set(name, {
-        name,
-        status: "active",
-        action: "running",
-        source_threads: [],
-      });
-    } else {
-      threads.set(name, { ...threads.get(name), status: "active" });
+async function submitComposer(event) {
+  event.preventDefault();
+  const input = el.promptInput.value.trim();
+  if (!input || state.submitting || !state.currentId) return;
+  if (input.startsWith("/")) {
+    const [name, ...rest] = input.slice(1).split(/\s+/);
+    if (commands.some((command) => command.name === name)) {
+      el.promptInput.value = rest.join(" ");
+      resizeComposer();
+      runCommand(name);
+      return;
     }
   }
-
-  for (const [name, thread] of threads) {
-    if (thread.status === "active" && !activeNames.has(name)) {
-      threads.set(name, { ...thread, status: "finished" });
-    }
-  }
-
-  state.activeThreadsBySession.set(sessionId, threads);
-}
-
-function eventDetail(envelope) {
-  const event = envelope.event || {};
-  if (envelope.local) return event.detail || "";
-  if (event.type === "agent") {
-    const inner = event.event || {};
-    if (inner.type === "tool_call_started") {
-      const args = inner.args_preview || (inner.args_detail ? inner.args_detail.slice(0, 200) : "");
-      return `${inner.name || "tool"}(${args})`;
-    }
-    if (inner.type === "tool_call_finished") {
-      const prefix = inner.is_error ? "ERROR " : "";
-      return `${prefix}${inner.name || "tool"}: ${inner.content_preview || ""}`;
-    }
-    return inner.message || inner.line || inner.content || inner.name || inner.prompt_preview || JSON.stringify(inner);
-  }
-  return event.response || event.message || event.prompt_preview || event.session_id || JSON.stringify(event);
-}
-
-function updateSessionActivity(sessions) {
-  const seen = new Set();
-  for (const entry of sessions) {
-    const sessionId = entry.summary.session_id;
-    const remoteActive = activeRunCountsForSession(sessionId, entry.active_run);
-    if (remoteActive) {
-      clearRunSubmitting(sessionId);
-      if (entry.active_run?.started_at_epoch_ms) {
-        state.runStartedAtBySession.set(sessionId, entry.active_run.started_at_epoch_ms);
+  state.submitting = true;
+  el.sendPrompt.disabled = true;
+  try {
+    if (state.targetedThread) {
+      const target = state.targetedThread;
+      await apiPost(`/sessions/${encodeURIComponent(state.currentId)}/threads/${encodeURIComponent(target)}/steering`, { instruction: input });
+      el.promptInput.value = "";
+      showToast(`Steering queued for ${target}`);
+      scheduleSnapshot(state.currentId);
+    } else if (currentSnapshot()?.active_run) {
+      let steered = true;
+      try {
+        await apiPost(`/sessions/${encodeURIComponent(state.currentId)}/steering`, { instruction: input });
+      } catch (error) {
+        const runEnded = error.status === 409 && /no active run|finishing/i.test(error.message);
+        if (!runEnded) throw error;
+        await apiPost(`/sessions/${encodeURIComponent(state.currentId)}/runs`, { prompt: input });
+        steered = false;
       }
+      el.promptInput.value = "";
+      showToast(steered ? "Steering queued for orchestrator" : "Run started");
+      scheduleSnapshot(state.currentId);
+      if (!steered) loadSessions({ workspaceStats: false });
+    } else {
+      await apiPost(`/sessions/${encodeURIComponent(state.currentId)}/runs`, { prompt: input });
+      el.promptInput.value = "";
+      showToast("Run started");
+      scheduleSnapshot(state.currentId);
+      loadSessions({ workspaceStats: false });
     }
-    const isSubmitting = state.submittingRunsBySession.has(sessionId);
-    const isActive = remoteActive || isSubmitting;
-    const wasActive = state.activeRunsBySession.get(sessionId) === true;
-    if (isActive) {
-      clearSessionAttention(sessionId);
-    } else if (wasActive) {
-      state.attentionSessions.add(sessionId);
+  } catch (error) { showToast(error.message, true); }
+  finally {
+    state.submitting = false;
+    el.sendPrompt.disabled = false;
+    resizeComposer();
+    el.promptInput.focus();
+  }
+}
+
+function handleComposerInput() {
+  resizeComposer();
+  renderCommandMenu();
+}
+
+function resizeComposer() {
+  const minHeight = Number.parseFloat(getComputedStyle(el.promptInput).minHeight) || 40;
+  el.promptInput.style.height = "auto";
+  el.promptInput.style.height = `${Math.max(minHeight, Math.min(el.promptInput.scrollHeight, 134))}px`;
+}
+
+function matchingCommands() {
+  const value = el.promptInput.value;
+  if (!value.startsWith("/") || value.includes("\n") || value.includes(" ")) return [];
+  const query = value.slice(1).toLowerCase();
+  return commands.filter((command) => command.name.startsWith(query));
+}
+
+function renderCommandMenu() {
+  const matches = matchingCommands();
+  if (!matches.length) {
+    el.commandMenu.hidden = true;
+    return;
+  }
+  state.commandIndex = Math.min(state.commandIndex, matches.length - 1);
+  el.commandMenu.hidden = false;
+  el.commandMenu.innerHTML = matches.map((command, index) => `<button class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" data-command-option="${command.name}"><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></button>`).join("");
+}
+
+function handleComposerKeydown(event) {
+  const matches = matchingCommands();
+  if (matches.length && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    state.commandIndex = (state.commandIndex + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length;
+    renderCommandMenu();
+    return;
+  }
+  if (event.key === "Escape" && !el.commandMenu.hidden) {
+    event.preventDefault();
+    el.commandMenu.hidden = true;
+    return;
+  }
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    if (matches.length && !el.commandMenu.hidden) runCommand(matches[state.commandIndex].name);
+    else el.commandComposer.requestSubmit();
+  }
+}
+
+function runCommand(name) {
+  el.commandMenu.hidden = true;
+  el.promptInput.value = "";
+  resizeComposer();
+  if (name === "transcript") openFocusView("orchestrator");
+  else if (name === "workspace") openFocusView("workspace");
+  else if (name === "settings") openFocusView("settings");
+  else if (name === "help") showHelpDrawer();
+  else if (name === "stop") stopActiveRun();
+  else if (name === "rename") renameCurrentSession();
+  else if (name === "delete") deleteCurrentSession();
+  else if (name === "clear") clearThreadTarget();
+}
+
+function openDrawer(title, html, view = "detail") {
+  el.drawerTitle.textContent = title;
+  el.drawerContent.innerHTML = html;
+  el.utilityDrawer.dataset.view = view;
+  el.drawerBackdrop.hidden = false;
+  el.utilityDrawer.hidden = false;
+  requestAnimationFrame(() => el.closeDrawer.focus());
+}
+
+function closeDrawer() {
+  el.drawerBackdrop.hidden = true;
+  el.utilityDrawer.hidden = true;
+  el.drawerContent.innerHTML = "";
+}
+
+function showHelpDrawer() {
+  openDrawer("commands", `<div class="command-reference">${commands.map((command) => `<div><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></div>`).join("")}</div>`, "compact");
+}
+
+async function handleDrawerSubmit(event) {
+  if (event.target.id === "renameForm") {
+    event.preventDefault();
+    await saveSessionRename(event.target);
+    return;
+  }
+  if (event.target.id === "deleteSessionForm") {
+    event.preventDefault();
+    await confirmSessionDeletion(event.target);
+    return;
+  }
+  if (event.target.id !== "settingsForm") return;
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const status = document.getElementById("settingsStatus");
+  try {
+    const headersText = String(form.get("extra_headers") || "{}").trim() || "{}";
+    const headers = JSON.parse(headersText);
+    if (!headers || Array.isArray(headers) || typeof headers !== "object") throw new Error("Extra headers must be a JSON object");
+    status.textContent = "Saving…";
+    const updated = await apiPatch(`/sessions/${encodeURIComponent(state.currentId)}/config`, {
+      backend: String(form.get("backend") || "").trim(),
+      reasoning_effort: String(form.get("reasoning_effort") || "").trim() || null,
+      model: String(form.get("model") || "").trim(),
+      base_url: String(form.get("base_url") || "").trim(),
+      api_key_env: String(form.get("api_key_env") || "").trim() || null,
+      extra_headers: headers,
+    });
+    if (state.settingsFocus?.sessionId === state.currentId && updated) state.settingsFocus.config = updated;
+    status.textContent = "saved";
+    await loadSnapshot(state.currentId, false);
+  } catch (error) {
+    status.textContent = error.message;
+    status.classList.add("is-error");
+  }
+}
+
+async function stopActiveRun() {
+  if (!state.currentId) return;
+  try {
+    await apiPost(`/sessions/${encodeURIComponent(state.currentId)}/cancel-active-run`);
+    showToast("Stop requested");
+    scheduleSnapshot(state.currentId);
+  } catch (error) { showToast(error.message, true); }
+}
+
+function renameCurrentSession() {
+  const entry = sessionEntry();
+  if (!entry) return;
+  openDrawer("rename session", `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry.summary.title || "")}" placeholder="${escapeAttr(shortId(entry.summary.session_id))}"></label><div class="settings-actions"><span class="form-status" data-rename-status></span><button class="button button-primary" type="submit">save title</button></div></form>`, "compact");
+  requestAnimationFrame(() => el.drawerContent.querySelector('input[name="title"]')?.focus());
+}
+
+async function saveSessionRename(formElement) {
+  const entry = sessionEntry();
+  if (!entry) return;
+  const status = formElement.querySelector("[data-rename-status]");
+  const next = String(new FormData(formElement).get("title") || "").trim();
+  status.textContent = "Saving…";
+  try {
+    entry.summary = await apiPut(`/sessions/${encodeURIComponent(state.currentId)}/presentation`, {
+      title: next,
+      pinned: entry.summary.pinned,
+      expected_version: entry.summary.presentation_version,
+    });
+    renderWorkspace();
+    renderPicker();
+    closeDrawer();
+    showToast("Session renamed");
+  } catch (error) {
+    status.textContent = error.message;
+    status.classList.add("is-error");
+  }
+}
+
+function deleteCurrentSession() {
+  const entry = sessionEntry();
+  if (!entry) return;
+  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, retained episodes, and steering history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
+}
+
+async function confirmSessionDeletion(formElement) {
+  const status = formElement.querySelector("[data-delete-status]");
+  status.textContent = "Deleting…";
+  try {
+    await apiDelete(`/sessions/${encodeURIComponent(state.currentId)}`);
+    closeDrawer();
+    showPicker();
+    await loadSessions({ workspaceStats: true });
+    showToast("Session deleted");
+  } catch (error) {
+    status.textContent = error.message;
+    status.classList.add("is-error");
+  }
+}
+
+function openLaunchDialog() {
+  el.launchStatus.textContent = "";
+  el.launchStatus.classList.remove("is-error");
+  if (!el.launchCwd.value && state.store?.root_cwd) el.launchCwd.value = state.store.root_cwd;
+  el.launchDialog.showModal();
+  requestAnimationFrame(() => el.launchCwd.focus());
+}
+
+function syncLaunchExecutionMode() {
+  const mode = new FormData(el.launchForm).get("execution_mode") || "local";
+  el.launchSshField.hidden = mode !== "ssh";
+  el.sandboxFields.hidden = mode !== "sandbox";
+  el.launchSshHost.required = mode === "ssh";
+}
+
+async function createSession(event) {
+  event.preventDefault();
+  const form = new FormData(el.launchForm);
+  const mode = form.get("execution_mode") || "local";
+  const body = {};
+  const cwd = String(form.get("cwd") || "").trim();
+  if (cwd) body.cwd = cwd;
+  if (mode === "ssh") body.ssh_host = String(form.get("ssh_host") || "").trim();
+  for (const [key, element] of [["backend", el.launchBackend], ["reasoning_effort", el.launchEffort], ["model", el.launchModel], ["base_url", el.launchBaseUrl], ["api_key_env", el.launchApiKeyEnv]]) {
+    const value = element.value.trim();
+    if (value) body[key] = value;
+  }
+  const headerText = el.launchExtraHeaders.value.trim();
+  try {
+    if (headerText) {
+      const headers = JSON.parse(headerText);
+      if (!headers || Array.isArray(headers) || typeof headers !== "object") throw new Error("Extra headers must be a JSON object");
+      body.extra_headers = headers;
     }
-    if (!isActive) {
-      state.runStartedAtBySession.delete(sessionId);
+  } catch (error) {
+    setLaunchStatus(error.message, true);
+    return;
+  }
+  body.sandbox = {
+    enabled: mode === "sandbox",
+    no_mount_cwd: el.sandboxNoMount.checked,
+    image: el.sandboxImage.value.trim() || null,
+    gpus: el.sandboxGpu.value.split(",").map((value) => value.trim()).filter(Boolean),
+    workdir: el.sandboxWorkdir.value.trim() || null,
+    shm_size: el.sandboxShm.value.trim() || null,
+    mounts: el.sandboxMounts.value.split(",").map((value) => value.trim()).filter(Boolean),
+    mounts_ro: [],
+  };
+  setLaunchStatus("Creating…");
+  const submit = el.launchForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    const snapshot = await apiPost("/sessions", body);
+    const sessionId = snapshot.metadata.session_id;
+    state.snapshots.set(sessionId, snapshot);
+    const initialPrompt = el.initialPrompt.value.trim();
+    el.launchDialog.close();
+    el.launchForm.reset();
+    if (state.store?.root_cwd) el.launchCwd.value = state.store.root_cwd;
+    syncLaunchExecutionMode();
+    await loadSessions({ workspaceStats: true });
+    openSession(sessionId);
+    if (initialPrompt) {
+      el.promptInput.value = initialPrompt;
+      el.commandComposer.requestSubmit();
     }
-    state.activeRunsBySession.set(sessionId, isActive);
-    seen.add(sessionId);
+  } catch (error) { setLaunchStatus(error.message, true); }
+  finally { submit.disabled = false; }
+}
+
+function setLaunchStatus(message, error = false) {
+  el.launchStatus.textContent = message;
+  el.launchStatus.classList.toggle("is-error", error);
+}
+
+function handleGlobalKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && state.currentId) {
+    event.preventDefault();
+    el.promptInput.focus();
   }
-
-  for (const sessionId of state.activeRunsBySession.keys()) {
-    if (!seen.has(sessionId)) {
-      state.activeRunsBySession.delete(sessionId);
-      state.terminalRunsBySession.delete(sessionId);
-      state.runStartedAtBySession.delete(sessionId);
-      clearRunSubmitting(sessionId);
-      state.attentionSessions.delete(sessionId);
-    }
-  }
+  if (event.key === "Escape" && state.focusView) closeFocusView();
+  else if (event.key === "Escape" && !el.utilityDrawer.hidden) closeDrawer();
 }
 
-function clearSessionAttention(sessionId) {
-  state.attentionSessions.delete(sessionId);
-}
-
-function markSessionAttention(sessionId) {
-  if (!sessionIsActive(sessionId)) return;
-  state.attentionSessions.add(sessionId);
-  state.activeRunsBySession.set(sessionId, false);
-}
-
-function sessionIsActive(sessionId) {
-  if (!sessionId) return false;
-  if (state.submittingRunsBySession.has(sessionId)) return true;
-  if (state.activeRunsBySession.get(sessionId) === true) return true;
-  return state.sessions.some((entry) => entry.summary.session_id === sessionId && activeRunCountsForSession(sessionId, entry.active_run));
-}
-
-function sessionHasActiveRun(sessionId, snapshot = state.snapshots.get(sessionId)) {
-  if (!sessionId) return false;
-  if (state.submittingRunsBySession.has(sessionId)) return true;
-  if (state.activeRunsBySession.get(sessionId) === true) return true;
-  return Boolean(activeRunCountsForSession(sessionId, snapshot?.active_run) || sessionIsActive(sessionId));
-}
-
-function sessionStatusClass(entry) {
-  const sessionId = entry.summary.session_id;
-  if (activeRunCountsForSession(sessionId, entry.active_run)) return "active";
-  if (state.attentionSessions.has(sessionId)) return "attention";
-  if (entry.summary.sandboxed) return "sandbox";
-  return "idle";
-}
-
-function workspaceDiffStats(snapshot, listDiff) {
-  const workspace = snapshot?.workspace;
-  if (workspace && !workspace.error) {
-    return formatWorkspaceDiffTotals(workspace);
-  }
-  if (listDiff && !listDiff.error) {
-    return formatWorkspaceDiffTotals(listDiff);
-  }
-  return { additions: "--", deletions: "--" };
-}
-
-function formatWorkspaceDiffTotals(totals) {
-  const additions = Number(totals.total_additions);
-  const deletions = Number(totals.total_deletions);
-  if (!Number.isFinite(additions) || !Number.isFinite(deletions)) {
-    return { additions: "--", deletions: "--" };
-  }
-
-  return { additions: `+${additions}`, deletions: `-${deletions}` };
-}
-
-function formatToolCalls(toolCalls) {
-  if (!toolCalls || toolCalls.length === 0) return "";
-  return toolCalls.map((call) => {
-    const name = call.function?.name || "tool";
-    const args = call.function?.arguments || "";
-    const preview = args.length > 100 ? args.slice(0, 97) + "..." : args;
-    return `${name}(${preview}) [${call.id}]`;
-  }).join("\n");
-}
-
-function messageText(message) {
-  return message.content || message.reasoning_text || formatToolCalls(message.tool_calls) || "";
-}
-
-function messageDisplayText(message) {
-  const text = messageText(message);
-  return message.role === "user" ? displayPromptFromMessageText(text) : text;
-}
-
-function displayPromptFromMessageText(content) {
-  const text = String(content || "");
-  const normalized = text.replaceAll("\r\n", "\n");
-  const header = normalized.split("\n", 1)[0] || "";
-  const match = header.match(/^# \/(plan|run)\s*:/);
-  if (!match) return text;
-
-  const kind = match[1];
-  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
-  const markerIndex = normalized.indexOf(marker);
-  if (markerIndex === -1) return text;
-
-  const valueStart = markerIndex + marker.length;
-  const valueEnd = normalized.indexOf("\n\n", valueStart);
-  if (valueEnd === -1) return text;
-
-  const value = normalized.slice(valueStart, valueEnd).trim();
-  return value ? `/${kind} ${value}` : text;
+function showToast(message, error = false) {
+  window.clearTimeout(state.statusTimer);
+  const target = el.sessionWorkspace.hidden ? el.pickerNavStatus : el.sessionNavStatus;
+  const inactive = target === el.sessionNavStatus ? el.pickerNavStatus : el.sessionNavStatus;
+  inactive.hidden = true;
+  inactive.textContent = "";
+  target.textContent = message;
+  target.title = message;
+  target.classList.toggle("is-error", error);
+  target.hidden = false;
+  state.statusTimer = window.setTimeout(() => {
+    target.hidden = true;
+    target.textContent = "";
+    target.removeAttribute("title");
+  }, error ? 5_500 : 2_500);
 }
 
 function displaySessionTitle(summary) {
-  const title = typeof summary?.title === "string" ? summary.title.trim() : "";
-  return title || shortId(summary?.session_id || "");
+  const title = String(summary?.title || "").trim();
+  return title || shortId(summary?.session_id || "session");
 }
 
-function setLaunchStatus(message, error) {
-  el.launchStatus.textContent = message || "";
-  el.launchStatus.classList.toggle("error", Boolean(error));
+function shortId(value) { return String(value).split("-")[0] || String(value); }
+function basename(path) { return String(path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || String(path || ""); }
+function shortModel(model) { const value = String(model || "—"); return value.length > 24 ? `${value.slice(0, 21)}…` : value; }
+function formatNumber(value) {
+  const number = Number(value || 0);
+  if (!number) return "—";
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(number >= 10_000_000 ? 0 : 1)}m`;
+  if (number >= 1_000) return `${(number / 1_000).toFixed(number >= 10_000 ? 0 : 1)}k`;
+  return String(number);
 }
 
-function serializeExtraHeaders(value, blankValue) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return blankValue;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (_) {
-    throw new Error("Extra Headers must be valid JSON");
-  }
-  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
-    throw new Error("Extra Headers must be a JSON object with string keys and string values");
-  }
-  for (const [key, headerValue] of Object.entries(parsed)) {
-    if (typeof headerValue !== "string") {
-      throw new Error(`Extra Headers value for "${key}" must be a string`);
-    }
-  }
-  return parsed;
+function relativeTime(value) {
+  const normalized = String(value || "").includes("T") ? String(value) : `${String(value || "").replace(" ", "T")}Z`;
+  const timestamp = new Date(normalized).getTime();
+  if (!Number.isFinite(timestamp)) return "Generated";
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-function optionalLaunchString(value, label) {
-  const raw = String(value ?? "");
-  if (raw === "") return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed) throw new Error(`${label} cannot contain only whitespace`);
-  return trimmed;
+function messageText(message) {
+  if (message.content) return String(message.content);
+  if (message.reasoning_text) return String(message.reasoning_text);
+  if (message.tool_calls?.length) return message.tool_calls.map((call) => call.function?.name || "tool").join(", ");
+  return "";
 }
 
-function requiredSettingsString(value, label) {
-  const trimmed = String(value ?? "").trim();
-  if (!trimmed) throw new Error(`${label} is required and cannot be cleared`);
-  return trimmed;
+function backendOptions(selected) {
+  const values = ["openai-responses", "chatgpt-codex-responses", "anthropic-messages", "deepseek-chat", "fireworks-chat", "together-chat", "arcee-auth", "arcee-api"];
+  return values.map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${value}</option>`).join("");
 }
 
-function selectedApiKeyEnv(mode, value) {
-  if (mode === "inherit") return undefined;
-  if (mode === "none") return null;
-  if (mode !== "variable") throw new Error("Choose how credentials are selected");
-  const selected = String(value ?? "");
-  if (!selected) throw new Error("API key environment variable is required when Environment variable is selected");
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(selected)) {
-    throw new Error("API key environment variable must match [A-Za-z_][A-Za-z0-9_]* exactly (no whitespace)");
-  }
-  return selected;
-}
-
-function validateCredentialMode(backend, mode) {
-  if (!backend) return;
-  const stored = backend === "arcee-auth" || backend === "chatgpt-codex-responses";
-  if (stored && mode !== "none") {
-    const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
-    throw new Error(`${backend} uses ${source} and does not accept an API key environment variable`);
-  }
-  if (!stored && mode !== "variable") {
-    throw new Error(`${backend} requires an API key environment variable; explicitly select Environment variable`);
-  }
-}
-
-function managedLaunchBaseUrl(backend) {
-  return MANAGED_LAUNCH_BASE_URLS[String(backend || "").trim()] || null;
-}
-
-function isManagedSettingsBaseUrl(baseUrl) {
-  const normalized = String(baseUrl ?? "").trim();
-  return Object.values(MANAGED_LAUNCH_BASE_URLS).includes(normalized);
-}
-
-function effectiveLaunchBackend(selectedBackend, configuredBackend) {
-  return String(selectedBackend || "").trim() || String(configuredBackend || "").trim();
-}
-
-function nextLaunchBaseUrlControl(
-  current,
-  selectedBackend,
-  configuredBackend,
-  configuredBaseUrl = null,
-) {
-  const value = String(current?.value ?? "");
-  const readOnly = Boolean(current?.readOnly);
-  const restoreValue = String(current?.restoreValue ?? "");
-  const explicitBackend = String(selectedBackend || "").trim();
-  const effectiveBackend = effectiveLaunchBackend(explicitBackend, configuredBackend);
-  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
-  const effectiveManagedUrl = managedUrl && !explicitBackend
-    ? (String(configuredBaseUrl || "").trim() || managedUrl)
-    : managedUrl;
-  if (effectiveManagedUrl) {
-    return {
-      value: effectiveManagedUrl,
-      readOnly: true,
-      restoreValue: readOnly ? restoreValue : value,
-    };
-  }
-  return {
-    value: readOnly ? restoreValue : value,
-    readOnly: false,
-    restoreValue,
-  };
-}
-
-function nextLaunchCredentialControl(current, selectedBackend, configuredBackend) {
-  const mode = String(current?.mode || "inherit");
-  const value = String(current?.value ?? "");
-  const locked = Boolean(current?.locked);
-  const restoreMode = String(current?.restoreMode || "inherit");
-  const restoreValue = String(current?.restoreValue ?? "");
-  const managed = Boolean(managedLaunchBaseUrl(
-    effectiveLaunchBackend(selectedBackend, configuredBackend),
-  ));
-  if (managed) {
-    return {
-      mode: "none",
-      value: "",
-      locked: true,
-      restoreMode: locked ? restoreMode : mode,
-      restoreValue: locked ? restoreValue : value,
-    };
-  }
-  return {
-    mode: locked ? restoreMode : mode,
-    value: locked ? restoreValue : value,
-    locked: false,
-    restoreMode,
-    restoreValue,
-  };
-}
-
-function buildLaunchModelPayload(values) {
-  const payload = {};
-  const model = optionalLaunchString(values.model, "Model");
-  if (model !== undefined) payload.model = model;
-
-  const selectedBackend = optionalLaunchString(values.backend, "Backend");
-  if (selectedBackend !== undefined) payload.backend = selectedBackend;
-  const effectiveBackend = effectiveLaunchBackend(selectedBackend, values.configured_backend);
-  const managedUrl = managedLaunchBaseUrl(effectiveBackend);
-
-  if (managedUrl) {
-    // An explicit managed backend must override an unrelated configured URL.
-    // An inherited managed backend must leave the configured tuple untouched.
-    if (selectedBackend !== undefined) payload.base_url = managedUrl;
-  } else {
-    const baseUrl = optionalLaunchString(values.base_url, "Base URL");
-    if (baseUrl !== undefined) payload.base_url = baseUrl;
-  }
-
-  const effort = String(values.reasoning_effort ?? "");
-  if (effort === "__clear__") payload.reasoning_effort = null;
-  else if (effort) payload.reasoning_effort = effort;
-
-  if (managedUrl) {
-    // Managed credentials must override a stale configured API-key selector,
-    // including when backend/base remain inherited.
-    payload.api_key_env = null;
-  } else {
-    const credentialMode = String(values.credential_mode || "inherit");
-    validateCredentialMode(payload.backend, credentialMode);
-    const apiKeyEnv = selectedApiKeyEnv(credentialMode, values.api_key_env);
-    if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
-  }
-
-  const headers = serializeExtraHeaders(values.extra_headers, undefined);
-  if (headers !== undefined) payload.extra_headers = headers;
-  return payload;
-}
-
-function settingsValuesFromMetadata(metadata) {
-  const headers = rawHeadersFromMetadata(metadata);
-  const values = {
-    model: String(metadata?.model ?? ""),
-    base_url: String(metadata?.base_url ?? ""),
-    backend: String(metadata?.backend ?? ""),
-    reasoning_effort: metadata?.reasoning_effort ?? null,
-    api_key_env: metadata?.api_key_env ?? null,
-    extra_headers: headers.value,
-  };
-  if (headers.invalid) values.extra_headers_invalid = true;
-  return values;
-}
-
-function sameHeaderObject(left, right) {
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
-}
-
-function buildSettingsPatch(values, initial) {
-  const backend = requiredSettingsString(values.backend, "Backend");
-  const managedUrl = managedLaunchBaseUrl(backend);
-  let baseUrl;
-  let apiKeyEnv;
-  if (managedUrl) {
-    baseUrl = managedUrl;
-    apiKeyEnv = null;
-  } else {
-    baseUrl = requiredSettingsString(values.base_url, "Base URL");
-    apiKeyEnv = selectedApiKeyEnv(values.credential_mode, values.api_key_env);
-    if (apiKeyEnv === undefined) {
-      throw new Error("Session settings must explicitly select an API key environment variable or none");
-    }
-    validateCredentialMode(backend, values.credential_mode);
-  }
-
-  const current = {
-    model: requiredSettingsString(values.model, "Model"),
-    base_url: baseUrl,
-    backend,
-    reasoning_effort: values.reasoning_effort === "__clear__" ? null : values.reasoning_effort,
-    api_key_env: apiKeyEnv,
-    extra_headers: serializeExtraHeaders(values.extra_headers, {}),
-  };
-
-  const patch = {};
-  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
-    if (current[field] !== initial[field]) patch[field] = current[field];
-  }
-  if (initial.extra_headers_invalid
-      || !sameHeaderObject(current.extra_headers, initial.extra_headers || {})) {
-    patch.extra_headers = current.extra_headers;
-  }
-  return patch;
-}
-
-function nextSettingsBaseUrlControl(current, backend) {
-  const value = String(current?.value ?? "");
-  const readOnly = Boolean(current?.readOnly);
-  const restoreValue = String(current?.restoreValue ?? "");
-  const managedUrl = managedLaunchBaseUrl(backend);
-  if (managedUrl) {
-    return {
-      value: managedUrl,
-      readOnly: true,
-      restoreValue: readOnly || isManagedSettingsBaseUrl(value) ? restoreValue : value,
-    };
-  }
-  return {
-    value: readOnly ? restoreValue : value,
-    readOnly: false,
-    restoreValue,
-  };
-}
-
-function nextSettingsCredentialControl(current, backend) {
-  const mode = String(current?.mode || "none");
-  const value = String(current?.value ?? "");
-  const locked = Boolean(current?.locked);
-  const restoreMode = String(current?.restoreMode || "variable");
-  const restoreValue = String(current?.restoreValue ?? "");
-  if (managedLaunchBaseUrl(backend)) {
-    return {
-      mode: "none",
-      value: "",
-      locked: true,
-      restoreMode: locked ? restoreMode : mode,
-      restoreValue: locked ? restoreValue : value,
-    };
-  }
-  return {
-    mode: locked ? restoreMode : mode,
-    value: locked ? restoreValue : value,
-    locked: false,
-    restoreMode,
-    restoreValue,
-  };
-}
-
-function renderSettingsModelControls() {
-  if (!el.settingsBackend) return;
-  const nextBaseUrl = nextSettingsBaseUrlControl(
-    {
-      value: el.settingsBaseUrl.value,
-      readOnly: el.settingsBaseUrl.readOnly,
-      restoreValue: state.settingsBaseUrlRestoreValue,
-    },
-    el.settingsBackend.value,
-  );
-  el.settingsBaseUrl.value = nextBaseUrl.value;
-  el.settingsBaseUrl.readOnly = nextBaseUrl.readOnly;
-  el.settingsBaseUrl.title = nextBaseUrl.readOnly
-    ? "Canonical URL for the selected managed backend"
-    : "";
-  state.settingsBaseUrlRestoreValue = nextBaseUrl.restoreValue;
-
-  const nextCredential = nextSettingsCredentialControl(
-    {
-      mode: el.settingsCredentialMode.value,
-      value: el.settingsApiKeyEnv.value,
-      locked: el.settingsCredentialMode.disabled,
-      restoreMode: state.settingsCredentialRestoreMode,
-      restoreValue: state.settingsCredentialRestoreValue,
-    },
-    el.settingsBackend.value,
-  );
-  el.settingsCredentialMode.value = nextCredential.mode;
-  el.settingsApiKeyEnv.value = nextCredential.value;
-  el.settingsCredentialMode.disabled = nextCredential.locked;
-  el.settingsCredentialMode.title = nextCredential.locked
-    ? "Stored credentials are selected automatically for this managed backend"
-    : "";
-  state.settingsCredentialRestoreMode = nextCredential.restoreMode;
-  state.settingsCredentialRestoreValue = nextCredential.restoreValue;
-  renderCredentialControls();
-}
-
-function renderLaunchModelControls() {
-  renderLaunchBaseUrlControl();
-  renderLaunchCredentialControl();
-}
-
-function renderLaunchBaseUrlControl() {
-  if (!el.launchBaseUrl || !el.launchBackend) return;
-  const next = nextLaunchBaseUrlControl(
-    {
-      value: el.launchBaseUrl.value,
-      readOnly: el.launchBaseUrl.readOnly,
-      restoreValue: state.launchBaseUrlRestoreValue,
-    },
-    el.launchBackend.value,
-    state.launchConfiguredBackend,
-    state.launchConfiguredBaseUrl,
-  );
-  el.launchBaseUrl.value = next.value;
-  el.launchBaseUrl.readOnly = next.readOnly;
-  el.launchBaseUrl.title = next.readOnly ? "Canonical URL for the selected managed backend" : "";
-  state.launchBaseUrlRestoreValue = next.restoreValue;
-}
-
-function renderLaunchCredentialControl() {
-  if (!el.launchCredentialMode || !el.launchApiKeyEnv || !el.launchBackend) return;
-  const next = nextLaunchCredentialControl(
-    {
-      mode: el.launchCredentialMode.value,
-      value: el.launchApiKeyEnv.value,
-      locked: el.launchCredentialMode.disabled,
-      restoreMode: state.launchCredentialRestoreMode,
-      restoreValue: state.launchCredentialRestoreValue,
-    },
-    el.launchBackend.value,
-    state.launchConfiguredBackend,
-  );
-  el.launchCredentialMode.value = next.mode;
-  el.launchApiKeyEnv.value = next.value;
-  el.launchCredentialMode.disabled = next.locked;
-  el.launchCredentialMode.title = next.locked
-    ? "Stored credentials are selected automatically for this managed backend"
-    : "";
-  state.launchCredentialRestoreMode = next.restoreMode;
-  state.launchCredentialRestoreValue = next.restoreValue;
-  renderCredentialControls();
-}
-
-function renderCredentialControls() {
-  for (const [modeElement, inputElement] of [
-    [el.launchCredentialMode, el.launchApiKeyEnv],
-    [el.settingsCredentialMode, el.settingsApiKeyEnv],
-  ]) {
-    if (!modeElement || !inputElement) continue;
-    const acceptsVariable = modeElement.value === "variable";
-    inputElement.disabled = !acceptsVariable;
-    inputElement.required = acceptsVariable;
-    inputElement.placeholder = acceptsVariable ? "MY_PROVIDER_API_KEY" : "not used";
-  }
-}
-
-function nullable(value) {
-  const trimmed = String(value || "").trim();
-  return trimmed ? trimmed : null;
-}
-
-function csv(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function shortId(id) {
-  if (!id) return "--";
-  return id.length > 13 ? `${id.slice(0, 8)}:${id.slice(-4)}` : id;
+function effortOptions(selected) {
+  return ["", "low", "medium", "high", "xhigh"].map((value) => `<option value="${value}" ${value === (selected || "") ? "selected" : ""}>${value || "default"}</option>`).join("");
 }
 
 function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
-
-function escapeAttr(value) {
-  return escapeHtml(value);
-}
-
-function safeClassToken(value) {
-  const token = String(value || "");
-  return /^[A-Za-z0-9_-]+$/.test(token) ? token : null;
-}
-
-function formatRuntime(ms) {
-  if (ms == null || ms < 0) return "00:00:00";
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-}
-
-function formatDuration(ms) {
-  if (ms == null) return null;
-  return formatRuntime(ms);
-}
-
-function formatTokens(n) {
-  if (n == null || !Number.isFinite(n)) return "--";
-  if (n < 1000) return String(n);
-  if (n < 10000) return (n / 1000).toFixed(1) + "k";
-  if (n < 1000000) return Math.round(n / 1000) + "k";
-  return (n / 1000000).toFixed(1) + "M";
-}
-
-function startLiveTimer() {
-  if (state.liveTimerInterval) return;
-  state.liveTimerInterval = setInterval(() => {
-    if (state.runStartedAtBySession.size === 0) {
-      stopLiveTimer();
-      return;
-    }
-    const now = Date.now();
-    const selectedId = state.selectedId;
-    if (selectedId) {
-      const startedAt = state.runStartedAtBySession.get(selectedId);
-      if (startedAt) {
-        el.snapRun.textContent = formatRuntime(now - startedAt);
-      }
-    }
-    document.querySelectorAll("[data-run-timer]").forEach((tile) => {
-      const sid = tile.dataset.runTimer;
-      if (!sid) return;
-      const startedAt = state.runStartedAtBySession.get(sid);
-      if (startedAt) {
-        tile.textContent = formatRuntime(now - startedAt);
-      }
-    });
-  }, 200);
-}
-
-function stopLiveTimer() {
-  if (state.liveTimerInterval) {
-    clearInterval(state.liveTimerInterval);
-    state.liveTimerInterval = null;
-  }
-}
+function escapeAttr(value) { return escapeHtml(value); }
+function cssEscape(value) { return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&"); }

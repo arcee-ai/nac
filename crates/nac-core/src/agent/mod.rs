@@ -343,6 +343,7 @@ impl Agent {
         let mut iteration = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
+            self.append_pending_steering_checked().await?;
             iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),
@@ -411,6 +412,9 @@ impl Agent {
             });
 
             if !has_tool_calls {
+                if self.append_pending_steering_checked().await? > 0 {
+                    continue;
+                }
                 let content = response
                     .assistant
                     .content
@@ -494,6 +498,69 @@ impl Agent {
             }
         }
         self.messages = messages;
+    }
+
+    async fn append_pending_steering(&mut self) -> Result<usize> {
+        let Some(session_id) = self.tool_runtime.session_id.clone() else {
+            return Ok(0);
+        };
+        let thread_name = self.thread_name.clone();
+        let steering_target = thread_name
+            .as_deref()
+            .unwrap_or(crate::store::ORCHESTRATOR_STEERING_TARGET)
+            .to_string();
+        let store_path = self.tool_runtime.store_path.clone();
+        let session_id_for_store = session_id.clone();
+        let steering_target_for_store = steering_target.clone();
+        let records = tokio::task::spawn_blocking(move || {
+            crate::store::claim_thread_steering(
+                &store_path,
+                &session_id_for_store,
+                &steering_target_for_store,
+            )
+        })
+        .await
+        .map_err(|error| anyhow!("steering claim task failed: {error}"))??;
+
+        for record in &records {
+            if let Some(thread_name) = &thread_name {
+                self.emit(AgentEvent::ThreadSteeringDelivered {
+                    name: thread_name.clone(),
+                    steering_id: record.id,
+                    instruction_preview: preview(&record.instruction, 160),
+                });
+                self.messages.push(Message::User {
+                    content: format!(
+                        "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
+                        record.instruction
+                    ),
+                });
+            } else {
+                self.emit(AgentEvent::OrchestratorSteeringDelivered {
+                    steering_id: record.id,
+                    instruction_preview: preview(&record.instruction, 160),
+                });
+                self.messages.push(Message::User {
+                    content: record.instruction.clone(),
+                });
+            }
+        }
+        Ok(records.len())
+    }
+
+    async fn append_pending_steering_checked(&mut self) -> Result<usize> {
+        match self.append_pending_steering().await {
+            Ok(count) => Ok(count),
+            Err(error) if crate::store::is_sqlite_busy(&error) => Ok(0),
+            Err(error) => {
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                Err(error)
+            }
+        }
     }
 
     fn emit(&self, event: AgentEvent) {
@@ -703,5 +770,120 @@ Here's the quick summary of what was discovered:\n\n\
 
         assert!(rendered.ends_with("..."));
         assert!(rendered.len() <= 163);
+    }
+
+    #[tokio::test]
+    async fn worker_claims_targeted_steering_into_its_own_conversation() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let store_path = std::env::temp_dir()
+            .join(format!("nac_agent_steering_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut agent = Agent::with_config(
+            ModelClient::new_for_test(),
+            AgentConfig {
+                mode: AgentMode::Worker,
+                store_path: store_path.clone(),
+                session_id: Some("session".to_string()),
+                initial_messages: Vec::new(),
+                thread_name: Some("impl/ui".to_string()),
+                event_sink: EventSink::channel(events_tx),
+                workspace_cwd: PathBuf::from("."),
+                config_cwd: PathBuf::from("."),
+                working_directory: ".".to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh_host: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            },
+        )
+        .unwrap();
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session",
+            "impl/ui",
+            "Keep the picker keyboard accessible.",
+        )
+        .unwrap();
+
+        assert_eq!(agent.append_pending_steering().await.unwrap(), 1);
+        assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
+        assert!(matches!(
+            agent.messages.last(),
+            Some(Message::User { content })
+                if content.contains("Keep the picker keyboard accessible.")
+        ));
+        assert!(matches!(
+            events_rx.try_recv().unwrap(),
+            AgentEvent::ThreadSteeringDelivered { steering_id, .. } if steering_id == queued.id
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_claims_steering_as_an_exact_user_message() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let store_path = std::env::temp_dir()
+            .join(format!("nac_orchestrator_steering_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut agent = Agent::with_config(
+            ModelClient::new_for_test(),
+            AgentConfig {
+                mode: AgentMode::Orchestrator,
+                store_path: store_path.clone(),
+                session_id: Some("session".to_string()),
+                initial_messages: Vec::new(),
+                thread_name: None,
+                event_sink: EventSink::channel(events_tx),
+                workspace_cwd: PathBuf::from("."),
+                config_cwd: PathBuf::from("."),
+                working_directory: ".".to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh_host: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            },
+        )
+        .unwrap();
+        let instruction = "Drop the fun facts and recommend a niche OSS repository.";
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            instruction,
+        )
+        .unwrap();
+
+        assert_eq!(agent.append_pending_steering().await.unwrap(), 1);
+        assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
+        assert!(matches!(
+            agent.messages.last(),
+            Some(Message::User { content }) if content == instruction
+        ));
+        assert!(matches!(
+            events_rx.try_recv().unwrap(),
+            AgentEvent::OrchestratorSteeringDelivered { steering_id, .. }
+                if steering_id == queued.id
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }

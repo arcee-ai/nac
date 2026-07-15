@@ -212,6 +212,18 @@ pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
         params![session_id],
     )?;
     tx.execute(
+        "DELETE FROM thread_steering WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM thread_events WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM session_overviews WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
         "DELETE FROM threads WHERE session_id = ?1",
         params![session_id],
     )?;

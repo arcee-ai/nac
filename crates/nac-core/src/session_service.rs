@@ -17,6 +17,7 @@ pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
+pub use crate::store::SessionOverviewRecord;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::types::Message;
@@ -136,6 +137,12 @@ pub struct SessionFrontendSnapshot {
     pub active_threads: Vec<String>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
+    #[serde(default)]
+    pub thread_events: HashMap<String, Vec<AgentEvent>>,
+    #[serde(default)]
+    pub thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<SessionOverviewRecord>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
@@ -282,6 +289,8 @@ impl SessionClientHandle {
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
+    overview_client: crate::model::ModelClient,
+    overview_generation: Arc<Mutex<()>>,
     metadata: Arc<SessionMetadata>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
@@ -330,7 +339,10 @@ impl SessionService {
             OrchestratorSession::Picker { .. } => None,
         };
 
-        let event_bus = SessionEventBus::new(session_id.clone());
+        let event_bus = SessionEventBus::with_thread_event_store(
+            session_id.clone(),
+            store_path.clone(),
+        );
         let events = event_bus.subscribe();
         run_config
             .agent
@@ -357,6 +369,8 @@ impl SessionService {
         let active_threads = run_config.agent.active_threads_handle();
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
+            overview_client: run_config.client,
+            overview_generation: Arc::new(Mutex::new(())),
             metadata: Arc::new(metadata.clone()),
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
@@ -483,6 +497,68 @@ impl SessionService {
         names
     }
 
+    pub async fn queue_thread_steering(
+        &self,
+        thread_name: &str,
+        instruction: &str,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        if self.active_run().is_none() {
+            return Err(anyhow::anyhow!("session has no active run"));
+        }
+        if !self.active_threads.lock().await.contains(thread_name) {
+            return Err(anyhow::anyhow!(
+                "thread '{thread_name}' is not active in this session"
+            ));
+        }
+        let record = crate::store::queue_thread_steering(
+            &self.metadata.store_path,
+            session_id,
+            thread_name,
+            instruction,
+        )?;
+        self.event_bus.emit_agent(AgentEvent::ThreadSteeringQueued {
+            name: thread_name.to_string(),
+            steering_id: record.id,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        });
+        Ok(record)
+    }
+
+    pub fn queue_orchestrator_steering(
+        &self,
+        instruction: &str,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let active_run = self.lock_active_run();
+        match active_run.as_ref() {
+            Some(run) if !run.finishing => {}
+            Some(_) => return Err(anyhow::anyhow!("session active run is finishing")),
+            None => return Err(anyhow::anyhow!("session has no active run")),
+        }
+        let record = crate::store::queue_thread_steering(
+            &self.metadata.store_path,
+            session_id,
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            instruction,
+        )?;
+        drop(active_run);
+        self.event_bus
+            .emit_agent(AgentEvent::OrchestratorSteeringQueued {
+                steering_id: record.id,
+                instruction_preview: record.instruction.chars().take(160).collect(),
+            });
+        Ok(record)
+    }
+
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
         commands::prepare_user_input(input)
     }
@@ -518,6 +594,30 @@ impl SessionService {
             &self.metadata.store_path,
             self.metadata.session_id.as_deref(),
         )
+    }
+
+    pub fn all_thread_events(&self) -> Result<HashMap<String, Vec<AgentEvent>>> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(HashMap::new());
+        };
+        crate::store::load_all_thread_events(&self.metadata.store_path, session_id, 512)?
+            .into_iter()
+            .map(|(thread_name, records)| {
+                let events = records
+                    .into_iter()
+                    .map(|record| {
+                        serde_json::from_str(&record.event_json).map_err(|error| {
+                            anyhow::anyhow!(
+                                "invalid persisted event {} for thread '{}': {error}",
+                                record.id,
+                                thread_name
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((thread_name, events))
+            })
+            .collect()
     }
 
     pub fn list_worksets(&self) -> Result<Vec<WorksetSummarySnapshot>> {
@@ -574,9 +674,75 @@ impl SessionService {
             active_threads: self.active_thread_names().await,
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
+            thread_events: self.all_thread_events()?,
+            thread_steering: self
+                .metadata
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::list_thread_steering(&self.metadata.store_path, session_id)
+                })
+                .transpose()?
+                .unwrap_or_default(),
+            overview: self
+                .metadata
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::read_session_overview(&self.metadata.store_path, session_id)
+                })
+                .transpose()?
+                .flatten(),
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
         })
+    }
+
+    pub async fn generate_overview(&self) -> Result<SessionOverviewRecord> {
+        let _generation = self.overview_generation.lock().await;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let snapshot = self.frontend_snapshot().await?;
+        let source_updated_at = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.updated_at.clone())
+            .unwrap_or_default();
+        let live_events = self.event_bus.recent_events(None, 1_024);
+        let source = overview_source(&snapshot, &live_events);
+        let response = self
+            .overview_client
+            .send_turn(
+                vec![
+                    Message::System {
+                        content: OVERVIEW_SYSTEM_PROMPT.to_string(),
+                    },
+                    Message::User {
+                        content: format!(
+                            "Generate the session overview from this state snapshot:\n{}",
+                            serde_json::to_string(&source)?
+                        ),
+                    },
+                ],
+                Vec::new(),
+            )
+            .await?;
+        let content = response
+            .assistant
+            .content
+            .ok_or_else(|| anyhow::anyhow!("overview model returned no content"))?;
+        let payload = parse_generated_overview(&content)?;
+        crate::store::write_session_overview(
+            &self.metadata.store_path,
+            session_id,
+            &payload.summary,
+            &self.overview_client.model,
+            &source_updated_at,
+        )
     }
 
     pub fn try_submit_prompt(
@@ -617,6 +783,8 @@ impl SessionService {
             task.abort();
             let _ = task.await;
         }
+
+        self.expire_orchestrator_steering();
 
         // Clear stale active_threads — the aborted task could not run
         // unmark cleanup.  All child processes have been killed by
@@ -810,6 +978,19 @@ impl SessionService {
             }
         }
 
+        if enforce_coordination {
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                crate::store::expire_thread_steering(
+                    &self.metadata.store_path,
+                    session_id,
+                    crate::store::ORCHESTRATOR_STEERING_TARGET,
+                )
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: format!("failed to clear stale orchestrator steering: {error:#}"),
+                })?;
+            }
+        }
+
         let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = SubmittedUserMessageSnapshot {
@@ -852,6 +1033,7 @@ impl SessionService {
         let Some(finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
+        self.expire_orchestrator_steering();
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -895,6 +1077,30 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    fn expire_orchestrator_steering(&self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        match crate::store::expire_thread_steering(
+            &self.metadata.store_path,
+            session_id,
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+        ) {
+            Ok(records) => {
+                for record in records {
+                    self.event_bus
+                        .emit_agent(AgentEvent::OrchestratorSteeringExpired {
+                            steering_id: record.id,
+                            instruction_preview: record.instruction.chars().take(160).collect(),
+                        });
+                }
+            }
+            Err(error) => {
+                eprintln!("nac: failed to expire orchestrator steering: {error:#}");
+            }
+        }
     }
 
     fn mark_run_finishing(&self, run_id: &SessionRunId) -> Option<FinishingRun> {
@@ -1038,6 +1244,314 @@ impl SessionService {
         // token usage from model calls made before the cancel.
         agent.last_usage.clone()
     }
+}
+
+const OVERVIEW_SYSTEM_PROMPT: &str = "You synthesize the current state of a coding orchestration session for an operator dashboard. Use only the supplied snapshot. Give priority to the latest user message, every thread dispatched after that message and its current outcome, and what each active thread is currently assigned to do. Use durable thread records to recover completed work when live dispatch history is unavailable; use worksets and workspace changes only when they clarify the current state. Do not address the user, quote the transcript, narrate your process, invent progress, or use headings or lists. Return exactly one JSON object with this schema: {\"summary\":\"one dense paragraph of two to four sentences\"}. The paragraph must state the current objective, distinguish active work from completed work, and mention a blocker or immediate next step only when supported. Keep it under 700 characters. Output JSON only.";
+
+#[derive(Debug, Deserialize)]
+struct GeneratedOverviewPayload {
+    summary: String,
+}
+
+fn overview_source(
+    snapshot: &SessionFrontendSnapshot,
+    live_events: &[SessionEventEnvelope],
+) -> serde_json::Value {
+    let transcript_user_index = snapshot
+        .messages
+        .iter()
+        .rposition(|message| matches!(message, Message::User { .. }));
+    let submitted_user_message = snapshot
+        .active_run
+        .as_ref()
+        .and_then(|run| run.submitted_user_message.as_ref());
+    let latest_user_message = submitted_user_message
+        .map(|message| compact_overview_text(&message.content, 1_200))
+        .or_else(|| {
+            transcript_user_index.and_then(|index| match &snapshot.messages[index] {
+                Message::User { content } => Some(compact_overview_text(content, 1_200)),
+                _ => None,
+            })
+        });
+    let transcript_dispatch_start = if let Some(submitted) = submitted_user_message {
+        snapshot
+            .messages
+            .iter()
+            .rposition(|message| {
+                matches!(message, Message::User { content } if content == &submitted.content)
+            })
+            .map_or(snapshot.messages.len(), |index| index + 1)
+    } else {
+        transcript_user_index.map_or(0, |index| index + 1)
+    };
+    let latest_run_sequence = live_events
+        .iter()
+        .rev()
+        .find(|envelope| {
+            matches!(
+                &envelope.event,
+                SessionEvent::RunStarted {
+                    submitted_user_message: Some(message),
+                    ..
+                } if latest_user_message.as_deref() == Some(compact_overview_text(&message.content, 1_200).as_str())
+            )
+        })
+        .map(|envelope| envelope.sequence_id);
+    let active_threads = snapshot
+        .active_threads
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let recent_dispatches = thread_dispatches_since_latest_user_message(
+        snapshot,
+        transcript_dispatch_start,
+        &active_threads,
+        live_events,
+        latest_run_sequence,
+    );
+    let active_thread_state = snapshot
+        .active_threads
+        .iter()
+        .map(|name| {
+            let recent_assignment = recent_dispatches
+                .iter()
+                .rev()
+                .find(|dispatch| dispatch.get("name").and_then(serde_json::Value::as_str) == Some(name.as_str()))
+                .and_then(|dispatch| dispatch.get("action"))
+                .cloned();
+            let durable_assignment = snapshot
+                .threads
+                .iter()
+                .find(|thread| thread.name == *name)
+                .and_then(|thread| thread.latest_action.as_deref())
+                .map(|action| serde_json::Value::String(compact_overview_text(action, 700)));
+            let latest_steering = snapshot
+                .thread_steering
+                .iter()
+                .rev()
+                .find(|record| record.thread_name == *name)
+                .map(|record| serde_json::json!({
+                    "status": record.status,
+                    "instruction": compact_overview_text(&record.instruction, 400),
+                }));
+            serde_json::json!({
+                "name": name,
+                "current_assignment": recent_assignment.or(durable_assignment),
+                "latest_steering": latest_steering,
+            })
+        })
+        .collect::<Vec<_>>();
+    let durable_threads = snapshot
+        .threads
+        .iter()
+        .map(|thread| {
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(&thread.name)
+                .and_then(|episodes| episodes.last());
+            serde_json::json!({
+                "name": thread.name,
+                "state": if active_threads.contains(thread.name.as_str()) { "active" } else if latest_episode.is_some() { "finished" } else { "known" },
+                "latest_action": thread.latest_action,
+                "latest_result": latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let worksets = snapshot
+        .worksets
+        .items
+        .iter()
+        .take(4)
+        .map(|workset| {
+            serde_json::json!({
+                "id": workset.id,
+                "goal": compact_overview_text(&workset.goal, 500),
+                "status": workset.status,
+                "summary": compact_overview_text(&workset.summary, 600),
+                "items": workset.items.iter().take(12).map(|item| serde_json::json!({
+                    "title": item.title,
+                    "role": item.role,
+                    "acceptance": compact_overview_text(&item.acceptance, 300),
+                    "notes": item.notes.as_deref().map(|notes| compact_overview_text(notes, 300)),
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let steering = snapshot
+        .thread_steering
+        .iter()
+        .rev()
+        .take(20)
+        .map(|record| {
+            serde_json::json!({
+                "thread": if record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET {
+                    "orchestrator"
+                } else {
+                    record.thread_name.as_str()
+                },
+                "status": record.status,
+                "instruction": compact_overview_text(&record.instruction, 400),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "session": {
+            "id": snapshot.metadata.session_id,
+            "model": snapshot.metadata.model,
+            "workspace": snapshot.metadata.cwd,
+            "run_active": snapshot.active_run.is_some(),
+        },
+        "latest_user_message": latest_user_message,
+        "thread_dispatches_since_latest_user_message": recent_dispatches,
+        "active_threads": active_thread_state,
+        "durable_threads": durable_threads,
+        "steering": steering,
+        "worksets": worksets,
+        "workspace": {
+            "branch": snapshot.workspace.branch,
+            "changed_files": snapshot.workspace.changed_files.iter().take(40).map(|file| serde_json::json!({
+                "status": file.status,
+                "path": file.path,
+                "additions": file.additions,
+                "deletions": file.deletions,
+            })).collect::<Vec<_>>(),
+            "total_additions": snapshot.workspace.total_additions,
+            "total_deletions": snapshot.workspace.total_deletions,
+        },
+    })
+}
+
+fn thread_dispatches_since_latest_user_message(
+    snapshot: &SessionFrontendSnapshot,
+    start_index: usize,
+    active_threads: &HashSet<&str>,
+    live_events: &[SessionEventEnvelope],
+    latest_run_sequence: Option<u64>,
+) -> Vec<serde_json::Value> {
+    let messages = snapshot.messages.get(start_index..).unwrap_or_default();
+    let tool_results = messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool {
+                tool_call_id,
+                content,
+            } => Some((tool_call_id.as_str(), content.as_str())),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut dispatches = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages {
+        let Message::Assistant {
+            tool_calls: Some(tool_calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for call in tool_calls {
+            if call.function.name != "thread" {
+                continue;
+            }
+            let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+            else {
+                continue;
+            };
+            let Some(name) = arguments.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let action = arguments
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .map(|value| compact_overview_text(value, 900));
+            seen.insert((name.to_string(), action.clone().unwrap_or_default()));
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(name)
+                .and_then(|episodes| episodes.last());
+            let is_active = active_threads.contains(name);
+            dispatches.push(serde_json::json!({
+                "name": name,
+                "action": action,
+                "source_threads": arguments.get("threads").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "state": if is_active { "active" } else if latest_episode.is_some() { "finished" } else { "dispatched" },
+                "result": if is_active { None } else { latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)) },
+                "dispatch_response": tool_results.get(call.id.as_str()).map(|content| compact_overview_text(content, 500)),
+            }));
+        }
+    }
+    if let Some(run_sequence) = latest_run_sequence {
+        for envelope in live_events
+            .iter()
+            .filter(|envelope| envelope.sequence_id > run_sequence)
+        {
+            let SessionEvent::Agent {
+                event:
+                    AgentEvent::ThreadStarted {
+                        name,
+                        action,
+                        source_threads,
+                    },
+            } = &envelope.event
+            else {
+                continue;
+            };
+            let action = compact_overview_text(action, 900);
+            if !seen.insert((name.clone(), action.clone())) {
+                continue;
+            }
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(name)
+                .and_then(|episodes| episodes.last());
+            let is_active = active_threads.contains(name.as_str());
+            dispatches.push(serde_json::json!({
+                "name": name,
+                "action": action,
+                "source_threads": source_threads,
+                "state": if is_active { "active" } else if latest_episode.is_some() { "finished" } else { "dispatched" },
+                "result": if is_active { None } else { latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)) },
+            }));
+        }
+    }
+    dispatches
+}
+
+fn parse_generated_overview(content: &str) -> Result<GeneratedOverviewPayload> {
+    let start = content.find('{').ok_or_else(|| {
+        anyhow::anyhow!("overview model returned invalid JSON: object start is missing")
+    })?;
+    let end = content.rfind('}').ok_or_else(|| {
+        anyhow::anyhow!("overview model returned invalid JSON: object end is missing")
+    })?;
+    if end < start {
+        return Err(anyhow::anyhow!(
+            "overview model returned invalid JSON: malformed object"
+        ));
+    }
+    let mut payload: GeneratedOverviewPayload = serde_json::from_str(&content[start..=end])
+        .map_err(|error| anyhow::anyhow!("overview model returned invalid JSON: {error}"))?;
+    payload.summary = compact_overview_text(&payload.summary, 700);
+    if payload.summary.is_empty() {
+        return Err(anyhow::anyhow!("overview model returned an empty summary"));
+    }
+    Ok(payload)
+}
+
+fn compact_overview_text(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= max_chars {
+        return compact;
+    }
+    let mut truncated = compact
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
 }
 
 fn count_user_messages(messages: &[Message]) -> usize {
@@ -1212,7 +1726,158 @@ mod tests {
     use super::*;
     use crate::agent::{AgentConfig, AgentMode};
     use crate::model::ModelClient;
+    use crate::types::{FunctionCall, ToolCall};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn generated_overview_parser_accepts_fenced_json_and_enforces_limit() {
+        let payload = parse_generated_overview(
+            "```json\n{\"summary\":\"  UI   implementation is active. \"}\n```",
+        )
+        .unwrap();
+
+        assert_eq!(payload.summary, "UI implementation is active.");
+    }
+
+    #[test]
+    fn overview_source_prioritizes_latest_user_dispatches_and_active_assignments() {
+        let mut snapshot = SessionFrontendSnapshot {
+            metadata: SessionMetadata {
+                cwd: "/repo".to_string(),
+                workspace_host_path: Some(PathBuf::from("/repo")),
+                store_path: PathBuf::from("/tmp/store.db"),
+                model: "test-model".to_string(),
+                backend: "test".to_string(),
+                session_id: Some("session-a".to_string()),
+                sandbox_status: "off".to_string(),
+                agents_md_status: "off".to_string(),
+                base_url: String::new(),
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: BTreeMap::new(),
+            },
+            messages: vec![
+                Message::User {
+                    content: "older request".to_string(),
+                },
+                Message::User {
+                    content: "revamp the thread board".to_string(),
+                },
+                Message::Assistant {
+                    content: None,
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: Some(vec![ToolCall {
+                        id: "call-ui".to_string(),
+                        call_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: "thread".to_string(),
+                            arguments: r#"{"name":"ui","action":"Build the two-column board","threads":[]}"#.to_string(),
+                        },
+                    }]),
+                },
+                Message::Tool {
+                    tool_call_id: "call-ui".to_string(),
+                    content: "worker is still running".to_string(),
+                },
+            ],
+            response_timing: ResponseTimingSnapshot::default(),
+            active_run: None,
+            sessions: Vec::new(),
+            active_threads: vec!["ui".to_string()],
+            threads: vec![ThreadSnapshot {
+                name: "ui".to_string(),
+                session_id: "session-a".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                episode_count: 0,
+                latest_action: None,
+            }],
+            thread_episodes: HashMap::new(),
+            thread_events: HashMap::new(),
+            thread_steering: Vec::new(),
+            overview: None,
+            worksets: WorksetsSnapshot::default(),
+            workspace: WorkspaceSnapshot {
+                host_root: Some(PathBuf::from("/repo")),
+                workspace_display: "/repo".to_string(),
+                repo_label: None,
+                branch: Some("ui".to_string()),
+                changed_files: Vec::new(),
+                total_additions: 0,
+                total_deletions: 0,
+                error: None,
+            },
+        };
+
+        let source = overview_source(&snapshot, &[]);
+        assert_eq!(source["latest_user_message"], "revamp the thread board");
+        assert_eq!(
+            source["thread_dispatches_since_latest_user_message"][0]["action"],
+            "Build the two-column board"
+        );
+        assert_eq!(
+            source["thread_dispatches_since_latest_user_message"][0]["state"],
+            "active"
+        );
+        assert_eq!(
+            source["active_threads"][0]["current_assignment"],
+            "Build the two-column board"
+        );
+
+        let run_id = SessionRunId::new();
+        let submitted = SubmittedUserMessageSnapshot {
+            run_id: run_id.clone(),
+            client_id: None,
+            content: "show live thread work".to_string(),
+            baseline_user_message_count: Some(2),
+            submitted_at_epoch_ms: 1,
+        };
+        snapshot.messages.truncate(1);
+        snapshot.active_run = Some(ActiveRunSnapshot {
+            run_id: run_id.clone(),
+            client_id: None,
+            prompt_preview: "show live thread work".to_string(),
+            submitted_user_message: Some(submitted.clone()),
+            started_at_epoch_ms: 1,
+        });
+        let live_events = vec![
+            SessionEventEnvelope {
+                session_id: Some("session-a".to_string()),
+                sequence_id: 1,
+                client_id: None,
+                run_id: Some(run_id.clone()),
+                event: SessionEvent::RunStarted {
+                    prompt_preview: "show live thread work".to_string(),
+                    submitted_user_message: Some(submitted),
+                    started_at_epoch_ms: 1,
+                },
+            },
+            SessionEventEnvelope {
+                session_id: Some("session-a".to_string()),
+                sequence_id: 2,
+                client_id: None,
+                run_id: Some(run_id),
+                event: SessionEvent::Agent {
+                    event: AgentEvent::ThreadStarted {
+                        name: "ui".to_string(),
+                        action: "Inspect the live board".to_string(),
+                        source_threads: Vec::new(),
+                    },
+                },
+            },
+        ];
+        let live_source = overview_source(&snapshot, &live_events);
+        assert_eq!(live_source["latest_user_message"], "show live thread work");
+        assert_eq!(
+            live_source["thread_dispatches_since_latest_user_message"][0]["action"],
+            "Inspect the live board"
+        );
+        assert_eq!(
+            live_source["active_threads"][0]["current_assignment"],
+            "Inspect the live board"
+        );
+    }
 
     fn test_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
@@ -1305,6 +1970,38 @@ mod tests {
         (parts, store_path)
     }
 
+    #[tokio::test]
+    async fn frontend_snapshot_restores_persisted_thread_activity() {
+        let (parts, store_path) = test_active_service("thread_activity", "activity-session");
+        parts.service.event_bus.emit_agent(AgentEvent::ThreadStarted {
+            name: "impl/ui".to_string(),
+            action: "Build the interface".to_string(),
+            source_threads: Vec::new(),
+        });
+        parts.service.event_bus.emit_agent(AgentEvent::ToolCallStarted {
+            thread_name: Some("impl/ui".to_string()),
+            call_id: "call-1".to_string(),
+            name: "read".to_string(),
+            args_preview: r#"{"path":"index.html"}"#.to_string(),
+            args_detail: None,
+        });
+        parts.service.event_bus.emit_agent(AgentEvent::ToolCallFinished {
+            thread_name: Some("impl/ui".to_string()),
+            call_id: "call-1".to_string(),
+            name: "read".to_string(),
+            content_preview: "done".to_string(),
+            is_error: false,
+        });
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        let events = &snapshot.thread_events["impl/ui"];
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], AgentEvent::ThreadStarted { .. }));
+        assert!(matches!(events[2], AgentEvent::ToolCallFinished { .. }));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
     #[test]
     fn public_submission_rejects_external_process_lease() {
         let (parts, store_path) = test_active_service("external_lease", "leased-session");
@@ -1315,6 +2012,93 @@ mod tests {
         ));
         assert!(parts.service.active_run().is_none());
         drop(_lease);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn steering_requires_an_active_run_and_active_target_thread() {
+        let (parts, store_path) = test_active_service("steering", "session-steering");
+        let service = parts.service;
+        let no_run = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap_err();
+        assert!(no_run.to_string().contains("no active run"));
+
+        *service
+            .active_run
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ActiveRunState {
+            snapshot: ActiveRunSnapshot {
+                run_id: SessionRunId::new(),
+                client_id: None,
+                prompt_preview: "revamp the UI".to_string(),
+                submitted_user_message: None,
+                started_at_epoch_ms: 0,
+            },
+            started_at: Instant::now(),
+            finishing: false,
+            task: None,
+            _run_lease: None,
+        });
+        let inactive = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap_err();
+        assert!(inactive.to_string().contains("not active"));
+
+        service
+            .active_threads
+            .lock()
+            .await
+            .insert("impl/ui".to_string());
+        let queued = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap();
+        assert_eq!(queued.status, "queued");
+        assert_eq!(
+            crate::store::list_thread_steering(&store_path, "session-steering").unwrap(),
+            vec![queued]
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_steering_requires_an_active_run_and_expires_at_run_end() {
+        let (parts, store_path) =
+            test_active_service("orchestrator_steering", "session-orchestrator-steering");
+        let service = parts.service;
+        let no_run = service
+            .queue_orchestrator_steering("change direction")
+            .unwrap_err();
+        assert!(no_run.to_string().contains("no active run"));
+
+        let active = service.try_begin_run(None, "initial direction").unwrap();
+        let queued = service
+            .queue_orchestrator_steering("change direction")
+            .unwrap();
+        assert_eq!(
+            queued.thread_name,
+            crate::store::ORCHESTRATOR_STEERING_TARGET
+        );
+        assert_eq!(queued.status, "queued");
+
+        assert!(
+            service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
+                .await
+        );
+        let steering =
+            crate::store::list_thread_steering(&store_path, "session-orchestrator-steering")
+                .unwrap();
+        assert_eq!(steering.len(), 1);
+        assert_eq!(steering[0].status, "expired");
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

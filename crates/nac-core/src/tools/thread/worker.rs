@@ -86,7 +86,14 @@ impl WorkerTimeoutTrace {
                 self.location = TimeoutLocation::Finalizing;
                 self.active_tool_calls.clear();
             }
-            AgentEvent::Error { .. } | AgentEvent::ThreadLog { .. } => {}
+            AgentEvent::Error { .. }
+            | AgentEvent::ThreadLog { .. }
+            | AgentEvent::ThreadSteeringQueued { .. }
+            | AgentEvent::ThreadSteeringDelivered { .. }
+            | AgentEvent::ThreadSteeringExpired { .. }
+            | AgentEvent::OrchestratorSteeringQueued { .. }
+            | AgentEvent::OrchestratorSteeringDelivered { .. }
+            | AgentEvent::OrchestratorSteeringExpired { .. } => {}
             AgentEvent::ThreadStarted { .. } | AgentEvent::ThreadFinished { .. } => {}
         }
     }

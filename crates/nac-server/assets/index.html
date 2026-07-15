@@ -3,426 +3,163 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>nac sessions</title>
-    <link rel="stylesheet" href="/assets/app.css" />
+    <meta name="color-scheme" content="dark" />
+    <title>nac</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=composer-alignment" />
   </head>
   <body>
-    <div id="appShell" class="app-shell">
-      <main id="sessionBoard" class="board">
-        <header class="top-strip">
-          <div class="nac-wordmark">NAC</div>
-          <strong id="storePath" class="store-path" title="Store path pending">store path pending</strong>
+    <div id="app" class="app-frame">
+      <section id="sessionPicker" class="picker-surface" aria-labelledby="pickerTitle">
+        <header class="picker-bar">
+          <div class="brand-lockup">
+            <span class="wordmark">NAC</span>
+          </div>
+          <span id="pickerNavStatus" class="nav-status picker-nav-status" role="status" aria-live="polite" hidden></span>
         </header>
+        <p id="reorderInstructions" class="sr-only">Use a session move handle with the arrow, Home, or End keys to reorder it.</p>
+        <div id="reorderLive" class="sr-only" aria-live="polite"></div>
+        <main class="session-browser">
+          <div class="session-list-heading">
+            <div class="session-list-title">
+              <h1 id="pickerTitle">All sessions</h1>
+              <span id="pickerSessionTotal">0</span>
+            </div>
+            <button id="newSessionBtn" class="picker-new-session icon-button" type="button" aria-label="New session" title="New session">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
+          </div>
+          <div id="sessionGrid" class="session-groups" aria-label="Session list"></div>
+        </main>
+      </section>
 
-        <p id="reorderInstructions" class="visually-hidden">
-          To reorder a session, focus its move handle and press Enter or Space. Use the arrow keys, Home, or End to choose a position, then press Enter or Space to save. Press Escape to cancel.
-        </p>
-        <div id="reorderLiveRegion" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
-        <section id="sessionGrid" class="session-grid" aria-label="Sessions"></section>
-      </main>
-
-      <div id="paneSplitter" class="pane-splitter">
-        <div
-          id="paneSeparator"
-          class="pane-separator"
-          role="separator"
-          aria-label="Resize session matrix"
-          aria-orientation="vertical"
-          aria-controls="sessionBoard sessionInspector"
-          aria-valuemin="30"
-          aria-valuemax="70"
-          aria-valuenow="50"
-          tabindex="0"
-        >
-          <span class="splitter-grip" aria-hidden="true"></span>
-        </div>
-      </div>
-
-      <aside id="sessionInspector" class="inspector">
-        <header class="inspector-head">
-          <button id="mobileBack" class="mobile-back" type="button" aria-label="Back to sessions" title="Back to sessions">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m15 18-6-6 6-6"></path>
-            </svg>
-            <span>Sessions</span>
+      <section id="sessionWorkspace" class="workspace-surface" hidden aria-labelledby="sessionTitle">
+        <header class="session-bar">
+          <button id="backToSessions" class="icon-button session-grid-button" type="button" aria-label="Back to all sessions" title="All sessions">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg>
           </button>
-          <div>
-            <div class="eyebrow">Inspector</div>
-            <h1 id="inspectorTitle">No session selected</h1>
-            <p id="inspectorMeta">Launch or select a session.</p>
+          <div class="session-identity">
+            <button id="renameSession" class="session-title-button" type="button" title="Rename session"><span id="sessionTitle">Session</span></button>
+            <span id="sessionLocation" class="session-location"></span>
           </div>
-          <div class="inspector-actions">
-            <button id="deleteSessionBtn" class="icon-button" type="button" aria-label="Delete session" title="Delete session">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-            <button id="renameSessionBtn" class="icon-button" type="button" aria-label="Rename session" title="Rename session" disabled>
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path>
-              </svg>
-            </button>
-            <button id="fullscreenBtn" class="icon-button" type="button" aria-label="Enter full screen" title="Enter full screen" aria-pressed="false" disabled>
-              <svg id="fullscreenEnterIcon" class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M8 3H3v5"></path>
-                <path d="M16 3h5v5"></path>
-                <path d="M8 21H3v-5"></path>
-                <path d="M16 21h5v-5"></path>
-              </svg>
-              <svg id="fullscreenExitIcon" class="icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-                <path d="M3 8h5V3"></path>
-                <path d="M21 8h-5V3"></path>
-                <path d="M3 16h5v5"></path>
-                <path d="M21 16h-5v5"></path>
-              </svg>
-            </button>
-            <button id="settingsBtn" class="icon-button" type="button" aria-label="Session settings" title="Session settings">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-            <button id="cancelRun" class="icon-button icon-button-destructive" type="button" aria-label="Stop active run" title="Stop active run">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
-              </svg>
-            </button>
-          </div>
+          <dl class="session-metrics" aria-label="Session metrics">
+            <div><dt>Model</dt><dd id="metricModel">—</dd></div>
+            <div><dt>Context</dt><dd id="metricContext">—</dd></div>
+            <div><dt>Tokens</dt><dd id="metricTokens">—</dd></div>
+            <div><dt>Changes</dt><dd id="metricChanges">—</dd></div>
+          </dl>
+          <span id="sessionNavStatus" class="nav-status session-nav-status" role="status" aria-live="polite" hidden></span>
+          <button id="stopRun" class="icon-button danger-button" type="button" aria-label="Stop active run" title="Stop active run" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
+          </button>
         </header>
 
-        <nav class="tabs" id="tabs">
-          <button class="active" data-tab="chat" type="button">Chat</button>
-          <button data-tab="events" type="button">Events</button>
-          <button data-tab="threads" type="button">Threads</button>
-          <button data-tab="worksets" type="button">Worksets</button>
-          <button data-tab="workspace" type="button">Workspace</button>
-        </nav>
+        <div id="sessionLayout" class="session-layout">
+          <aside class="overview-rail" aria-label="Session overview">
+            <section class="rail-section overview-section">
+              <div class="section-heading">
+                <h2>Overview</h2>
+                <button id="refreshSession" class="overview-refresh" type="button" aria-label="Generate overview" title="Generate overview">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"></path><path d="M20 5v6h-6"></path></svg>
+                </button>
+              </div>
+              <div id="generatedOverview" class="generated-overview is-empty">Not generated.</div>
+            </section>
+            <section class="rail-section orchestrator-section" aria-labelledby="orchestratorTitle">
+              <div class="section-heading">
+                <h2 id="orchestratorTitle">Orchestrator</h2>
+                <div class="section-actions">
+                  <span id="orchestratorState" class="orchestrator-state">Idle</span>
+                  <button id="expandOrchestrator" class="expand-button" type="button" aria-label="Open orchestrator conversation" title="Open orchestrator conversation">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <ol id="orchestratorLedger" class="action-ledger orchestrator-ledger" aria-live="polite"></ol>
+            </section>
+          </aside>
 
-        <section class="summary-grid">
-          <div><span>Model</span><strong id="snapModel">--</strong></div>
-          <div><span>Backend</span><strong id="snapBackend">--</strong></div>
-          <div><span>Msgs</span><strong id="snapMessages">0</strong></div>
-          <div><span>Run</span><strong id="snapRun">idle</strong></div>
-          <div><span>Tokens</span><strong id="snapTokens">--</strong></div>
-          <div><span>Orch Context</span><strong id="snapContext">--</strong></div>
-        </section>
+          <section id="focusPanel" class="focus-panel" aria-labelledby="focusTitle" hidden>
+            <header class="focus-header">
+              <div class="focus-identity">
+                <h2 id="focusTitle">Detail</h2>
+                <span id="focusState" class="focus-state"></span>
+              </div>
+              <button id="closeFocusPanel" class="expand-button" type="button" aria-label="Close fullscreen view" title="Close fullscreen view">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"></path></svg>
+              </button>
+            </header>
+            <div id="focusContent" class="focus-content" aria-live="polite"></div>
+          </section>
 
-        <div class="tab-panel active" id="tab-chat">
-          <div id="transcript" class="transcript"></div>
-          <form id="promptForm" class="prompt-form">
-            <textarea id="promptInput" rows="5" spellcheck="false"></textarea>
-            <button class="icon-button prompt-submit" type="submit" aria-label="Send message" title="Send message">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 12h12"></path>
-                <path d="m13 6 6 6-6 6"></path>
-              </svg>
+          <main class="thread-canvas" aria-label="Threads">
+            <div id="threadGrid" class="thread-board" aria-live="polite"></div>
+          </main>
+
+          <form id="commandComposer" class="composer">
+            <div id="composerTarget" class="composer-target" hidden>
+              <span>Thread</span><strong id="composerTargetName"></strong>
+              <button id="clearTarget" type="button" aria-label="Clear thread target">×</button>
+            </div>
+            <textarea id="promptInput" rows="1" spellcheck="false" placeholder="Message the orchestrator · / for commands" aria-label="Message the orchestrator"></textarea>
+            <button id="sendPrompt" class="composer-send" type="submit" aria-label="Send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg>
             </button>
+            <div id="commandMenu" class="command-menu" hidden></div>
           </form>
         </div>
-
-        <div class="tab-panel" id="tab-events">
-          <div class="events-toolbar">
-            <span class="events-toolbar-label">Events by thread</span>
-            <div id="eventStreamStatus" class="events-stream-status" role="status" aria-live="polite">Connecting</div>
-          </div>
-          <div id="eventLog" class="event-log event-streams" aria-label="Events by thread"></div>
-        </div>
-
-        <div class="tab-panel" id="tab-threads">
-          <div id="threadsView" class="threads-view" aria-label="Thread lifecycle"></div>
-        </div>
-
-        <div class="tab-panel" id="tab-worksets">
-          <div id="worksetsView" class="dense-list"></div>
-        </div>
-
-        <div class="tab-panel" id="tab-workspace">
-          <div id="workspaceView" class="dense-list"></div>
-        </div>
-      </aside>
-    </div>
-
-    <div class="launch-overlay" id="renameOverlay" hidden>
-      <section class="launch-dialog launch-dialog--compact" role="dialog" aria-modal="true" aria-labelledby="renameDialogTitle" aria-describedby="renameTitleHelp">
-        <header class="launch-dialog-head">
-          <div>
-            <div class="eyebrow" id="renameDialogTitle">Rename session</div>
-          </div>
-          <button id="closeRename" class="icon-button" type="button" aria-label="Close rename dialog" title="Close">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-          </button>
-        </header>
-        <form id="renameForm" class="launch-form">
-          <label for="renameTitleInput">
-            <span>Session title</span>
-            <input id="renameTitleInput" name="title" autocomplete="off" aria-describedby="renameTitleHelp" />
-          </label>
-          <p id="renameTitleHelp" class="form-help">Leave empty to use the session ID. Maximum 120 characters.</p>
-          <div class="launch-actions">
-            <button id="confirmRename" class="primary-action icon-button launch-submit" type="submit" aria-label="Save session title" title="Save session title">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m5 12 4 4L19 6"></path>
-              </svg>
-            </button>
-            <div class="form-status" id="renameStatus" role="status" aria-live="polite"></div>
-          </div>
-        </form>
       </section>
     </div>
 
-    <div class="launch-overlay" id="launchOverlay" hidden>
-      <section class="launch-dialog" role="dialog" aria-modal="true" aria-label="Launch session">
-        <header class="launch-dialog-head">
-          <div>
-            <div class="eyebrow">Launch</div>
-          </div>
-          <button id="closeLaunch" class="icon-button" type="button" aria-label="Close launch dialog" title="Close">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-          </button>
-        </header>
+    <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="utilityDrawer" class="utility-drawer" hidden aria-modal="true" role="dialog" aria-labelledby="drawerTitle">
+      <header class="drawer-header">
+        <h2 id="drawerTitle">Details</h2>
+        <button id="closeDrawer" class="icon-button" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+        </button>
+      </header>
+      <div id="drawerContent" class="drawer-content"></div>
+    </aside>
 
-        <form id="launchForm" class="launch-form">
-          <label>
-            <span>SSH host (optional)</span>
-            <input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="build-box or user@host" />
-          </label>
-          <label id="launchCwdField">
-            <span>CWD</span>
-            <input id="launchCwd" name="cwd" autocomplete="off" placeholder="local path or remote cwd (default ~)" />
-          </label>
-          <div class="form-grid two">
-            <label>
-              <span>Backend</span>
-              <select id="launchBackend" name="backend">
-                <option value="">inherit config</option>
-                <option value="openai-responses">openai-responses</option>
-                <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
-                <option value="anthropic-messages">anthropic-messages</option>
-                <option value="deepseek-chat">deepseek-chat</option>
-                <option value="fireworks-chat">fireworks-chat</option>
-                <option value="together-chat">together-chat</option>
-                <option value="arcee-auth">arcee-auth</option>
-                <option value="arcee-api">arcee-api</option>
-              </select>
-            </label>
-            <label>
-              <span>Effort</span>
-              <select id="launchEffort" name="reasoning_effort">
-                <option value="">inherit config</option>
-                <option value="__clear__">clear configured effort</option>
-                <option value="none">none</option>
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-              </select>
-            </label>
+    <dialog id="launchDialog" class="modal">
+      <form id="launchForm" method="dialog" class="modal-form">
+        <header class="modal-header"><h2>new session</h2><button class="icon-button" type="button" data-close-dialog="launchDialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></header>
+        <fieldset id="launchExecutionModes" class="execution-modes">
+          <legend>execution</legend>
+          <label><input type="radio" name="execution_mode" value="local" checked><span>local</span></label>
+          <label><input type="radio" name="execution_mode" value="ssh"><span>ssh</span></label>
+          <label><input type="radio" name="execution_mode" value="sandbox"><span>sandbox</span></label>
+        </fieldset>
+        <div class="field-grid">
+          <label class="field span-two"><span>working directory</span><input id="launchCwd" name="cwd" autocomplete="off" placeholder="/path/to/repository"></label>
+          <label id="launchSshField" class="field span-two" hidden><span>ssh host</span><input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="user@host"></label>
+          <label class="field"><span>backend</span><select id="launchBackend" name="backend">
+            <option value="">from config</option><option value="openai-responses">openai-responses</option><option value="chatgpt-codex-responses">chatgpt-codex-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="deepseek-chat">deepseek-chat</option><option value="fireworks-chat">fireworks-chat</option><option value="together-chat">together-chat</option><option value="arcee-auth">arcee-auth</option><option value="arcee-api">arcee-api</option>
+          </select></label>
+          <label class="field"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="">from config</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
+          <label class="field"><span>model</span><input id="launchModel" name="model" autocomplete="off" placeholder="from config"></label>
+          <label class="field"><span>base url</span><input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="from config"></label>
+          <label class="field"><span>api key environment variable</span><input id="launchApiKeyEnv" name="api_key_env" autocomplete="off" placeholder="from config"></label>
+          <label class="field"><span>extra headers</span><input id="launchExtraHeaders" name="extra_headers" autocomplete="off" placeholder='{"X-Header":"value"}'></label>
+          <div id="sandboxFields" class="field-grid nested-grid span-two" hidden>
+            <label class="field"><span>image</span><input id="sandboxImage" autocomplete="off" placeholder="default image"></label>
+            <label class="field"><span>gpu</span><input id="sandboxGpu" autocomplete="off" placeholder="none"></label>
+            <label class="field"><span>container working directory</span><input id="sandboxWorkdir" autocomplete="off" placeholder="default"></label>
+            <label class="field"><span>shared memory</span><input id="sandboxShm" autocomplete="off" placeholder="e.g. 2g"></label>
+            <label class="field span-two"><span>mounts</span><input id="sandboxMounts" autocomplete="off" placeholder="host:container, host:container"></label>
+            <label class="checkbox-field span-two"><input id="sandboxNoMount" type="checkbox"><span>do not mount the current working directory</span></label>
           </div>
-          <div class="form-grid two">
-            <label>
-              <span>Model</span>
-              <input id="launchModel" name="model" autocomplete="off" placeholder="inherit config" />
-            </label>
-            <label>
-              <span>Base URL</span>
-              <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="inherit config" />
-            </label>
-          </div>
-          <div class="form-grid two">
-            <label>
-              <span>Credential selector</span>
-              <select id="launchCredentialMode">
-                <option value="inherit">inherit config</option>
-                <option value="none">no API key environment variable</option>
-                <option value="variable">environment variable</option>
-              </select>
-            </label>
-            <label>
-              <span>API key environment variable</span>
-              <input id="launchApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
-            </label>
-          </div>
-          <label>
-            <span>Extra Headers (JSON object)</span>
-            <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='blank inherits config; {} selects no extra headers'></textarea>
-          </label>
-          <p class="form-help">Blank inherits configured headers. Enter <code>{}</code> to explicitly select no extra headers.</p>
-          <div id="sandboxFields" class="launch-form">
-            <div class="toggle-row">
-              <label class="toggle">
-                <input id="sandboxEnabled" type="checkbox" />
-                <span>Sandbox</span>
-              </label>
-              <label class="toggle">
-                <input id="sandboxNoMount" type="checkbox" />
-                <span>No CWD mount</span>
-              </label>
-            </div>
-            <div class="form-grid two">
-              <label>
-                <span>Image</span>
-                <input id="sandboxImage" autocomplete="off" placeholder="python:3.13-bookworm" />
-              </label>
-              <label>
-                <span>GPU</span>
-                <input id="sandboxGpu" autocomplete="off" placeholder="all" />
-              </label>
-            </div>
-            <div class="form-grid two">
-              <label>
-                <span>Workdir</span>
-                <input id="sandboxWorkdir" autocomplete="off" placeholder="/workspace" />
-              </label>
-              <label>
-                <span>shm</span>
-                <input id="sandboxShm" autocomplete="off" placeholder="0" />
-              </label>
-            </div>
-            <label>
-              <span>Mounts</span>
-              <input id="sandboxMounts" autocomplete="off" placeholder="HOST:GUEST, ..." />
-            </label>
-          </div>
-          <label>
-            <span>Initial prompt</span>
-            <textarea id="initialPrompt" rows="4" spellcheck="false"></textarea>
-          </label>
-          <div class="launch-actions">
-            <button class="primary-action icon-button launch-submit" type="submit" aria-label="Launch session" title="Launch session">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 12h12"></path>
-                <path d="m13 6 6 6-6 6"></path>
-              </svg>
-            </button>
-            <div class="form-status" id="launchStatus"></div>
-          </div>
-        </form>
-      </section>
-    </div>
-
-    <div class="launch-overlay" id="deleteOverlay" hidden>
-      <section class="launch-dialog launch-dialog--compact" role="dialog" aria-modal="true" aria-label="Delete session">
-        <header class="launch-dialog-head">
-          <div>
-            <div class="eyebrow">Delete</div>
-          </div>
-          <button id="closeDelete" class="icon-button" type="button" aria-label="Close delete dialog" title="Close">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-          </button>
-        </header>
-        <div class="launch-form">
-          <p id="deleteConfirmText" class="confirm-text">Delete this session? This permanently removes all threads, episodes, and worksets.</p>
-          <div class="launch-actions">
-            <button class="primary-action icon-button icon-button-destructive launch-submit" id="confirmDelete" type="button" aria-label="Confirm delete" title="Confirm delete">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-            <div class="form-status" id="deleteStatus"></div>
-          </div>
+          <label class="field span-two"><span>initial prompt</span><textarea id="initialPrompt" rows="3" placeholder="optional"></textarea></label>
         </div>
-      </section>
-    </div>
+        <footer class="modal-actions"><div id="launchStatus" class="form-status" role="status"></div><button class="button button-primary" type="submit">create session</button></footer>
+      </form>
+    </dialog>
 
-    <div class="launch-overlay" id="settingsOverlay" hidden>
-      <section class="launch-dialog" role="dialog" aria-modal="true" aria-label="Session settings">
-        <header class="launch-dialog-head">
-          <div>
-            <div class="eyebrow">Settings</div>
-          </div>
-          <button id="closeSettings" class="icon-button" type="button" aria-label="Close settings dialog" title="Close">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-          </button>
-        </header>
-        <form id="settingsForm" class="launch-form">
-          <div class="form-grid two">
-            <label>
-              <span>Backend</span>
-              <select id="settingsBackend">
-                <option value="openai-responses">openai-responses</option>
-                <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
-                <option value="anthropic-messages">anthropic-messages</option>
-                <option value="deepseek-chat">deepseek-chat</option>
-                <option value="fireworks-chat">fireworks-chat</option>
-                <option value="together-chat">together-chat</option>
-                <option value="arcee-auth">arcee-auth</option>
-                <option value="arcee-api">arcee-api</option>
-              </select>
-            </label>
-            <label>
-              <span>Effort</span>
-              <select id="settingsEffort">
-                <option value="__clear__">unset</option>
-                <option value="none">none</option>
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-grid two">
-            <label>
-              <span>Model</span>
-              <input id="settingsModel" autocomplete="off" />
-            </label>
-            <label>
-              <span>Base URL</span>
-              <input id="settingsBaseUrl" autocomplete="off" />
-            </label>
-          </div>
-          <div class="form-grid two">
-            <label>
-              <span>Credential selector</span>
-              <select id="settingsCredentialMode">
-                <option value="none">no API key environment variable</option>
-                <option value="variable">environment variable</option>
-              </select>
-            </label>
-            <label>
-              <span>API key environment variable</span>
-              <input id="settingsApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
-            </label>
-          </div>
-          <label>
-            <span>Extra Headers (JSON object)</span>
-            <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{}'></textarea>
-          </label>
-          <p class="form-help">Clear this field or enter <code>{}</code> to remove all extra headers.</p>
-          <div class="launch-actions">
-            <button id="settingsSubmit" class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 12h12"></path>
-                <path d="m13 6 6 6-6 6"></path>
-              </svg>
-            </button>
-            <div class="form-status" id="settingsStatus"></div>
-          </div>
-        </form>
-      </section>
-    </div>
-
-    <script src="/assets/vendor/purify.min.js"></script>
-    <script src="/assets/vendor/markdown-it.min.js"></script>
-    <script src="/assets/app.js"></script>
+    <script src="/assets/vendor/markdown-it.min.js" defer></script>
+    <script src="/assets/vendor/purify.min.js" defer></script>
+    <script src="/assets/app.js?v=orchestrator-steering" defer></script>
   </body>
 </html>

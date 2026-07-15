@@ -1092,6 +1092,75 @@ impl App {
             AgentEvent::ThreadLog { name, line } => {
                 self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
             }
+            AgentEvent::ThreadSteeringQueued {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::ThreadSteeringDelivered {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::ThreadSteeringExpired {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
+            }
+            AgentEvent::OrchestratorSteeringQueued {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::OrchestratorSteeringDelivered {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::OrchestratorSteeringExpired {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
+            }
             AgentEvent::ThreadFinished {
                 name,
                 exit_code,

@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
+    path::PathBuf,
     sync::{Arc, Mutex as StdMutex},
 };
 
@@ -125,6 +126,33 @@ pub enum AgentEvent {
         name: String,
         line: String,
     },
+    ThreadSteeringQueued {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    ThreadSteeringDelivered {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    ThreadSteeringExpired {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringQueued {
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringDelivered {
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringExpired {
+        steering_id: i64,
+        instruction_preview: String,
+    },
     ThreadFinished {
         name: String,
         exit_code: i32,
@@ -228,10 +256,17 @@ pub struct SessionEventReplaySubscription {
 #[derive(Clone)]
 pub struct SessionEventBus {
     session_id: Option<String>,
+    thread_event_store: Option<ThreadEventStore>,
     sender: broadcast::Sender<SessionEventEnvelope>,
     state: Arc<StdMutex<SessionEventBusState>>,
     recent_capacity: usize,
     recent_byte_capacity: usize,
+}
+
+#[derive(Clone)]
+struct ThreadEventStore {
+    writer: Arc<crate::store::ThreadEventWriter>,
+    session_id: String,
 }
 
 struct SessionEventBusState {
@@ -254,12 +289,31 @@ impl SessionEventBus {
         Self::with_limits(session_id, capacity, SESSION_EVENT_BUS_REPLAY_BYTE_CAP)
     }
 
+    pub fn with_thread_event_store(session_id: Option<String>, path: PathBuf) -> Self {
+        let mut bus = Self::new(session_id.clone());
+        bus.thread_event_store =
+            session_id.and_then(
+                |session_id| match crate::store::ThreadEventWriter::new(&path) {
+                    Ok(writer) => Some(ThreadEventStore {
+                        writer: Arc::new(writer),
+                        session_id,
+                    }),
+                    Err(error) => {
+                        eprintln!("nac: failed to open thread event store: {error:#}");
+                        None
+                    }
+                },
+            );
+        bus
+    }
+
     fn with_limits(session_id: Option<String>, capacity: usize, byte_capacity: usize) -> Self {
         let capacity = capacity.max(1);
         let byte_capacity = byte_capacity.max(1);
         let (sender, _) = broadcast::channel(capacity);
         Self {
             session_id,
+            thread_event_store: None,
             sender,
             state: Arc::new(StdMutex::new(SessionEventBusState {
                 next_sequence_id: 0,
@@ -356,6 +410,8 @@ impl SessionEventBus {
                 serialized_bytes,
             });
         }
+        drop(state);
+        self.persist_thread_event(&envelope);
         let _ = self.sender.send(envelope.clone());
         envelope
     }
@@ -390,6 +446,52 @@ impl SessionEventBus {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn persist_thread_event(&self, envelope: &SessionEventEnvelope) {
+        let Some(store) = &self.thread_event_store else {
+            return;
+        };
+        let SessionEvent::Agent { event } = &envelope.event else {
+            return;
+        };
+        let Some(thread_name) = persisted_thread_event_name(event) else {
+            return;
+        };
+        let event_json = match serde_json::to_string(event) {
+            Ok(event_json) => event_json,
+            Err(error) => {
+                eprintln!("nac: failed to serialize thread event: {error}");
+                return;
+            }
+        };
+        if let Err(error) = store
+            .writer
+            .append(&store.session_id, thread_name, &event_json)
+        {
+            eprintln!("nac: failed to persist thread event: {error:#}");
+        }
+    }
+}
+
+fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
+    match event {
+        AgentEvent::RunStarted { thread_name, .. }
+        | AgentEvent::ModelCallStarted { thread_name, .. }
+        | AgentEvent::ToolCallStarted { thread_name, .. }
+        | AgentEvent::ToolCallFinished { thread_name, .. }
+        | AgentEvent::AssistantMessage { thread_name, .. }
+        | AgentEvent::Error { thread_name, .. }
+        | AgentEvent::RunFinished { thread_name } => thread_name.as_deref(),
+        AgentEvent::ThreadStarted { name, .. }
+        | AgentEvent::ThreadSteeringQueued { name, .. }
+        | AgentEvent::ThreadSteeringDelivered { name, .. }
+        | AgentEvent::ThreadSteeringExpired { name, .. }
+        | AgentEvent::ThreadFinished { name, .. } => Some(name),
+        AgentEvent::ThreadLog { .. }
+        | AgentEvent::OrchestratorSteeringQueued { .. }
+        | AgentEvent::OrchestratorSteeringDelivered { .. }
+        | AgentEvent::OrchestratorSteeringExpired { .. } => None,
     }
 }
 
@@ -927,5 +1029,41 @@ mod tests {
         assert_eq!(envelope.run_id.as_ref(), Some(&run_id));
         assert_eq!(envelope.client_id.as_ref(), Some(&client_id));
         assert_eq!(envelope.event, SessionEvent::Agent { event });
+    }
+
+    #[test]
+    fn session_event_bus_persists_actionable_thread_events() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_bus_store_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-persisted-events".to_string()),
+            path.clone(),
+        );
+
+        bus.emit_agent(AgentEvent::ModelCallStarted {
+            thread_name: Some("worker".to_string()),
+            iteration: 2,
+        });
+        bus.emit_agent(AgentEvent::ThreadLog {
+            name: "worker".to_string(),
+            line: "noisy stderr".to_string(),
+        });
+
+        let events = crate::store::load_all_thread_events(
+            &path,
+            "session-persisted-events",
+            20,
+        )
+        .unwrap();
+        assert_eq!(events["worker"].len(), 1);
+        let event: AgentEvent = serde_json::from_str(&events["worker"][0].event_json).unwrap();
+        assert!(matches!(
+            event,
+            AgentEvent::ModelCallStarted { iteration: 2, .. }
+        ));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

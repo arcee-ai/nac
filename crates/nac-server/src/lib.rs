@@ -31,8 +31,8 @@ use nac_core::{
         StoreOptions,
     },
     session_service::{
-        ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
-        SessionService, SessionSubmitError,
+        ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionOverviewRecord,
+        SessionRunHandle, SessionService, SessionSubmitError,
     },
     sessions,
     view::{self, SessionSummarySnapshot},
@@ -283,6 +283,31 @@ pub struct SubmitPromptResponse {
     pub run_id: String,
     pub client_id: Option<String>,
     pub display_prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OrchestratorSteeringResponse {
+    pub steering_id: i64,
+    pub status: String,
+    pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThreadSteeringResponse {
+    pub steering_id: i64,
+    pub thread_name: String,
+    pub status: String,
+    pub instruction_preview: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -684,6 +709,16 @@ impl SessionManager {
             .await
     }
 
+    pub async fn generate_overview(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionOverviewRecord> {
+        self.attach_session(session_id)
+            .await?
+            .generate_overview()
+            .await
+    }
+
     pub async fn workspace_file_diff(
         &self,
         session_id: &str,
@@ -739,6 +774,38 @@ impl SessionManager {
                 Ok(submit_response(handle, display_prompt))
             }
         }
+    }
+
+    pub async fn queue_thread_steering(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        request: ThreadSteeringRequest,
+    ) -> Result<ThreadSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service
+            .queue_thread_steering(thread_name, &request.instruction)
+            .await?;
+        Ok(ThreadSteeringResponse {
+            steering_id: record.id,
+            thread_name: record.thread_name,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    pub async fn queue_orchestrator_steering(
+        &self,
+        session_id: &str,
+        request: OrchestratorSteeringRequest,
+    ) -> Result<OrchestratorSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service.queue_orchestrator_steering(&request.instruction)?;
+        Ok(OrchestratorSteeringResponse {
+            steering_id: record.id,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
     }
 
     pub async fn recent_events(
@@ -917,8 +984,12 @@ pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
+        .route("/prototype", get(prototype_html))
         .route("/assets/app.css", get(app_css))
+        .route("/assets/redesign.css", get(redesign_css))
         .route("/assets/app.js", get(app_js))
+        .route("/assets/prototype.css", get(prototype_css))
+        .route("/assets/prototype.js", get(prototype_js))
         .route(
             "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
             get(doto_rounded_extra_bold_font),
@@ -950,7 +1021,19 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/config",
             get(session_config_handler).patch(update_config_handler),
         )
+        .route(
+            "/sessions/{session_id}/overview",
+            post(generate_overview_handler),
+        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route(
+            "/sessions/{session_id}/steering",
+            post(queue_orchestrator_steering_handler),
+        )
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/steering",
+            post(queue_thread_steering_handler),
+        )
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
@@ -978,10 +1061,21 @@ async fn index_html() -> Html<&'static str> {
     Html(include_str!("../assets/index.html"))
 }
 
+async fn prototype_html() -> Html<&'static str> {
+    Html(include_str!("../assets/prototype.html"))
+}
+
 async fn app_css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         include_str!("../assets/app.css"),
+    )
+}
+
+async fn redesign_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/redesign.css"),
     )
 }
 
@@ -992,6 +1086,23 @@ async fn app_js() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/app.js"),
+    )
+}
+
+async fn prototype_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/prototype.css"),
+    )
+}
+
+async fn prototype_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/prototype.js"),
     )
 }
 
@@ -1101,6 +1212,13 @@ async fn session_snapshot(
     Ok(Json(manager.snapshot(&session_id).await?))
 }
 
+async fn generate_overview_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<SessionOverviewRecord>, ApiError> {
+    Ok(Json(manager.generate_overview(&session_id).await?))
+}
+
 async fn workspace_diff(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -1117,6 +1235,38 @@ async fn submit_prompt(
     Ok((
         StatusCode::ACCEPTED,
         Json(manager.submit_prompt(&session_id, request).await?),
+    ))
+}
+
+async fn queue_orchestrator_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<OrchestratorSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_orchestrator_steering(&session_id, request)
+                .await?,
+        ),
+    ))
+}
+
+async fn queue_thread_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ThreadSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_thread_steering(&session_id, &thread_name, request)
+                .await?,
+        ),
     ))
 }
 
@@ -1600,7 +1750,11 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unknown host")
         {
             StatusCode::NOT_FOUND
-        } else if message.contains("busy") || message.contains("no active run") {
+        } else if message.contains("busy")
+            || message.contains("no active run")
+            || message.contains("not active")
+            || message.contains("active run is finishing")
+        {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
             || message.contains("cancellation is not supported")
@@ -1771,127 +1925,277 @@ mod tests {
     #[test]
     fn web_configuration_controls_include_together_and_launch_parity_fields() {
         let html = include_str!("../assets/index.html");
-        for select_id in ["launchBackend", "settingsBackend"] {
-            let select = html
-                .split(&format!("id=\"{select_id}\""))
-                .nth(1)
-                .and_then(|tail| tail.split("</select>").next())
-                .expect("backend select");
-            assert!(select.contains("<option value=\"together-chat\">together-chat</option>"));
-        }
+        let select = html
+            .split("id=\"launchBackend\"")
+            .nth(1)
+            .and_then(|tail| tail.split("</select>").next())
+            .expect("launch backend select");
+        assert!(select.contains("<option value=\"together-chat\">together-chat</option>"));
         assert!(html.contains("id=\"launchApiKeyEnv\""));
         assert!(html.contains("id=\"launchExtraHeaders\""));
 
         let app = include_str!("../assets/app.js");
-        assert!(app.contains("buildLaunchModelPayload"));
-        assert!(app.contains("payload.api_key_env = apiKeyEnv"));
-        assert!(app.contains("payload.extra_headers = headers"));
-        assert!(app.contains("body = buildSettingsPatch"));
+        assert!(app.contains("function backendOptions"));
+        assert!(app.contains("\"together-chat\""));
+        assert!(app.contains("function createSession"));
+        assert!(app.contains("body.extra_headers = headers"));
+        assert!(app.contains("function handleDrawerSubmit"));
+        assert!(app
+            .contains("await apiPatch(`/sessions/${encodeURIComponent(state.currentId)}/config`"));
     }
 
     #[test]
-    fn grouped_events_and_tiled_threads_assets_expose_their_contracts() {
-        let html = include_str!("../assets/index.html");
-        for id in ["eventStreamStatus", "eventLog", "threadsView"] {
-            assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
-        }
-        assert!(!html.contains("eventViewThreads"));
-        assert!(!html.contains("eventViewChronology"));
-        assert!(!html.contains("events-view-switch"));
-        assert!(html.contains("role=\"status\" aria-live=\"polite\""));
-        assert!(html.contains("class=\"event-log event-streams\""));
-        assert!(html.contains("class=\"threads-view\" aria-label=\"Thread lifecycle\""));
-
-        let app = include_str!("../assets/app.js");
-        let event_lifecycle_order = ["Orchestrator", "Running", "Queued", "Finished"];
-        let event_positions: Vec<_> = event_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderEventStreamArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing dense Events {area} area"))
-            })
-            .collect();
-        assert!(event_positions.windows(2).all(|pair| pair[0] < pair[1]));
-        let thread_lifecycle_order = ["Running", "Queued", "Finished"];
-        let thread_positions: Vec<_> = thread_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderThreadTileArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing Threads tile {area} area"))
-            })
-            .collect();
-        assert!(thread_positions.windows(2).all(|pair| pair[0] < pair[1]));
-
-        assert!(app.contains(
-            "const orderedStreams = area === \"orchestrator\" ? [...streams] : orderedThreadsByName(streams);"
-        ));
-        assert!(app.contains("orderedStreams.map((stream) => area === \"orchestrator\""));
-        assert!(app.contains("const orderedTiles = orderedThreadTiles(tiles);"));
-
-        assert!(!app.contains("renderThreadTileArea(\"Orchestrator\""));
-        assert!(!app.contains("renderOrchestratorThreadTile"));
-        assert_eq!(
-            app.matches("const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);")
-                .count(),
-            1,
-            "Events must remain the sole Orchestrator presentation consumer"
-        );
-        assert!(app.contains("class=\"event-stream-tile-grid\""));
-        assert!(app.contains("class=\"event-thread-stream event-tone-${tone}\""));
-        assert!(app.contains("items.map(renderDenseEventRow)"));
-        assert!(app.contains("stream.activity"));
-        assert!(!app.contains("stream.allActivity"));
-        assert!(!app.contains("[...items].reverse()"));
-        assert!(!app.contains("renderEventChronology"));
-        assert!(!app.contains("eventsViewBySession"));
-        assert!(app.contains("data-thread-key=\"${escapeAttr(key)}\""));
-        assert!(app.contains("aria-expanded=\"${expanded ? \"true\" : \"false\"}\""));
-        assert!(app.contains("aria-controls=\"${escapeAttr(controlsId)}\""));
-        assert!(app.contains("label: \"Timed out\""));
-        assert!(app.contains("label: \"Dispatch error\""));
-        assert!(app.contains(
-            "const terminalError = threadError\n      && evidenceIsNewer(threadError, dispatch.start);"
-        ));
-        assert!(!app.contains("&& !snapshotActive"));
-        assert!(app.contains("label: \"Retained history\""));
-        assert!(app.contains("tile.episodes.map(renderThreadEpisode)"));
-        assert!(app.contains("const episodes = snapshot?.thread_episodes?.[name] || [];"));
-        assert!(app.contains("episodes,\n      retained,"));
-
-        let css = include_str!("../assets/app.css");
-        assert!(css.contains("container-name: events"));
-        for threshold in [600, 900, 1200] {
-            assert!(css.contains(&format!("@container events (min-width: {threshold}px)")));
-            assert!(css.contains(&format!("@container threads (min-width: {threshold}px)")));
-        }
-        assert!(css.contains(".event-stream-area-orchestrator .event-thread-stream"));
-        assert!(css.contains(".event-stream-tile-grid"));
-        for removed_thread_selector in [
-            ".thread-orchestrator-cell",
-            ".thread-orchestrator-summary",
-            ".thread-orchestrator-card",
-        ] {
-            assert!(!css.contains(removed_thread_selector));
-        }
-        for accent_selector in [
-            ".event-tone-running",
-            ".event-tone-queued",
-            ".thread-pulse-card.thread-tone-running",
-            ".thread-pulse-card.thread-tone-queued",
-            ".thread-tone-running .thread-card-status",
-            ".thread-tone-queued .thread-card-status",
+    fn ui_exploration_prototype_preserves_the_embedded_asset_contract() {
+        let html = include_str!("../assets/prototype.html");
+        for contract in [
+            "id=\"sessionPicker\"",
+            "id=\"sessionWorkspace\"",
+            "id=\"threadGrid\"",
+            "id=\"threadFilters\"",
+            "id=\"commandComposer\"",
+            "id=\"launchDialog\"",
+            "id=\"sessionReorderInstructions\"",
+            "data-action=\"toggle-pin\"",
+            "data-action=\"reorder-session\"",
+            "<h2>Run brief</h2>",
+            "<time>now</time>",
+            "Confirm embedded-asset contract",
+            "class=\"execution-modes\"",
+            "<path d=\"M12 19V5\"></path>",
+            "/assets/prototype.css",
+            "/assets/prototype.js",
         ] {
             assert!(
-                !css.contains(accent_selector),
-                "lifecycle tile must remain neutral: {accent_selector}"
+                html.contains(contract),
+                "missing prototype contract {contract}"
             );
         }
-        assert!(css.contains(".event-thread-stream.event-tone-danger"));
-        assert!(css.contains(".thread-pulse-card.thread-tone-danger"));
-        assert!(!css.contains("box-shadow: 0 0 12px var(--danger-ring)"));
-        assert!(css.contains(".thread-tile-cell.is-expanded"));
-        assert!(css.contains("grid-column: 1 / -1"));
-        assert!(css.contains(".event-stream-row"));
+        assert!(!html.contains("thread-objective"));
+        assert!(!html.contains("new-session-card"));
+        assert!(!html.contains("picker-hero"));
+        assert!(!html.contains("hero-copy"));
+        assert!(!html.contains("session-intent"));
+        assert!(!html.contains("class=\"eyebrow\""));
+        for removed_chrome in [
+            "class=\"system-state\"",
+            "class=\"workspace-nav\"",
+            "class=\"workspace-actions\"",
+            "Recent orchestration",
+        ] {
+            assert!(!html.contains(removed_chrome));
+        }
+
+        let css = include_str!("../assets/prototype.css");
+        assert!(css.contains(".session-grid"));
+        assert!(css.contains(".cockpit-layout"));
+        assert!(css.contains("font-family: \"Doto\""));
+        assert!(css.contains("Fixed run context: deliberately no internal scrolling."));
+        assert!(css.contains("@media (max-width: 640px)"));
+        assert!(!css.contains("--green"));
+
+        let app = include_str!("../assets/prototype.js");
+        assert!(app.contains("function showWorkspace"));
+        assert!(app.contains("function selectThread"));
+        assert!(app.contains("function applyThreadFilters"));
+        assert!(app.contains("function syncExecutionMode"));
+        assert!(app.contains("function openLaunchDialog"));
+        assert!(app.contains("function toggleSessionPin"));
+        assert!(app.contains("function startKeyboardSessionReorder"));
+        assert!(app.contains("function startPointerSessionReorder"));
+    }
+
+    #[test]
+    fn production_ui_is_a_single_thread_canvas_with_command_driven_utilities() {
+        let html = include_str!("../assets/index.html");
+        for contract in [
+            "/assets/redesign.css",
+            "id=\"sessionPicker\"",
+            "id=\"sessionWorkspace\"",
+            "id=\"pickerSessionTotal\"",
+            "id=\"pickerNavStatus\"",
+            "id=\"newSessionBtn\"",
+            "id=\"metricChanges\"",
+            "id=\"sessionNavStatus\"",
+            "id=\"generatedOverview\"",
+            "id=\"orchestratorState\"",
+            "id=\"orchestratorLedger\"",
+            "id=\"expandOrchestrator\"",
+            "id=\"focusPanel\"",
+            "id=\"focusContent\"",
+            "id=\"closeFocusPanel\"",
+            "id=\"threadGrid\"",
+            "id=\"commandComposer\"",
+            "id=\"utilityDrawer\"",
+            "id=\"launchExecutionModes\"",
+            "aria-label=\"Send\"",
+        ] {
+            assert!(
+                html.contains(contract),
+                "missing production UI contract {contract}"
+            );
+        }
+        assert!(!html.contains("class=\"tabs\""));
+        assert!(!html.contains("data-tab="));
+        assert!(!html.contains("data-thread-filter="));
+        assert!(!html.contains("Thread board"));
+        assert!(!html.contains("id=\"eventLog\""));
+        assert!(!html.contains("/assets/app.css"));
+        assert!(!html.contains("Recent orchestration"));
+        assert!(html.contains("fonts.googleapis.com"));
+        assert!(html.contains("family=IBM+Plex+Mono"));
+        assert!(html.contains("family=Inter"));
+        assert!(!html.contains("id=\"sessionSearch\""));
+        assert!(!html.contains("Find a session"));
+        assert!(!html.contains("id=\"toast\""));
+        assert!(html.contains("<h2>new session</h2>"));
+        assert!(html.contains("<option value=\"\">from config</option>"));
+        assert!(!html.contains("From config"));
+
+        let css = include_str!("../assets/redesign.css");
+        for contract in [
+            ".session-layout",
+            ".overview-rail",
+            ".thread-board",
+            ".thread-tile",
+            ".action-ledger",
+            ".focus-panel",
+            ".focus-conversation",
+            ".focus-orchestrator-layout",
+            ".focus-orchestrator-sidebar",
+            ".focus-worksets",
+            ".focus-thread-layout",
+            ".focus-episode-prompt",
+            ".focus-workspace-layout",
+            ".focus-settings-layout",
+            ".composer",
+            ".utility-drawer",
+            ".session-card",
+            ".session-grid-button",
+            ".move-handle",
+            "overflow: hidden;",
+            ".execution-modes",
+        ] {
+            assert!(
+                css.contains(contract),
+                "missing redesign style contract {contract}"
+            );
+        }
+        assert!(!css.contains("--green"));
+        assert!(!css.contains(".toast"));
+        assert!(css.contains(".nav-status"));
+        assert!(css.contains("grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)"));
+        assert!(css.contains("repeat(auto-fill, minmax(min(310px, 100%), 1fr))"));
+        assert!(css.contains(".utility-drawer, .modal { font-family: var(--sans); }"));
+        assert!(css.contains("--event-font: 12px/1.08 var(--mono);"));
+        assert!(css.contains("--composer-control-height: 40px;"));
+
+        let app = include_str!("../assets/app.js");
+        for contract in [
+            "function buildThreadModels",
+            "lastFinished > 0 && lastFinished >= lastStarted",
+            "function buildThreadActions",
+            "function buildOrchestratorActions",
+            "function renderActionRows",
+            "function formatToolArguments",
+            "const ACTION_LEDGER_LIMIT = 5",
+            "function renderThreadTile",
+            "function openFocusView",
+            "function renderFocusView",
+            "function renderOrchestratorConversation",
+            "function renderFocusWorksets",
+            "function renderThreadFocus",
+            "function renderWorkspaceFocus",
+            "function renderFocusSettings",
+            "function loadFocusSettings",
+            "function generateOverview",
+            "/overview`",
+            "function submitComposer",
+            "/sessions/${encodeURIComponent(state.currentId)}/steering",
+            "/threads/${encodeURIComponent(target)}/steering",
+            "function runCommand",
+            "function openDrawer(title, html, view = \"detail\")",
+            "function syncLaunchExecutionMode",
+            "function toggleSessionPin",
+            "function handleSessionGridKeydown",
+            "function handleSessionDragStart",
+        ] {
+            assert!(
+                app.contains(contract),
+                "missing live behavior contract {contract}"
+            );
+        }
+        assert!(!app.contains("function lastAssistantSummary"));
+        assert!(!app.contains("threadFilter"));
+        assert!(!app.contains("function renderThreadGroup"));
+        assert!(!app.contains("function showThreadDrawer"));
+        assert!(!app.contains("function showSettingsDrawer"));
+        assert!(!app.contains("Open retained episodes for"));
+        assert!(!app.contains("sessionQuery"));
+        assert!(!app.contains("el.toast"));
+        assert!(app.contains("const target = el.sessionWorkspace.hidden ? el.pickerNavStatus : el.sessionNavStatus"));
+        assert!(!app.contains("action-detail\" title="));
+        assert!(!app.contains("{ name: \"worksets\""));
+        assert!(app.contains("class=\"focus-orchestrator-sidebar\""));
+        assert!(app.contains("function renderThreadEpisodes"));
+        assert!(app.contains("Episode ${index + 1}"));
+        assert!(app.contains("<details class=\"focus-episode\""));
+        assert!(!app.contains("Episode ${episode.id}"));
+        assert!(app.contains("<span>Live activity</span>"));
+        assert!(app.contains("openFocusView(\"settings\")"));
+        assert!(app.contains("\"compact\")"));
+        assert!(!html.contains("id=\"sessionMenu\""));
+        assert!(!html.contains("id=\"sessionFilters\""));
+        assert!(!html.contains("id=\"sessionCount\""));
+        assert!(!html.contains("id=\"worksetRail\""));
+    }
+
+    #[test]
+    fn production_thread_tiles_embed_live_actions_without_a_parallel_events_view() {
+        let html = include_str!("../assets/index.html");
+        for id in ["threadGrid", "orchestratorLedger", "commandComposer"] {
+            assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(!html.contains("eventLog"));
+        assert!(!html.contains("Events</button>"));
+        assert!(!html.contains("data-tab"));
+        assert!(!html.contains("data-thread-filter"));
+        assert!(!html.contains("Thread board"));
+
+        let app = include_str!("../assets/app.js");
+        assert!(app.contains("event.type === \"tool_call_started\""));
+        assert!(app.contains("event.type === \"tool_call_finished\""));
+        assert!(app.contains("event.type === \"thread_steering_queued\""));
+        assert!(app.contains("event.type === \"thread_steering_delivered\""));
+        assert!(app.contains("event.type === \"thread_steering_expired\""));
+        assert!(app.contains("event.type === \"orchestrator_steering_queued\""));
+        assert!(app.contains("event.type === \"orchestrator_steering_delivered\""));
+        assert!(app.contains("event.type === \"orchestrator_steering_expired\""));
+        assert!(app.contains("const ORCHESTRATOR_STEERING_TARGET = \"__orchestrator__\""));
+        assert!(app.contains("class=\"action-ledger\""));
+        assert!(app.contains("event.args_detail"));
+        assert!(app.contains("actions.slice(-ACTION_LEDGER_LIMIT)"));
+        assert!(!app.contains("function renderEvents"));
+        let thread_actions = app
+            .split("function buildThreadActions")
+            .nth(1)
+            .and_then(|source| source.split("function buildRetainedThreadActions").next())
+            .expect("missing thread action builder");
+        assert!(!thread_actions.contains("name: \"model\""));
+        assert!(thread_actions.contains("name: \"response\""));
+        assert!(thread_actions.contains("latestEpisode?.content"));
+
+        let css = include_str!("../assets/redesign.css");
+        assert!(css.contains(".action-ledger"));
+        assert!(css.contains("grid-template-rows: repeat(5"));
+        assert!(css.contains("grid-auto-rows: 208px"));
+        assert!(css.contains(".action-row.is-live"));
+        assert!(css.contains(".action-row.is-error"));
+        let action_row_rule = css
+            .split(".action-row {")
+            .nth(1)
+            .and_then(|rule| rule.split('}').next())
+            .expect("missing action row rule");
+        assert!(!action_row_rule.contains("border"));
     }
 
     #[test]
@@ -2781,6 +3085,45 @@ thread_timeout_secs = 7200
                 std::future::pending::<()>().await;
             }
         })
+    }
+
+    #[tokio::test]
+    async fn active_run_accepts_orchestrator_steering() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("orchestrator_steering");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "begin the original task".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let steering = manager
+            .queue_orchestrator_steering(
+                "session",
+                OrchestratorSteeringRequest {
+                    instruction: "change direction".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(steering.status, "queued");
+        let records = manager.snapshot("session").await.unwrap().thread_steering;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].thread_name, "__orchestrator__");
+        assert_eq!(records[0].instruction, "change direction");
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

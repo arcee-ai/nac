@@ -175,6 +175,37 @@ pub async fn execute_parsed_dispatch(
     )
     .await;
 
+    let expire_store_path = runtime.store_path.clone();
+    let expire_session_id = session_id.clone();
+    let expire_thread_name = thread_name.clone();
+    let expired_result = tokio::task::spawn_blocking(move || {
+        crate::store::expire_thread_steering(
+            &expire_store_path,
+            &expire_session_id,
+            &expire_thread_name,
+        )
+    })
+    .await;
+    match expired_result {
+        Ok(Ok(expired)) => {
+            for record in expired {
+                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
+                    name: thread_name.clone(),
+                    steering_id: record.id,
+                    instruction_preview: record.instruction.chars().take(160).collect(),
+                });
+            }
+        }
+        Ok(Err(error)) => runtime.event_sink.emit(AgentEvent::Error {
+            thread_name: Some(thread_name.clone()),
+            message: format!("failed to expire undelivered steering: {error}"),
+        }),
+        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
+            thread_name: Some(thread_name.clone()),
+            message: format!("steering expiry task failed: {error}"),
+        }),
+    }
+
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
     if let Ok(run) = &result {

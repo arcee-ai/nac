@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NAC UI exploration</title>
+    <link rel="stylesheet" href="/assets/prototype.css" />
+  </head>
+  <body>
+    <div class="prototype-shell">
+      <header class="global-header">
+        <button class="brand" type="button" data-action="show-picker" aria-label="NAC sessions">
+          <span class="brand-mark">NAC</span>
+        </button>
+      </header>
+
+      <main id="sessionPicker" class="picker-shell">
+        <header class="picker-toolbar" aria-labelledby="pickerTitle">
+          <div class="picker-title">
+            <h1 id="pickerTitle">Sessions</h1>
+            <span id="sessionTotal">7</span>
+          </div>
+          <label class="search-control">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+            <span class="visually-hidden">Search sessions</span>
+            <input id="sessionSearch" type="search" placeholder="Search sessions, repositories, or branches" autocomplete="off" />
+          </label>
+          <div class="segmented-control" id="sessionFilters" aria-label="Filter sessions">
+            <button class="active" type="button" data-filter="all" aria-pressed="true">All <span>7</span></button>
+            <button type="button" data-filter="running" aria-pressed="false">Running <span>3</span></button>
+            <button type="button" data-filter="attention" aria-pressed="false">Attention <span>1</span></button>
+            <button type="button" data-filter="idle" aria-pressed="false">Idle <span>3</span></button>
+          </div>
+          <button class="button button-primary new-session-button" type="button" data-action="open-launch">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            New session
+          </button>
+        </header>
+
+        <p id="sessionReorderInstructions" class="visually-hidden">Use the move handle to reorder a session within its pin group. Press Enter or Space, then use arrow keys, Home, or End. Press Enter or Space again to save, or Escape to cancel.</p>
+        <div id="sessionReorderStatus" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+
+        <div id="sessionGrid" class="session-groups">
+          <section class="session-group" data-session-group="pinned" aria-labelledby="pinnedSessionsTitle">
+            <header class="session-group-head">
+              <h2 id="pinnedSessionsTitle">Pinned</h2>
+              <span data-group-count>2</span>
+            </header>
+            <div class="session-grid" data-pinned="true" role="list" aria-label="Pinned sessions">
+              <article class="session-card" data-session-id="ui-exploration" data-pinned="true" data-state="running" data-search="ui exploration arcee nac varun" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration">
+                  <span class="session-card-head"><span><span class="session-title">ui-exploration</span><span class="session-repo">arcee-ai/nac · varun/ui-exploration</span></span><span class="status-badge status-running"><i></i> Running</span></span>
+                  <span class="session-latest"><span>impl/thread-board</span><b>laying out responsive activity tiles</b></span>
+                  <span class="session-card-stats"><span><small>Threads</small><strong>6</strong></span><span><small>Runtime</small><strong>18m</strong></span><span><small>Changes</small><strong class="positive">+428</strong></span><span><small>Context</small><strong>38%</strong></span></span>
+                </button>
+                <div class="session-card-controls">
+                  <button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Unpin ui-exploration" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button>
+                  <button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder ui-exploration in pinned sessions; position 1 of 2" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button>
+                </div>
+              </article>
+
+              <article class="session-card" data-session-id="model-config-hardening" data-pinned="true" data-state="attention" data-search="model config validation nac main" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration">
+                  <span class="session-card-head"><span><span class="session-title">model-config-hardening</span><span class="session-repo">arcee-ai/nac · main</span></span><span class="status-badge status-attention"><i></i> Needs input</span></span>
+                  <span class="session-latest"><span>review/config</span><b>waiting on a product choice</b></span>
+                  <span class="session-card-stats"><span><small>Threads</small><strong>4</strong></span><span><small>Runtime</small><strong>42m</strong></span><span><small>Changes</small><strong class="positive">+91</strong></span><span><small>Context</small><strong>71%</strong></span></span>
+                </button>
+                <div class="session-card-controls">
+                  <button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Unpin model-config-hardening" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button>
+                  <button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder model-config-hardening in pinned sessions; position 2 of 2" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="session-group" data-session-group="unpinned" aria-labelledby="otherSessionsTitle">
+            <header class="session-group-head">
+              <h2 id="otherSessionsTitle">Sessions</h2>
+              <span data-group-count>5</span>
+            </header>
+            <div class="session-grid" data-pinned="false" role="list" aria-label="Sessions">
+              <article class="session-card" data-session-id="smolvm-gpu-pass" data-pinned="false" data-state="running" data-search="smolvm gpu sandbox remote" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration"><span class="session-card-head"><span><span class="session-title">smolvm-gpu-pass</span><span class="session-repo">arcee-ai/nac · feat/smolvm-gpu</span></span><span class="status-badge status-running"><i></i> Running</span></span><span class="session-latest"><span>verify/macos</span><b>running targeted sandbox tests</b></span><span class="session-card-stats"><span><small>Threads</small><strong>3</strong></span><span><small>Runtime</small><strong>9m</strong></span><span><small>Changes</small><strong class="positive">+66</strong></span><span><small>Context</small><strong>22%</strong></span></span></button>
+                <div class="session-card-controls"><button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Pin smolvm-gpu-pass" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button><button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder smolvm-gpu-pass in sessions; position 1 of 5" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button></div>
+              </article>
+
+              <article class="session-card" data-session-id="event-ordering" data-pinned="false" data-state="idle" data-search="event ordering sse replay hotfix" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration"><span class="session-card-head"><span><span class="session-title">event-ordering</span><span class="session-repo">arcee-ai/nac · hotfix/events-ordering</span></span><span class="status-badge status-idle"><i></i> Complete</span></span><span class="session-latest"><span>verify/events</span><b>24 checks passed</b></span><span class="session-card-stats"><span><small>Threads</small><strong>5</strong></span><span><small>Runtime</small><strong>31m</strong></span><span><small>Changes</small><strong class="positive">+184</strong></span><span><small>Context</small><strong>54%</strong></span></span></button>
+                <div class="session-card-controls"><button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Pin event-ordering" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button><button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder event-ordering in sessions; position 2 of 5" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button></div>
+              </article>
+
+              <article class="session-card" data-session-id="oauth-store-audit" data-pinned="false" data-state="idle" data-search="oauth auth store credential security" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration"><span class="session-card-head"><span><span class="session-title">oauth-store-audit</span><span class="session-repo">arcee-ai/nac · auth-hardening</span></span><span class="status-badge status-idle"><i></i> Idle</span></span><span class="session-latest"><span>audit/security</span><b>retained findings available</b></span><span class="session-card-stats"><span><small>Threads</small><strong>4</strong></span><span><small>Runtime</small><strong>1h 06m</strong></span><span><small>Changes</small><strong>+0</strong></span><span><small>Context</small><strong>63%</strong></span></span></button>
+                <div class="session-card-controls"><button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Pin oauth-store-audit" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button><button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder oauth-store-audit in sessions; position 3 of 5" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button></div>
+              </article>
+
+              <article class="session-card" data-session-id="pty-cleanup" data-pinned="false" data-state="running" data-search="terminal pty cleanup tui" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration"><span class="session-card-head"><span><span class="session-title">pty-cleanup</span><span class="session-repo">arcee-ai/nac · fix/terminal-jobs</span></span><span class="status-badge status-running"><i></i> Running</span></span><span class="session-latest"><span>impl/process-tree</span><b>patching process-group teardown</b></span><span class="session-card-stats"><span><small>Threads</small><strong>2</strong></span><span><small>Runtime</small><strong>7m</strong></span><span><small>Changes</small><strong class="positive">+37</strong></span><span><small>Context</small><strong>17%</strong></span></span></button>
+                <div class="session-card-controls"><button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Pin pty-cleanup" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button><button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder pty-cleanup in sessions; position 4 of 5" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button></div>
+              </article>
+
+              <article class="session-card" data-session-id="model-docs" data-pinned="false" data-state="idle" data-search="readme documentation model matrix" role="listitem">
+                <button class="session-card-select" type="button" data-session-open="ui-exploration"><span class="session-card-head"><span><span class="session-title">model-docs</span><span class="session-repo">arcee-ai/nac · docs/model-matrix</span></span><span class="status-badge status-idle"><i></i> Complete</span></span><span class="session-latest"><span>docs/readme</span><b>final copy accepted</b></span><span class="session-card-stats"><span><small>Threads</small><strong>3</strong></span><span><small>Runtime</small><strong>26m</strong></span><span><small>Changes</small><strong class="positive">+122</strong></span><span><small>Context</small><strong>44%</strong></span></span></button>
+                <div class="session-card-controls"><button class="session-card-action session-pin-button" type="button" data-action="toggle-pin" aria-label="Pin model-docs" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"></path><path d="M12 14v7"></path></svg></button><button class="session-card-action session-reorder-handle" type="button" data-action="reorder-session" aria-label="Reorder model-docs in sessions; position 5 of 5" aria-describedby="sessionReorderInstructions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="1"></circle><circle cx="16" cy="7" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="17" r="1"></circle><circle cx="16" cy="17" r="1"></circle></svg></button></div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <main id="sessionWorkspace" class="workspace-shell" hidden>
+        <header class="workspace-header">
+          <div class="workspace-identity">
+            <button class="icon-button back-button" type="button" data-action="show-picker" aria-label="Back to sessions">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+            </button>
+            <div>
+              <div class="workspace-title-line">
+                <h1>ui-exploration</h1>
+                <span class="status-badge status-running"><i></i> Running</span>
+              </div>
+              <p>arcee-ai/nac <span>·</span> varun/ui-exploration <span>·</span> 18m 42s</p>
+            </div>
+          </div>
+        </header>
+
+        <div class="cockpit-layout">
+          <aside class="overview-rail" aria-label="Session overview">
+            <section class="overview-stats" aria-label="Session metrics">
+              <div><span>Model</span><strong>gpt-5.5</strong></div>
+              <div><span>Context</span><strong>38%</strong></div>
+              <div><span>Tokens</span><strong>42.8k</strong></div>
+              <div><span>Changes</span><strong class="positive">+428 −76</strong></div>
+            </section>
+
+            <section class="rail-section generated-overview">
+              <div class="section-heading-row">
+                <h2>Run brief</h2>
+                <button class="icon-button icon-button-small" id="refreshOverview" type="button" aria-label="Refresh generated overview">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M18.5 9A7 7 0 0 0 6.1 6.1L4 8M5.5 15A7 7 0 0 0 17.9 17.9L20 16"></path></svg>
+                </button>
+              </div>
+              <p id="overviewCopy">Three implementations are converging on the operator UI. Review is waiting on the shell and thread ledger.</p>
+              <dl class="overview-brief">
+                <div><dt>Doing</dt><dd>Shell, tool ledger, launch flow</dd></div>
+                <div><dt>Blocked</dt><dd>Review · waiting on 2 threads</dd></div>
+                <div><dt>Next</dt><dd>Merge direction, verify at 390px</dd></div>
+              </dl>
+              <div class="overview-meta"><span>gpt-5.5 · refreshed 24s ago</span><span>Manual</span></div>
+            </section>
+
+            <section class="rail-section plan-section">
+              <div class="section-heading-row">
+                <h2>Web UI revamp</h2>
+                <span class="count-badge">3 / 6</span>
+              </div>
+              <ol class="plan-list">
+                <li class="done"><i></i><span><strong>Map current state</strong><small>research/ui</small></span><em>done</em></li>
+                <li class="active"><i></i><span><strong>Build visual shell</strong><small>impl/ui-shell</small></span><em>running</em></li>
+                <li class="active"><i></i><span><strong>Tool-call ledger</strong><small>impl/thread-board</small></span><em>running</em></li>
+                <li class="queued"><i></i><span><strong>Accessibility pass</strong><small>review/accessibility</small></span><em>blocked · 2</em></li>
+                <li><i></i><span><strong>Responsive verification</strong><small>verify/mobile</small></span><em>waiting</em></li>
+              </ol>
+            </section>
+          </aside>
+
+          <section class="thread-stage" aria-labelledby="threadStageTitle">
+            <header class="thread-stage-header">
+              <div class="thread-title-line">
+                <h2 id="threadStageTitle">Threads</h2>
+                <span>6 workers · live</span>
+              </div>
+              <div class="thread-filters" id="threadFilters" aria-label="Filter threads">
+                <button class="active" type="button" data-thread-filter="all" aria-pressed="true">All <span>6</span></button>
+                <button type="button" data-thread-filter="running" aria-pressed="false">Active <span>3</span></button>
+                <button type="button" data-thread-filter="queued" aria-pressed="false">Queued <span>1</span></button>
+                <button type="button" data-thread-filter="finished" aria-pressed="false">Done <span>2</span></button>
+              </div>
+            </header>
+
+            <div class="thread-grid" id="threadGrid">
+              <button class="thread-card" type="button" data-thread="research/ui" data-status="finished">
+                <span class="thread-card-head"><strong>research/ui</strong><span class="thread-status"><i class="thread-state"></i> Finished</span></span>
+                <span class="event-stack">
+                  <span><small>read</small><span><em>app.css</em><b>Map layout and token conventions</b></span><time>18:22</time></span>
+                  <span><small>inspect</small><span><em>desktop dashboard</em><b>Identify hierarchy and overflow</b></span><time>18:25</time></span>
+                  <span><small>inspect</small><span><em>390 × 844</em><b>Verify responsive constraints</b></span><time>18:28</time></span>
+                  <span><small>write</small><span><em>ui-direction.md</em><b>Hand findings to implementers</b></span><time>18:31</time></span>
+                </span>
+                <span class="thread-card-foot"><span>4 tool calls · finished 6m ago</span><span>8.2k tokens</span></span>
+              </button>
+
+              <button class="thread-card" type="button" data-thread="impl/ui-shell" data-status="running">
+                <span class="thread-card-head"><strong>impl/ui-shell</strong><span class="thread-status"><i class="thread-state"></i> Running · 3m</span></span>
+                <span class="event-stack">
+                  <span><small>read</small><span><em>server asset routes</em><b>Confirm embedded-asset contract</b></span><time>18:32</time></span>
+                  <span><small>write</small><span><em>prototype.html</em><b>Restructure operator surfaces</b></span><time>18:34</time></span>
+                  <span><small>edit</small><span><em>prototype.css</em><b>Build fixed rail and dense ledger</b></span><time>18:37</time></span>
+                  <span class="event-current"><small>test</small><span><em>1440 × 1000</em><b>Validate fit without rail scroll</b></span><time>now</time></span>
+                </span>
+                <span class="thread-card-foot"><span class="working-label">4 tool calls · active now</span><span>11.4k tokens</span></span>
+              </button>
+
+              <button class="thread-card" type="button" data-thread="impl/thread-board" data-status="running">
+                <span class="thread-card-head"><strong>impl/thread-board</strong><span class="thread-status"><i class="thread-state"></i> Running · 2m</span></span>
+                <span class="event-stack">
+                  <span><small>read</small><span><em>event lifecycle</em><b>Map tool-call states and ordering</b></span><time>18:34</time></span>
+                  <span><small>write</small><span><em>activity rows</em><b>Pair each target with its intent</b></span><time>18:36</time></span>
+                  <span><small>test</small><span><em>target selection</em><b>Route steering to one worker</b></span><time>18:39</time></span>
+                  <span class="event-current"><small>test</small><span><em>keyboard flow</em><b>Verify focus and escape behavior</b></span><time>now</time></span>
+                </span>
+                <span class="thread-card-foot"><span class="working-label">4 tool calls · active now</span><span>9.7k tokens</span></span>
+              </button>
+
+              <button class="thread-card" type="button" data-thread="impl/launch-flow" data-status="running">
+                <span class="thread-card-head"><strong>impl/launch-flow</strong><span class="thread-status"><i class="thread-state"></i> Running · 1m</span></span>
+                <span class="event-stack">
+                  <span><small>inspect</small><span><em>create-session API</em><b>Align local, SSH, sandbox payloads</b></span><time>18:35</time></span>
+                  <span><small>write</small><span><em>execution modes</em><b>Expose launch topology up front</b></span><time>18:37</time></span>
+                  <span><small>write</small><span><em>advanced config</em><b>Preserve backend overrides</b></span><time>18:40</time></span>
+                  <span class="event-current"><small>validate</small><span><em>launch defaults</em><b>Surface readiness before submit</b></span><time>now</time></span>
+                </span>
+                <span class="thread-card-foot"><span class="working-label">4 tool calls · active now</span><span>6.1k tokens</span></span>
+              </button>
+
+              <button class="thread-card" type="button" data-thread="review/accessibility" data-status="queued">
+                <span class="thread-card-head"><strong>review/accessibility</strong><span class="thread-status"><i class="thread-state"></i> Queued</span></span>
+                <span class="event-stack">
+                  <span><small>source</small><span><em>research/ui</em><b>Findings available</b></span><time>ready</time></span>
+                  <span><small>source</small><span><em>impl/ui-shell</em><b>Waiting for implementation</b></span><time>wait</time></span>
+                  <span><small>source</small><span><em>impl/thread-board</em><b>Waiting for implementation</b></span><time>wait</time></span>
+                  <span class="event-muted"><small>queue</small><span><em>review pass</em><b>Start when both sources settle</b></span><time>+2</time></span>
+                </span>
+                <span class="thread-card-foot"><span>2 sources pending</span><span>0 tokens</span></span>
+              </button>
+
+              <button class="thread-card" type="button" data-thread="verify/mobile" data-status="finished">
+                <span class="thread-card-head"><strong>verify/mobile</strong><span class="thread-status"><i class="thread-state"></i> Finished</span></span>
+                <span class="event-stack">
+                  <span><small>set</small><span><em>390 × 844</em><b>Emulate phone viewport</b></span><time>18:30</time></span>
+                  <span><small>inspect</small><span><em>session picker</em><b>Check filters and touch targets</b></span><time>18:31</time></span>
+                  <span><small>inspect</small><span><em>session cockpit</em><b>Confirm rail becomes document flow</b></span><time>18:33</time></span>
+                  <span><small>record</small><span><em>mobile baseline</em><b>Verify no horizontal overflow</b></span><time>18:34</time></span>
+                </span>
+                <span class="thread-card-foot"><span>4 tool calls · finished 2m ago</span><span>4.6k tokens</span></span>
+              </button>
+            </div>
+
+            <form class="command-composer" id="commandComposer">
+              <div class="composer-target-row">
+                <button class="target-chip" id="composerTarget" type="button" aria-label="Reset target to orchestrator">
+                  <span>Target</span><strong>Orchestrator</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+                </button>
+                <span id="composerHint">Steering is applied when active threads return.</span>
+              </div>
+              <div class="composer-input-row">
+                <textarea id="composerInput" rows="1" placeholder="Steer the orchestrator…  / for commands" aria-label="Steering instruction"></textarea>
+                <button class="button button-primary send-button" type="submit" aria-label="Queue instruction" title="Queue instruction">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"></path><path d="m6 11 6-6 6 6"></path></svg>
+                </button>
+              </div>
+              <div class="command-menu" id="commandMenu" hidden>
+                <p>Commands</p>
+                <button type="button" data-command="/settings"><code>/settings</code><span>Configure this session</span></button>
+                <button type="button" data-command="/stop"><code>/stop</code><span>Stop the active orchestration</span></button>
+                <button type="button" data-command="/transcript"><code>/transcript</code><span>Open the full transcript</span></button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="launch-dialog" id="launchDialog" aria-labelledby="launchTitle">
+      <form method="dialog" id="launchForm">
+        <header class="dialog-header">
+          <h2 id="launchTitle">Launch session</h2>
+          <button class="icon-button" type="button" data-action="close-launch" aria-label="Close launch dialog">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+          </button>
+        </header>
+        <div class="launch-fields">
+          <fieldset class="execution-modes" id="executionModes">
+            <legend>Execution</legend>
+            <label><input type="radio" name="execution" value="local" checked /><span><strong>Local</strong><small>Run in this workspace</small></span></label>
+            <label><input type="radio" name="execution" value="ssh" /><span><strong>SSH</strong><small>Run on a configured host</small></span></label>
+            <label><input type="radio" name="execution" value="sandbox" /><span><strong>Sandbox</strong><small>Isolated local VM</small></span></label>
+          </fieldset>
+          <div class="launch-primary-grid">
+            <label><span>Workspace</span><input type="text" value="/Users/varunsingh/agentbackend" /></label>
+            <label><span>Model profile</span><select><option>Use configured default</option><option>ChatGPT Codex · gpt-5.5</option><option>OpenAI Responses · gpt-5.5</option><option>Arcee · Trinity Large</option></select></label>
+          </div>
+          <label><span>Initial objective</span><textarea rows="4" placeholder="What should NAC accomplish?"></textarea></label>
+          <div class="launch-readiness" id="launchReadiness" aria-label="Resolved launch context">
+            <span><i></i> Workspace found</span>
+            <span><i></i> Model configured</span>
+            <span><i></i> CWD mounted</span>
+          </div>
+          <details class="advanced-settings" id="advancedSettings">
+            <summary><span>Advanced configuration</span><small>SSH, backend, sandbox, mounts</small></summary>
+            <div class="advanced-grid">
+              <label><span>SSH host</span><input id="launchSshHost" type="text" placeholder="user@build-box" /></label>
+              <label><span>Backend</span><select><option>Inherit config</option><option>openai-responses</option><option>chatgpt-codex-responses</option><option>anthropic-messages</option><option>arcee-auth</option></select></label>
+              <label><span>Model</span><input type="text" placeholder="Inherit config" /></label>
+              <label><span>Base URL</span><input type="url" placeholder="Inherit config" /></label>
+              <label class="check-row"><input type="checkbox" /><span>Run in sandbox</span></label>
+              <label class="check-row"><input type="checkbox" /><span>Disable CWD mount</span></label>
+            </div>
+          </details>
+        </div>
+        <footer class="dialog-actions">
+          <button class="button button-ghost" type="button" data-action="close-launch">Cancel</button>
+          <button class="button button-primary" type="submit">Launch session</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="prototype-toast" id="prototypeToast" role="status" aria-live="polite" hidden></div>
+    <script src="/assets/prototype.js" defer></script>
+  </body>
+</html>

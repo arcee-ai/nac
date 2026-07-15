@@ -7,7 +7,7 @@ pub fn append_episode(
     action: &str,
     content: &str,
 ) -> Result<()> {
-    let mut conn = open_connection(path)?;
+    let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction()?;
     ensure_thread_in_tx(&tx, session_id, thread_name)?;
 
@@ -34,7 +34,7 @@ pub fn load_worker_context(
     thread_name: &str,
     source_threads: &[String],
 ) -> Result<WorkerContext> {
-    let conn = open_connection(path)?;
+    let conn = open_runtime_connection(path)?;
     let self_episodes = load_thread_episodes(&conn, session_id, thread_name)?;
     let mut source_episodes = Vec::with_capacity(source_threads.len());
 
@@ -56,7 +56,7 @@ pub fn load_all_episodes(
     store_path: &Path,
     session_id: &str,
 ) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
-    let conn = open_connection(store_path)?;
+    let conn = open_runtime_connection(store_path)?;
     let mut stmt = conn.prepare(
         "SELECT e.id, e.thread_name, e.session_id, e.action, e.content, e.created_at
          FROM episodes e
@@ -78,7 +78,7 @@ pub fn load_all_episodes(
 }
 
 pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> {
-    let conn = open_connection(path)?;
+    let conn = open_runtime_connection(path)?;
     let mut stmt = conn.prepare(
         "SELECT t.name, t.session_id, t.created_at, t.updated_at,
                 (SELECT COUNT(*) FROM episodes e
@@ -108,12 +108,12 @@ pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> 
 }
 
 pub fn thread_read(path: &Path, session_id: &str, thread_name: &str) -> Result<Vec<EpisodeRecord>> {
-    let conn = open_connection(path)?;
+    let conn = open_runtime_connection(path)?;
     load_thread_episodes(&conn, session_id, thread_name)
 }
 
 pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result<bool> {
-    let mut conn = open_connection(path)?;
+    let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction()?;
     tx.execute(
         "DELETE FROM episodes WHERE thread_name = ?1 AND session_id = ?2",
