@@ -160,6 +160,8 @@ pub struct SessionRunHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSubmitError {
     Busy { active_run: ActiveRunSnapshot },
+    ExternalBusy { session_id: String },
+    Coordination { message: String },
 }
 
 impl std::fmt::Display for SessionSubmitError {
@@ -170,6 +172,11 @@ impl std::fmt::Display for SessionSubmitError {
                 "session is busy with run {} ({})",
                 active_run.run_id, active_run.prompt_preview
             ),
+            Self::ExternalBusy { session_id } => write!(
+                formatter,
+                "session '{session_id}' is busy with an active run in another process"
+            ),
+            Self::Coordination { message } => formatter.write_str(message),
         }
     }
 }
@@ -244,6 +251,18 @@ impl SessionClientHandle {
         self.try_submit_prompt(prompt.agent_prompt)
     }
 
+    pub fn try_submit_prepared_prompt_with_lease(
+        &self,
+        prompt: PreparedPrompt,
+        lease: sessions::SessionRunLease,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        self.service.try_submit_prompt_for_client_with_lease(
+            self.client_id.clone(),
+            prompt.agent_prompt,
+            lease,
+        )
+    }
+
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -264,6 +283,7 @@ impl SessionClientHandle {
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     metadata: Arc<SessionMetadata>,
+    config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     event_bus: SessionEventBus,
     active_run: Arc<StdMutex<Option<ActiveRunState>>>,
@@ -275,6 +295,7 @@ struct ActiveRunState {
     started_at: Instant,
     finishing: bool,
     task: Option<JoinHandle<()>>,
+    _run_lease: Option<sessions::SessionRunLease>,
 }
 
 struct FinishingRun {
@@ -304,6 +325,10 @@ impl SessionService {
                 OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
                 OrchestratorSession::Picker { .. } => None,
             });
+        let config_version = match &run_config.session {
+            OrchestratorSession::Active { snapshot, .. } => Some(snapshot.config_version),
+            OrchestratorSession::Picker { .. } => None,
+        };
 
         let event_bus = SessionEventBus::new(session_id.clone());
         let events = event_bus.subscribe();
@@ -333,6 +358,7 @@ impl SessionService {
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
+            config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             event_bus,
             active_run: Arc::new(StdMutex::new(None)),
@@ -422,6 +448,10 @@ impl SessionService {
         self.lock_active_run()
             .as_ref()
             .map(|active_run| active_run.snapshot.clone())
+    }
+
+    pub fn config_version(&self) -> Option<i64> {
+        self.config_version
     }
 
     /// Explicitly destroy the sandbox (if any) associated with this session.
@@ -553,7 +583,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt)
+        self.try_submit_prompt_inner(None, expanded_prompt, None)
     }
 
     pub fn try_submit_prompt_for_client(
@@ -561,7 +591,16 @@ impl SessionService {
         client_id: SessionClientId,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt)
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None)
+    }
+
+    pub fn try_submit_prompt_for_client_with_lease(
+        &self,
+        client_id: SessionClientId,
+        expanded_prompt: String,
+        lease: sessions::SessionRunLease,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease))
     }
 
     pub async fn request_cancel(
@@ -645,8 +684,9 @@ impl SessionService {
         &self,
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
+        run_lease: Option<sessions::SessionRunLease>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run = self.try_begin_run(client_id, &expanded_prompt)?;
+        let active_run = self.try_begin_run_with_lease(client_id, &expanded_prompt, run_lease)?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
@@ -692,16 +732,82 @@ impl SessionService {
         })
     }
 
+    #[cfg(test)]
     fn try_begin_run(
         &self,
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
+    ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        self.try_begin_run_inner(client_id, expanded_prompt, None, false)
+    }
+
+    fn try_begin_run_with_lease(
+        &self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: &str,
+        supplied_lease: Option<sessions::SessionRunLease>,
+    ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true)
+    }
+
+    fn try_begin_run_inner(
+        &self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: &str,
+        supplied_lease: Option<sessions::SessionRunLease>,
+        enforce_coordination: bool,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let mut guard = self.lock_active_run();
         if let Some(active_run) = guard.as_ref() {
             return Err(SessionSubmitError::Busy {
                 active_run: active_run.snapshot.clone(),
             });
+        }
+
+        let run_lease = if enforce_coordination {
+            match (supplied_lease, self.metadata.session_id.as_deref()) {
+                (Some(lease), _) => Some(lease),
+                (None, Some(session_id)) => Some(
+                    sessions::SessionRunLease::try_acquire(&self.metadata.store_path, session_id)
+                        .map_err(|error| match error {
+                        sessions::SessionRunLeaseError::Busy(session_id) => {
+                            SessionSubmitError::ExternalBusy { session_id }
+                        }
+                        sessions::SessionRunLeaseError::Store(error) => {
+                            SessionSubmitError::Coordination {
+                                message: format!("session run coordination failed: {error:#}"),
+                            }
+                        }
+                    })?,
+                ),
+                // Picker services have no runnable persisted session. Keeping this
+                // path lease-free supports read-only picker construction.
+                (None, None) => None,
+            }
+        } else {
+            None
+        };
+
+        if enforce_coordination {
+            if let (Some(session_id), Some(service_version)) =
+                (self.metadata.session_id.as_deref(), self.config_version)
+            {
+                let persisted_version =
+                    sessions::load_session_model_config(&self.metadata.store_path, session_id)
+                        .map_err(|error| SessionSubmitError::Coordination {
+                            message: format!(
+                                "failed to verify session configuration revision: {error:#}"
+                            ),
+                        })?
+                        .config_version;
+                if persisted_version != service_version {
+                    return Err(SessionSubmitError::Coordination {
+                        message: format!(
+                            "session '{session_id}' configuration changed externally; reload it before submitting"
+                        ),
+                    });
+                }
+            }
         }
 
         let run_id = SessionRunId::new();
@@ -725,6 +831,7 @@ impl SessionService {
             started_at: Instant::now(),
             finishing: false,
             task: None,
+            _run_lease: run_lease,
         });
         drop(guard);
 
@@ -1157,6 +1264,81 @@ mod tests {
             workspace_host_path: Some(PathBuf::from("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         })
+    }
+
+    fn test_active_service(label: &str, session_id: &str) -> (SessionServiceParts, PathBuf) {
+        let store_path = test_store_path(label);
+        let client = ModelClient::new_for_test();
+        let agent = test_agent(
+            client.clone(),
+            store_path.clone(),
+            Some(session_id.to_string()),
+        );
+        let snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.to_string(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        (parts, store_path)
+    }
+
+    #[test]
+    fn public_submission_rejects_external_process_lease() {
+        let (parts, store_path) = test_active_service("external_lease", "leased-session");
+        let _lease = sessions::SessionRunLease::try_acquire(&store_path, "leased-session").unwrap();
+        assert!(matches!(
+            parts.service.try_submit_prompt("must not run".to_string()),
+            Err(SessionSubmitError::ExternalBusy { session_id }) if session_id == "leased-session"
+        ));
+        assert!(parts.service.active_run().is_none());
+        drop(_lease);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn public_submission_rejects_stale_config_revision() {
+        let (parts, store_path) = test_active_service("stale_revision", "stale-session");
+        let mut stored = sessions::load_session(&store_path, "stale-session").unwrap();
+        stored.model = "externally-updated-model".to_string();
+        sessions::update_session_model_config(&store_path, &stored).unwrap();
+
+        let error = match parts
+            .service
+            .try_submit_prompt("must not use stale config".to_string())
+        {
+            Ok(_) => panic!("stale service unexpectedly started a run"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            SessionSubmitError::Coordination { ref message }
+                if message.contains("configuration changed externally")
+        ));
+        assert!(parts.service.active_run().is_none());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     fn assert_run_started_event(

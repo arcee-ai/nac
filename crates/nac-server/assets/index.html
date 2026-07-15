@@ -203,19 +203,23 @@
             <label>
               <span>Backend</span>
               <select id="launchBackend" name="backend">
-                <option value="">config</option>
+                <option value="">inherit config</option>
                 <option value="openai-responses">openai-responses</option>
                 <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
                 <option value="anthropic-messages">anthropic-messages</option>
                 <option value="deepseek-chat">deepseek-chat</option>
                 <option value="fireworks-chat">fireworks-chat</option>
                 <option value="together-chat">together-chat</option>
+                <option value="arcee-auth">arcee-auth</option>
+                <option value="arcee-api">arcee-api</option>
               </select>
             </label>
             <label>
               <span>Effort</span>
               <select id="launchEffort" name="reasoning_effort">
-                <option value="">config</option>
+                <option value="">inherit config</option>
+                <option value="__clear__">clear configured effort</option>
+                <option value="none">none</option>
                 <option value="minimal">minimal</option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
@@ -227,21 +231,32 @@
           <div class="form-grid two">
             <label>
               <span>Model</span>
-              <input id="launchModel" name="model" autocomplete="off" placeholder="config" />
+              <input id="launchModel" name="model" autocomplete="off" placeholder="inherit config" />
             </label>
             <label>
               <span>Base URL</span>
-              <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="config" />
+              <input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="inherit config" />
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Credential selector</span>
+              <select id="launchCredentialMode">
+                <option value="inherit">inherit config</option>
+                <option value="none">no API key environment variable</option>
+                <option value="variable">environment variable</option>
+              </select>
+            </label>
+            <label>
+              <span>API key environment variable</span>
+              <input id="launchApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
             </label>
           </div>
           <label>
-            <span>API Key Env</span>
-            <input id="launchApiKeyEnv" autocomplete="off" placeholder="config" />
+            <span>Extra Headers (JSON object)</span>
+            <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='blank inherits config; {} selects no extra headers'></textarea>
           </label>
-          <label>
-            <span>Extra Headers (JSON)</span>
-            <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
-          </label>
+          <p class="form-help">Blank inherits configured headers. Enter <code>{}</code> to explicitly select no extra headers.</p>
           <div id="sandboxFields" class="launch-form">
             <div class="toggle-row">
               <label class="toggle">
@@ -342,19 +357,20 @@
             <label>
               <span>Backend</span>
               <select id="settingsBackend">
-                <option value="">config</option>
                 <option value="openai-responses">openai-responses</option>
                 <option value="chatgpt-codex-responses">chatgpt-codex-responses</option>
                 <option value="anthropic-messages">anthropic-messages</option>
                 <option value="deepseek-chat">deepseek-chat</option>
                 <option value="fireworks-chat">fireworks-chat</option>
                 <option value="together-chat">together-chat</option>
+                <option value="arcee-auth">arcee-auth</option>
+                <option value="arcee-api">arcee-api</option>
               </select>
             </label>
             <label>
               <span>Effort</span>
               <select id="settingsEffort">
-                <option value="">config</option>
+                <option value="__clear__">unset</option>
                 <option value="none">none</option>
                 <option value="minimal">minimal</option>
                 <option value="low">low</option>
@@ -367,23 +383,33 @@
           <div class="form-grid two">
             <label>
               <span>Model</span>
-              <input id="settingsModel" autocomplete="off" placeholder="config" />
+              <input id="settingsModel" autocomplete="off" />
             </label>
             <label>
               <span>Base URL</span>
-              <input id="settingsBaseUrl" autocomplete="off" placeholder="config" />
+              <input id="settingsBaseUrl" autocomplete="off" />
+            </label>
+          </div>
+          <div class="form-grid two">
+            <label>
+              <span>Credential selector</span>
+              <select id="settingsCredentialMode">
+                <option value="none">no API key environment variable</option>
+                <option value="variable">environment variable</option>
+              </select>
+            </label>
+            <label>
+              <span>API key environment variable</span>
+              <input id="settingsApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
             </label>
           </div>
           <label>
-            <span>API Key Env</span>
-            <input id="settingsApiKeyEnv" autocomplete="off" placeholder="config" />
+            <span>Extra Headers (JSON object)</span>
+            <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{}'></textarea>
           </label>
-          <label>
-            <span>Extra Headers (JSON)</span>
-            <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
-          </label>
+          <p class="form-help">Clear this field or enter <code>{}</code> to remove all extra headers.</p>
           <div class="launch-actions">
-            <button class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
+            <button id="settingsSubmit" class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M5 12h12"></path>
                 <path d="m13 6 6 6-6 6"></path>

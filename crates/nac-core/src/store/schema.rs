@@ -85,6 +85,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
              api_key_env TEXT,
              extra_headers_json TEXT,
              token_usages_json TEXT,
+             config_version INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
@@ -120,6 +121,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     ensure_column(&conn, "sessions", "api_key_env", "TEXT")?;
     ensure_column(&conn, "sessions", "extra_headers_json", "TEXT")?;
     ensure_column(&conn, "sessions", "token_usages_json", "TEXT")?;
+    ensure_column(
+        &conn,
+        "sessions",
+        "config_version",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0)",
+    )?;
     Ok(conn)
 }
 

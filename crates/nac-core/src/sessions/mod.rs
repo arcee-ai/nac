@@ -6,23 +6,81 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{detect_backend, BackendKind, ReasoningEffort};
+use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec};
 use crate::types::Message;
 
 mod codec;
 mod db;
+mod run_lease;
 mod snapshot;
 mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    reorder_sessions, save_session, update_session_presentation,
+    load_session_model_config, reorder_sessions, save_session, update_raw_session_model_config,
+    update_session_model_config, update_session_presentation,
 };
+pub use run_lease::{SessionRunLease, SessionRunLeaseError};
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
 use summary::*;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RawSessionModelConfig {
+    pub session_id: String,
+    pub model: String,
+    pub base_url: String,
+    pub backend: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub api_key_env: Option<String>,
+    pub extra_headers_json: Option<String>,
+    pub config_version: i64,
+    /// Structural parse failures in the persisted values. These are diagnostics,
+    /// not migrations: callers must explicitly PATCH every invalid value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum SessionConfigUpdateError {
+    NotFound(String),
+    Conflict(String),
+    Store(anyhow::Error),
+}
+
+impl fmt::Display for SessionConfigUpdateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(message) | Self::Conflict(message) => formatter.write_str(message),
+            Self::Store(error) => {
+                write!(formatter, "session configuration storage failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SessionConfigUpdateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl From<rusqlite::Error> for SessionConfigUpdateError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Store(error.into())
+    }
+}
+
+impl From<anyhow::Error> for SessionConfigUpdateError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Store(error)
+    }
+}
 
 /// In-memory session state; persistence uses the store path passed by the caller.
 #[derive(Debug, Clone)]
@@ -42,6 +100,8 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
+    /// Monotonic revision for optimistic model-configuration updates.
+    pub config_version: i64,
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
@@ -58,7 +118,11 @@ pub struct SessionSummary {
     pub cwd: PathBuf,
     pub workspace_host_path: Option<PathBuf>,
     pub model: String,
-    pub backend: BackendKind,
+    /// Raw persisted backend. Empty means the legacy row has no backend.
+    pub backend: String,
+    /// Per-row model configuration parse failure; listing remains available so
+    /// the row can be selected and repaired.
+    pub model_config_error: Option<String>,
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
@@ -337,15 +401,16 @@ mod tests {
             let conn = crate::store::open_connection(&store_path).unwrap();
             conn.execute(
                 "INSERT INTO sessions (
-                    session_id, cwd, store_path, model, base_url, messages_json,
+                    session_id, cwd, store_path, model, base_url, backend, messages_json,
                     created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     "session-foreign",
                     "/repo",
                     foreign_store_path.display().to_string(),
                     "model-a",
                     "https://api.openai.com/v1",
+                    "openai-responses",
                     messages_json,
                     "2026-01-01 00:00:00.000000000",
                     "2026-01-01 00:00:01.000000000",
@@ -566,6 +631,99 @@ mod tests {
     }
 
     #[test]
+    fn listing_and_raw_config_isolate_structurally_invalid_model_rows() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("raw_invalid_model_rows");
+        for (index, id) in ["healthy", "auto", "missing", "effort", "headers"]
+            .into_iter()
+            .enumerate()
+        {
+            let snapshot = test_snapshot(
+                id,
+                &format!("2026-01-0{} 00:00:00.000000000", index + 1),
+                &format!("2026-01-0{} 00:00:01.000000000", index + 1),
+            );
+            create_session(&store_path, &snapshot).unwrap();
+        }
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET backend = 'auto' WHERE session_id = 'auto'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET backend = NULL WHERE session_id = 'missing'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET reasoning_effort = 'ultra' WHERE session_id = 'effort'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET extra_headers_json = '{broken' WHERE session_id = 'headers'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 5);
+        let by_id = summaries
+            .into_iter()
+            .map(|summary| (summary.session_id.clone(), summary))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(by_id["healthy"].model_config_error, None);
+        assert!(by_id["auto"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("auto"));
+        assert_eq!(by_id["missing"].backend, "");
+        assert!(by_id["missing"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("no backend"));
+        assert!(by_id["effort"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("ultra"));
+        assert!(by_id["headers"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("malformed stored extra headers"));
+
+        let raw = load_session_model_config(&store_path, "headers").unwrap();
+        assert_eq!(raw.extra_headers_json.as_deref(), Some("{broken"));
+        assert_eq!(raw.config_version, 0);
+        assert!(!raw.diagnostics.is_empty());
+        let mut repaired = raw.clone();
+        repaired.extra_headers_json = None;
+        repaired.diagnostics.clear();
+        assert_eq!(
+            update_raw_session_model_config(&store_path, &repaired).unwrap(),
+            1
+        );
+        let mut stale = raw;
+        stale.extra_headers_json = Some("{\"X-Test\":\"yes\"}".to_string());
+        assert!(matches!(
+            update_raw_session_model_config(&store_path, &stale),
+            Err(SessionConfigUpdateError::Conflict(_))
+        ));
+        assert_eq!(
+            load_session_model_config(&store_path, "headers")
+                .unwrap()
+                .extra_headers_json,
+            None
+        );
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn api_key_env_and_extra_headers_round_trip_through_store() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("api_key_env_headers");
@@ -574,6 +732,7 @@ mod tests {
         headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
         headers.insert("X-Org".to_string(), "my-org".to_string());
 
+        let raw_selector = " MY_CUSTOM_API_KEY ";
         let snapshot = new_snapshot(
             "session-config".to_string(),
             PathBuf::from("/repo"),
@@ -586,7 +745,7 @@ mod tests {
             vec![Message::User {
                 content: "hello".to_string(),
             }],
-            Some("MY_CUSTOM_API_KEY".to_string()),
+            Some(raw_selector.to_string()),
             headers.clone(),
         );
         create_session(&store_path, &snapshot).unwrap();
@@ -594,8 +753,8 @@ mod tests {
         let loaded = load_session(&store_path, "session-config").unwrap();
         assert_eq!(
             loaded.api_key_env.as_deref(),
-            Some("MY_CUSTOM_API_KEY"),
-            "api_key_env must round-trip through the DB"
+            Some(raw_selector),
+            "api_key_env must round-trip through the DB byte-for-byte"
         );
         assert_eq!(
             loaded.extra_headers, headers,
@@ -611,13 +770,166 @@ mod tests {
             None,
             loaded.token_usages.clone(),
         );
-        assert_eq!(refreshed.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(refreshed.api_key_env.as_deref(), Some(raw_selector));
         assert_eq!(refreshed.extra_headers, headers);
         save_session(&store_path, &refreshed).unwrap();
 
         let reloaded = load_session(&store_path, "session-config").unwrap();
-        assert_eq!(reloaded.api_key_env.as_deref(), Some("MY_CUSTOM_API_KEY"));
+        assert_eq!(reloaded.api_key_env.as_deref(), Some(raw_selector));
         assert_eq!(reloaded.extra_headers, headers);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn config_and_history_writes_preserve_each_other_in_both_orders() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("config_history_isolation");
+
+        for (session_id, config_first) in [
+            ("history-then-config", false),
+            ("config-then-history", true),
+        ] {
+            let initial = test_snapshot(
+                session_id,
+                "2026-01-01 00:00:00.000000000",
+                "2026-01-01 00:00:00.000000000",
+            );
+            create_session(&store_path, &initial).unwrap();
+            crate::store::append_episode(
+                &store_path,
+                session_id,
+                "worker",
+                "progress",
+                "retained episode",
+            )
+            .unwrap();
+
+            // These snapshots represent two processes that both read revision 0.
+            let mut config_patch = load_session(&store_path, session_id).unwrap();
+            config_patch.model = "model-after-patch".to_string();
+            config_patch.base_url = "https://example.test/v1".to_string();
+            config_patch.backend = BackendKind::TogetherChat;
+            config_patch.reasoning_effort = Some(ReasoningEffort::High);
+            config_patch.api_key_env = Some("PATCHED_KEY".to_string());
+            config_patch.extra_headers =
+                BTreeMap::from([("X-Patched".to_string(), "true".to_string())]);
+
+            let mut completed_run = load_session(&store_path, session_id).unwrap();
+            completed_run.messages = vec![
+                Message::User {
+                    content: "new prompt".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("new response".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+            ];
+            completed_run.last_response_duration_ms = Some(250);
+            completed_run.previous_response_duration_ms = Some(125);
+            completed_run.response_durations_ms = Some(vec![Some(250)]);
+            completed_run.token_usages = vec![Some(crate::model::TokenUsage {
+                input_tokens: 10,
+                output_tokens: 20,
+                cache_read_tokens: 3,
+                cache_write_tokens: 4,
+                reasoning_tokens: 5,
+                orchestrator_context_tokens: 42,
+            })];
+            completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
+
+            if config_first {
+                update_session_model_config(&store_path, &config_patch).unwrap();
+                save_session(&store_path, &completed_run).unwrap();
+            } else {
+                save_session(&store_path, &completed_run).unwrap();
+                update_session_model_config(&store_path, &config_patch).unwrap();
+            }
+
+            let stored = load_session(&store_path, session_id).unwrap();
+            assert_eq!(stored.model, "model-after-patch");
+            assert_eq!(stored.base_url, "https://example.test/v1");
+            assert_eq!(stored.backend, BackendKind::TogetherChat);
+            assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
+            assert_eq!(stored.api_key_env.as_deref(), Some("PATCHED_KEY"));
+            assert_eq!(
+                stored.extra_headers.get("X-Patched").map(String::as_str),
+                Some("true")
+            );
+            assert_eq!(stored.config_version, 1);
+            assert_eq!(stored.messages.len(), 2);
+            assert!(matches!(
+                stored.messages.first(),
+                Some(Message::User { content }) if content == "new prompt"
+            ));
+            assert!(matches!(
+                stored.messages.get(1),
+                Some(Message::Assistant { content: Some(content), .. }) if content == "new response"
+            ));
+            assert_eq!(stored.last_response_duration_ms, Some(250));
+            assert_eq!(stored.previous_response_duration_ms, Some(125));
+            assert_eq!(stored.response_durations_ms, Some(vec![Some(250)]));
+            assert_eq!(stored.token_usages.len(), 1);
+            assert_eq!(stored.updated_at, completed_run.updated_at);
+            let episodes = crate::store::thread_read(&store_path, session_id, "worker").unwrap();
+            assert_eq!(episodes.len(), 1);
+            assert_eq!(episodes[0].content, "retained episode");
+        }
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn concurrent_config_updates_use_revision_cas() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("config_revision_conflict");
+        create_session(
+            &store_path,
+            &test_snapshot(
+                "session",
+                "2026-01-01 00:00:00.000000000",
+                "2026-01-01 00:00:00.000000000",
+            ),
+        )
+        .unwrap();
+
+        let mut first = load_session(&store_path, "session").unwrap();
+        first.model = "first-model".to_string();
+        let mut second = load_session(&store_path, "session").unwrap();
+        second.model = "second-model".to_string();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+
+        let first_path = store_path.clone();
+        let first_barrier = barrier.clone();
+        let first_update = std::thread::spawn(move || {
+            first_barrier.wait();
+            update_session_model_config(&first_path, &first)
+        });
+        let second_path = store_path.clone();
+        let second_barrier = barrier.clone();
+        let second_update = std::thread::spawn(move || {
+            second_barrier.wait();
+            update_session_model_config(&second_path, &second)
+        });
+        barrier.wait();
+
+        let results = [first_update.join().unwrap(), second_update.join().unwrap()];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let conflict = results
+            .iter()
+            .find_map(|result| result.as_ref().err())
+            .expect("one stale updater must lose the CAS");
+        assert!(matches!(conflict, SessionConfigUpdateError::Conflict(_)));
+        assert!(conflict.to_string().contains("expected version 0, found 1"));
+
+        let stored = load_session(&store_path, "session").unwrap();
+        assert!(matches!(
+            stored.model.as_str(),
+            "first-model" | "second-model"
+        ));
+        assert_eq!(stored.config_version, 1);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -809,15 +1121,16 @@ mod tests {
             .unwrap();
             conn.execute(
                 "INSERT INTO sessions (
-                    session_id, cwd, store_path, model, base_url, messages_json,
+                    session_id, cwd, store_path, model, base_url, backend, messages_json,
                     created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     "legacy-session",
                     "/repo",
                     store_path.display().to_string(),
                     "model-a",
                     "https://api.openai.com/v1",
+                    "openai-responses",
                     messages_json,
                     "2026-01-01 00:00:00.000000000",
                     "2026-01-02 00:00:00.000000000",

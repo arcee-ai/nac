@@ -10,7 +10,9 @@ use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
-use crate::model::{BackendKind, ClientOverrides, ModelClient, ReasoningEffort};
+use crate::model::{
+    BackendKind, EffectiveModelSettings, ModelClient, ModelConfigurationError, ReasoningEffort,
+};
 use crate::paths::PathContext;
 use crate::sandbox::{
     build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType, SandboxSession,
@@ -63,6 +65,27 @@ pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct NonModelNacConfig {
+    #[serde(default)]
+    storage: StorageConfig,
+    #[serde(default)]
+    sandbox: SandboxConfig,
+    #[serde(default)]
+    worker: WorkerConfig,
+}
+
+impl From<NonModelNacConfig> for NacConfig {
+    fn from(config: NonModelNacConfig) -> Self {
+        Self {
+            storage: config.storage,
+            model: ModelConfig::default(),
+            sandbox: config.sandbox,
+            worker: config.worker,
+        }
+    }
+}
+
 impl NacConfig {
     pub fn load() -> Result<Self> {
         let Some(path) = crate::paths::nac_config_path() else {
@@ -79,18 +102,40 @@ impl NacConfig {
         Self::load_from_path(path)
     }
 
-    fn load_from_path(path: PathBuf) -> Result<Self> {
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default());
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read config {}", path.display()));
-            }
+    /// Load runtime settings for a command whose model tuple comes from a
+    /// persisted session snapshot or managed-worker transport.
+    ///
+    /// The complete TOML document must still be syntactically valid and all
+    /// non-model runtime sections remain strictly typed. The `model` key is
+    /// deliberately omitted from the deserialization target, so obsolete
+    /// backend names, selector fields, and table shapes cannot affect a
+    /// snapshot-authoritative command. MCP, workspace metadata, and other
+    /// independent config consumers continue loading their own sections from
+    /// the same file.
+    pub fn load_without_model_from_cwd(cwd: &Path) -> Result<Self> {
+        let paths = PathContext::new(cwd);
+        let Some(path) = paths.nac_config_path() else {
+            return Ok(Self::default());
         };
+        let raw = Self::read_config(&path)?;
+        toml::from_str::<NonModelNacConfig>(&raw)
+            .map(Into::into)
+            .with_context(|| format!("failed to parse non-model config {}", path.display()))
+    }
+
+    fn load_from_path(path: PathBuf) -> Result<Self> {
+        let raw = Self::read_config(&path)?;
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    fn read_config(path: &Path) -> Result<String> {
+        match std::fs::read_to_string(path) {
+            Ok(raw) => Ok(raw),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to read config {}", path.display()))
+            }
+        }
     }
 }
 
@@ -99,13 +144,41 @@ pub struct StoreOptions {
     pub store_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OptionalModelOption<T> {
+    /// No CLI/API override was supplied; inherit `config.toml`.
+    #[default]
+    Inherit,
+    /// Use the explicitly supplied value.
+    Value(T),
+    /// Explicitly select absence instead of inheriting a configured value.
+    Clear,
+}
+
+impl<T: Clone> OptionalModelOption<T> {
+    fn resolve(&self, configured: Option<T>) -> Option<T> {
+        match self {
+            Self::Inherit => configured,
+            Self::Value(value) => Some(value.clone()),
+            Self::Clear => None,
+        }
+    }
+
+    fn snapshot_value(&self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value.clone()),
+            Self::Inherit | Self::Clear => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ModelOptions {
     pub backend: Option<BackendKind>,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning_effort: OptionalModelOption<ReasoningEffort>,
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
-    pub api_key_env: Option<String>,
+    pub api_key_env: OptionalModelOption<String>,
     pub extra_headers: Option<BTreeMap<String, String>>,
 }
 
@@ -216,6 +289,7 @@ impl EffectiveSandboxOptions {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum OrchestratorSession {
     Active {
         session_id: String,
@@ -267,11 +341,16 @@ impl OrchestratorRunConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ResumePickerRunConfig {
+    pub store_path: PathBuf,
+    pub lookup_cwd: PathBuf,
+    pub worker_executable: Option<PathBuf>,
+}
+
 pub enum RunState {
-    Orchestrator {
-        run_config: OrchestratorRunConfig,
-        start_in_session_picker: bool,
-    },
+    Orchestrator { run_config: OrchestratorRunConfig },
+    ResumePicker(ResumePickerRunConfig),
     ManagedWorker(ManagedWorkerRunConfig),
 }
 
@@ -286,10 +365,7 @@ pub(crate) fn effective_sandbox_options(
         .or(config.sandbox.backend.as_deref())
         .map(|s| SandboxBackendType::from_str(s).unwrap_or_default())
         .unwrap_or_default();
-    let sandbox_cpus = options
-        .sandbox_cpus
-        .or(config.sandbox.cpus)
-        .unwrap_or(2);
+    let sandbox_cpus = options.sandbox_cpus.or(config.sandbox.cpus).unwrap_or(2);
     let sandbox_mem = options
         .sandbox_mem
         .or(config.sandbox.memory_mib)
@@ -335,61 +411,61 @@ fn validate_sandbox_options(options: &EffectiveSandboxOptions) -> Result<()> {
     Ok(())
 }
 
-fn env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
 pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
-    config
-        .model
-        .api_key_env
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_string)
+    config.model.api_key_env.clone()
 }
 
-pub(crate) fn model_overrides(model: &ModelOptions, config: &NacConfig) -> Result<ClientOverrides> {
-    Ok(ClientOverrides {
-        base_url: model
-            .api_base_url
-            .clone()
-            .or_else(|| env_var("OPENAI_BASE_URL"))
-            .or_else(|| config.model.base_url.clone()),
-        model: model
+/// Merge explicit new-session model options over `config.toml` settings.
+///
+/// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
+/// ambient backend/model/base selector. Credential values are read only from
+/// the configured `api_key_env` later when constructing the model client.
+pub fn effective_model_settings(
+    model: &ModelOptions,
+    config: &NacConfig,
+) -> Result<EffectiveModelSettings> {
+    EffectiveModelSettings::from_optional(
+        model.backend.or(config.model.backend),
+        model
             .api_model
             .clone()
-            .or_else(|| env_var("OPENAI_MODEL"))
             .or_else(|| config.model.model.clone()),
-        backend: model.backend.or(config.model.backend),
-        reasoning_effort: model.reasoning_effort.or(config.model.reasoning_effort),
-        api_key_env: model
-            .api_key_env
+        model
+            .api_base_url
             .clone()
-            .or_else(|| configured_api_key_env(config)),
-        extra_headers: model
+            .or_else(|| config.model.base_url.clone()),
+        model
+            .reasoning_effort
+            .resolve(config.model.reasoning_effort),
+        model.api_key_env.resolve(configured_api_key_env(config)),
+        model
             .extra_headers
             .clone()
             .unwrap_or_else(|| config.model.extra_headers.clone()),
-    })
+    )
 }
 
-fn managed_worker_model_overrides(
-    model: &ModelOptions,
-    config: &NacConfig,
-) -> Result<ClientOverrides> {
-    let mut overrides = model_overrides(model, config)?;
-    overrides.reasoning_effort = model.reasoning_effort;
-    overrides.api_key_env = model.api_key_env.clone();
-    Ok(overrides)
+fn managed_worker_effective_model_settings(model: &ModelOptions) -> Result<EffectiveModelSettings> {
+    EffectiveModelSettings::from_optional(
+        model.backend,
+        model.api_model.clone(),
+        model.api_base_url.clone(),
+        model.reasoning_effort.snapshot_value(),
+        model.api_key_env.snapshot_value(),
+        model.extra_headers.clone().unwrap_or_default(),
+    )
 }
 
-/// Parse a JSON object string into a `BTreeMap<String, String>`.
-/// Returns `None` for empty or invalid input.
-pub fn parse_extra_headers_json(json: &str) -> Option<BTreeMap<String, String>> {
-    if json.is_empty() {
-        return None;
-    }
-    serde_json::from_str::<BTreeMap<String, String>>(json).ok()
+/// Parse the hidden worker header transport as a JSON object.
+///
+/// A present argument must be valid JSON. In particular, workers use `{}` to
+/// transport an explicitly empty snapshot header map; absence is represented by
+/// omitting the argument entirely.
+pub fn parse_extra_headers_json(
+    json: &str,
+) -> std::result::Result<BTreeMap<String, String>, String> {
+    serde_json::from_str::<BTreeMap<String, String>>(json)
+        .map_err(|error| format!("expected a JSON object with string header values: {error}"))
 }
 
 pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
@@ -431,8 +507,8 @@ pub async fn build_run_config(
         .config_cwd
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
-    let overrides = model_overrides(&options.model, config)?;
-    let client = ModelClient::from_env_with_overrides(overrides.clone())?.with_cache_ttl(Some("1h"));
+    let settings = effective_model_settings(&options.model, config)?;
+    let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -474,15 +550,15 @@ pub async fn build_run_config(
         let session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             remote_cwd,
-            client.model.clone(),
-            client.base_url().to_string(),
-            client.backend(),
-            client.reasoning_effort(),
+            settings.model.clone(),
+            settings.base_url.clone(),
+            settings.backend,
+            settings.reasoning_effort,
             None,
             Some(ssh_host),
             agent.messages.clone(),
-            overrides.api_key_env.clone(),
-            overrides.extra_headers.clone(),
+            settings.api_key_env.clone(),
+            settings.extra_headers.clone(),
         );
         sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -555,15 +631,15 @@ pub async fn build_run_config(
     let session_snapshot = sessions::new_snapshot(
         session_id.clone(),
         workspace_cwd.clone(),
-        client.model.clone(),
-        client.base_url().to_string(),
-        client.backend(),
-        client.reasoning_effort(),
+        settings.model.clone(),
+        settings.base_url.clone(),
+        settings.backend,
+        settings.reasoning_effort,
         sandbox.as_ref().map(|session| session.spec().clone()),
         None, // fresh local/sandbox sessions carry no ssh_host
         agent.messages.clone(),
-        overrides.api_key_env.clone(),
-        overrides.extra_headers.clone(),
+        settings.api_key_env.clone(),
+        settings.extra_headers.clone(),
     );
     sessions::create_session(&store_path, &session_snapshot)?;
 
@@ -587,9 +663,8 @@ pub async fn build_managed_worker_config(
     options: ManagedWorkerOptions,
     config: &NacConfig,
 ) -> Result<ManagedWorkerRunConfig> {
-    let client = ModelClient::from_env_with_overrides(managed_worker_model_overrides(
+    let client = ModelClient::from_effective_settings(managed_worker_effective_model_settings(
         &options.model,
-        config,
     )?)?;
     let ssh_host = trim_ssh_host(options.ssh_host.clone());
     let config_cwd = options
@@ -633,8 +708,7 @@ pub async fn build_managed_worker_config(
         } else {
             (workspace_dir.as_deref(), SkillPathVisibility::Visible)
         };
-        let skills =
-            SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
+        let skills = SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
         (agents_md.system_message(), mcp, skills)
     };
     let working_directory = sandbox
@@ -693,52 +767,19 @@ pub async fn build_managed_worker_config(
 pub async fn build_resume_picker_config(
     options: ResumeOptions,
     config: &NacConfig,
-) -> Result<OrchestratorRunConfig> {
-    let client =
-        ModelClient::from_env_with_overrides(model_overrides(&ModelOptions::default(), config)?)?
-            .with_cache_ttl(Some("1h"));
+) -> Result<ResumePickerRunConfig> {
+    if options.last || options.session_id.is_some() {
+        anyhow::bail!("session picker does not accept a session id or --last");
+    }
+
     let lookup_cwd = options.lookup_cwd;
-    let paths = PathContext::new(&lookup_cwd);
-    let agents_md = AgentsMdBundle::load(Some(&lookup_cwd), &paths)?;
-    let skills = SkillRegistry::load(Some(&lookup_cwd), SkillPathVisibility::Visible, &paths)?;
-    let working_directory = directory_display(&lookup_cwd);
-    let workspace_host_path = Some(lookup_cwd.clone());
-    let sandbox_status = "off".to_string();
-    let agents_md_status = agents_md.status_text();
     let store_path = resolve_store_path(&lookup_cwd, options.store, config);
     store::initialize(&store_path)?;
-    let agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
-            mode: AgentMode::Orchestrator,
-            store_path: store_path.clone(),
-            session_id: None,
-            initial_messages: Vec::new(),
-            thread_name: None,
-            event_sink: EventSink::none(),
-            workspace_cwd: lookup_cwd.clone(),
-            config_cwd: lookup_cwd.clone(),
-            working_directory: working_directory.clone(),
-            worker_executable: options.worker_executable,
-            sandbox: None,
-            ssh_host: None,
-            mcp: None,
-            skills,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: agents_md.system_message(),
-            thread_timeout_secs: worker_thread_timeout_secs(config),
-        },
-    )?;
 
-    Ok(OrchestratorRunConfig {
-        agent,
-        client,
-        session: OrchestratorSession::Picker { store_path },
-        sandbox_status,
-        agents_md_status,
-        workspace_display: working_directory,
-        workspace_host_path,
-        resume_base_cwd: lookup_cwd,
+    Ok(ResumePickerRunConfig {
+        store_path,
+        lookup_cwd,
+        worker_executable: options.worker_executable,
     })
 }
 
@@ -809,15 +850,40 @@ async fn build_resume_config_from_snapshot(
         workspace_cwd.clone()
     };
     let paths = PathContext::new(&workspace_cwd);
-    let client = ModelClient::from_env_with_overrides(ClientOverrides {
-        base_url: Some(snapshot.base_url.clone()),
-        model: Some(snapshot.model.clone()),
-        backend: Some(snapshot.backend),
-        reasoning_effort: snapshot.reasoning_effort,
-        api_key_env: snapshot.api_key_env.clone(),
-        extra_headers: snapshot.extra_headers.clone(),
-    })?
-    .with_cache_ttl(Some("1h"));
+    let stored_model = snapshot.model.clone();
+    let stored_base_url = snapshot.base_url.clone();
+    let snapshot_settings = EffectiveModelSettings::new(
+        snapshot.backend,
+        stored_model.clone(),
+        stored_base_url.clone(),
+        snapshot.reasoning_effort,
+        snapshot.api_key_env.clone(),
+        snapshot.extra_headers.clone(),
+    )
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "stored session model settings are invalid; settings repair required: {}",
+            error
+        )
+    })?;
+    if snapshot_settings.model != stored_model || snapshot_settings.base_url != stored_base_url {
+        anyhow::bail!(
+            "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
+        );
+    }
+    let client = ModelClient::from_effective_settings(snapshot_settings)
+        .map_err(|error| {
+            if error.downcast_ref::<ModelConfigurationError>().is_some() {
+                let message = format!(
+                    "stored session model settings are invalid; settings repair required: {}",
+                    error
+                );
+                error.context(message)
+            } else {
+                error
+            }
+        })?
+        .with_cache_ttl(Some("1h"));
     let sandbox = if ssh_host.is_some() {
         None
     } else {
@@ -1063,6 +1129,16 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     use std::ffi::OsString;
 
+    fn test_openai_model_options() -> ModelOptions {
+        ModelOptions {
+            backend: Some(BackendKind::OpenAiResponses),
+            api_base_url: Some(" https://api.openai.com/v1 ".to_string()),
+            api_model: Some(" test-model ".to_string()),
+            api_key_env: OptionalModelOption::Value("OPENAI_API_KEY".to_string()),
+            ..ModelOptions::default()
+        }
+    }
+
     fn temp_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1080,178 +1156,390 @@ mod tests {
         }
     }
 
+    fn complete_model_config() -> NacConfig {
+        let mut config = NacConfig::default();
+        config.model.backend = Some(BackendKind::OpenAiResponses);
+        config.model.model = Some("config-model".to_string());
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
+        config
+    }
+
     #[test]
-    fn model_overrides_prefer_cli_then_env_then_config() {
+    fn effective_model_settings_ignore_ambient_model_and_base() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_base_url = std::env::var_os("OPENAI_BASE_URL");
         let original_model = std::env::var_os("OPENAI_MODEL");
         unsafe {
-            std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1");
-            std::env::set_var("OPENAI_MODEL", "env-model");
+            std::env::set_var("OPENAI_BASE_URL", "https://ambient.example/v1");
+            std::env::set_var("OPENAI_MODEL", "ambient-model");
         }
 
-        let mut config = NacConfig::default();
-        config.model.base_url = Some("https://config.example/v1".to_string());
-        config.model.model = Some("config-model".to_string());
-        config.model.backend = Some(BackendKind::OpenAiResponses);
-        config.model.reasoning_effort = Some(ReasoningEffort::High);
-        config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
-
-        let env_overrides = model_overrides(&ModelOptions::default(), &config).unwrap();
-        assert_eq!(
-            env_overrides.base_url.as_deref(),
-            Some("https://env.example/v1")
-        );
-        assert_eq!(env_overrides.model.as_deref(), Some("env-model"));
-        assert_eq!(env_overrides.backend, Some(BackendKind::OpenAiResponses));
-        assert_eq!(env_overrides.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(
-            env_overrides.api_key_env.as_deref(),
-            Some("NAC_TEST_API_KEY")
-        );
-
-        let cli_overrides = model_overrides(
-            &ModelOptions {
-                backend: Some(BackendKind::DeepSeekChat),
-                reasoning_effort: Some(ReasoningEffort::Low),
-                api_base_url: Some("https://cli.example/v1".to_string()),
-                api_model: Some("cli-model".to_string()),
-                api_key_env: None,
-                extra_headers: None,
-            },
-            &config,
-        )
-        .unwrap();
-        assert_eq!(
-            cli_overrides.base_url.as_deref(),
-            Some("https://cli.example/v1")
-        );
-        assert_eq!(cli_overrides.model.as_deref(), Some("cli-model"));
-        assert_eq!(cli_overrides.backend, Some(BackendKind::DeepSeekChat));
-        assert_eq!(cli_overrides.reasoning_effort, Some(ReasoningEffort::Low));
-
-        // CLI-provided api_key_env and extra_headers should override config values.
-        let mut cli_extra = std::collections::BTreeMap::new();
-        cli_extra.insert("X-Custom".to_string(), "cli-value".to_string());
-        let cli_full_overrides = model_overrides(
-            &ModelOptions {
-                backend: Some(BackendKind::DeepSeekChat),
-                reasoning_effort: Some(ReasoningEffort::Low),
-                api_base_url: Some("https://cli.example/v1".to_string()),
-                api_model: Some("cli-model".to_string()),
-                api_key_env: Some("CLI_KEY_ENV".to_string()),
-                extra_headers: Some(cli_extra.clone()),
-            },
-            &config,
-        )
-        .unwrap();
-        assert_eq!(
-            cli_full_overrides.api_key_env.as_deref(),
-            Some("CLI_KEY_ENV")
-        );
-        assert_eq!(cli_full_overrides.extra_headers, cli_extra);
+        let settings =
+            effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
+        assert_eq!(settings.base_url, "https://config.example/v1");
+        assert_eq!(settings.model, "config-model");
 
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);
     }
 
     #[test]
-    fn managed_worker_model_values_are_session_authoritative() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_together_api_key = std::env::var_os("TOGETHER_API_KEY");
-        unsafe {
-            std::env::set_var("TOGETHER_API_KEY", "test_dummy_key");
-        }
-
-        let mut config = NacConfig::default();
+    fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
+        let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
-        config.model.api_key_env = Some("LATER_CONFIG_API_KEY".to_string());
+        config
+            .model
+            .extra_headers
+            .insert("X-Config".to_string(), "config".to_string());
 
-        let session_without_optional_values = ModelOptions {
-            backend: Some(BackendKind::TogetherChat),
-            ..ModelOptions::default()
-        };
-        let absent = managed_worker_model_overrides(&session_without_optional_values, &config)
-            .unwrap();
-        assert_eq!(absent.reasoning_effort, None);
-        assert_eq!(absent.api_key_env, None);
+        let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(inherited.backend, BackendKind::OpenAiResponses);
+        assert_eq!(inherited.model, "config-model");
+        assert_eq!(inherited.base_url, "https://config.example/v1");
+        assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
 
-        let client = ModelClient::from_env_with_overrides(absent).unwrap();
-        assert_eq!(client.reasoning_effort(), None);
-        assert_eq!(client.api_key_env(), None);
-
-        let session_with_optional_values = ModelOptions {
-            backend: Some(BackendKind::TogetherChat),
-            reasoning_effort: Some(ReasoningEffort::Low),
-            api_key_env: Some("SESSION_API_KEY".to_string()),
-            ..ModelOptions::default()
-        };
-        let concrete = managed_worker_model_overrides(&session_with_optional_values, &config)
-            .unwrap();
-        assert_eq!(concrete.reasoning_effort, Some(ReasoningEffort::Low));
-        assert_eq!(concrete.api_key_env.as_deref(), Some("SESSION_API_KEY"));
-
-        restore_env("TOGETHER_API_KEY", original_together_api_key);
+        let headers = BTreeMap::from([("X-Explicit".to_string(), "explicit".to_string())]);
+        let explicit = effective_model_settings(
+            &ModelOptions {
+                backend: Some(BackendKind::TogetherChat),
+                reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Low),
+                api_base_url: Some(" https://explicit.example/v1 ".to_string()),
+                api_model: Some(" explicit-model ".to_string()),
+                api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
+                extra_headers: Some(headers.clone()),
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(explicit.backend, BackendKind::TogetherChat);
+        assert_eq!(explicit.model, "explicit-model");
+        assert_eq!(explicit.base_url, "https://explicit.example/v1");
+        assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Low));
+        assert_eq!(explicit.api_key_env.as_deref(), Some("EXPLICIT_API_KEY"));
+        assert_eq!(explicit.extra_headers, headers);
     }
 
     #[test]
-    fn fresh_model_resolution_still_inherits_optional_config_values() {
-        let mut config = NacConfig::default();
-        config.model.reasoning_effort = Some(ReasoningEffort::High);
-        config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
+    fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
+        for (backend, expected) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                BackendKind::ArceeAuth,
+                crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            let mut inherited_config = NacConfig::default();
+            inherited_config.model.backend = Some(backend);
+            inherited_config.model.model = Some("managed-model".to_string());
+            let inherited = effective_model_settings(&ModelOptions::default(), &inherited_config)
+                .expect("managed config should not require a redundant base_url");
+            assert_eq!(inherited.base_url, expected);
 
-        let fresh = model_overrides(
+            let mut explicit_config = NacConfig::default();
+            explicit_config.model.model = Some("managed-model".to_string());
+            let explicit = effective_model_settings(
+                &ModelOptions {
+                    backend: Some(backend),
+                    ..ModelOptions::default()
+                },
+                &explicit_config,
+            )
+            .expect("an explicit managed backend should materialize after merge");
+            assert_eq!(explicit.base_url, expected);
+        }
+    }
+
+    #[test]
+    fn optional_model_overrides_distinguish_inherit_value_and_clear() {
+        let mut config = complete_model_config();
+        config.model.reasoning_effort = Some(ReasoningEffort::High);
+
+        let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
+
+        let valued = effective_model_settings(
             &ModelOptions {
-                backend: Some(BackendKind::TogetherChat),
+                api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
+                reasoning_effort: OptionalModelOption::Value(ReasoningEffort::None),
                 ..ModelOptions::default()
             },
             &config,
         )
         .unwrap();
+        assert_eq!(valued.api_key_env.as_deref(), Some("CLI_API_KEY"));
+        assert_eq!(valued.reasoning_effort, Some(ReasoningEffort::None));
 
-        assert_eq!(fresh.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(fresh.api_key_env.as_deref(), Some("CONFIG_API_KEY"));
-    }
-
-    #[test]
-    fn parse_extra_headers_json_handles_empty_object() {
-        // Empty string → None (no override)
-        assert_eq!(parse_extra_headers_json(""), None);
-        // "{}" → Some(empty map) so the worker uses empty headers, not config fallback
-        assert_eq!(parse_extra_headers_json("{}"), Some(BTreeMap::new()));
-        // Valid headers → Some(map)
-        let mut headers = BTreeMap::new();
-        headers.insert("X-Custom".to_string(), "val".to_string());
-        assert_eq!(
-            parse_extra_headers_json(r#"{"X-Custom":"val"}"#),
-            Some(headers)
-        );
-        // Invalid JSON → None
-        assert_eq!(parse_extra_headers_json("not json"), None);
-    }
-
-    #[test]
-    fn model_overrides_empty_extra_headers_does_not_leak_config() {
-        // When the CLI passes Some(empty map), config's extra_headers must NOT leak.
-        let mut config = NacConfig::default();
-        config
-            .model
-            .extra_headers
-            .insert("X-Config-Leak".to_string(), "should-not-appear".to_string());
-
-        let overrides = model_overrides(
+        let cleared = effective_model_settings(
             &ModelOptions {
-                backend: None,
-                reasoning_effort: None,
-                api_base_url: None,
-                api_model: None,
-                api_key_env: None,
-                extra_headers: Some(BTreeMap::new()),
+                api_key_env: OptionalModelOption::Clear,
+                reasoning_effort: OptionalModelOption::Clear,
+                ..ModelOptions::default()
             },
             &config,
         )
         .unwrap();
-        assert!(overrides.extra_headers.is_empty());
+        assert_eq!(cleared.api_key_env, None);
+        assert_eq!(cleared.reasoning_effort, None);
+    }
+
+    #[test]
+    fn configured_api_key_selectors_are_preserved_and_validated_exactly() {
+        for selector in ["", "   ", " SURROUNDED_KEY "] {
+            let mut config = complete_model_config();
+            config.model.api_key_env = Some(selector.to_string());
+
+            let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+            assert_eq!(settings.api_key_env.as_deref(), Some(selector));
+            let error = ModelClient::from_effective_settings(settings)
+                .expect_err("invalid configured selector must not be normalized or ignored");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("api_key_env"), "{error:#}");
+        }
+
+        let mut managed = complete_model_config();
+        managed.model.backend = Some(BackendKind::ArceeAuth);
+        managed.model.base_url = Some("https://api.arcee.ai".to_string());
+        managed.model.api_key_env = Some("   ".to_string());
+        let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
+        assert_eq!(settings.api_key_env.as_deref(), Some("   "));
+        let error = ModelClient::from_effective_settings(settings)
+            .expect_err("managed backend must reject even a blank present selector");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("is not supported"), "{error:#}");
+    }
+
+    #[test]
+    fn required_model_settings_are_rejected_without_defaults() {
+        for (config, expected) in [
+            (NacConfig::default(), "backend"),
+            (
+                {
+                    let mut config = complete_model_config();
+                    config.model.model = None;
+                    config
+                },
+                "model",
+            ),
+            (
+                {
+                    let mut config = complete_model_config();
+                    config.model.base_url = Some("   ".to_string());
+                    config
+                },
+                "base_url",
+            ),
+        ] {
+            let error = effective_model_settings(&ModelOptions::default(), &config).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn no_reasoning_effort_is_injected() {
+        let settings =
+            effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
+        assert_eq!(settings.reasoning_effort, None);
+    }
+
+    #[test]
+    fn managed_worker_settings_are_snapshot_authoritative() {
+        let settings = managed_worker_effective_model_settings(&ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            api_base_url: Some("https://worker.example/v1".to_string()),
+            api_model: Some("worker-model".to_string()),
+            api_key_env: OptionalModelOption::Value("SESSION_API_KEY".to_string()),
+            extra_headers: Some(BTreeMap::new()),
+            ..ModelOptions::default()
+        })
+        .unwrap();
+        assert_eq!(settings.reasoning_effort, None);
+        assert_eq!(settings.api_key_env.as_deref(), Some("SESSION_API_KEY"));
+        assert!(settings.extra_headers.is_empty());
+
+        for (backend, expected) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                BackendKind::ArceeAuth,
+                crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            let managed = managed_worker_effective_model_settings(&ModelOptions {
+                backend: Some(backend),
+                api_model: Some("managed-worker-model".to_string()),
+                extra_headers: Some(BTreeMap::new()),
+                ..ModelOptions::default()
+            })
+            .expect("managed worker resolver should use the same fixed URL invariant");
+            assert_eq!(managed.base_url, expected);
+        }
+
+        let raw_selector = " WORKER_KEY ";
+        let invalid = managed_worker_effective_model_settings(&ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            api_base_url: Some("https://worker.example/v1".to_string()),
+            api_model: Some("worker-model".to_string()),
+            api_key_env: OptionalModelOption::Value(raw_selector.to_string()),
+            extra_headers: Some(BTreeMap::new()),
+            ..ModelOptions::default()
+        })
+        .unwrap();
+        assert_eq!(invalid.api_key_env.as_deref(), Some(raw_selector));
+        let error = ModelClient::from_effective_settings(invalid)
+            .expect_err("worker selector must be validated without normalization");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+
+        let error = managed_worker_effective_model_settings(&ModelOptions {
+            backend: Some(BackendKind::TogetherChat),
+            ..ModelOptions::default()
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("model"));
+    }
+
+    #[tokio::test]
+    async fn resume_picker_defers_snapshot_and_credential_validation_until_selection() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_MISSING_PICKER_SELECTION_KEY";
+        let original = std::env::var_os(key_name);
+        unsafe { std::env::remove_var(key_name) };
+
+        let root = temp_store_path("credential_free_picker")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        store::initialize(&store_path).unwrap();
+        sessions::create_session(
+            &store_path,
+            &sessions::new_snapshot(
+                "picker-session".to_string(),
+                root.clone(),
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+
+        let picker = build_resume_picker_config(
+            ResumeOptions {
+                lookup_cwd: root.clone(),
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                ..ResumeOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("picker startup must not resolve model settings or credentials");
+        assert_eq!(picker.store_path, store_path);
+        assert_eq!(
+            sessions::list_sessions(&picker.store_path).unwrap().len(),
+            1
+        );
+
+        let error = match build_resume_config_for_session(
+            picker.store_path,
+            "picker-session",
+            &NacConfig::default(),
+            picker.lookup_cwd,
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("selecting a session with a missing credential must fail"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(key_name), "{error:#}");
+
+        match original {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parse_extra_headers_json_requires_valid_object() {
+        assert!(parse_extra_headers_json("").is_err());
+        assert_eq!(parse_extra_headers_json("{}").unwrap(), BTreeMap::new());
+        let headers = BTreeMap::from([("X-Custom".to_string(), "val".to_string())]);
+        assert_eq!(
+            parse_extra_headers_json(r#"{"X-Custom":"val"}"#).unwrap(),
+            headers
+        );
+        assert!(parse_extra_headers_json("not json").is_err());
+        assert!(parse_extra_headers_json(r#"{"X-Custom":1}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn required_model_failures_occur_before_session_persistence() {
+        let root = temp_store_path("required_model_before_persist")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let cases = [
+            (NacConfig::default(), "backend"),
+            (
+                {
+                    let mut config = complete_model_config();
+                    config.model.model = None;
+                    config
+                },
+                "model",
+            ),
+            (
+                {
+                    let mut config = complete_model_config();
+                    config.model.base_url = Some("".to_string());
+                    config
+                },
+                "base_url",
+            ),
+        ];
+
+        for (index, (config, expected)) in cases.into_iter().enumerate() {
+            let store_path = root.join(format!("store-{index}.db"));
+            let error = match build_run_config(
+                RunOptions {
+                    workspace_cwd: root.clone(),
+                    store: StoreOptions {
+                        store_path: Some(store_path.clone()),
+                    },
+                    ..RunOptions::default()
+                },
+                &config,
+            )
+            .await
+            {
+                Ok(_) => panic!("missing {expected} must fail"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(
+                !store_path.exists(),
+                "invalid settings created the session store"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1322,7 +1610,7 @@ backend = "openai-responses"
 model = "config-model"
 base_url = "https://config.example/v1"
 reasoning_effort = "high"
-api_key_env = "NAC_TEST_API_KEY"
+api_key_env = " NAC_TEST_API_KEY "
 
 [sandbox]
 image = "config-image"
@@ -1355,10 +1643,68 @@ url = "https://mcp.context7.com/mcp"
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(
             config.model.api_key_env.as_deref(),
-            Some("NAC_TEST_API_KEY")
+            Some(" NAC_TEST_API_KEY ")
         );
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+
+        restore_env("NAC_HOME", original_nac_home);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_strict() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_non_model_config_load_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let invalid_model_sections = [
+            "[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n",
+            "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
+            "model = [\"not\", \"a\", \"table\"]\n",
+            "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+        ];
+        for invalid_model in invalid_model_sections {
+            std::fs::write(
+                root.join("config.toml"),
+                format!(
+                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[worker]\nthread_timeout_secs = 7200\n"
+                ),
+            )
+            .unwrap();
+
+            let config = NacConfig::load_without_model_from_cwd(&root).unwrap();
+            assert_eq!(
+                config.storage.store_path.as_deref(),
+                Some(Path::new("persisted/store.db"))
+            );
+            assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
+            assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+            assert!(config.model.backend.is_none());
+            assert!(config.model.model.is_none());
+            assert!(
+                NacConfig::load_from_cwd(&root).is_err(),
+                "new-session config unexpectedly accepted {invalid_model:?}"
+            );
+        }
+
+        std::fs::write(
+            root.join("config.toml"),
+            "[model]\nbackend = \"auto\"\n\n[storage]\nstore_path = [\"invalid\"]\n",
+        )
+        .unwrap();
+        let error = NacConfig::load_without_model_from_cwd(&root).unwrap_err();
+        assert!(error.to_string().contains("non-model config"), "{error:#}");
 
         restore_env("NAC_HOME", original_nac_home);
         let _ = std::fs::remove_dir_all(root);
@@ -1527,6 +1873,94 @@ url = "https://mcp.context7.com/mcp"
     }
 
     #[tokio::test]
+    async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
+        let root = temp_store_path("arcee_api_key_env_paths")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let expected = "is not supported for backend 'arcee-auth'";
+
+        let snapshot = sessions::new_snapshot(
+            "invalid-arcee-resume".to_string(),
+            root.clone(),
+            "model".to_string(),
+            "https://api.arcee.ai".to_string(),
+            BackendKind::ArceeAuth,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("SESSION_ARCEE_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        let resume_store = root.join("resume.db");
+        let resume_error = match build_resume_config_from_snapshot(
+            snapshot,
+            resume_store.clone(),
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("Arcee session resume must reject api_key_env"),
+            Err(error) => error,
+        };
+        assert!(
+            resume_error.to_string().contains(expected),
+            "got: {resume_error:#}"
+        );
+        assert!(
+            !resume_store.exists(),
+            "invalid resume initialized its store"
+        );
+
+        let worker_store = root.join("worker.db");
+        let worker_error = match build_managed_worker_config(
+            ManagedWorkerOptions {
+                workspace_cwd: root.clone(),
+                config_cwd: None,
+                dispatch: WorkerDispatchOptions {
+                    session_id: "session".to_string(),
+                    thread_name: "impl".to_string(),
+                    action: "work".to_string(),
+                    source_threads: Vec::new(),
+                    skills: Vec::new(),
+                },
+                store: StoreOptions {
+                    store_path: Some(worker_store.clone()),
+                },
+                model: ModelOptions {
+                    backend: Some(BackendKind::ArceeAuth),
+                    api_base_url: Some("https://api.arcee.ai".to_string()),
+                    api_model: Some("model".to_string()),
+                    api_key_env: OptionalModelOption::Value("DELEGATED_ARCEE_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
+                sandbox: SandboxOptions::default(),
+                ssh_host: None,
+            },
+            &NacConfig::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("delegated Arcee worker must reject api_key_env"),
+            Err(error) => error,
+        };
+        assert!(
+            worker_error.to_string().contains(expected),
+            "got: {worker_error:#}"
+        );
+        assert!(
+            !worker_store.exists(),
+            "invalid worker initialized its store"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn managed_worker_builds_user_messages_from_self_and_source_threads() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 
@@ -1578,7 +2012,7 @@ url = "https://mcp.context7.com/mcp"
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: ModelOptions::default(),
+            model: test_openai_model_options(),
             sandbox: SandboxOptions::default(),
             ssh_host: None,
         };
@@ -1626,6 +2060,99 @@ url = "https://mcp.context7.com/mcp"
     }
 
     #[tokio::test]
+    async fn reasoning_effort_is_identical_across_create_snapshot_resume_and_worker() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_REASONING_LIFECYCLE_TEST_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("reasoning_lifecycle")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let store_path = root.join("store.db");
+        let headers = BTreeMap::from([("X-Snapshot".to_string(), "exact".to_string())]);
+        let created = build_run_config(
+            RunOptions {
+                workspace_cwd: workspace.clone(),
+                config_cwd: None,
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: ModelOptions {
+                    backend: Some(BackendKind::OpenAiResponses),
+                    reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Xhigh),
+                    api_base_url: Some("https://snapshot.example/v1".to_string()),
+                    api_model: Some("snapshot-model".to_string()),
+                    api_key_env: OptionalModelOption::Value(key_name.to_string()),
+                    extra_headers: Some(headers.clone()),
+                },
+                sandbox: SandboxOptions::default(),
+                ssh_host: None,
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .unwrap();
+        let session_id = created.session.session_id().unwrap().to_string();
+        assert_eq!(
+            created.client.reasoning_effort(),
+            Some(ReasoningEffort::Xhigh)
+        );
+
+        let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(snapshot.extra_headers, headers);
+
+        let mut conflicting_config = complete_model_config();
+        conflicting_config.model.reasoning_effort = Some(ReasoningEffort::Low);
+        conflicting_config.model.model = Some("must-not-win".to_string());
+        let resumed = build_resume_config(
+            ResumeOptions {
+                lookup_cwd: workspace,
+                worker_executable: None,
+                session_id: Some(session_id),
+                last: false,
+                store: StoreOptions {
+                    store_path: Some(store_path),
+                },
+            },
+            &conflicting_config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumed.client.model, "snapshot-model");
+        assert_eq!(
+            resumed.client.reasoning_effort(),
+            Some(ReasoningEffort::Xhigh)
+        );
+        assert_eq!(resumed.client.extra_headers(), &headers);
+        assert_eq!(
+            crate::tools::thread::worker_model_arguments_for_test(&resumed.client),
+            vec![
+                "--api-model",
+                "snapshot-model",
+                "--api-base-url",
+                "https://snapshot.example/v1",
+                "--backend",
+                "openai-responses",
+                "--effort",
+                "xhigh",
+                "--api-key-env",
+                key_name,
+                "--extra-headers",
+                "{\"X-Snapshot\":\"exact\"}",
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
     async fn resume_config_restores_messages_without_changing_process_cwd() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 
@@ -1651,7 +2178,7 @@ url = "https://mcp.context7.com/mcp"
             "resume-model".to_string(),
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
-            Some(ReasoningEffort::Xhigh),
+            None,
             None,
             None,
             vec![
@@ -1668,12 +2195,16 @@ url = "https://mcp.context7.com/mcp"
                     tool_calls: None,
                 },
             ],
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
         let caller_cwd = original_cwd.canonicalize().unwrap();
+        let mut changed_config = complete_model_config();
+        changed_config.model.model = Some("changed-config-model".to_string());
+        changed_config.model.base_url = Some("https://changed-config.example/v1".to_string());
+        changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
         let run_config = build_resume_config(
             ResumeOptions {
                 lookup_cwd: session_cwd.clone(),
@@ -1684,10 +2215,17 @@ url = "https://mcp.context7.com/mcp"
                     store_path: Some(store_path.clone()),
                 },
             },
-            &NacConfig::default(),
+            &changed_config,
         )
         .await
         .unwrap();
+
+        assert_eq!(run_config.client.model, "resume-model");
+        assert_eq!(run_config.client.base_url(), "https://api.openai.com/v1");
+        assert_eq!(run_config.client.backend(), BackendKind::OpenAiResponses);
+        assert_eq!(run_config.client.reasoning_effort(), None);
+        assert_eq!(run_config.client.api_key_env(), Some("OPENAI_API_KEY"));
+        assert!(run_config.client.extra_headers().is_empty());
 
         let canonical_session_cwd = session_cwd.canonicalize().unwrap();
         assert_eq!(
@@ -1741,8 +2279,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let normalized =
@@ -1762,8 +2300,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         let normalized =
             normalize_snapshot_paths(relative, Path::new("/local/resume/base")).unwrap();
@@ -1791,8 +2329,8 @@ url = "https://mcp.context7.com/mcp"
             }),
             Some("build-box".to_string()),
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let error = match build_resume_config_from_snapshot(
@@ -1814,6 +2352,43 @@ url = "https://mcp.context7.com/mcp"
         );
     }
 
+    #[tokio::test]
+    async fn invalid_legacy_snapshot_requires_settings_repair_without_persistence() {
+        let store_path = temp_store_path("invalid_legacy_model_snapshot");
+        let snapshot = sessions::new_snapshot(
+            "legacy-invalid-model".to_string(),
+            PathBuf::from("~/repo"),
+            "   ".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            Some("build-box".to_string()),
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+
+        let error = match build_resume_config_from_snapshot(
+            snapshot,
+            store_path.clone(),
+            &complete_model_config(),
+            PathBuf::from("/local/resume/base"),
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("invalid legacy model settings must not resume"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("settings repair required"),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains("model"), "{error:#}");
+        assert!(!store_path.exists());
+    }
+
     #[test]
     fn normalize_snapshot_paths_still_canonicalizes_local_sessions() {
         let missing_local_cwd = std::env::temp_dir().join(format!(
@@ -1833,8 +2408,8 @@ url = "https://mcp.context7.com/mcp"
             None,
             None,
             Vec::new(),
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
 
         let error = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap_err();
@@ -1880,8 +2455,8 @@ url = "https://mcp.context7.com/mcp"
                     content: "hello".to_string(),
                 },
             ],
-        None,
-        BTreeMap::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
 
@@ -1955,7 +2530,7 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -1989,6 +2564,12 @@ url = "https://mcp.context7.com/mcp"
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(stored.ssh_host.as_deref(), Some("build-box"));
         assert_eq!(stored.cwd, remote_cwd);
+        assert_eq!(stored.model, "test-model");
+        assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.reasoning_effort, None);
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert!(stored.extra_headers.is_empty());
         assert!(stored.sandbox_spec.is_none());
 
         let _ = std::fs::remove_dir_all(&store_root);
@@ -2026,7 +2607,7 @@ url = "https://mcp.context7.com/mcp"
                 config_cwd: Some(config_cwd.clone()),
                 worker_executable: None,
                 store: StoreOptions::default(),
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2103,7 +2684,7 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(run_store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions {
                     sandbox: true,
                     ..SandboxOptions::default()
@@ -2144,7 +2725,7 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(worker_store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions {
                     sandbox: true,
                     ..SandboxOptions::default()
@@ -2190,7 +2771,7 @@ url = "https://mcp.context7.com/mcp"
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: ModelOptions::default(),
+            model: test_openai_model_options(),
             sandbox,
             ssh_host: Some("build-box".to_string()),
         };
@@ -2265,7 +2846,7 @@ url = "https://mcp.context7.com/mcp"
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2338,7 +2919,7 @@ args = ["-c", {}]
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2426,7 +3007,7 @@ args = ["-c", {}]
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
-                model: ModelOptions::default(),
+                model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },

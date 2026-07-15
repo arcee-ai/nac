@@ -3,7 +3,7 @@ use std::{
     convert::Infallible,
     net::SocketAddr,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex, Weak},
     time::{Duration, Instant},
 };
 
@@ -16,14 +16,20 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
     },
-    routing::{get, patch, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{SessionEventEnvelope, SessionReplayGap},
-    model::{BackendKind, ReasoningEffort},
-    runtime::{self, ModelOptions, NacConfig, RunOptions, SandboxOptions, StoreOptions},
+    model::{
+        managed_backend_base_url, resolve_model_base_url, validate_model_configuration,
+        BackendKind, EffectiveModelSettings, ModelConfigurationError, ReasoningEffort,
+    },
+    runtime::{
+        self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
+        StoreOptions,
+    },
     session_service::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
         SessionService, SessionSubmitError,
@@ -32,7 +38,10 @@ use nac_core::{
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpListener, sync::RwLock};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, RwLock},
+};
 use tower_http::cors::CorsLayer;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
@@ -54,8 +63,15 @@ struct SessionManagerInner {
     root_cwd: PathBuf,
     store_path: PathBuf,
     worker_executable: PathBuf,
-    active_sessions: RwLock<HashMap<String, SessionService>>,
+    active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
+    lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
+}
+
+struct ResolvedLaunchLocation {
+    workspace_cwd: PathBuf,
+    config_cwd: PathBuf,
+    ssh_host: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +85,22 @@ pub struct StoreInfo {
     pub root_cwd: PathBuf,
     pub store_path: PathBuf,
     pub worker_executable: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LaunchModelDefaultsRequest {
+    pub cwd: Option<PathBuf>,
+    /// OpenSSH target for remote sessions; remote paths never select local config.
+    #[serde(default, alias = "host_id")]
+    pub ssh_host: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LaunchModelDefaults {
+    pub configured_model_backend: Option<BackendKind>,
+    /// Effective configured base URL after applying the managed-backend-only
+    /// fixed URL invariant. Other incomplete backends remain `None`.
+    pub configured_model_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,16 +118,85 @@ pub struct ListSessionsQuery {
     pub workspace_stats: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestField<T> {
+    Omitted,
+    Null,
+    Value(T),
+}
+
+impl<T> Default for RequestField<T> {
+    fn default() -> Self {
+        Self::Omitted
+    }
+}
+
+impl<'de, T> Deserialize<'de> for RequestField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|value| match value {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadersRequest(pub BTreeMap<String, String>);
+
+impl<'de> Deserialize<'de> for HeadersRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Representation {
+            Object(BTreeMap<String, String>),
+            LegacyJson(String),
+        }
+
+        match Representation::deserialize(deserializer)? {
+            Representation::Object(headers) => Ok(Self(headers)),
+            Representation::LegacyJson(json) => {
+                if json.trim().is_empty() {
+                    return Err(serde::de::Error::custom(
+                        "extra_headers compatibility string must not be blank",
+                    ));
+                }
+                serde_json::from_str::<BTreeMap<String, String>>(&json)
+                    .map(Self)
+                    .map_err(|error| {
+                        serde::de::Error::custom(format!(
+                            "extra_headers compatibility string must contain a JSON object with string values: {error}"
+                        ))
+                    })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct CreateSessionRequest {
     pub cwd: Option<PathBuf>,
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-    pub backend: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub api_key_env: Option<String>,
-    /// JSON string containing an object whose keys and values are strings.
-    pub extra_headers: Option<String>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<String>,
+    #[serde(default)]
+    pub api_key_env: RequestField<String>,
+    /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
+    #[serde(default)]
+    pub extra_headers: RequestField<HeadersRequest>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -124,15 +225,32 @@ pub struct SandboxRequest {
     pub memory_mib: Option<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateConfigRequest {
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-    pub backend: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub api_key_env: Option<String>,
-    /// JSON string of `BTreeMap<String, String>`. An empty string clears the map.
-    pub extra_headers: Option<String>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<String>,
+    #[serde(default)]
+    pub api_key_env: RequestField<String>,
+    /// Prefer a JSON object. Null or an empty object clears the persisted map.
+    #[serde(default)]
+    pub extra_headers: RequestField<HeadersRequest>,
+}
+
+impl UpdateConfigRequest {
+    fn is_empty(&self) -> bool {
+        matches!(self.model, RequestField::Omitted)
+            && matches!(self.base_url, RequestField::Omitted)
+            && matches!(self.backend, RequestField::Omitted)
+            && matches!(self.reasoning_effort, RequestField::Omitted)
+            && matches!(self.api_key_env, RequestField::Omitted)
+            && matches!(self.extra_headers, RequestField::Omitted)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,7 +316,7 @@ pub struct ReplayGapEvent {
 impl SessionManager {
     pub fn new(options: ServerOptions) -> Result<Self> {
         let root_cwd = canonicalize_dir(options.root_cwd)?;
-        let config = NacConfig::load_from_cwd(&root_cwd)?;
+        let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
         let store_path = runtime::resolve_store_path(
             &root_cwd,
             StoreOptions {
@@ -218,6 +336,7 @@ impl SessionManager {
                 store_path,
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
+                lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
             }),
         })
@@ -229,6 +348,61 @@ impl SessionManager {
             store_path: self.inner.store_path.clone(),
             worker_executable: self.inner.worker_executable.clone(),
         }
+    }
+
+    fn resolve_launch_location(
+        &self,
+        cwd: Option<PathBuf>,
+        ssh_host: Option<String>,
+    ) -> Result<ResolvedLaunchLocation> {
+        let ssh_host = ssh_host
+            .as_deref()
+            .map(str::trim)
+            .filter(|ssh_host| !ssh_host.is_empty())
+            .map(str::to_string);
+        let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
+            let remote_cwd = cwd
+                .and_then(|cwd| {
+                    let trimmed = cwd.as_os_str().to_string_lossy().trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(trimmed))
+                    }
+                })
+                .unwrap_or_else(|| PathBuf::from("~"));
+            (remote_cwd, self.inner.root_cwd.clone())
+        } else {
+            let local_cwd = match cwd {
+                Some(cwd) => canonicalize_dir(cwd)?,
+                None => self.inner.root_cwd.clone(),
+            };
+            (local_cwd.clone(), local_cwd)
+        };
+        Ok(ResolvedLaunchLocation {
+            workspace_cwd,
+            config_cwd,
+            ssh_host,
+        })
+    }
+
+    pub fn launch_model_defaults(
+        &self,
+        request: LaunchModelDefaultsRequest,
+    ) -> Result<LaunchModelDefaults> {
+        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let configured_model_backend = config.model.backend;
+        let configured_model_base_url = match configured_model_backend {
+            Some(backend) if managed_backend_base_url(backend).is_some() => Some(
+                resolve_model_base_url(backend, config.model.base_url.clone())?,
+            ),
+            _ => config.model.base_url.clone(),
+        };
+        Ok(LaunchModelDefaults {
+            configured_model_backend,
+            configured_model_base_url,
+        })
     }
 
     pub async fn list_sessions(
@@ -248,7 +422,7 @@ impl SessionManager {
                     let active_service = active.get(&summary.session_id);
                     ManagedSessionSummary {
                         active: active_service.is_some(),
-                        active_run: active_service.and_then(SessionService::active_run),
+                        active_run: active_service.and_then(|service| service.active_run()),
                         summary,
                         workspace_diff: None,
                     }
@@ -385,56 +559,32 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let ssh_host = request
-            .ssh_host
-            .as_deref()
-            .map(str::trim)
-            .filter(|ssh_host| !ssh_host.is_empty())
-            .map(str::to_string);
-        if ssh_host.is_some() && sandbox_requested(&request.sandbox) {
+        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        if location.ssh_host.is_some() && sandbox_requested(&request.sandbox) {
             return Err(anyhow!(
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
         }
-        let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
-            let remote_cwd = request
-                .cwd
-                .and_then(|cwd| {
-                    let trimmed = cwd.as_os_str().to_string_lossy().trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(PathBuf::from(trimmed))
-                    }
-                })
-                .unwrap_or_else(|| PathBuf::from("~"));
-            (remote_cwd, self.inner.root_cwd.clone())
-        } else {
-            let local_cwd = match request.cwd {
-                Some(cwd) => canonicalize_dir(cwd)?,
-                None => self.inner.root_cwd.clone(),
-            };
-            (local_cwd.clone(), local_cwd)
-        };
-        let config = NacConfig::load_from_cwd(&config_cwd)?;
+        let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let model = model_options(
+            request.model,
+            request.base_url,
+            request.backend,
+            request.reasoning_effort,
+            request.api_key_env,
+            request.extra_headers,
+        )?;
         let run_config = runtime::build_run_config(
             RunOptions {
-                workspace_cwd,
-                config_cwd: Some(config_cwd.clone()),
+                workspace_cwd: location.workspace_cwd,
+                config_cwd: Some(location.config_cwd.clone()),
                 worker_executable: Some(self.inner.worker_executable.clone()),
                 store: StoreOptions {
                     store_path: Some(self.inner.store_path.clone()),
                 },
-                model: model_options(
-                    request.model,
-                    request.base_url,
-                    request.backend,
-                    request.reasoning_effort,
-                    request.api_key_env,
-                    request.extra_headers,
-                )?,
+                model,
                 sandbox: sandbox_options(request.sandbox),
-                ssh_host,
+                ssh_host: location.ssh_host,
             },
             &config,
         )
@@ -451,22 +601,80 @@ impl SessionManager {
             .active_sessions
             .write()
             .await
-            .insert(session_id, service);
+            .insert(session_id, Arc::new(service));
         Ok(snapshot)
     }
 
-    pub async fn attach_session(&self, session_id: &str) -> Result<SessionService> {
-        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
-            return Ok(service.clone());
+    fn lifecycle_gate(&self, session_id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self
+            .inner
+            .lifecycle_gates
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(gate) = gates.get(session_id).and_then(Weak::upgrade) {
+            return gate;
         }
 
-        let service = self.resume_session(session_id).await?;
+        let gate = Arc::new(Mutex::new(()));
+        gates.insert(session_id.to_string(), Arc::downgrade(&gate));
+        gate
+    }
+
+    async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        self.attach_session_locked(session_id).await
+    }
+
+    /// Attaches while the caller holds this session's lifecycle gate. Keeping
+    /// resume and insertion behind the same gate prevents an old service from
+    /// being inserted after a settings update has committed.
+    async fn attach_session_locked(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
+            return Ok(Arc::clone(service));
+        }
+
+        let service = Arc::new(self.resume_session(session_id).await?);
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
-            return Ok(existing.clone());
+            return Ok(Arc::clone(existing));
         }
-        active.insert(session_id.to_string(), service.clone());
+        active.insert(session_id.to_string(), Arc::clone(&service));
         Ok(service)
+    }
+
+    /// Returns a service whose model configuration revision matches the store.
+    /// The caller must hold both the local lifecycle gate and the shared run
+    /// lease, preventing a PATCH between the revision read and run start.
+    async fn attach_current_submission_service_locked(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<SessionService>> {
+        let persisted_version =
+            sessions::load_session_model_config(&self.inner.store_path, session_id)?.config_version;
+        let cached = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        if let Some(service) = cached {
+            if service.config_version() == Some(persisted_version) {
+                return Ok(service);
+            }
+            if service.active_run().is_some() {
+                return Err(anyhow!(
+                    "session is busy with an active run while its persisted configuration changed"
+                ));
+            }
+            self.inner.active_sessions.write().await.remove(session_id);
+        }
+        self.attach_session_locked(session_id).await
+    }
+
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
+        sessions::load_session_model_config(&self.inner.store_path, session_id)
     }
 
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
@@ -507,7 +715,14 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
-        let service = self.attach_session(session_id).await?;
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        // The OS lease closes the cross-process gap between checking the
+        // persisted revision and synchronously establishing active-run state.
+        let run_lease = sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let service = self
+            .attach_current_submission_service_locked(session_id)
+            .await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
             PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
@@ -519,7 +734,7 @@ impl SessionManager {
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
-                    .try_submit_prepared_prompt(prompt)
+                    .try_submit_prepared_prompt_with_lease(prompt, run_lease)
                     .map_err(submit_error_to_anyhow)?;
                 Ok(submit_response(handle, display_prompt))
             }
@@ -603,85 +818,72 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Updates the model configuration of an existing session in the DB,
-    /// then removes it from the in-memory `active_sessions` map so that the
-    /// next `attach_session` call re-resumes it with the new config.
-    /// Returns an error if a run is currently active.
+    /// Transactionally updates persisted model settings for an inactive session.
+    /// The prospective snapshot and credentials are fully validated before the
+    /// database or in-memory service map is changed.
     pub async fn update_session_config(
         &self,
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // 1. Check that no run is active.
-        {
-            let active = self.inner.active_sessions.read().await;
-            if let Some(service) = active.get(session_id) {
-                if service.active_run().is_some() {
-                    return Err(anyhow!(
-                        "session is busy with an active run; cancel it before updating config"
-                    ));
-                }
+        // An omitted patch is intentionally independent of persisted settings
+        // and credentials. In particular, it must not evict an attached service.
+        if request.is_empty() {
+            return Ok(());
+        }
+
+        // Submission and update both hold this per-session gate. A submission
+        // that wins establishes active-run state synchronously before releasing
+        // it; an update that wins commits and evicts before a submit can attach.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+
+        // Hold the write lock through validation and persistence so other
+        // attachment paths cannot observe or insert a stale service.
+        let mut active = self.inner.active_sessions.write().await;
+        if let Some(service) = active.get(session_id) {
+            if service.active_run().is_some() {
+                return Err(anyhow!(
+                    "session is busy with an active run; cancel it before updating config"
+                ));
             }
         }
 
-        // 2. Load the current snapshot from DB.
-        let mut snapshot = sessions::load_session(&self.inner.store_path, session_id)?;
+        // Independent server/TUI processes coordinate through the same
+        // crash-safe lease. Keep it through validation, CAS persistence, and
+        // local eviction, but never hold a SQLite transaction over model I/O.
+        let _run_lease =
+            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
 
-        // 3. Apply overrides.
-        if let Some(model) = request.model {
-            let trimmed = model.trim().to_string();
-            snapshot.model = if trimmed.is_empty() {
-                // Fall back to a sensible default — keep current if empty.
-                snapshot.model
-            } else {
-                trimmed
-            };
-        }
-        if let Some(base_url) = request.base_url {
-            let trimmed = base_url.trim().to_string();
-            if !trimmed.is_empty() {
-                snapshot.base_url = trimmed;
-            }
-        }
-        if let Some(backend) = request.backend {
-            let trimmed = backend.trim();
-            if !trimmed.is_empty() {
-                snapshot.backend = parse_json_string_enum::<BackendKind>(trimmed)?;
-            }
-        }
-        if let Some(effort) = request.reasoning_effort {
-            let trimmed = effort.trim();
-            if trimmed.is_empty() {
-                snapshot.reasoning_effort = None;
-            } else {
-                snapshot.reasoning_effort =
-                    Some(parse_json_string_enum::<ReasoningEffort>(trimmed)?);
-            }
-        }
-        if let Some(api_key_env) = request.api_key_env {
-            let trimmed = api_key_env.trim();
-            snapshot.api_key_env = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            };
-        }
-        if let Some(extra_headers_json) = request.extra_headers {
-            let trimmed = extra_headers_json.trim();
-            if trimmed.is_empty() {
-                snapshot.extra_headers = BTreeMap::new();
-            } else {
-                snapshot.extra_headers = serde_json::from_str::<BTreeMap<String, String>>(trimmed)
-                    .context("failed to parse extra_headers as JSON object")?;
-            }
-        }
+        let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+        let mut prospective = current.clone();
+        apply_raw_config_patch(&mut prospective, request)?;
+        let (backend, reasoning_effort, extra_headers) =
+            parse_prospective_model_config(&mut prospective)?;
 
-        // 4. Save the updated snapshot to DB.
-        sessions::save_session(&self.inner.store_path, &snapshot)?;
+        let _settings = EffectiveModelSettings::new(
+            backend,
+            prospective.model.clone(),
+            prospective.base_url.clone(),
+            reasoning_effort,
+            prospective.api_key_env.clone(),
+            extra_headers.clone(),
+        )?;
+        validate_model_configuration(
+            backend,
+            &prospective.model,
+            Some(&prospective.base_url),
+            reasoning_effort,
+            prospective.api_key_env.as_deref(),
+            &extra_headers,
+        )?;
 
-        // 5. Remove from active_sessions so the next attach re-resumes.
-        self.inner.active_sessions.write().await.remove(session_id);
-
+        // Persist only model columns after all caller-controlled configuration
+        // and credential checks succeed. The revision CAS rejects a concurrent
+        // PATCH, while run/history writes remain independent of these columns.
+        // A store failure or conflict leaves the active map untouched.
+        sessions::update_raw_session_model_config(&self.inner.store_path, &prospective)?;
+        active.remove(session_id);
         Ok(())
     }
 
@@ -698,7 +900,7 @@ impl SessionManager {
         } else {
             &summary.cwd
         };
-        let config = NacConfig::load_from_cwd(config_cwd)?;
+        let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
         let run_config = runtime::build_resume_config_for_session(
             self.inner.store_path.clone(),
             session_id,
@@ -754,6 +956,10 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route("/health", get(health))
         .route("/store", get(store_info))
+        .route(
+            "/sessions/launch-defaults",
+            post(launch_model_defaults_handler),
+        )
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/order", put(reorder_sessions_handler))
         .route(
@@ -767,7 +973,7 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route(
             "/sessions/{session_id}/config",
-            patch(update_config_handler),
+            get(session_config_handler).patch(update_config_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/events", get(recent_events))
@@ -937,6 +1143,14 @@ async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
 }
 
+async fn launch_model_defaults_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<LaunchModelDefaultsRequest>, JsonRejection>,
+) -> std::result::Result<Json<LaunchModelDefaults>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.launch_model_defaults(request)?))
+}
+
 async fn list_sessions(
     State(manager): State<SessionManager>,
     Query(query): Query<ListSessionsQuery>,
@@ -981,8 +1195,9 @@ async fn reorder_sessions_handler(
 
 async fn create_session(
     State(manager): State<SessionManager>,
-    Json(request): Json<CreateSessionRequest>,
+    payload: std::result::Result<Json<CreateSessionRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<SessionFrontendSnapshot>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
     Ok((
         StatusCode::CREATED,
         Json(manager.create_session(request).await?),
@@ -1075,55 +1290,224 @@ async fn delete_session_handler(
     Ok(StatusCode::OK)
 }
 
+async fn session_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<sessions::RawSessionModelConfig>, ApiError> {
+    Ok(Json(manager.session_config(&session_id)?))
+}
+
 async fn update_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-    Json(request): Json<UpdateConfigRequest>,
+    payload: std::result::Result<Json<UpdateConfigRequest>, JsonRejection>,
 ) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
     manager.update_session_config(&session_id, request).await?;
     Ok(StatusCode::OK)
 }
 
+#[derive(Debug)]
+struct RequestConfigurationError(String);
+
+impl std::fmt::Display for RequestConfigurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RequestConfigurationError {}
+
+fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(RequestConfigurationError(message.into()))
+}
+
+fn nonblank_request_string(value: String, field: &str) -> Result<String> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(request_configuration_error(format!(
+            "invalid model configuration: field '{field}' must not be empty or whitespace-only"
+        )));
+    }
+    Ok(normalized.to_string())
+}
+
+fn required_create_string(field: RequestField<String>, name: &str) -> Result<Option<String>> {
+    match field {
+        RequestField::Omitted => Ok(None),
+        RequestField::Null => Err(request_configuration_error(format!(
+            "invalid model configuration: required field '{name}' cannot be null"
+        ))),
+        RequestField::Value(value) => nonblank_request_string(value, name).map(Some),
+    }
+}
+
 fn model_options(
-    model: Option<String>,
-    base_url: Option<String>,
-    backend: Option<String>,
-    reasoning_effort: Option<String>,
-    api_key_env: Option<String>,
-    extra_headers: Option<String>,
+    model: RequestField<String>,
+    base_url: RequestField<String>,
+    backend: RequestField<String>,
+    reasoning_effort: RequestField<String>,
+    api_key_env: RequestField<String>,
+    extra_headers: RequestField<HeadersRequest>,
 ) -> Result<ModelOptions> {
+    let backend = required_create_string(backend, "backend")?
+        .map(|value| parse_request_enum::<BackendKind>(&value, "backend"))
+        .transpose()?;
+    let reasoning_effort = match reasoning_effort {
+        RequestField::Omitted => OptionalModelOption::Inherit,
+        RequestField::Null => OptionalModelOption::Clear,
+        RequestField::Value(value) => {
+            let value = nonblank_request_string(value, "reasoning_effort")?;
+            OptionalModelOption::Value(parse_request_enum::<ReasoningEffort>(
+                &value,
+                "reasoning_effort",
+            )?)
+        }
+    };
+    let api_key_env = match api_key_env {
+        RequestField::Omitted => OptionalModelOption::Inherit,
+        RequestField::Null => OptionalModelOption::Clear,
+        RequestField::Value(value) => OptionalModelOption::Value(value),
+    };
+    let extra_headers = match extra_headers {
+        RequestField::Omitted => None,
+        RequestField::Null => Some(BTreeMap::new()),
+        RequestField::Value(HeadersRequest(headers)) => Some(headers),
+    };
+
     Ok(ModelOptions {
-        backend: backend
-            .map(|value| parse_json_string_enum::<BackendKind>(&value))
-            .transpose()?,
-        reasoning_effort: reasoning_effort
-            .map(|value| parse_json_string_enum::<ReasoningEffort>(&value))
-            .transpose()?,
-        api_base_url: base_url,
-        api_model: model,
-        api_key_env: api_key_env.and_then(|value| {
-            let trimmed = value.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        }),
-        extra_headers: parse_extra_headers(extra_headers)?,
+        backend,
+        reasoning_effort,
+        api_base_url: required_create_string(base_url, "base_url")?,
+        api_model: required_create_string(model, "model")?,
+        api_key_env,
+        extra_headers,
     })
 }
 
-fn parse_extra_headers(extra_headers: Option<String>) -> Result<Option<BTreeMap<String, String>>> {
-    let Some(extra_headers) = extra_headers else {
-        return Ok(None);
-    };
-    let trimmed = extra_headers.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
+fn apply_raw_config_patch(
+    config: &mut sessions::RawSessionModelConfig,
+    request: UpdateConfigRequest,
+) -> Result<()> {
+    match request.model {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'model' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => config.model = nonblank_request_string(value, "model")?,
     }
-    serde_json::from_str::<BTreeMap<String, String>>(trimmed)
-        .map(Some)
-        .map_err(|error| {
-            anyhow!(
-                "invalid extra_headers: expected a JSON object with string keys and string values: {error}"
-            )
+    match request.base_url {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'base_url' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => {
+            config.base_url = nonblank_request_string(value, "base_url")?;
+        }
+    }
+    match request.backend {
+        RequestField::Omitted => {}
+        RequestField::Null => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'backend' cannot be null",
+            ));
+        }
+        RequestField::Value(value) => {
+            config.backend = Some(nonblank_request_string(value, "backend")?);
+        }
+    }
+    match request.reasoning_effort {
+        RequestField::Omitted => {}
+        RequestField::Null => config.reasoning_effort = None,
+        RequestField::Value(value) => {
+            config.reasoning_effort = Some(nonblank_request_string(value, "reasoning_effort")?);
+        }
+    }
+    match request.api_key_env {
+        RequestField::Omitted => {}
+        RequestField::Null => config.api_key_env = None,
+        RequestField::Value(value) => config.api_key_env = Some(value),
+    }
+    match request.extra_headers {
+        RequestField::Omitted => {}
+        RequestField::Null => config.extra_headers_json = None,
+        RequestField::Value(HeadersRequest(headers)) => {
+            config.extra_headers_json = if headers.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&headers).map_err(|error| {
+                    request_configuration_error(format!(
+                        "invalid model configuration: failed to serialize extra_headers: {error}"
+                    ))
+                })?)
+            };
+        }
+    }
+    config.diagnostics.clear();
+    Ok(())
+}
+
+fn parse_prospective_model_config(
+    config: &mut sessions::RawSessionModelConfig,
+) -> Result<(
+    BackendKind,
+    Option<ReasoningEffort>,
+    BTreeMap<String, String>,
+)> {
+    nonblank_request_string(config.model.clone(), "model")?;
+    let backend_raw = config.backend.as_deref().ok_or_else(|| {
+        request_configuration_error(
+            "invalid model configuration: required field 'backend' is missing; explicitly select a backend",
+        )
+    })?;
+    let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
+    let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
+    // A zero-length stored value is how legacy/incomplete rows represent an
+    // absent NOT NULL base_url. Concrete request values are rejected before
+    // reaching this point, so only repair can take the managed default path.
+    let stored_base_url = if config.base_url.is_empty() {
+        None
+    } else {
+        Some(config.base_url.clone())
+    };
+    config.base_url = resolve_model_base_url(backend, stored_base_url)?;
+    let reasoning_effort = config
+        .reasoning_effort
+        .as_deref()
+        .map(|raw| {
+            let raw = nonblank_request_string(raw.to_string(), "reasoning_effort")?;
+            parse_request_enum::<ReasoningEffort>(&raw, "reasoning_effort")
         })
+        .transpose()?;
+    let extra_headers = config
+        .extra_headers_json
+        .as_deref()
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| {
+            serde_json::from_str::<BTreeMap<String, String>>(raw).map_err(|error| {
+                request_configuration_error(format!(
+                    "invalid model configuration: stored extra_headers must be replaced or cleared: {error}"
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok((backend, reasoning_effort, extra_headers))
+}
+
+fn parse_request_enum<T>(value: &str, field: &str) -> Result<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|error| {
+        request_configuration_error(format!(
+            "invalid model configuration: invalid '{field}' value '{value}': {error}"
+        ))
+    })
 }
 
 fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
@@ -1155,14 +1539,6 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
         || request.workdir.is_some()
 }
 
-fn parse_json_string_enum<T>(value: &str) -> Result<T>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .with_context(|| format!("invalid enum value '{}'", value))
-}
-
 fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
     match error {
         SessionSubmitError::Busy { active_run } => anyhow!(
@@ -1170,6 +1546,11 @@ fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
             active_run.run_id,
             active_run.prompt_preview
         ),
+        SessionSubmitError::ExternalBusy { session_id } => anyhow!(
+            "session '{}' is busy with an active run in another process",
+            session_id
+        ),
+        SessionSubmitError::Coordination { message } => anyhow!(message),
     }
 }
 
@@ -1295,10 +1676,36 @@ impl From<sessions::SessionPresentationError> for ApiError {
     }
 }
 
+impl From<sessions::SessionConfigUpdateError> for ApiError {
+    fn from(error: sessions::SessionConfigUpdateError) -> Self {
+        let status = match &error {
+            sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
+            sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
+            sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
-        let status = if message.contains("was not found")
+        let status = if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>()
+        {
+            match error {
+                sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
+                sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
+                sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if error.downcast_ref::<ModelConfigurationError>().is_some()
+            || error.downcast_ref::<RequestConfigurationError>().is_some()
+            || message.contains("invalid model configuration")
+        {
+            StatusCode::BAD_REQUEST
+        } else if message.contains("was not found")
             || message.contains("not found")
             || message.contains("unknown host")
         {
@@ -1338,77 +1745,136 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_model_option_enums_from_api_strings() {
-        let options = model_options(
-            Some("model-a".to_string()),
-            Some("https://example.com/v1".to_string()),
-            Some("openai-responses".to_string()),
-            Some("xhigh".to_string()),
-            None,
-            None,
+    fn model_request_fields_distinguish_omitted_null_and_values() {
+        let request: CreateSessionRequest = serde_json::from_str(
+            r#"{
+                "model":" model-a ",
+                "base_url":null,
+                "backend":"openai-responses",
+                "reasoning_effort":"xhigh",
+                "api_key_env":null,
+                "extra_headers":{"X-Trace":"launch"}
+            }"#,
         )
         .unwrap();
 
-        assert_eq!(options.backend, Some(BackendKind::OpenAiResponses));
-        assert_eq!(options.reasoning_effort, Some(ReasoningEffort::Xhigh));
-        assert_eq!(options.api_model.as_deref(), Some("model-a"));
+        assert_eq!(request.model, RequestField::Value(" model-a ".to_string()));
+        assert_eq!(request.base_url, RequestField::Null);
         assert_eq!(
-            options.api_base_url.as_deref(),
+            request.backend,
+            RequestField::Value("openai-responses".to_string())
+        );
+        assert_eq!(
+            request.reasoning_effort,
+            RequestField::Value("xhigh".to_string())
+        );
+        assert_eq!(request.api_key_env, RequestField::Null);
+        assert_eq!(
+            request.extra_headers,
+            RequestField::Value(HeadersRequest(BTreeMap::from([(
+                "X-Trace".to_string(),
+                "launch".to_string()
+            )])))
+        );
+        assert_eq!(request.cwd, None);
+    }
+
+    #[test]
+    fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() {
+        let mut config = NacConfig::default();
+        config.model.reasoning_effort = Some(ReasoningEffort::Medium);
+        config.model.api_key_env = Some("CONFIG_KEY".to_string());
+        config
+            .model
+            .extra_headers
+            .insert("X-Config".to_string(), "yes".to_string());
+
+        let inherited = model_options(
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+        )
+        .unwrap();
+        assert_eq!(inherited.reasoning_effort, OptionalModelOption::Inherit);
+        assert_eq!(inherited.api_key_env, OptionalModelOption::Inherit);
+        assert_eq!(inherited.extra_headers, None);
+        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
+
+        let explicit = model_options(
+            RequestField::Value(" model-a ".to_string()),
+            RequestField::Value(" https://example.com/v1 ".to_string()),
+            RequestField::Value("openai-responses".to_string()),
+            RequestField::Value("xhigh".to_string()),
+            RequestField::Null,
+            RequestField::Null,
+        )
+        .unwrap();
+        assert_eq!(explicit.api_model.as_deref(), Some("model-a"));
+        assert_eq!(
+            explicit.api_base_url.as_deref(),
             Some("https://example.com/v1")
         );
-    }
+        assert_eq!(explicit.backend, Some(BackendKind::OpenAiResponses));
+        assert_eq!(
+            explicit.reasoning_effort,
+            OptionalModelOption::Value(ReasoningEffort::Xhigh)
+        );
+        assert_eq!(explicit.api_key_env, OptionalModelOption::Clear);
+        assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
+        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
-    #[test]
-    fn parses_together_launch_options_with_api_key_env_and_headers() {
-        let options = model_options(
-            None,
-            None,
-            Some("together-chat".to_string()),
-            None,
-            Some("  CUSTOM_TOGETHER_KEY  ".to_string()),
-            Some(r#"{"X-Trace":"launch","X-Mode":"test"}"#.to_string()),
+        let raw_selector = " SELECTED_KEY ";
+        let selected = model_options(
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Omitted,
+            RequestField::Value(raw_selector.to_string()),
+            RequestField::Omitted,
         )
         .unwrap();
-
-        assert_eq!(options.backend, Some(BackendKind::TogetherChat));
-        assert_eq!(options.api_key_env.as_deref(), Some("CUSTOM_TOGETHER_KEY"));
         assert_eq!(
-            options.extra_headers,
-            Some(BTreeMap::from([
-                ("X-Mode".to_string(), "test".to_string()),
-                ("X-Trace".to_string(), "launch".to_string()),
-            ]))
+            selected.api_key_env,
+            OptionalModelOption::Value(raw_selector.to_string())
         );
     }
 
     #[test]
-    fn launch_header_options_distinguish_inherit_from_explicit_empty_map() {
-        let inherited = model_options(None, None, None, None, None, None).unwrap();
-        let blank = model_options(
-            None,
-            None,
-            None,
-            None,
-            Some("   ".to_string()),
-            Some("   ".to_string()),
-        )
-        .unwrap();
-        let cleared = model_options(None, None, None, None, None, Some("{}".to_string())).unwrap();
-
-        assert_eq!(inherited.api_key_env, None);
-        assert_eq!(inherited.extra_headers, None);
-        assert_eq!(blank.api_key_env, None);
-        assert_eq!(blank.extra_headers, None);
-        assert_eq!(cleared.extra_headers, Some(BTreeMap::new()));
+    fn null_required_and_blank_concrete_create_fields_are_bad_requests() {
+        for field in ["model", "base_url", "backend"] {
+            let json = format!(r#"{{"{field}":null}}"#);
+            let request: CreateSessionRequest = serde_json::from_str(&json).unwrap();
+            let error = model_options(
+                request.model,
+                request.base_url,
+                request.backend,
+                request.reasoning_effort,
+                request.api_key_env,
+                request.extra_headers,
+            )
+            .unwrap_err();
+            assert!(error.downcast_ref::<RequestConfigurationError>().is_some());
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
     }
 
     #[test]
-    fn invalid_launch_headers_map_to_bad_request() {
-        for invalid in ["{not-json}", r#"["value"]"#, r#"{"X-Count":3}"#] {
-            let error =
-                model_options(None, None, None, None, None, Some(invalid.to_string())).unwrap_err();
-            assert!(error.to_string().contains("invalid extra_headers"));
-            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+    fn headers_prefer_objects_and_accept_only_valid_legacy_object_strings() {
+        let object: CreateSessionRequest =
+            serde_json::from_str(r#"{"extra_headers":{"X-Test":"yes"}}"#).unwrap();
+        let legacy: CreateSessionRequest =
+            serde_json::from_str(r#"{"extra_headers":"{\"X-Test\":\"yes\"}"}"#).unwrap();
+        assert_eq!(object.extra_headers, legacy.extra_headers);
+
+        for invalid in [
+            r#"{"extra_headers":"   "}"#,
+            r#"{"extra_headers":"[1]"}"#,
+            r#"{"extra_headers":{"X-Count":3}}"#,
+        ] {
+            assert!(serde_json::from_str::<CreateSessionRequest>(invalid).is_err());
         }
     }
 
@@ -1427,9 +1893,10 @@ mod tests {
         assert!(html.contains("id=\"launchExtraHeaders\""));
 
         let app = include_str!("../assets/app.js");
-        assert!(app.contains("api_key_env: nullable(el.launchApiKeyEnv.value)"));
-        assert!(app.contains("extra_headers: extraHeaders"));
-        assert!(app.contains("serializeExtraHeaders(el.launchExtraHeaders.value)"));
+        assert!(app.contains("buildLaunchModelPayload"));
+        assert!(app.contains("payload.api_key_env = apiKeyEnv"));
+        assert!(app.contains("payload.extra_headers = headers"));
+        assert!(app.contains("body = buildSettingsPatch"));
     }
 
     #[test]
@@ -1561,6 +2028,110 @@ mod tests {
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
     }
 
+    static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct ScopedModelEnv {
+        original: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl ScopedModelEnv {
+        fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
+            Self::with_config_home(Some(nac_home), None, None, openai_api_key)
+        }
+
+        fn with_config_home(
+            nac_home: Option<&std::path::Path>,
+            xdg_config_home: Option<&std::path::Path>,
+            home: Option<&std::path::Path>,
+            openai_api_key: Option<&str>,
+        ) -> Self {
+            let names = [
+                "NAC_HOME",
+                "XDG_CONFIG_HOME",
+                "HOME",
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "SECOND_API_KEY",
+            ];
+            let original = names
+                .into_iter()
+                .map(|name| (name, std::env::var_os(name)))
+                .collect();
+            unsafe {
+                for (name, value) in [
+                    ("NAC_HOME", nac_home),
+                    ("XDG_CONFIG_HOME", xdg_config_home),
+                    ("HOME", home),
+                ] {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+                match openai_api_key {
+                    Some(value) => std::env::set_var("OPENAI_API_KEY", value),
+                    None => std::env::remove_var("OPENAI_API_KEY"),
+                }
+                std::env::remove_var("OPENAI_BASE_URL");
+                std::env::remove_var("SECOND_API_KEY");
+            }
+            Self { original }
+        }
+    }
+
+    impl Drop for ScopedModelEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.original.drain(..) {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+
+    fn write_managed_credential(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+        std::fs::write(path, contents).expect("write managed credential");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("set managed credential permissions");
+        }
+    }
+
+    fn write_codex_auth(nac_home: &std::path::Path) {
+        std::fs::create_dir_all(nac_home).expect("create NAC home");
+        write_managed_credential(
+            &nac_home.join("auth.json"),
+            serde_json::json!({
+                "type": "chatgpt-codex",
+                "access": "codex-server-access",
+                "refresh": "codex-server-refresh",
+                "expires_at_ms": u64::MAX,
+                "account_id": "codex-server-account"
+            })
+            .to_string(),
+        );
+    }
+
+    fn write_arcee_auth(nac_home: &std::path::Path, base_url: &str) {
+        std::fs::create_dir_all(nac_home).expect("create NAC home");
+        write_managed_credential(
+            &nac_home.join("arcee_auth.json"),
+            serde_json::json!({
+                "type": "arcee_api_key",
+                "api_key": "rcai-server-test",
+                "base_url": base_url,
+                "organization_id": "org-server-test",
+                "workspace_name": "server-test"
+            })
+            .to_string(),
+        );
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1581,20 +2152,167 @@ mod tests {
     }
 
     #[test]
+    fn launch_defaults_reload_config_after_manager_boot() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("launch_defaults_reload");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let request = || LaunchModelDefaultsRequest {
+            cwd: Some(root.clone()),
+            ssh_host: None,
+        };
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"arcee-auth\"\n",
+        )
+        .unwrap();
+        let arcee_defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(
+            arcee_defaults.configured_model_backend,
+            Some(BackendKind::ArceeAuth)
+        );
+        assert_eq!(
+            arcee_defaults.configured_model_base_url.as_deref(),
+            Some(nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL)
+        );
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"chatgpt-codex-responses\"\n",
+        )
+        .unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(
+            defaults.configured_model_backend,
+            Some(BackendKind::ChatGptCodexResponses)
+        );
+        assert_eq!(
+            defaults.configured_model_base_url.as_deref(),
+            Some(nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL)
+        );
+        let serialized_defaults = serde_json::to_value(defaults).unwrap();
+        assert_eq!(
+            serialized_defaults["configured_model_backend"],
+            "chatgpt-codex-responses"
+        );
+        assert_eq!(
+            serialized_defaults["configured_model_base_url"],
+            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
+        );
+        assert!(
+            serde_json::to_value(manager.store_info())
+                .unwrap()
+                .get("configured_model_backend")
+                .is_none(),
+            "root-only launch metadata must not remain on /store"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn launch_defaults_use_local_cwd_but_server_root_for_ssh_with_relative_config_homes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        for config_home_kind in ["NAC_HOME", "XDG_CONFIG_HOME", "HOME"] {
+            let root = temp_root(&format!("launch_defaults_{config_home_kind}"));
+            let workspace_a = root.join("workspace-a");
+            let workspace_b = root.join("workspace-b");
+            std::fs::create_dir_all(&workspace_a).unwrap();
+            std::fs::create_dir_all(&workspace_b).unwrap();
+            let relative_home = std::path::Path::new("relative-config-home");
+            let _env = match config_home_kind {
+                "NAC_HOME" => {
+                    ScopedModelEnv::with_config_home(Some(relative_home), None, None, None)
+                }
+                "XDG_CONFIG_HOME" => {
+                    ScopedModelEnv::with_config_home(None, Some(relative_home), None, None)
+                }
+                "HOME" => ScopedModelEnv::with_config_home(None, None, Some(relative_home), None),
+                _ => unreachable!(),
+            };
+            let config_dir = |cwd: &std::path::Path| match config_home_kind {
+                "NAC_HOME" => cwd.join(relative_home),
+                "XDG_CONFIG_HOME" => cwd.join(relative_home).join("nac"),
+                "HOME" => cwd.join(relative_home).join(".config").join("nac"),
+                _ => unreachable!(),
+            };
+            for (cwd, backend) in [
+                (&root, "openai-responses"),
+                (&workspace_a, "arcee-auth"),
+                (&workspace_b, "chatgpt-codex-responses"),
+            ] {
+                let dir = config_dir(cwd);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    dir.join("config.toml"),
+                    format!("[model]\nbackend = \"{backend}\"\n"),
+                )
+                .unwrap();
+            }
+            let manager = test_manager(&root);
+
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(workspace_a.clone()),
+                        ssh_host: None,
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::ArceeAuth),
+                "{config_home_kind} local workspace A"
+            );
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(workspace_b.clone()),
+                        ssh_host: None,
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::ChatGptCodexResponses),
+                "{config_home_kind} local workspace B"
+            );
+            assert_eq!(
+                manager
+                    .launch_model_defaults(LaunchModelDefaultsRequest {
+                        cwd: Some(std::path::PathBuf::from("remote/project")),
+                        ssh_host: Some(" build-box ".to_string()),
+                    })
+                    .unwrap()
+                    .configured_model_backend,
+                Some(BackendKind::OpenAiResponses),
+                "{config_home_kind} SSH must use the server root"
+            );
+
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
     fn create_session_request_deserializes_optional_ssh_host() {
         let with_host: CreateSessionRequest = serde_json::from_str(
             r#"{"ssh_host":"build-box","backend":"together-chat","api_key_env":"TOGETHER_CUSTOM_KEY","extra_headers":"{\"X-Launch\":\"yes\"}"}"#,
         )
         .unwrap();
         assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
-        assert_eq!(with_host.backend.as_deref(), Some("together-chat"));
         assert_eq!(
-            with_host.api_key_env.as_deref(),
-            Some("TOGETHER_CUSTOM_KEY")
+            with_host.backend,
+            RequestField::Value("together-chat".to_string())
         );
         assert_eq!(
-            with_host.extra_headers.as_deref(),
-            Some(r#"{"X-Launch":"yes"}"#)
+            with_host.api_key_env,
+            RequestField::Value("TOGETHER_CUSTOM_KEY".to_string())
+        );
+        assert_eq!(
+            with_host.extra_headers,
+            RequestField::Value(HeadersRequest(BTreeMap::from([(
+                "X-Launch".to_string(),
+                "yes".to_string()
+            )])))
         );
 
         let alias_host: CreateSessionRequest =
@@ -1616,12 +2334,12 @@ mod tests {
 
         let request = CreateSessionRequest {
             cwd: None,
-            model: None,
-            base_url: None,
-            backend: None,
-            reasoning_effort: None,
-            api_key_env: None,
-            extra_headers: None,
+            model: RequestField::Omitted,
+            base_url: RequestField::Omitted,
+            backend: RequestField::Omitted,
+            reasoning_effort: RequestField::Omitted,
+            api_key_env: RequestField::Omitted,
+            extra_headers: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,
@@ -1633,6 +2351,154 @@ mod tests {
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn server_create_rejects_removed_backend_names_as_bad_requests() {
+        let root = temp_root("removed_backend_create");
+        let manager = test_manager(&root);
+
+        for backend in ["arcee", "auto"] {
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    cwd: None,
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Omitted,
+                    extra_headers: RequestField::Omitted,
+                    ssh_host: None,
+                    sandbox: SandboxRequest::default(),
+                })
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported backend"),
+                "{error:#}"
+            );
+            assert!(
+                error.to_string().contains("settings repair required"),
+                "{error:#}"
+            );
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
+        assert!(!root.join("store.db").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        {
+            let root = temp_root("arcee_malformed_auth_status");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            write_managed_credential(&nac_home.join("arcee_auth.json"), "{not-json}");
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+            assert!(response
+                .message
+                .contains("failed to parse stored Arcee auth"));
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let root = temp_root("arcee_unsafe_auth_permissions");
+            let nac_home = root.join("nac-home");
+            write_arcee_auth(&nac_home, "https://api.arcee.ai");
+            std::fs::set_permissions(
+                nac_home.join("arcee_auth.json"),
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0644"));
+            assert!(!format!("{error:#}").contains("rcai-server-test"));
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+            assert!(response.message.contains("mode to 0600"));
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        {
+            let root = temp_root("arcee_auth_store_failure_status");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(nac_home.join("arcee_auth.json")).unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+            let manager = test_manager(&root);
+
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert!(format!("{error:#}").contains("non-regular credential path"));
+            let response = ApiError::from(error);
+            assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(response.message, "failed to load stored Arcee credentials");
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     fn seed_session(root: &std::path::Path, session_id: &str, created_at: &str) {
@@ -1652,6 +2518,1880 @@ mod tests {
         snapshot.created_at = created_at.to_string();
         snapshot.updated_at = created_at.to_string();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
+    }
+
+    fn seed_editable_session(root: &std::path::Path, session_id: &str) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::from([("X-Original".to_string(), "yes".to_string())]),
+        );
+        snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
+        snapshot.updated_at = snapshot.created_at.clone();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn server_attach_ignores_invalid_ambient_model_but_create_remains_strict() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("persisted_attach_invalid_ambient_model");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"
+[model]
+backend = "auto"
+api_key_env = ["invalid-selector-shape"]
+extra_headers = "invalid-header-shape"
+
+[worker]
+thread_timeout_secs = 7200
+"#,
+        )
+        .unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-resume-key"));
+        seed_editable_session(&root, "persisted");
+
+        // Server startup, listing, and attachment use only non-model ambient
+        // settings; the model tuple and selector come from the stored snapshot.
+        let manager = test_manager(&root);
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+        let resumed = manager.snapshot("persisted").await.unwrap();
+        assert_eq!(resumed.metadata.session_id.as_deref(), Some("persisted"));
+
+        // A new session still parses the complete model table before doing any
+        // persistence, so the same obsolete config remains an actionable error.
+        let error = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("failed to parse config"),
+            "{error:#}"
+        );
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionally_repairable() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("repair_incomplete_settings");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
+        let store_path = root.join("store.db");
+
+        seed_editable_session(&root, "complete");
+        seed_session(&root, "missing-selector", "2026-01-02 00:00:00.000000000");
+        seed_session(
+            &root,
+            "missing-environment-value",
+            "2026-01-03 00:00:00.000000000",
+        );
+        let mut missing_value =
+            sessions::load_session(&store_path, "missing-environment-value").unwrap();
+        missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
+        sessions::update_session_model_config(&store_path, &missing_value).unwrap();
+
+        seed_session(
+            &root,
+            "unavailable-managed-auth",
+            "2026-01-04 00:00:00.000000000",
+        );
+        let mut unavailable_auth =
+            sessions::load_session(&store_path, "unavailable-managed-auth").unwrap();
+        unavailable_auth.backend = BackendKind::ArceeAuth;
+        unavailable_auth.base_url = "https://api.arcee.ai".to_string();
+        unavailable_auth.api_key_env = None;
+        sessions::update_session_model_config(&store_path, &unavailable_auth).unwrap();
+
+        let manager = test_manager(&root);
+        let Json(endpoint_config) = session_config_handler(
+            State(manager.clone()),
+            AxumPath("missing-selector".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(endpoint_config.session_id, "missing-selector");
+        assert!(!serde_json::to_string(&endpoint_config)
+            .unwrap()
+            .contains("server-repair-key"));
+
+        let listed = manager.list_sessions(false).await.unwrap();
+        let listed_ids = listed
+            .iter()
+            .map(|entry| entry.summary.session_id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(listed_ids.len(), 4);
+        for expected in [
+            "complete",
+            "missing-selector",
+            "missing-environment-value",
+            "unavailable-managed-auth",
+        ] {
+            assert!(
+                listed_ids.contains(expected),
+                "missing listed session {expected}"
+            );
+        }
+
+        let missing_selector = manager.session_config("missing-selector").unwrap();
+        assert_eq!(
+            missing_selector.backend.as_deref(),
+            Some("openai-responses")
+        );
+        assert_eq!(missing_selector.api_key_env, None);
+        let missing_environment = manager.session_config("missing-environment-value").unwrap();
+        assert_eq!(
+            missing_environment.api_key_env.as_deref(),
+            Some("MISSING_SERVER_REPAIR_KEY")
+        );
+        let unavailable_managed = manager.session_config("unavailable-managed-auth").unwrap();
+        assert_eq!(unavailable_managed.backend.as_deref(), Some("arcee-auth"));
+        assert_eq!(unavailable_managed.api_key_env, None);
+        assert!(
+            manager.inner.active_sessions.read().await.is_empty(),
+            "reading persisted settings must not attach any session"
+        );
+
+        for session_id in [
+            "missing-selector",
+            "missing-environment-value",
+            "unavailable-managed-auth",
+        ] {
+            let error = manager.snapshot(session_id).await.unwrap_err();
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        }
+        assert!(manager.inner.active_sessions.read().await.is_empty());
+
+        for session_id in ["missing-selector", "missing-environment-value"] {
+            manager
+                .update_session_config(
+                    session_id,
+                    UpdateConfigRequest {
+                        api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .expect("API-key session should be repairable with an available selector");
+            assert_eq!(
+                manager
+                    .session_config(session_id)
+                    .unwrap()
+                    .api_key_env
+                    .as_deref(),
+                Some("OPENAI_API_KEY")
+            );
+        }
+
+        manager
+            .update_session_config(
+                "unavailable-managed-auth",
+                UpdateConfigRequest {
+                    base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("unavailable managed auth should be repairable by switching credential mode");
+        let repaired_auth = manager.session_config("unavailable-managed-auth").unwrap();
+        assert_eq!(repaired_auth.backend.as_deref(), Some("arcee-api"));
+        assert_eq!(repaired_auth.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+
+        let before_failed_repair = manager.session_config("missing-selector").unwrap();
+        let error = manager
+            .update_session_config(
+                "missing-selector",
+                UpdateConfigRequest {
+                    api_key_env: RequestField::Value("MISSING_SERVER_REPAIR_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            manager.session_config("missing-selector").unwrap(),
+            before_failed_repair,
+            "failed repair must leave persisted settings unchanged"
+        );
+
+        let listed_after_repairs = manager.list_sessions(false).await.unwrap();
+        assert_eq!(listed_after_repairs.len(), 4);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn structurally_invalid_raw_settings_require_explicit_transactional_repair() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("repair_structurally_invalid_settings");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
+        let store_path = root.join("store.db");
+        for id in ["healthy", "auto", "arcee", "missing", "effort", "headers"] {
+            seed_editable_session(&root, id);
+        }
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            let mut raw = sessions::load_session_model_config(&store_path, id).unwrap();
+            match id {
+                "auto" => raw.backend = Some("auto".to_string()),
+                "arcee" => raw.backend = Some("arcee".to_string()),
+                "missing" => raw.backend = None,
+                "effort" => raw.reasoning_effort = Some("ultra".to_string()),
+                "headers" => raw.extra_headers_json = Some("{broken".to_string()),
+                _ => unreachable!(),
+            }
+            sessions::update_raw_session_model_config(&store_path, &raw).unwrap();
+        }
+
+        let manager = test_manager(&root);
+        let listed = manager.list_sessions(false).await.unwrap();
+        assert_eq!(listed.len(), 6);
+        assert_eq!(
+            listed
+                .iter()
+                .find(|entry| entry.summary.session_id == "healthy")
+                .unwrap()
+                .summary
+                .model_config_error,
+            None
+        );
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            assert!(
+                listed
+                    .iter()
+                    .find(|entry| entry.summary.session_id == id)
+                    .unwrap()
+                    .summary
+                    .model_config_error
+                    .is_some(),
+                "{id} should be diagnosed without breaking listing"
+            );
+        }
+
+        let raw_auto = manager.session_config("auto").unwrap();
+        assert_eq!(raw_auto.backend.as_deref(), Some("auto"));
+        assert!(!raw_auto.diagnostics.is_empty());
+        let raw_missing = manager.session_config("missing").unwrap();
+        assert_eq!(raw_missing.backend, None);
+        let raw_effort = manager.session_config("effort").unwrap();
+        assert_eq!(raw_effort.reasoning_effort.as_deref(), Some("ultra"));
+        let raw_headers = manager.session_config("headers").unwrap();
+        assert_eq!(raw_headers.extra_headers_json.as_deref(), Some("{broken"));
+        let Json(endpoint_headers) =
+            session_config_handler(State(manager.clone()), AxumPath("headers".to_string()))
+                .await
+                .unwrap();
+        assert_eq!(endpoint_headers, raw_headers);
+        assert!(manager.inner.active_sessions.read().await.is_empty());
+
+        let before_failed = raw_auto.clone();
+        let error = manager
+            .update_session_config(
+                "auto",
+                UpdateConfigRequest {
+                    model: RequestField::Value("replacement-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert_eq!(manager.session_config("auto").unwrap(), before_failed);
+
+        for id in ["auto", "arcee", "missing"] {
+            manager
+                .update_session_config(
+                    id,
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("openai-responses".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        manager
+            .update_session_config(
+                "effort",
+                UpdateConfigRequest {
+                    reasoning_effort: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+        manager
+            .update_session_config(
+                "headers",
+                UpdateConfigRequest {
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                        "X-Repaired".to_string(),
+                        "yes".to_string(),
+                    )]))),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        for id in ["auto", "arcee", "missing", "effort", "headers"] {
+            let repaired = manager.session_config(id).unwrap();
+            assert!(
+                repaired.diagnostics.is_empty(),
+                "{id}: {:?}",
+                repaired.diagnostics
+            );
+            assert_eq!(repaired.config_version, 2);
+            sessions::load_session(&store_path, id).expect("repaired row must strictly load");
+        }
+        assert_eq!(
+            manager
+                .session_config("headers")
+                .unwrap()
+                .extra_headers_json
+                .as_deref(),
+            Some("{\"X-Repaired\":\"yes\"}")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    async fn point_session_at_hanging_endpoint(
+        root: &std::path::Path,
+        session_id: &str,
+    ) -> tokio::task::JoinHandle<()> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
+        snapshot.base_url = format!("http://{address}/v1");
+        sessions::update_session_model_config(&root.join("store.db"), &snapshot).unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                let _socket = socket;
+                std::future::pending::<()>().await;
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn submission_winning_lifecycle_gate_makes_concurrent_patch_reject_busy() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("submit_before_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let original_service = manager.attach_session("session").await.unwrap();
+
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+        let (submit_started_tx, submit_started_rx) = tokio::sync::oneshot::channel();
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_started_tx.send(()).unwrap();
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "hold this run open".to_string(),
+                    },
+                )
+                .await
+        });
+        submit_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let (patch_started_tx, patch_started_rx) = tokio::sync::oneshot::channel();
+        let patch_manager = manager.clone();
+        let patch = tokio::spawn(async move {
+            patch_started_tx.send(()).unwrap();
+            patch_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("model-after-update".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        patch_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!submit.is_finished());
+        assert!(!patch.is_finished());
+
+        drop(blocker);
+        let submitted = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should acquire the gate")
+            .unwrap()
+            .unwrap();
+        let patch_error = tokio::time::timeout(Duration::from_secs(2), patch)
+            .await
+            .expect("patch should run after submission")
+            .unwrap()
+            .unwrap_err();
+        assert!(patch_error.to_string().contains("busy with an active run"));
+        assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-a"
+        );
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&mapped, &original_service));
+        assert_eq!(
+            mapped.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn patch_winning_lifecycle_gate_evicts_before_concurrent_submission_attaches() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_before_submit");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let stale_service = manager.attach_session("session").await.unwrap();
+
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+        let (patch_started_tx, patch_started_rx) = tokio::sync::oneshot::channel();
+        let patch_manager = manager.clone();
+        let patch = tokio::spawn(async move {
+            patch_started_tx.send(()).unwrap();
+            patch_manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Value("model-after-update".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+        });
+        patch_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let (submit_started_tx, submit_started_rx) = tokio::sync::oneshot::channel();
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_started_tx.send(()).unwrap();
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "use committed settings".to_string(),
+                    },
+                )
+                .await
+        });
+        submit_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!patch.is_finished());
+        assert!(!submit.is_finished());
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), patch)
+            .await
+            .expect("patch should acquire the gate")
+            .unwrap()
+            .unwrap();
+        let submitted = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should run after patch")
+            .unwrap()
+            .unwrap();
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(!Arc::ptr_eq(&mapped, &stale_service));
+        assert_eq!(mapped.metadata().model, "model-after-update");
+        assert!(stale_service.active_run().is_none());
+        assert_eq!(
+            mapped.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-after-update"
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn external_active_run_lease_rejects_patch_from_independent_manager() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("external_active_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let running_manager = test_manager(&root);
+        let patch_manager = test_manager(&root);
+
+        running_manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "hold cross-process lease".to_string(),
+                },
+            )
+            .await
+            .expect("first manager starts run");
+        let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
+
+        let error = patch_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("must-not-commit".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("PATCH cannot commit beneath another process run");
+        assert!(error.to_string().contains("busy with an active run"));
+        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
+        let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(after.model, before.model);
+        assert_eq!(after.config_version, before.config_version);
+        assert!(!patch_manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+
+        running_manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("external_patch_rebuild");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("SECOND_API_KEY", "second-server-key") };
+        seed_editable_session(&root, "session");
+        let stale_manager = test_manager(&root);
+        let patch_manager = test_manager(&root);
+        let stale_service = stale_manager.attach_session("session").await.unwrap();
+        assert_eq!(stale_service.config_version(), Some(0));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let new_base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let endpoint = tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                let _socket = socket;
+                std::future::pending::<()>().await;
+            }
+        });
+        let new_headers = BTreeMap::from([
+            ("X-Cross-Process".to_string(), "current".to_string()),
+            ("X-Revision".to_string(), "1".to_string()),
+        ]);
+        patch_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("model-from-other-manager".to_string()),
+                    base_url: RequestField::Value(new_base_url.clone()),
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
+                },
+            )
+            .await
+            .expect("external manager commits complete model settings");
+        assert_eq!(stale_service.metadata().model, "model-a");
+
+        let submitted = stale_manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "must use externally committed authority".to_string(),
+                },
+            )
+            .await
+            .expect("stale manager converges before starting the next run");
+        let current_service = stale_manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(!Arc::ptr_eq(&current_service, &stale_service));
+        assert_eq!(current_service.config_version(), Some(1));
+        let metadata = current_service.metadata();
+        assert_eq!(metadata.model, "model-from-other-manager");
+        assert_eq!(metadata.base_url, new_base_url);
+        assert_eq!(metadata.backend, "openai-responses");
+        assert_eq!(metadata.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(metadata.api_key_env.as_deref(), Some("SECOND_API_KEY"));
+        assert_eq!(metadata.extra_headers, new_headers);
+        assert_eq!(
+            current_service.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        assert!(stale_service.active_run().is_none());
+
+        stale_manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn independent_manager_patch_rejects_held_shared_lease() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cross_manager_config_lease");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let first_manager = test_manager(&root);
+        let second_manager = test_manager(&root);
+        let held = sessions::SessionRunLease::try_acquire(&root.join("store.db"), "session")
+            .expect("first process lease");
+
+        let conflict = second_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("blocked-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("a concurrent shared lease must reject PATCH without waiting");
+        assert!(conflict.to_string().contains("busy with an active run"));
+        assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .model,
+            "model-a"
+        );
+
+        drop(held);
+        first_manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("committed-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("dropping the other process lease permits PATCH");
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "committed-model");
+        assert_eq!(stored.config_version, 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn empty_patch_does_not_touch_store_credentials_or_attached_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("empty_patch_noop");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let before = manager.attach_session("session").await.unwrap();
+        let before_metadata = before.metadata();
+        let store_path = root.join("store.db");
+        let hidden_store = root.join("store.db.hidden");
+        std::fs::rename(&store_path, &hidden_store).unwrap();
+        std::fs::create_dir(&store_path).unwrap();
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
+        manager
+            .update_session_config("session", UpdateConfigRequest::default())
+            .await
+            .expect("an empty patch must not read the store or credentials");
+
+        let after = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .expect("empty patch must preserve attached service");
+        assert!(Arc::ptr_eq(&before, &after));
+        assert_eq!(after.metadata().model, before_metadata.model);
+        assert_eq!(after.metadata().base_url, before_metadata.base_url);
+        assert_eq!(after.active_run(), None);
+
+        std::fs::remove_dir(&store_path).unwrap();
+        std::fs::rename(hidden_store, store_path).unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "model-a");
+        assert_eq!(stored.updated_at, "2026-01-01 00:00:00.000000000");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn create_inherits_overrides_and_null_clears_optional_config() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_tristate");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"[model]
+backend = "openai-responses"
+model = "config-model"
+base_url = "https://api.openai.com/v1"
+reasoning_effort = "medium"
+api_key_env = "OPENAI_API_KEY"
+extra_headers = { X-Config = "yes" }
+"#,
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+
+        let inherited = manager
+            .create_session(CreateSessionRequest::default())
+            .await
+            .expect("omitted fields should inherit config");
+        let inherited_id = inherited.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.model, "config-model");
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(
+            stored.extra_headers,
+            BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
+        );
+
+        let cleared = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("explicit-model".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Null,
+                api_key_env: RequestField::Null,
+                extra_headers: RequestField::Null,
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("explicit values and null optional fields should override config");
+        let cleared_id = cleared.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &cleared_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(stored.model, "explicit-model");
+        assert_eq!(stored.reasoning_effort, None);
+        assert_eq!(stored.api_key_env, None);
+        assert!(stored.extra_headers.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_bases() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_base_materialization");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        write_codex_auth(&nac_home);
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        for (backend, expected_base) in [
+            (
+                "chatgpt-codex-responses",
+                nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            ("arcee-auth", nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL),
+        ] {
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
+                ),
+            )
+            .unwrap();
+
+            let defaults = manager
+                .launch_model_defaults(LaunchModelDefaultsRequest {
+                    cwd: Some(root.clone()),
+                    ssh_host: None,
+                })
+                .unwrap();
+            assert_eq!(
+                defaults.configured_model_base_url.as_deref(),
+                Some(expected_base),
+                "launch metadata must expose the same materialized URL"
+            );
+
+            // This is the inherited shape emitted by the launch UI: the locked
+            // backend/base remain omitted, while null clears a stale configured selector.
+            let inherited: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "ssh_host": null,
+                "api_key_env": null
+            }))
+            .unwrap();
+            assert!(matches!(inherited.backend, RequestField::Omitted));
+            assert!(matches!(inherited.base_url, RequestField::Omitted));
+            assert_eq!(inherited.api_key_env, RequestField::Null);
+            let created = manager
+                .create_session(inherited)
+                .await
+                .unwrap_or_else(|error| panic!("inherited {backend} launch failed: {error:#}"));
+            assert_eq!(created.metadata.base_url, expected_base);
+            assert_eq!(created.metadata.api_key_env, None);
+            let session_id = created.metadata.session_id.unwrap();
+            let stored = sessions::load_session(&store_path, &session_id).unwrap();
+            assert_eq!(stored.base_url, expected_base);
+            assert_eq!(stored.api_key_env, None);
+
+            // Force a real persisted-snapshot attach instead of returning the
+            // service left in memory by create.
+            manager
+                .inner
+                .active_sessions
+                .write()
+                .await
+                .remove(&session_id);
+            let resumed = manager.snapshot(&session_id).await.unwrap();
+            assert_eq!(resumed.metadata.base_url, expected_base);
+
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"configured-model\"\nbase_url = \"{expected_base}\"\n"
+                ),
+            )
+            .unwrap();
+            let configured = manager
+                .create_session(CreateSessionRequest {
+                    cwd: Some(root.clone()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect("an explicitly configured canonical base URL must remain accepted");
+            assert_eq!(configured.metadata.base_url, expected_base);
+
+            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "backend": backend,
+                "model": "explicit-model",
+                "base_url": expected_base,
+                "api_key_env": null
+            }))
+            .unwrap();
+            let explicit = manager
+                .create_session(explicit)
+                .await
+                .expect("an explicit canonical managed base URL must remain accepted");
+            assert_eq!(explicit.metadata.base_url, expected_base);
+        }
+
+        let before_controls = sessions::list_sessions(&store_path).unwrap().len();
+        for (backend, invalid_base, expected_error) in [
+            (
+                "chatgpt-codex-responses",
+                "https://attacker.example/backend-api",
+                "requires the approved ChatGPT origin",
+            ),
+            (
+                "arcee-auth",
+                "https://tenant.arcee.ai/api/v1",
+                "does not match the stored credential origin",
+            ),
+        ] {
+            std::fs::write(
+                nac_home.join("config.toml"),
+                format!(
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\nbase_url = \"{invalid_base}\"\n"
+                ),
+            )
+            .unwrap();
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    cwd: Some(root.clone()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("a present non-managed origin must not be overwritten by the default");
+            assert!(error.to_string().contains(expected_error), "{error:#}");
+        }
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"api-model\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+        )
+        .unwrap();
+        let error = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("non-managed backends must still require base_url");
+        assert!(error.to_string().contains("base_url"), "{error:#}");
+        assert_eq!(
+            sessions::list_sessions(&store_path).unwrap().len(),
+            before_controls,
+            "mismatch and non-managed failures must not persist sessions"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn patch_repairs_absent_managed_bases_with_the_same_materialized_urls() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_base_patch_repair");
+        let nac_home = root.join("nac-home");
+        write_codex_auth(&nac_home);
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+
+        for (session_id, backend, expected_base) in [
+            (
+                "repair-codex",
+                BackendKind::ChatGptCodexResponses,
+                nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                "repair-arcee",
+                BackendKind::ArceeAuth,
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
+            let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
+            incomplete.backend = backend;
+            incomplete.base_url.clear();
+            incomplete.api_key_env = None;
+            sessions::update_session_model_config(&store_path, &incomplete).unwrap();
+
+            manager
+                .update_session_config(
+                    session_id,
+                    UpdateConfigRequest {
+                        model: RequestField::Value("repaired-model".to_string()),
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .expect("repair PATCH should materialize an absent managed base URL");
+            let repaired = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(repaired.base_url, expected_base);
+            let resumed = manager.snapshot(session_id).await.unwrap();
+            assert_eq!(resumed.metadata.base_url, expected_base);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn codex_create_preflights_endpoint_and_managed_credentials_before_persistence() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+
+        for (label, base_url, auth, expected_status, expected) in [
+            (
+                "codex-create-missing",
+                "https://chatgpt.com/backend-api",
+                None,
+                StatusCode::BAD_REQUEST,
+                "not configured",
+            ),
+            (
+                "codex-create-malformed",
+                "https://chatgpt.com/backend-api",
+                Some("{not-json}"),
+                StatusCode::BAD_REQUEST,
+                "failed to parse",
+            ),
+            (
+                "codex-create-blank",
+                "https://chatgpt.com/backend-api",
+                Some(
+                    r#"{"type":"chatgpt-codex","access":"secret-must-not-leak","refresh":"","expires_at_ms":1,"account_id":"account"}"#,
+                ),
+                StatusCode::BAD_REQUEST,
+                "nonblank field 'refresh'",
+            ),
+            (
+                "codex-create-endpoint",
+                "http://chatgpt.com/backend-api",
+                Some(
+                    r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":"account"}"#,
+                ),
+                StatusCode::BAD_REQUEST,
+                "requires HTTPS",
+            ),
+        ] {
+            let root = temp_root(label);
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            if let Some(auth) = auth {
+                write_managed_credential(&nac_home.join("auth.json"), auth);
+            }
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            let manager = test_manager(&root);
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("gpt-test".to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("invalid Codex setup must fail creation");
+            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(!format!("{error:#}").contains("secret-must-not-leak"));
+            assert_eq!(ApiError::from(error).status, expected_status);
+            assert!(!root.join("store.db").exists());
+            drop(_env);
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let root = temp_root("codex-create-symlink");
+            let nac_home = root.join("nac-home");
+            std::fs::create_dir_all(&nac_home).unwrap();
+            let target = nac_home.join("target.json");
+            std::fs::write(&target, "secret-target").unwrap();
+            symlink(&target, nac_home.join("auth.json")).unwrap();
+            let _env = ScopedModelEnv::isolated(&nac_home, None);
+            let manager = test_manager(&root);
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("gpt-test".to_string()),
+                    base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(
+                ApiError::from(error).status,
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+            assert!(!root.join("store.db").exists());
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "secret-target");
+            drop(_env);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_resume_preflights_missing_credentials() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("codex-resume-missing");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let mut stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        stored.backend = BackendKind::ChatGptCodexResponses;
+        stored.base_url = "https://chatgpt.com/backend-api".to_string();
+        stored.api_key_env = None;
+        sessions::update_session_model_config(&root.join("store.db"), &stored).unwrap();
+        let manager = test_manager(&root);
+
+        let error = manager
+            .attach_session("session")
+            .await
+            .err()
+            .expect("resume without Codex auth must fail");
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains("not configured"));
+        assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn codex_patch_failures_roll_back_database_and_active_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("codex-patch-rollback");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        manager.attach_session("session").await.unwrap();
+        let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
+
+        for (auth, base_url, expected_status) in [
+            (
+                "{not-json}",
+                "https://chatgpt.com/backend-api",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                r#"{"type":"chatgpt-codex","access":"a","refresh":"r","expires_at_ms":1,"account_id":"id"}"#,
+                "https://attacker.example/backend-api",
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            write_managed_credential(&nac_home.join("auth.json"), auth);
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(base_url.to_string()),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(ApiError::from(error).status, expected_status);
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert_eq!(after.api_key_env, before.api_key_env);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            write_codex_auth(&nac_home);
+            std::fs::set_permissions(
+                nac_home.join("auth.json"),
+                std::fs::Permissions::from_mode(0o660),
+            )
+            .unwrap();
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(
+                            "https://chatgpt.com/backend-api".to_string(),
+                        ),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains("unsafe permissions 0660"));
+            assert!(!format!("{error:#}").contains("codex-server-access"));
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert_eq!(after.api_key_env, before.api_key_env);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            std::fs::remove_file(nac_home.join("auth.json")).unwrap();
+            let target = nac_home.join("patch-target.json");
+            std::fs::write(&target, "secret-target").unwrap();
+            symlink(&target, nac_home.join("auth.json")).unwrap();
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                        base_url: RequestField::Value(
+                            "https://chatgpt.com/backend-api".to_string(),
+                        ),
+                        api_key_env: RequestField::Null,
+                        ..UpdateConfigRequest::default()
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_none());
+            assert_eq!(
+                ApiError::from(error).status,
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+            let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(after.backend, before.backend);
+            assert_eq!(after.base_url, before.base_url);
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "secret-target");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_raw_invalid_selectors_without_persisting() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_invalid_selectors");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        for (backend, base_url, selector) in [
+            ("openai-responses", "https://api.openai.com/v1", ""),
+            ("openai-responses", "https://api.openai.com/v1", "   "),
+            (
+                "openai-responses",
+                "https://api.openai.com/v1",
+                " SURROUNDED_KEY ",
+            ),
+            ("arcee-auth", "https://api.arcee.ai", ""),
+            ("arcee-auth", "https://api.arcee.ai", "   "),
+        ] {
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value("test-model".to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    api_key_env: RequestField::Value(selector.to_string()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("invalid selector must fail creation");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            assert!(
+                !store_path.exists(),
+                "invalid selector {selector:?} must fail before persistence"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_unsupported_backend_and_anthropic_model_efforts_before_persisting() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_invalid_reasoning");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+        let cases = [
+            (
+                "together-chat",
+                "test-model",
+                "https://api.together.xyz/v1",
+                "minimal",
+            ),
+            (
+                "anthropic-messages",
+                "claude-sonnet-4-6",
+                "https://api.anthropic.com/v1",
+                "xhigh",
+            ),
+            (
+                "anthropic-messages",
+                "claude-opus-4-5",
+                "https://api.anthropic.com/v1",
+                "high",
+            ),
+            (
+                "anthropic-messages",
+                "claude-always-on-future",
+                "https://api.anthropic.com/v1",
+                "low",
+            ),
+        ];
+
+        for (backend, model, base_url, effort) in cases {
+            let error = manager
+                .create_session(CreateSessionRequest {
+                    model: RequestField::Value(model.to_string()),
+                    base_url: RequestField::Value(base_url.to_string()),
+                    backend: RequestField::Value(backend.to_string()),
+                    reasoning_effort: RequestField::Value(effort.to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect_err("unsupported effort must fail creation");
+            assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+            assert!(error.to_string().contains(effort), "{error:#}");
+            assert!(error.to_string().contains(backend), "{error:#}");
+            if backend == "anthropic-messages" {
+                assert!(error.to_string().contains(model), "{error:#}");
+            }
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            assert!(
+                !root.join("store.db").exists(),
+                "invalid {model}/{effort} must fail before persistence"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_tristate");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        write_codex_auth(&nac_home);
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+
+        manager.attach_session("session").await.unwrap();
+        assert!(manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value(" replacement-model ".to_string()),
+                    base_url: RequestField::Value(" https://api.openai.com/v1 ".to_string()),
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                        "X-Replaced".to_string(),
+                        "true".to_string(),
+                    )]))),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+        let replaced = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(replaced.model, "replacement-model");
+        assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
+
+        manager.attach_session("session").await.unwrap();
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                    reasoning_effort: RequestField::Null,
+                    api_key_env: RequestField::Null,
+                    extra_headers: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to stored Arcee auth");
+        let arcee_auth = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(arcee_auth.backend, BackendKind::ArceeAuth);
+        assert_eq!(arcee_auth.reasoning_effort, None);
+        assert_eq!(arcee_auth.api_key_env, None);
+        assert!(arcee_auth.extra_headers.is_empty());
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to Arcee API key mode");
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), "session")
+                .unwrap()
+                .backend,
+            BackendKind::ArceeApi
+        );
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
+                    api_key_env: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch to Codex stored OAuth mode");
+        let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
+        assert_eq!(codex.api_key_env, None);
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("openai-responses".to_string()),
+                    base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Value(HeadersRequest(BTreeMap::new())),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("switch back to API-key mode");
+        let api_key = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(api_key.backend, BackendKind::OpenAiResponses);
+        assert_eq!(api_key.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert!(api_key.extra_headers.is_empty());
+
+        let before_omitted = api_key;
+        manager
+            .update_session_config("session", UpdateConfigRequest::default())
+            .await
+            .expect("omitted fields preserve snapshot");
+        let after_omitted = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(after_omitted.model, before_omitted.model);
+        assert_eq!(after_omitted.base_url, before_omitted.base_url);
+        assert_eq!(after_omitted.backend, before_omitted.backend);
+        assert_eq!(after_omitted.api_key_env, before_omitted.api_key_env);
+        assert_eq!(after_omitted.extra_headers, before_omitted.extra_headers);
+
+        manager.attach_session("session").await.unwrap();
+        let rebuilt = manager.snapshot("session").await.unwrap();
+        assert_eq!(rebuilt.metadata.model, "replacement-model");
+        assert_eq!(rebuilt.metadata.backend, "openai-responses");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn invalid_patches_preserve_database_and_active_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("patch_rollback");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        manager.attach_session("session").await.unwrap();
+
+        let invalid = [
+            UpdateConfigRequest {
+                model: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                base_url: RequestField::Value("   ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value("   ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value(" SURROUNDED_KEY ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Value("arcee-auth".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                api_key_env: RequestField::Value("   ".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                api_key_env: RequestField::Value("MISSING_SERVER_KEY".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "bad header".to_string(),
+                    "value".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "Authorization".to_string(),
+                    "must-not-append".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                extra_headers: RequestField::Value(HeadersRequest(BTreeMap::from([(
+                    "X-API-KEY".to_string(),
+                    "must-not-append".to_string(),
+                )]))),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                backend: RequestField::Value("together-chat".to_string()),
+                reasoning_effort: RequestField::Value("xhigh".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-sonnet-4-6".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("xhigh".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-opus-4-5".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("high".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+            UpdateConfigRequest {
+                model: RequestField::Value("claude-always-on-future".to_string()),
+                base_url: RequestField::Value("https://api.anthropic.com/v1".to_string()),
+                backend: RequestField::Value("anthropic-messages".to_string()),
+                reasoning_effort: RequestField::Value("low".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+        ];
+
+        for request in invalid {
+            let anthropic_model = match (&request.backend, &request.model) {
+                (RequestField::Value(backend), RequestField::Value(model))
+                    if backend == "anthropic-messages" =>
+                {
+                    Some(model.clone())
+                }
+                _ => None,
+            };
+            let error = manager
+                .update_session_config("session", request)
+                .await
+                .unwrap_err();
+            if let Some(model) = anthropic_model {
+                assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                assert!(error.to_string().contains(&model), "{error:#}");
+            }
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.model, "model-a");
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
+            assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+            assert_eq!(stored.extra_headers.get("X-Original").unwrap(), "yes");
+            assert!(manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session"));
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
+        let root = temp_root("removed_backend_update");
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let manager = test_manager(&root);
+
+        for backend in ["arcee", "auto"] {
+            let error = manager
+                .update_session_config(
+                    "session",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                        backend: RequestField::Value(backend.to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported backend"),
+                "{error:#}"
+            );
+            assert!(
+                error.to_string().contains("settings repair required"),
+                "{error:#}"
+            );
+            assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+
+            let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn server_arcee_configuration_status_and_persistence_are_consistent() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("arcee_config_status");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://tenant.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        let create_error = manager
+            .create_session(CreateSessionRequest {
+                cwd: None,
+                model: RequestField::Omitted,
+                base_url: RequestField::Value("http://api.arcee.ai/insecure".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Omitted,
+                api_key_env: RequestField::Omitted,
+                extra_headers: RequestField::Omitted,
+                ssh_host: None,
+                sandbox: SandboxRequest::default(),
+            })
+            .await
+            .unwrap_err();
+        assert!(create_error
+            .downcast_ref::<ModelConfigurationError>()
+            .is_some());
+        assert_eq!(ApiError::from(create_error).status, StatusCode::BAD_REQUEST);
+        assert!(
+            !store_path.exists(),
+            "invalid create must fail before initializing session storage"
+        );
+
+        seed_session(&root, "attach-invalid", "2026-01-01 00:00:00.000000000");
+        let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
+        attach_snapshot.backend = BackendKind::ArceeApi;
+        attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
+        sessions::update_session_model_config(&store_path, &attach_snapshot).unwrap();
+        let attach_error = match manager.attach_session("attach-invalid").await {
+            Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
+            Err(error) => error,
+        };
+        assert!(attach_error
+            .to_string()
+            .contains("requires a nonblank api_key_env"));
+        assert!(attach_error
+            .downcast_ref::<ModelConfigurationError>()
+            .is_some());
+        assert_eq!(ApiError::from(attach_error).status, StatusCode::BAD_REQUEST);
+
+        seed_session(&root, "update", "2026-01-02 00:00:00.000000000");
+        for invalid_base_url in ["https://api.arcee.ai/v1", "not a URL"] {
+            let update_error = manager
+                .update_session_config(
+                    "update",
+                    UpdateConfigRequest {
+                        model: RequestField::Omitted,
+                        base_url: RequestField::Value(invalid_base_url.to_string()),
+                        backend: RequestField::Value("arcee-auth".to_string()),
+                        reasoning_effort: RequestField::Omitted,
+                        api_key_env: RequestField::Omitted,
+                        extra_headers: RequestField::Omitted,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                update_error
+                    .downcast_ref::<ModelConfigurationError>()
+                    .is_some(),
+                "unclassified configuration error: {update_error:#}"
+            );
+            assert_eq!(ApiError::from(update_error).status, StatusCode::BAD_REQUEST);
+
+            let stored = sessions::load_session(&store_path, "update").unwrap();
+            assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+            assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        }
+
+        manager
+            .update_session_config(
+                "update",
+                UpdateConfigRequest {
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Omitted,
+                    extra_headers: RequestField::Omitted,
+                },
+            )
+            .await
+            .expect("same-origin approved Arcee configuration should persist");
+        let approved = sessions::load_session(&store_path, "update").unwrap();
+        assert_eq!(approved.backend, BackendKind::ArceeAuth);
+        assert_eq!(approved.base_url, "https://tenant.arcee.ai/api/v1");
+
+        unsafe { std::env::set_var("OPENAI_API_KEY", "custom-server-key") };
+        manager
+            .update_session_config(
+                "update",
+                UpdateConfigRequest {
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
+                    backend: RequestField::Value("arcee-api".to_string()),
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    extra_headers: RequestField::Omitted,
+                },
+            )
+            .await
+            .expect("approved arcee-api configuration with an explicit selector should persist");
+        let api_mode = sessions::load_session(&store_path, "update").unwrap();
+        assert_eq!(api_mode.base_url, "https://api.arcee.ai/api");
+        assert_eq!(api_mode.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: None,
+                model: RequestField::Value("test-model".to_string()),
+                base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
+                backend: RequestField::Value("arcee-api".to_string()),
+                reasoning_effort: RequestField::Omitted,
+                api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                extra_headers: RequestField::Omitted,
+                ssh_host: None,
+                sandbox: SandboxRequest::default(),
+            })
+            .await
+            .expect("valid approved arcee-api create should succeed");
+        assert!(created.metadata.session_id.is_some());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn null_update_clears_legacy_arcee_api_key_env() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("clear_arcee_api_key_env");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let snapshot = sessions::new_snapshot(
+            "legacy-arcee".to_string(),
+            root.clone(),
+            "model".to_string(),
+            "https://api.arcee.ai".to_string(),
+            BackendKind::ArceeAuth,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("LEGACY_ARCEE_KEY_ENV".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        let manager = test_manager(&root);
+
+        manager
+            .update_session_config(
+                "legacy-arcee",
+                UpdateConfigRequest {
+                    model: RequestField::Omitted,
+                    base_url: RequestField::Omitted,
+                    backend: RequestField::Omitted,
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Null,
+                    extra_headers: RequestField::Omitted,
+                },
+            )
+            .await
+            .expect("null api_key_env should clear the invalid legacy value");
+
+        let stored = sessions::load_session(&root.join("store.db"), "legacy-arcee").unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(stored.api_key_env, None);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {

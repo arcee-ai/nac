@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
-use nac_core::model::{run_codex_auth_action, BackendKind, CodexAuthAction, ReasoningEffort};
+use nac_core::model::{
+    run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind, CodexAuthAction,
+    ReasoningEffort,
+};
 use nac_core::runtime::{
-    self, run_managed_worker, ManagedWorkerOptions, ModelOptions, ResumeOptions, RunOptions,
-    RunState, SandboxOptions, StoreOptions, WorkerDispatchOptions,
+    self, run_managed_worker, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
+    ResumeOptions, RunOptions, RunState, SandboxOptions, StoreOptions, WorkerDispatchOptions,
 };
 use nac_core::session_service::SessionService;
 use nac_core::upgrade::{run_upgrade, UpgradeRequest};
@@ -25,7 +28,10 @@ pub async fn run() -> Result<()> {
         io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     if !matches!(
         cli,
-        ParsedCli::ManagedWorker(_) | ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_)
+        ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
+            | ParsedCli::Upgrade(_)
     ) && !terminal_available
     {
         if matches!(&cli, ParsedCli::Resume(resume_cli) if resume_cli.session_id.is_none() && !resume_cli.last)
@@ -40,6 +46,11 @@ pub async fn run() -> Result<()> {
         return Ok(());
     }
 
+    if let ParsedCli::ArceeAuth(cli) = cli {
+        run_arcee_auth_cli(cli).await?;
+        return Ok(());
+    }
+
     if let ParsedCli::Upgrade(cli) = cli {
         run_upgrade_cli(cli).await?;
         return Ok(());
@@ -48,7 +59,7 @@ pub async fn run() -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let effective_cwd = effective_cli_cwd(&cli, &launch_cwd)?;
     let config_cwd = effective_cli_config_cwd(&cli, &launch_cwd, &effective_cwd)?;
-    let app_config = runtime::NacConfig::load_from_cwd(&config_cwd)?;
+    let app_config = load_runtime_config(&cli, &config_cwd)?;
     let worker_executable = current_worker_executable()?;
     let mut run_state = build_run_state(
         cli,
@@ -65,10 +76,33 @@ pub async fn run() -> Result<()> {
                 run_managed_worker(run_config).await?;
                 return Ok(());
             }
-            RunState::Orchestrator {
-                run_config,
-                start_in_session_picker,
-            } => {
+            RunState::ResumePicker(picker_config) => {
+                let store_path = picker_config.store_path.clone();
+                let resume_base_cwd = picker_config.lookup_cwd.clone();
+                let worker_executable = picker_config.worker_executable.clone();
+                match nac_tui::run_session_picker(nac_tui::SessionPickerConfig {
+                    cwd: picker_config.lookup_cwd.display().to_string(),
+                    workspace_host_path: Some(picker_config.lookup_cwd),
+                    store_path: picker_config.store_path,
+                })
+                .await?
+                {
+                    TuiOutcome::Exit => return Ok(()),
+                    TuiOutcome::ResumeSession(session_id) => {
+                        run_state = RunState::Orchestrator {
+                            run_config: runtime::build_resume_config_for_session(
+                                store_path,
+                                &session_id,
+                                &app_config,
+                                resume_base_cwd,
+                                worker_executable,
+                            )
+                            .await?,
+                        };
+                    }
+                }
+            }
+            RunState::Orchestrator { run_config } => {
                 let resume_base_cwd = run_config.resume_base_cwd().to_path_buf();
                 let session_service = SessionService::from_orchestrator_run_config(run_config);
                 let store_path = session_service.init.metadata.store_path.clone();
@@ -77,7 +111,6 @@ pub async fn run() -> Result<()> {
                     session_service.service,
                     session_service.init,
                     session_service.events,
-                    start_in_session_picker,
                 )
                 .await?
                 {
@@ -92,12 +125,22 @@ pub async fn run() -> Result<()> {
                                 Some(worker_executable.clone()),
                             )
                             .await?,
-                            start_in_session_picker: false,
                         };
-                        continue;
                     }
                 }
             }
+        }
+    }
+}
+
+fn load_runtime_config(cli: &ParsedCli, config_cwd: &Path) -> Result<runtime::NacConfig> {
+    match cli {
+        ParsedCli::Run(_) => runtime::NacConfig::load_from_cwd(config_cwd),
+        ParsedCli::Resume(_) | ParsedCli::ManagedWorker(_) => {
+            runtime::NacConfig::load_without_model_from_cwd(config_cwd)
+        }
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            unreachable!("standalone commands are handled before loading runtime config")
         }
     }
 }
@@ -116,7 +159,6 @@ async fn build_run_state(
                 config,
             )
             .await?,
-            start_in_session_picker: false,
         }),
         ParsedCli::ManagedWorker(cli) => Ok(RunState::ManagedWorker(
             runtime::build_managed_worker_config(
@@ -126,14 +168,13 @@ async fn build_run_state(
             .await?,
         )),
         ParsedCli::Resume(cli) if cli.session_id.is_none() && !cli.last => {
-            Ok(RunState::Orchestrator {
-                run_config: runtime::build_resume_picker_config(
+            Ok(RunState::ResumePicker(
+                runtime::build_resume_picker_config(
                     resume_options(cli, effective_cwd, worker_executable),
                     config,
                 )
                 .await?,
-                start_in_session_picker: true,
-            })
+            ))
         }
         ParsedCli::Resume(cli) => Ok(RunState::Orchestrator {
             run_config: runtime::build_resume_config(
@@ -141,9 +182,9 @@ async fn build_run_state(
                 config,
             )
             .await?,
-            start_in_session_picker: false,
         }),
         ParsedCli::CodexAuth(_) => unreachable!("codex-auth is handled before loading config"),
+        ParsedCli::ArceeAuth(_) => unreachable!("arcee-auth is handled before loading config"),
         ParsedCli::Upgrade(_) => unreachable!("upgrade is handled before loading config"),
     }
 }
@@ -168,6 +209,26 @@ fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
     }
 }
 
+async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
+    match cli.command {
+        Some(command) => run_arcee_auth_action(arcee_auth_action(command)).await,
+        None => {
+            let mut command = ArceeAuthCli::command();
+            command.print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
+    match command {
+        ArceeAuthCommand::Login => ArceeAuthAction::Login,
+        ArceeAuthCommand::Status => ArceeAuthAction::Status,
+        ArceeAuthCommand::Logout => ArceeAuthAction::Logout,
+    }
+}
+
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
     run_upgrade(UpgradeRequest {
         install_dir: cli.install_dir,
@@ -189,7 +250,9 @@ fn effective_cli_cwd(cli: &ParsedCli, launch_cwd: &Path) -> Result<PathBuf> {
             (Some(_), Some(remote_cwd)) => Ok(remote_cwd.clone()),
             _ => resolve_cli_cwd(launch_cwd, cli.workspace_cwd.as_deref()),
         },
-        ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            Ok(launch_cwd.to_path_buf())
+        }
     }
 }
 
@@ -205,7 +268,9 @@ fn effective_cli_config_cwd(
             None => Ok(effective_cwd.to_path_buf()),
         },
         ParsedCli::Run(_) | ParsedCli::Resume(_) => Ok(effective_cwd.to_path_buf()),
-        ParsedCli::CodexAuth(_) | ParsedCli::Upgrade(_) => Ok(launch_cwd.to_path_buf()),
+        ParsedCli::CodexAuth(_) | ParsedCli::ArceeAuth(_) | ParsedCli::Upgrade(_) => {
+            Ok(launch_cwd.to_path_buf())
+        }
     }
 }
 
@@ -227,17 +292,28 @@ fn store_options(cli: StoreArgs) -> StoreOptions {
 }
 
 fn model_options(cli: ModelArgs) -> ModelOptions {
-    let extra_headers = cli
-        .extra_headers
-        .as_deref()
-        .and_then(runtime::parse_extra_headers_json);
+    let reasoning_effort = if cli.clear_effort {
+        OptionalModelOption::Clear
+    } else {
+        cli.reasoning_effort
+            .map(Into::into)
+            .map(OptionalModelOption::Value)
+            .unwrap_or_default()
+    };
+    let api_key_env = if cli.clear_api_key_env {
+        OptionalModelOption::Clear
+    } else {
+        cli.api_key_env
+            .map(OptionalModelOption::Value)
+            .unwrap_or_default()
+    };
     ModelOptions {
         backend: cli.backend.map(Into::into),
-        reasoning_effort: cli.reasoning_effort.map(Into::into),
+        reasoning_effort,
         api_base_url: cli.api_base_url,
         api_model: cli.api_model,
-        api_key_env: cli.api_key_env,
-        extra_headers,
+        api_key_env,
+        extra_headers: cli.extra_headers,
     }
 }
 
@@ -320,6 +396,81 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn persisted_session_commands_ignore_invalid_ambient_model_config() {
+        let _guard = CONFIG_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let root = std::env::temp_dir().join(format!(
+            "nac_tui_persisted_config_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+[model]
+backend = "arcee"
+api_key_env = ["invalid-selector-shape"]
+extra_headers = "invalid-header-shape"
+
+[storage]
+store_path = "persisted.db"
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+        }
+
+        let commands = [
+            vec![OsString::from("nac"), OsString::from("resume")],
+            vec![
+                OsString::from("nac"),
+                OsString::from("resume"),
+                OsString::from("session-123"),
+            ],
+            vec![
+                OsString::from("nac"),
+                OsString::from("__worker"),
+                OsString::from("--session-id"),
+                OsString::from("session-123"),
+                OsString::from("--thread-name"),
+                OsString::from("impl"),
+                OsString::from("--action"),
+                OsString::from("do work"),
+            ],
+        ];
+        for args in commands {
+            let cli = parse_cli_from(args);
+            let config = load_runtime_config(&cli, &root).unwrap();
+            assert_eq!(
+                config.storage.store_path.as_deref(),
+                Some(Path::new("persisted.db"))
+            );
+            assert!(config.model.backend.is_none());
+        }
+
+        let new_session = parse_cli_from(vec![OsString::from("nac")]);
+        let error = load_runtime_config(&new_session, &root).unwrap_err();
+        assert!(
+            error.to_string().contains("failed to parse config"),
+            "{error:#}"
+        );
+
+        unsafe {
+            match original_nac_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn parse_resume_command_uses_resume_cli() {
         let parsed = parse_cli_from(vec![
@@ -334,6 +485,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::ManagedWorker(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected resume cli")
             }
@@ -351,6 +503,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::ManagedWorker(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected resume cli")
             }
@@ -392,6 +545,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected managed worker cli")
             }
@@ -421,6 +575,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected managed worker cli")
             }
@@ -441,6 +596,7 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected codex-auth cli")
             }
@@ -458,8 +614,42 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
+            | ParsedCli::ArceeAuth(_)
             | ParsedCli::Upgrade(_) => {
                 panic!("expected codex-auth cli")
+            }
+        }
+    }
+
+    #[test]
+    fn parse_arcee_auth_command_uses_arcee_auth_cli() {
+        let parsed = parse_cli_from(vec![OsString::from("nac"), OsString::from("arcee-auth")]);
+        match parsed {
+            ParsedCli::ArceeAuth(cli) => assert!(cli.command.is_none()),
+            ParsedCli::Run(_)
+            | ParsedCli::Resume(_)
+            | ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::Upgrade(_) => {
+                panic!("expected arcee-auth cli")
+            }
+        }
+
+        let parsed = parse_cli_from(vec![
+            OsString::from("nac"),
+            OsString::from("arcee-auth"),
+            OsString::from("login"),
+        ]);
+        match parsed {
+            ParsedCli::ArceeAuth(cli) => {
+                assert!(matches!(cli.command, Some(ArceeAuthCommand::Login)))
+            }
+            ParsedCli::Run(_)
+            | ParsedCli::Resume(_)
+            | ParsedCli::ManagedWorker(_)
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::Upgrade(_) => {
+                panic!("expected arcee-auth cli")
             }
         }
     }
@@ -472,7 +662,8 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_) => panic!("expected upgrade cli"),
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_) => panic!("expected upgrade cli"),
         }
 
         let parsed = parse_cli_from(vec![
@@ -488,7 +679,8 @@ mod tests {
             ParsedCli::Run(_)
             | ParsedCli::Resume(_)
             | ParsedCli::ManagedWorker(_)
-            | ParsedCli::CodexAuth(_) => panic!("expected upgrade cli"),
+            | ParsedCli::CodexAuth(_)
+            | ParsedCli::ArceeAuth(_) => panic!("expected upgrade cli"),
         }
     }
 }

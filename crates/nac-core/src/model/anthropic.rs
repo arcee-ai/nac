@@ -5,23 +5,29 @@ const ANTHROPIC_MAX_TOKENS: u32 = 128_000;
 
 pub(super) fn anthropic_messages_request(
     model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
     cache_ttl: Option<&str>,
 ) -> Result<Value> {
+    validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, reasoning_effort)?;
     let (system, mut messages) = anthropic_messages_from_internal(messages)?;
     let mut request = json!({
         "model": model,
         "max_tokens": ANTHROPIC_MAX_TOKENS,
         "messages": &messages,
-        "thinking": {
-            "type": "adaptive",
-            "display": "omitted",
-        },
-        "output_config": {
-            "effort": "max",
-        },
     });
+    match reasoning_effort {
+        None | Some(ReasoningEffort::None) => {}
+        Some(ReasoningEffort::Xhigh) => {
+            request["thinking"] = json!({"type": "adaptive"});
+            request["output_config"] = json!({"effort": "max"});
+        }
+        Some(effort) => {
+            request["thinking"] = json!({"type": "adaptive"});
+            request["output_config"] = json!({"effort": effort.as_str()});
+        }
+    }
 
     // Breakpoint 1: system prompt (also caches tools, which render before system).
     if let Some(system) = system {
