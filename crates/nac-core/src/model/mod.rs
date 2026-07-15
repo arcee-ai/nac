@@ -26,7 +26,10 @@ pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort}
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
-pub use types::EffectiveModelSettings;
+pub use types::{
+    managed_backend_base_url, resolve_model_base_url, EffectiveModelSettings,
+    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
+};
 pub(crate) use types::{AssistantTurn, ModelTurnResponse, TokenUsage};
 pub use types::{BackendKind, ReasoningEffort};
 
@@ -478,6 +481,61 @@ mod tests {
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             assert!(error.to_string().contains(expected), "{error:#}");
         }
+    }
+
+    #[test]
+    fn managed_backends_materialize_only_absent_base_urls() {
+        for (backend, expected) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (BackendKind::ArceeAuth, ARCEE_AUTH_CANONICAL_BASE_URL),
+        ] {
+            let materialized = EffectiveModelSettings::from_optional(
+                Some(backend),
+                Some("model".to_string()),
+                None,
+                None,
+                None,
+                std::collections::BTreeMap::new(),
+            )
+            .expect("managed backend should materialize its absent base URL");
+            assert_eq!(materialized.base_url, expected);
+
+            let configured = EffectiveModelSettings::from_optional(
+                Some(backend),
+                Some("model".to_string()),
+                Some(expected.to_string()),
+                None,
+                None,
+                std::collections::BTreeMap::new(),
+            )
+            .expect("matching configured managed base URL should remain accepted");
+            assert_eq!(configured.base_url, expected);
+
+            let error = EffectiveModelSettings::from_optional(
+                Some(backend),
+                Some("model".to_string()),
+                Some("   ".to_string()),
+                None,
+                None,
+                std::collections::BTreeMap::new(),
+            )
+            .expect_err("a present invalid base URL must not be replaced by the default");
+            assert!(error.to_string().contains("must not be blank"), "{error:#}");
+        }
+
+        let error = EffectiveModelSettings::from_optional(
+            Some(BackendKind::OpenAiResponses),
+            Some("model".to_string()),
+            None,
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .expect_err("API-key backends must not acquire a base URL default");
+        assert!(error.to_string().contains("base_url"), "{error:#}");
     }
 
     #[test]

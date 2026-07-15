@@ -313,7 +313,10 @@ impl ModelClient {
         }
 
         let value = match self.backend {
-            BackendKind::ArceeAuth => self.post_arcee_auth_with_refresh(url.as_str(), &request).await?,
+            BackendKind::ArceeAuth => {
+                self.post_arcee_auth_with_refresh(url.as_str(), &request)
+                    .await?
+            }
             _ => self.post_json_with_retry(url.as_str(), &request).await?,
         };
         parse_chat_completions_response(&value, url.as_str())

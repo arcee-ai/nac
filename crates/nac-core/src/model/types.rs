@@ -116,6 +116,41 @@ pub struct EffectiveModelSettings {
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
 }
 
+pub const ARCEE_AUTH_CANONICAL_BASE_URL: &str = "https://api.arcee.ai/api/v1";
+pub const CHATGPT_CODEX_CANONICAL_BASE_URL: &str = "https://chatgpt.com/backend-api";
+
+/// Return the fixed inference URL supplied when a managed backend has no
+/// explicit or configured base URL. API-key backends intentionally have no
+/// corresponding default.
+pub fn managed_backend_base_url(backend: BackendKind) -> Option<&'static str> {
+    match backend {
+        BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),
+        BackendKind::ChatGptCodexResponses => Some(CHATGPT_CODEX_CANONICAL_BASE_URL),
+        _ => None,
+    }
+}
+
+/// Materialize and validate the base URL after the effective backend has been
+/// selected. A caller-supplied value is always authoritative (and is never
+/// replaced when invalid); only genuine absence receives a managed default.
+pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) -> Result<String> {
+    let base_url = base_url.or_else(|| managed_backend_base_url(backend).map(str::to_string));
+    let base_url = required_nonblank_setting(base_url, "base_url")?;
+    let parsed = Url::parse(&base_url).map_err(|error| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
+            base_url, error
+        ))
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
+            base_url
+        )));
+    }
+    Ok(base_url)
+}
+
 impl EffectiveModelSettings {
     pub fn from_optional(
         backend: Option<BackendKind>,
@@ -131,19 +166,7 @@ impl EffectiveModelSettings {
             )
         })?;
         let model = required_nonblank_setting(model, "model")?;
-        let base_url = required_nonblank_setting(base_url, "base_url")?;
-        let parsed = Url::parse(&base_url).map_err(|error| {
-            model_configuration_error(format!(
-                "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
-                base_url, error
-            ))
-        })?;
-        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-            return Err(model_configuration_error(format!(
-                "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
-                base_url
-            )));
-        }
+        let base_url = resolve_model_base_url(backend, base_url)?;
         validate_model_reasoning_effort(backend, &model, reasoning_effort)?;
 
         Ok(Self {

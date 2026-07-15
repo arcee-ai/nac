@@ -252,12 +252,6 @@
               <input id="launchApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
             </label>
           </div>
-          <p class="form-help credential-help">
-            <strong>arcee-auth</strong> uses stored Arcee login and rejects a key selector;
-            <strong>arcee-api</strong> requires an environment variable;
-            <strong>chatgpt-codex-responses</strong> uses stored Codex OAuth and rejects a key selector.
-            Every other backend requires an environment variable. When choosing a backend here, explicitly choose the matching credential selector.
-          </p>
           <label>
             <span>Extra Headers (JSON object)</span>
             <textarea id="launchExtraHeaders" rows="3" spellcheck="false" placeholder='blank inherits config; {} selects no extra headers'></textarea>
@@ -409,19 +403,13 @@
               <input id="settingsApiKeyEnv" autocomplete="off" placeholder="not used" disabled />
             </label>
           </div>
-          <p class="form-help credential-help">
-            <strong>arcee-auth</strong> uses stored Arcee login and requires “no API key environment variable”;
-            <strong>arcee-api</strong> requires an environment variable;
-            <strong>chatgpt-codex-responses</strong> uses stored Codex OAuth and requires “no API key environment variable”.
-            Every other backend requires an environment variable. Credential-mode changes must be explicit when switching backends.
-          </p>
           <label>
             <span>Extra Headers (JSON object)</span>
             <textarea id="settingsExtraHeaders" rows="3" spellcheck="false" placeholder='{}'></textarea>
           </label>
           <p class="form-help">Clear this field or enter <code>{}</code> to remove all extra headers.</p>
           <div class="launch-actions">
-            <button class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
+            <button id="settingsSubmit" class="primary-action icon-button launch-submit" type="submit" aria-label="Save settings" title="Save settings">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M5 12h12"></path>
                 <path d="m13 6 6 6-6 6"></path>

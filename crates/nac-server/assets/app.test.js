@@ -10,7 +10,7 @@ const context = {
   module: { exports: {} },
 };
 vm.runInNewContext(
-  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsMetadataForSession, serializeExtraHeaders };`,
+  `${appSource}\nmodule.exports = { orderedThreadsByName, orderedThreadTiles, buildLaunchModelPayload, buildSettingsPatch, settingsValuesFromMetadata, settingsFormStateFromMetadata, settingsMetadataForSession, serializeExtraHeaders, managedLaunchBaseUrl, nextLaunchBaseUrlControl, nextLaunchCredentialControl, nextSettingsBaseUrlControl, nextSettingsCredentialControl, launchLocationFromValues, fetchLaunchModelDefaultsForValues };`,
   context,
   { filename: "app.js" },
 );
@@ -20,12 +20,143 @@ const {
   buildLaunchModelPayload,
   buildSettingsPatch,
   settingsValuesFromMetadata,
+  settingsFormStateFromMetadata,
   settingsMetadataForSession,
   serializeExtraHeaders,
+  managedLaunchBaseUrl,
+  nextLaunchBaseUrlControl,
+  nextLaunchCredentialControl,
+  nextSettingsBaseUrlControl,
+  nextSettingsCredentialControl,
+  launchLocationFromValues,
+  fetchLaunchModelDefaultsForValues,
 } = context.module.exports;
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function fakeSelect(values) {
+  const select = {
+    value: "",
+    disabled: false,
+    readOnly: false,
+    title: "",
+    options: values.map((value) => ({ value, dataset: {} })),
+    querySelectorAll(selector) {
+      if (selector !== "option[data-raw-invalid]") return [];
+      return this.options.filter((option) => option.dataset.rawInvalid);
+    },
+  };
+  for (const option of select.options) {
+    option.remove = () => {
+      select.options = select.options.filter((candidate) => candidate !== option);
+    };
+  }
+  return select;
+}
+
+function createSettingsLifecycleHarness() {
+  const sandbox = {
+    document: {
+      addEventListener() {},
+      createElement() {
+        return { value: "", textContent: "", dataset: {}, append() {} };
+      },
+    },
+    module: { exports: {} },
+  };
+  vm.runInNewContext(
+    `${appSource}\nmodule.exports = { state, el, showSettingsOverlay, hideSettingsOverlay, updateSessionConfig };`,
+    sandbox,
+    { filename: "app.js" },
+  );
+  const lifecycle = sandbox.module.exports;
+  const attributes = new Map();
+  const settingsForm = {
+    inert: false,
+    setAttribute(name, value) { attributes.set(name, value); },
+    removeAttribute(name) { attributes.delete(name); },
+    hasAttribute(name) { return attributes.has(name); },
+  };
+  const statusClasses = new Set();
+  Object.assign(lifecycle.el, {
+    settingsOverlay: { hidden: true },
+    settingsForm,
+    settingsSubmit: { disabled: false },
+    settingsStatus: {
+      textContent: "",
+      classList: {
+        toggle(name, enabled) {
+          if (enabled) statusClasses.add(name);
+          else statusClasses.delete(name);
+        },
+        contains(name) { return statusClasses.has(name); },
+      },
+    },
+    settingsBackend: fakeSelect([
+      "openai-responses",
+      "chatgpt-codex-responses",
+      "arcee-auth",
+      "arcee-api",
+    ]),
+    settingsEffort: fakeSelect([
+      "__clear__",
+      "none",
+      "low",
+      "medium",
+      "high",
+    ]),
+    settingsModel: { value: "" },
+    settingsBaseUrl: { value: "", readOnly: false, title: "" },
+    settingsCredentialMode: fakeSelect(["none", "variable"]),
+    settingsApiKeyEnv: {
+      value: "",
+      disabled: true,
+      required: false,
+      placeholder: "not used",
+    },
+    settingsExtraHeaders: { value: "" },
+  });
+
+  const effects = {
+    streams: [],
+    snapshots: [],
+    sessionLoads: [],
+  };
+  sandbox.openEventStream = (sessionId) => effects.streams.push(sessionId);
+  sandbox.loadSnapshot = async (...args) => { effects.snapshots.push(args); };
+  sandbox.loadSessions = async (...args) => { effects.sessionLoads.push(args); };
+
+  return {
+    ...lifecycle,
+    sandbox,
+    effects,
+    settingsForm,
+    event: { preventDefault() {} },
+  };
+}
+
+function persistedSettings(overrides = {}) {
+  return {
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: "medium",
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers: {},
+    ...overrides,
+  };
 }
 
 function launchValues(overrides = {}) {
@@ -50,6 +181,19 @@ function settingsFixture(overrides = {}) {
     credential_mode: "variable",
     api_key_env: "CUSTOM_API_KEY",
     extra_headers: '{"X-Trace":"yes"}',
+    ...overrides,
+  };
+}
+
+function valuesFromSettingsFormState(formState, overrides = {}) {
+  return {
+    model: formState.model,
+    base_url: formState.baseUrlControl.value,
+    backend: formState.backend,
+    reasoning_effort: formState.reasoning_effort,
+    credential_mode: formState.credentialControl.mode,
+    api_key_env: formState.credentialControl.value,
+    extra_headers: formState.extra_headers,
     ...overrides,
   };
 }
@@ -122,9 +266,311 @@ test("launch and settings backend selectors expose explicit Arcee modes only", (
     assert.doesNotMatch(select, /value="arcee"/);
     assert.doesNotMatch(select, /value="auto"/);
   }
-  assert.match(indexSource, /arcee-auth[\s\S]*stored Arcee login/);
-  assert.match(indexSource, /arcee-api[\s\S]*requires an environment variable/);
-  assert.match(indexSource, /chatgpt-codex-responses[\s\S]*stored Codex OAuth/);
+});
+
+test("launch and settings omit long managed credential guidance", () => {
+  for (const id of ["launchForm", "settingsForm"]) {
+    const form = indexSource.match(new RegExp(`<form id="${id}"[\\s\\S]*?</form>`))[0];
+    assert.doesNotMatch(form, /credential-help/);
+    assert.doesNotMatch(form, /stored Arcee login|stored Codex OAuth|Every other backend requires/);
+  }
+  assert.match(indexSource, /<button id="settingsSubmit"[^>]*type="submit"/);
+  assert.doesNotMatch(appSource, /explicitly select No API key environment variable/i);
+});
+
+test("managed launch backends lock canonical URLs and restore the non-managed draft", () => {
+  let control = {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "",
+  };
+  control = plain(nextLaunchBaseUrlControl(control, "arcee-auth", "openai-responses"));
+  assert.deepEqual(control, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    "chatgpt-codex-responses",
+    "openai-responses",
+  ));
+  assert.deepEqual(control, {
+    value: "https://chatgpt.com/backend-api",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  control = plain(nextLaunchBaseUrlControl(control, "together-chat", "arcee-auth"));
+  assert.deepEqual(control, {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "https://custom.example/v1",
+  });
+
+  const inherited = plain(nextLaunchBaseUrlControl(
+    { value: "", readOnly: false, restoreValue: "stale" },
+    "",
+    "arcee-auth",
+  ));
+  assert.deepEqual(inherited, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "",
+  });
+  const inheritedServerValue = plain(nextLaunchBaseUrlControl(
+    { value: "", readOnly: false, restoreValue: "" },
+    "",
+    "chatgpt-codex-responses",
+    "https://chatgpt.com/backend-api",
+  ));
+  assert.deepEqual(inheritedServerValue, {
+    value: "https://chatgpt.com/backend-api",
+    readOnly: true,
+    restoreValue: "",
+  });
+  assert.deepEqual(
+    plain(nextLaunchBaseUrlControl(inherited, "", "openai-responses")),
+    { value: "", readOnly: false, restoreValue: "" },
+  );
+  assert.equal(managedLaunchBaseUrl("arcee-api"), null);
+  assert.match(appSource, /launchBackend\.addEventListener\("change", renderLaunchModelControls\)/);
+  assert.match(appSource, /el\.launchBaseUrl\.readOnly = next\.readOnly/);
+});
+
+test("managed launch backends lock no-key credentials across transitions and restore named drafts", () => {
+  let control = {
+    mode: "variable",
+    value: "CUSTOM_API_KEY",
+    locked: false,
+    restoreMode: "inherit",
+    restoreValue: "",
+  };
+  control = plain(nextLaunchCredentialControl(control, "arcee-auth", "openai-responses"));
+  assert.deepEqual(control, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  control = plain(nextLaunchCredentialControl(
+    control,
+    "chatgpt-codex-responses",
+    "arcee-auth",
+  ));
+  assert.deepEqual(control, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  control = plain(nextLaunchCredentialControl(control, "arcee-api", "arcee-auth"));
+  assert.deepEqual(control, {
+    mode: "variable",
+    value: "CUSTOM_API_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "CUSTOM_API_KEY",
+  });
+
+  const inheritedDraft = plain(nextLaunchCredentialControl({
+    mode: "inherit",
+    value: "",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "OLD_KEY",
+  }, "", "arcee-auth"));
+  assert.deepEqual(inheritedDraft, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "inherit",
+    restoreValue: "",
+  });
+  assert.deepEqual(
+    plain(nextLaunchCredentialControl(inheritedDraft, "", "openai-responses")),
+    {
+      mode: "inherit",
+      value: "",
+      locked: false,
+      restoreMode: "inherit",
+      restoreValue: "",
+    },
+  );
+
+  assert.match(appSource, /el\.launchCredentialMode\.disabled = next\.locked/);
+  assert.match(appSource, /Stored credentials are selected automatically/);
+});
+
+test("launch credential drafts survive modal reuse and launch-default refresh transitions", () => {
+  let control = {
+    mode: "variable",
+    value: "REUSED_API_KEY",
+    locked: false,
+    restoreMode: "inherit",
+    restoreValue: "",
+  };
+
+  // First open applies inherited managed defaults.
+  control = plain(nextLaunchCredentialControl(control, "", "arcee-auth"));
+  assert.equal(control.locked, true);
+
+  // Reopening starts a new refresh by clearing old configured defaults.
+  control = plain(nextLaunchCredentialControl(control, "", null));
+  assert.deepEqual(control, {
+    mode: "variable",
+    value: "REUSED_API_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "REUSED_API_KEY",
+  });
+
+  // The winning location/config response alone reapplies managed state.
+  control = plain(nextLaunchCredentialControl(control, "", "chatgpt-codex-responses"));
+  assert.equal(control.mode, "none");
+  assert.equal(control.locked, true);
+  control = plain(nextLaunchCredentialControl(control, "", "together-chat"));
+  assert.equal(control.mode, "variable");
+  assert.equal(control.value, "REUSED_API_KEY");
+  assert.equal(control.locked, false);
+
+  const beginSource = appSource.match(/function beginLaunchModelDefaultsRequest[\s\S]*?\n}/)[0];
+  const applySource = appSource.match(/function applyLaunchModelDefaults[\s\S]*?\n}/)[0];
+  const refreshSource = appSource.match(/async function refreshLaunchModelDefaults[\s\S]*?\n}/)[0];
+  assert.match(beginSource, /renderLaunchModelControls\(\)/);
+  assert.match(applySource, /renderLaunchModelControls\(\)/);
+  assert.match(refreshSource, /if \(applied\) \{[\s\S]*applyLaunchModelDefaults/);
+  assert.match(refreshSource, /requestGeneration === state\.launchDefaultsRequestGeneration/);
+  assert.match(refreshSource, /launchLocationKey\(currentLocation\) === expectedKey/);
+  assert.match(refreshSource, /!el\.launchOverlay\.hidden/);
+});
+
+test("launch defaults requests use creation-equivalent local and SSH locations", async () => {
+  const requests = [];
+  const postDefaults = async (path, body) => {
+    requests.push([path, body]);
+    return { configured_model_backend: "arcee-auth" };
+  };
+
+  const local = await fetchLaunchModelDefaultsForValues({
+    cwd: " /repo/worktree ",
+    ssh_host: "",
+  }, postDefaults);
+  const remote = await fetchLaunchModelDefaultsForValues({
+    cwd: "   ",
+    ssh_host: " build-box ",
+  }, postDefaults);
+
+  assert.deepEqual(plain(local.location), { cwd: "/repo/worktree", ssh_host: null });
+  assert.deepEqual(plain(remote.location), { cwd: "~", ssh_host: "build-box" });
+  assert.deepEqual(plain(requests), [
+    ["/sessions/launch-defaults", { cwd: "/repo/worktree", ssh_host: null }],
+    ["/sessions/launch-defaults", { cwd: "~", ssh_host: "build-box" }],
+  ]);
+});
+
+test("each launch refreshes changed config before payload construction and preserves the base draft", async () => {
+  let configuredBackend = "openai-responses";
+  const requests = [];
+  const postDefaults = async (path, body) => {
+    requests.push([path, body, configuredBackend]);
+    return { configured_model_backend: configuredBackend };
+  };
+  const values = launchValues({
+    cwd: "/repo",
+    base_url: "https://custom.example/v1",
+  });
+  let control = {
+    value: values.base_url,
+    readOnly: false,
+    restoreValue: "",
+  };
+
+  let refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  let payload = buildLaunchModelPayload({
+    ...values,
+    configured_backend: refreshed.defaults.configured_model_backend,
+  });
+  assert.deepEqual(plain(payload), { base_url: "https://custom.example/v1" });
+
+  configuredBackend = "arcee-auth";
+  refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    values.backend,
+    refreshed.defaults.configured_model_backend,
+  ));
+  payload = buildLaunchModelPayload({
+    ...values,
+    base_url: control.value,
+    configured_backend: refreshed.defaults.configured_model_backend,
+  });
+  assert.deepEqual(control, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "https://custom.example/v1",
+  });
+  assert.deepEqual(plain(payload), { api_key_env: null });
+
+  configuredBackend = "openai-responses";
+  refreshed = await fetchLaunchModelDefaultsForValues(values, postDefaults);
+  control = plain(nextLaunchBaseUrlControl(
+    control,
+    values.backend,
+    refreshed.defaults.configured_model_backend,
+  ));
+  assert.deepEqual(control, {
+    value: "https://custom.example/v1",
+    readOnly: false,
+    restoreValue: "https://custom.example/v1",
+  });
+  assert.equal(requests.length, 3, "defaults must be fetched for every launch attempt");
+
+  const createSource = appSource.match(/async function createSession[\s\S]*?\n}\n\nasync function submitPrompt/)[0];
+  assert.ok(
+    createSource.indexOf("await refreshLaunchModelDefaults")
+      < createSource.indexOf("buildLaunchModelPayload"),
+    "submission must await refreshed defaults before building its payload",
+  );
+  assert.doesNotMatch(createSource, /state\.store.*configured_model_backend/);
+  assert.match(appSource, /showLaunchOverlay[\s\S]*refreshLaunchModelDefaults/);
+  assert.match(appSource, /launchCwd\.addEventListener\("change", refreshOpenLaunchModelDefaults\)/);
+  assert.match(appSource, /launchSshHost\.addEventListener\("change", refreshOpenLaunchModelDefaults\)/);
+});
+
+test("managed launch payloads send exact explicit and inherited credential clearing", () => {
+  assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+    backend: "arcee-auth",
+    base_url: "https://stale.example/v1",
+    credential_mode: "variable",
+    api_key_env: "STALE_CONFIG_KEY",
+  }))), {
+    backend: "arcee-auth",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+  });
+  assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+    backend: "chatgpt-codex-responses",
+    credential_mode: "inherit",
+  }))), {
+    backend: "chatgpt-codex-responses",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+  });
+
+  for (const configured_backend of ["arcee-auth", "chatgpt-codex-responses"]) {
+    assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
+      base_url: managedLaunchBaseUrl(configured_backend),
+      configured_backend,
+      credential_mode: "variable",
+      api_key_env: "STALE_CONFIG_KEY",
+    }))), { api_key_env: null });
+  }
 });
 
 test("launch omits inherited model settings and sends header JSON as objects", () => {
@@ -138,19 +584,18 @@ test("launch omits inherited model settings and sends header JSON as objects", (
   assert.equal(serializeExtraHeaders("", undefined), undefined);
 });
 
-test("launch rejects whitespace concrete values and enforces explicit credential modes", () => {
+test("launch rejects whitespace values and enforces credentials only for API-key backends", () => {
   assert.throws(
     () => buildLaunchModelPayload(launchValues({ model: "   " })),
     /Model cannot contain only whitespace/,
   );
-  assert.throws(
-    () => buildLaunchModelPayload(launchValues({ backend: "arcee-auth" })),
-    /explicitly select No API key environment variable/,
-  );
   assert.deepEqual(plain(buildLaunchModelPayload(launchValues({
     backend: "arcee-auth",
-    credential_mode: "none",
-  }))), { backend: "arcee-auth", api_key_env: null });
+  }))), {
+    backend: "arcee-auth",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+  });
   assert.throws(
     () => buildLaunchModelPayload(launchValues({
       backend: "arcee-api",
@@ -240,22 +685,29 @@ test("settings explicitly clears optional fields with null and empty header obje
     api_key_env: "",
     extra_headers: "",
   }), storedInitial);
-  assert.deepEqual(plain(cleared), { backend: "arcee-auth", api_key_env: null });
+  assert.deepEqual(plain(cleared), {
+    base_url: "https://api.arcee.ai/api/v1",
+    backend: "arcee-auth",
+    api_key_env: null,
+  });
 });
 
-test("settings rejects required clearing and stale selectors across backend transitions", () => {
+test("settings normalizes managed dependencies and still rejects missing API credentials", () => {
   assert.throws(
     () => buildSettingsPatch(settingsFixture({ model: " " }), initialSettings),
     /Model is required and cannot be cleared/,
   );
-  assert.throws(
-    () => buildSettingsPatch(settingsFixture({ backend: "chatgpt-codex-responses" }), initialSettings),
-    /stored Codex OAuth.*No API key environment variable/,
-  );
+  assert.deepEqual(plain(buildSettingsPatch(settingsFixture({
+    backend: "chatgpt-codex-responses",
+  }), initialSettings)), {
+    base_url: "https://chatgpt.com/backend-api",
+    backend: "chatgpt-codex-responses",
+    api_key_env: null,
+  });
 
   const authInitial = settingsValuesFromMetadata({
     model: "arcee-model",
-    base_url: "https://api.arcee.ai",
+    base_url: "https://api.arcee.ai/api/v1",
     backend: "arcee-auth",
     reasoning_effort: null,
     api_key_env: null,
@@ -264,7 +716,7 @@ test("settings rejects required clearing and stale selectors across backend tran
   assert.throws(
     () => buildSettingsPatch(settingsFixture({
       model: "arcee-model",
-      base_url: "https://api.arcee.ai",
+      base_url: "https://api.arcee.ai/api/v1",
       backend: "openai-responses",
       reasoning_effort: "__clear__",
       credential_mode: "none",
@@ -273,6 +725,522 @@ test("settings rejects required clearing and stale selectors across backend tran
     }), authInitial),
     /requires an API key environment variable/,
   );
+});
+
+test("settings modal hydration canonicalizes and locks managed controls", () => {
+  const codex = plain(settingsFormStateFromMetadata({
+    model: "gpt-5-codex",
+    base_url: "https://chatgpt.com/backend-api",
+    backend: "chatgpt-codex-responses",
+    reasoning_effort: "high",
+    api_key_env: null,
+    extra_headers: { "X-Codex": "yes" },
+  }));
+  assert.deepEqual(codex.baseUrlControl, {
+    value: "https://chatgpt.com/backend-api",
+    readOnly: true,
+    restoreValue: "",
+  });
+  assert.deepEqual(codex.credentialControl, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "",
+  });
+  assert.equal(codex.extra_headers, '{\n  "X-Codex": "yes"\n}');
+
+  const incompleteArcee = plain(settingsFormStateFromMetadata({
+    model: "arcee-model",
+    base_url: "",
+    backend: "arcee-auth",
+    reasoning_effort: null,
+    api_key_env: "STALE_API_KEY",
+    extra_headers_json: null,
+  }));
+  assert.deepEqual(incompleteArcee.baseUrlControl, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "",
+  });
+  assert.deepEqual(incompleteArcee.credentialControl, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "STALE_API_KEY",
+  });
+  assert.equal(incompleteArcee.initial.base_url, "");
+  assert.equal(incompleteArcee.initial.api_key_env, "STALE_API_KEY");
+  assert.match(appSource, /settingsBackend\.addEventListener\("change", renderSettingsModelControls\)/);
+  assert.match(appSource, /el\.settingsBaseUrl\.readOnly = formState\.baseUrlControl\.readOnly/);
+  assert.match(appSource, /el\.settingsCredentialMode\.disabled = formState\.credentialControl\.locked/);
+});
+
+test("settings managed transitions preserve non-managed base and credential drafts", () => {
+  let base = {
+    value: "https://tenant.example.test/v1",
+    readOnly: false,
+    restoreValue: "",
+  };
+  let credential = {
+    mode: "variable",
+    value: "TENANT_API_KEY",
+    locked: false,
+    restoreMode: "none",
+    restoreValue: "",
+  };
+
+  base = plain(nextSettingsBaseUrlControl(base, "arcee-auth"));
+  credential = plain(nextSettingsCredentialControl(credential, "arcee-auth"));
+  assert.deepEqual(base, {
+    value: "https://api.arcee.ai/api/v1",
+    readOnly: true,
+    restoreValue: "https://tenant.example.test/v1",
+  });
+  assert.deepEqual(credential, {
+    mode: "none",
+    value: "",
+    locked: true,
+    restoreMode: "variable",
+    restoreValue: "TENANT_API_KEY",
+  });
+
+  base = plain(nextSettingsBaseUrlControl(base, "chatgpt-codex-responses"));
+  credential = plain(nextSettingsCredentialControl(credential, "chatgpt-codex-responses"));
+  assert.equal(base.value, "https://chatgpt.com/backend-api");
+  assert.equal(base.restoreValue, "https://tenant.example.test/v1");
+  assert.equal(credential.restoreValue, "TENANT_API_KEY");
+
+  base = plain(nextSettingsBaseUrlControl(base, "arcee-api"));
+  credential = plain(nextSettingsCredentialControl(credential, "arcee-api"));
+  assert.deepEqual(base, {
+    value: "https://tenant.example.test/v1",
+    readOnly: false,
+    restoreValue: "https://tenant.example.test/v1",
+  });
+  assert.deepEqual(credential, {
+    mode: "variable",
+    value: "TENANT_API_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "TENANT_API_KEY",
+  });
+});
+
+test("settings managed PATCHes are exact, sparse, and repair raw dependencies", () => {
+  for (const [backend, base_url] of [
+    ["chatgpt-codex-responses", "https://chatgpt.com/backend-api"],
+    ["arcee-auth", "https://api.arcee.ai/api/v1"],
+  ]) {
+    const valid = settingsFormStateFromMetadata({
+      model: "managed-model",
+      base_url,
+      backend,
+      reasoning_effort: null,
+      api_key_env: null,
+      extra_headers: {},
+    });
+    assert.deepEqual(
+      plain(buildSettingsPatch(valuesFromSettingsFormState(valid), valid.initial)),
+      {},
+    );
+  }
+
+  const incomplete = settingsFormStateFromMetadata({
+    model: "managed-model",
+    base_url: "",
+    backend: "arcee-auth",
+    reasoning_effort: null,
+    api_key_env: "STALE_API_KEY",
+    extra_headers: {},
+  });
+  assert.deepEqual(
+    plain(buildSettingsPatch(valuesFromSettingsFormState(incomplete), incomplete.initial)),
+    {
+      base_url: "https://api.arcee.ai/api/v1",
+      api_key_env: null,
+    },
+  );
+
+  const whitespaceRaw = settingsFormStateFromMetadata({
+    model: "managed-model",
+    base_url: " https://chatgpt.com/backend-api ",
+    backend: "chatgpt-codex-responses",
+    reasoning_effort: null,
+    api_key_env: null,
+    extra_headers: {},
+  });
+  assert.deepEqual(
+    plain(buildSettingsPatch(valuesFromSettingsFormState(whitespaceRaw), whitespaceRaw.initial)),
+    { base_url: "https://chatgpt.com/backend-api" },
+  );
+
+  const managedToManaged = settingsFormStateFromMetadata({
+    model: "managed-model",
+    base_url: "https://api.arcee.ai/api/v1",
+    backend: "arcee-auth",
+    reasoning_effort: null,
+    api_key_env: null,
+    extra_headers: {},
+  });
+  assert.deepEqual(plain(buildSettingsPatch(
+    valuesFromSettingsFormState(managedToManaged, {
+      backend: "chatgpt-codex-responses",
+      base_url: "ignored managed draft",
+      credential_mode: "variable",
+      api_key_env: "IGNORED_KEY",
+    }),
+    managedToManaged.initial,
+  )), {
+    base_url: "https://chatgpt.com/backend-api",
+    backend: "chatgpt-codex-responses",
+  });
+
+  assert.deepEqual(plain(buildSettingsPatch(
+    valuesFromSettingsFormState(managedToManaged, {
+      backend: "arcee-api",
+      base_url: "https://tenant.arcee.ai/api/v1",
+      credential_mode: "variable",
+      api_key_env: "ARCEE_API_KEY",
+    }),
+    managedToManaged.initial,
+  )), {
+    base_url: "https://tenant.arcee.ai/api/v1",
+    backend: "arcee-api",
+    api_key_env: "ARCEE_API_KEY",
+  });
+
+  assert.deepEqual(plain(buildSettingsPatch(settingsFixture({
+    backend: "arcee-api",
+  }), initialSettings)), {
+    backend: "arcee-api",
+  });
+
+  assert.deepEqual(plain(buildSettingsPatch(settingsFixture({
+    backend: "arcee-auth",
+    base_url: "https://stale.example.test/v1",
+    credential_mode: "variable",
+    api_key_env: "STALE_API_KEY",
+  }), initialSettings)), {
+    base_url: "https://api.arcee.ai/api/v1",
+    backend: "arcee-auth",
+    api_key_env: null,
+  });
+});
+
+test("settings malformed managed rows remain explicitly repairable", () => {
+  const malformed = settingsFormStateFromMetadata({
+    model: "managed-model",
+    base_url: "https://old-api.example/v1",
+    backend: "chatgpt-codex-responses",
+    reasoning_effort: "ultra",
+    api_key_env: " BAD KEY ",
+    extra_headers_json: "{broken",
+  });
+  assert.equal(malformed.initial.extra_headers_invalid, true);
+  assert.equal(malformed.baseUrlControl.restoreValue, "https://old-api.example/v1");
+  assert.equal(malformed.credentialControl.restoreValue, " BAD KEY ");
+  assert.deepEqual(plain(buildSettingsPatch(
+    valuesFromSettingsFormState(malformed, {
+      reasoning_effort: "medium",
+      extra_headers: "",
+    }),
+    malformed.initial,
+  )), {
+    base_url: "https://chatgpt.com/backend-api",
+    reasoning_effort: "medium",
+    api_key_env: null,
+    extra_headers: {},
+  });
+});
+
+test("settings empty raw reasoning effort is repaired as an explicit null", () => {
+  const malformed = settingsFormStateFromMetadata({
+    model: "gpt-5",
+    base_url: "https://api.example.test/v1",
+    backend: "openai-responses",
+    reasoning_effort: "",
+    api_key_env: "CUSTOM_API_KEY",
+    extra_headers: {},
+  });
+  assert.equal(malformed.initial.reasoning_effort, "");
+  assert.equal(malformed.reasoning_effort, "__clear__");
+  assert.deepEqual(
+    plain(buildSettingsPatch(valuesFromSettingsFormState(malformed), malformed.initial)),
+    { reasoning_effort: null },
+  );
+});
+
+test("settings never captures any managed canonical URL as an API-backend draft", () => {
+  for (const [backend, malformedBase, nextManagedBackend] of [
+    ["arcee-auth", "https://chatgpt.com/backend-api", "chatgpt-codex-responses"],
+    ["chatgpt-codex-responses", "https://api.arcee.ai/api/v1", "arcee-auth"],
+  ]) {
+    const hydrated = settingsFormStateFromMetadata({
+      model: "managed-model",
+      base_url: malformedBase,
+      backend,
+      reasoning_effort: null,
+      api_key_env: null,
+      extra_headers: {},
+    });
+    assert.equal(hydrated.baseUrlControl.restoreValue, "");
+
+    const switchedManaged = plain(nextSettingsBaseUrlControl(
+      hydrated.baseUrlControl,
+      nextManagedBackend,
+    ));
+    const switchedApi = plain(nextSettingsBaseUrlControl(switchedManaged, "arcee-api"));
+    assert.deepEqual(switchedApi, {
+      value: "",
+      readOnly: false,
+      restoreValue: "",
+    });
+  }
+
+  const apiWithManagedBase = settingsFormStateFromMetadata({
+    model: "api-model",
+    base_url: " https://chatgpt.com/backend-api ",
+    backend: "openai-responses",
+    reasoning_effort: null,
+    api_key_env: "API_KEY",
+    extra_headers: {},
+  });
+  assert.equal(apiWithManagedBase.baseUrlControl.restoreValue, "");
+  const locked = nextSettingsBaseUrlControl(apiWithManagedBase.baseUrlControl, "arcee-auth");
+  assert.equal(locked.restoreValue, "");
+  assert.equal(nextSettingsBaseUrlControl(locked, "arcee-api").value, "");
+});
+
+test("repeated settings modal openings reset drafts and ignore stale loads", () => {
+  const first = settingsFormStateFromMetadata({
+    model: "first",
+    base_url: "https://old-api.example/v1",
+    backend: "arcee-auth",
+    api_key_env: "OLD_KEY",
+    extra_headers: {},
+  });
+  assert.equal(first.baseUrlControl.readOnly, true);
+  assert.equal(first.credentialControl.locked, true);
+
+  const reopened = plain(settingsFormStateFromMetadata({
+    model: "second",
+    base_url: "https://new-api.example/v1",
+    backend: "openai-responses",
+    api_key_env: "NEW_KEY",
+    extra_headers: {},
+  }));
+  assert.deepEqual(reopened.baseUrlControl, {
+    value: "https://new-api.example/v1",
+    readOnly: false,
+    restoreValue: "https://new-api.example/v1",
+  });
+  assert.deepEqual(reopened.credentialControl, {
+    mode: "variable",
+    value: "NEW_KEY",
+    locked: false,
+    restoreMode: "variable",
+    restoreValue: "NEW_KEY",
+  });
+
+  const showSource = appSource.match(/async function showSettingsOverlay[\s\S]*?\n}/)[0];
+  const hideSource = appSource.match(/function hideSettingsOverlay[\s\S]*?\n}/)[0];
+  assert.match(showSource, /requestGeneration !== state\.settingsRequestGeneration/);
+  assert.match(showSource, /state\.selectedId !== sessionId/);
+  assert.match(showSource, /el\.settingsOverlay\.hidden/);
+  assert.match(hideSource, /state\.settingsRequestGeneration \+= 1/);
+});
+
+test("pending settings PATCH success cannot affect a closed and reopened different session", async () => {
+  const harness = createSettingsLifecycleHarness();
+  const first = persistedSettings({ model: "first-model" });
+  const second = persistedSettings({
+    model: "second-model",
+    base_url: "https://second.example.test/v1",
+    api_key_env: "SECOND_API_KEY",
+  });
+  harness.state.snapshots.set("first", { metadata: first });
+  harness.state.snapshots.set("second", { metadata: second });
+  harness.state.selectedId = "first";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  const requests = [];
+  harness.sandbox.fetch = (...args) => {
+    requests.push(args);
+    return patch.promise;
+  };
+  harness.el.settingsModel.value = "first-model-updated";
+  const pendingSave = harness.updateSessionConfig(harness.event);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+
+  harness.hideSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "");
+  harness.state.selectedId = "second";
+  await harness.showSettingsOverlay();
+  const reopenedGeneration = harness.state.settingsRequestGeneration;
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+
+  patch.resolve({ ok: true });
+  await pendingSave;
+  assert.equal(requests.length, 1);
+  assert.equal(harness.state.settingsRequestGeneration, reopenedGeneration);
+  assert.equal(harness.state.settingsSessionId, "second");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.el.settingsStatus.textContent, "");
+  assert.deepEqual(harness.effects, { streams: [], snapshots: [], sessionLoads: [] });
+});
+
+test("pending settings PATCH error cannot leak into a reopened modal", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("first", { metadata: persistedSettings({ model: "first-model" }) });
+  harness.state.snapshots.set("second", { metadata: persistedSettings({ model: "second-model" }) });
+  harness.state.selectedId = "first";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  harness.sandbox.fetch = () => patch.promise;
+  harness.el.settingsModel.value = "first-model-updated";
+  const pendingSave = harness.updateSessionConfig(harness.event);
+  harness.hideSettingsOverlay();
+  harness.state.selectedId = "second";
+  await harness.showSettingsOverlay();
+
+  patch.resolve({
+    ok: false,
+    status: 409,
+    statusText: "Conflict",
+    async json() { return { error: "stale first-session failure" }; },
+  });
+  await pendingSave;
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsModel.value, "second-model");
+  assert.equal(harness.el.settingsStatus.textContent, "");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), false);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+});
+
+test("settings save suppresses duplicate submissions and re-enables after a current error", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("current", { metadata: persistedSettings() });
+  harness.state.selectedId = "current";
+  await harness.showSettingsOverlay();
+
+  const patch = deferred();
+  let requestCount = 0;
+  harness.sandbox.fetch = () => {
+    requestCount += 1;
+    return patch.promise;
+  };
+  harness.el.settingsModel.value = "updated-model";
+  const firstSave = harness.updateSessionConfig(harness.event);
+  const duplicateSave = harness.updateSessionConfig(harness.event);
+  assert.equal(requestCount, 1);
+  assert.ok(harness.state.settingsSubmission);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+
+  patch.resolve({
+    ok: false,
+    status: 422,
+    statusText: "Unprocessable Content",
+    async json() { return { error: "save failed" }; },
+  });
+  await Promise.all([firstSave, duplicateSave]);
+  assert.equal(requestCount, 1);
+  assert.equal(harness.state.settingsSubmission, null);
+  assert.equal(harness.el.settingsStatus.textContent, "save failed");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
+});
+
+test("settings loading immediately clears stale controls and failures stay inert", async () => {
+  const harness = createSettingsLifecycleHarness();
+  harness.state.snapshots.set("loaded", {
+    metadata: persistedSettings({
+      model: "loaded-model",
+      backend: "arcee-auth",
+      base_url: "https://api.arcee.ai/api/v1",
+      reasoning_effort: "high",
+      api_key_env: null,
+      extra_headers: { "X-Loaded": "yes" },
+      diagnostics: ["old failure"],
+    }),
+  });
+  harness.state.selectedId = "loaded";
+  await harness.showSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "loaded-model");
+  assert.equal(harness.el.settingsBaseUrl.readOnly, true);
+  assert.equal(harness.el.settingsCredentialMode.disabled, true);
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+
+  const failedLoad = deferred();
+  harness.sandbox.apiGet = () => failedLoad.promise;
+  harness.state.selectedId = "failed";
+  const loading = harness.showSettingsOverlay();
+  for (const control of [
+    harness.el.settingsModel,
+    harness.el.settingsBackend,
+    harness.el.settingsEffort,
+    harness.el.settingsBaseUrl,
+    harness.el.settingsCredentialMode,
+    harness.el.settingsApiKeyEnv,
+    harness.el.settingsExtraHeaders,
+  ]) {
+    assert.equal(control.value, "");
+  }
+  assert.equal(harness.el.settingsBaseUrl.readOnly, false);
+  assert.equal(harness.el.settingsBaseUrl.title, "");
+  assert.equal(harness.el.settingsCredentialMode.title, "");
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.settingsForm.hasAttribute("aria-busy"), true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+  assert.equal(harness.el.settingsStatus.textContent, "loading persisted settings");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), false);
+
+  failedLoad.reject(new Error("config load failed"));
+  await loading;
+  assert.equal(harness.el.settingsModel.value, "");
+  assert.equal(harness.el.settingsBackend.value, "");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.el.settingsStatus.textContent, "config load failed");
+  assert.equal(harness.el.settingsStatus.classList.contains("error"), true);
+  assert.equal(harness.settingsForm.inert, true);
+  assert.equal(harness.el.settingsSubmit.disabled, true);
+  assert.equal(harness.state.settingsInitial, null);
+  assert.equal(harness.state.settingsSessionId, null);
+});
+
+test("stale settings loads cannot overwrite a newer successful opening", async () => {
+  const harness = createSettingsLifecycleHarness();
+  const staleLoad = deferred();
+  harness.sandbox.apiGet = () => staleLoad.promise;
+  harness.state.selectedId = "stale";
+  const staleOpening = harness.showSettingsOverlay();
+  assert.equal(harness.settingsForm.inert, true);
+
+  harness.state.snapshots.set("current", {
+    metadata: persistedSettings({ model: "current-model" }),
+  });
+  harness.state.selectedId = "current";
+  await harness.showSettingsOverlay();
+  assert.equal(harness.el.settingsModel.value, "current-model");
+  assert.equal(harness.settingsForm.inert, false);
+
+  staleLoad.resolve(persistedSettings({ model: "stale-model" }));
+  await staleOpening;
+  assert.equal(harness.state.settingsSessionId, "current");
+  assert.equal(harness.el.settingsModel.value, "current-model");
+  assert.equal(harness.el.settingsOverlay.hidden, false);
+  assert.equal(harness.settingsForm.inert, false);
+  assert.equal(harness.el.settingsSubmit.disabled, false);
 });
 
 test("settings metadata falls back to persisted config when no resumed snapshot exists", async () => {

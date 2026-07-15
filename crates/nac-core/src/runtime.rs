@@ -1222,6 +1222,39 @@ mod tests {
     }
 
     #[test]
+    fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
+        for (backend, expected) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                BackendKind::ArceeAuth,
+                crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            let mut inherited_config = NacConfig::default();
+            inherited_config.model.backend = Some(backend);
+            inherited_config.model.model = Some("managed-model".to_string());
+            let inherited = effective_model_settings(&ModelOptions::default(), &inherited_config)
+                .expect("managed config should not require a redundant base_url");
+            assert_eq!(inherited.base_url, expected);
+
+            let mut explicit_config = NacConfig::default();
+            explicit_config.model.model = Some("managed-model".to_string());
+            let explicit = effective_model_settings(
+                &ModelOptions {
+                    backend: Some(backend),
+                    ..ModelOptions::default()
+                },
+                &explicit_config,
+            )
+            .expect("an explicit managed backend should materialize after merge");
+            assert_eq!(explicit.base_url, expected);
+        }
+    }
+
+    #[test]
     fn optional_model_overrides_distinguish_inherit_value_and_clear() {
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
@@ -1328,6 +1361,26 @@ mod tests {
         assert_eq!(settings.reasoning_effort, None);
         assert_eq!(settings.api_key_env.as_deref(), Some("SESSION_API_KEY"));
         assert!(settings.extra_headers.is_empty());
+
+        for (backend, expected) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                BackendKind::ArceeAuth,
+                crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            let managed = managed_worker_effective_model_settings(&ModelOptions {
+                backend: Some(backend),
+                api_model: Some("managed-worker-model".to_string()),
+                extra_headers: Some(BTreeMap::new()),
+                ..ModelOptions::default()
+            })
+            .expect("managed worker resolver should use the same fixed URL invariant");
+            assert_eq!(managed.base_url, expected);
+        }
 
         let raw_selector = " WORKER_KEY ";
         let invalid = managed_worker_effective_model_settings(&ModelOptions {

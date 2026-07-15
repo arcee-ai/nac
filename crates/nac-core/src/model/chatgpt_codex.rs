@@ -1,6 +1,7 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
 use super::*;
 use anyhow::Context;
+use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -1104,36 +1105,12 @@ impl Drop for FileLock {
     }
 }
 
-#[cfg(unix)]
 fn lock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    FileExt::lock_exclusive(file)
 }
 
-#[cfg(unix)]
 fn unlock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(unix))]
-fn lock_file(_file: &File) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn unlock_file(_file: &File) -> io::Result<()> {
-    Ok(())
+    FileExt::unlock(file)
 }
 
 fn extract_account_id(token: &str) -> Option<String> {
@@ -1283,6 +1260,15 @@ mod tests {
             expires_at_ms: 123_456,
             account_id: "account-1".to_string(),
         }
+    }
+
+    #[test]
+    fn codex_lock_contends_until_release() {
+        super::super::auth_store::assert_lock_contention_and_release(
+            "codex",
+            lock_file,
+            unlock_file,
+        );
     }
 
     #[test]
@@ -1473,7 +1459,7 @@ mod tests {
         let dir = TestDir::new("logout-malformed");
         let codex_path = dir.path("auth.json");
         let arcee_path = dir.path("arcee_auth.json");
-        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
         write_credential(&codex_path, "{ malformed");
         fs::write(&arcee_path, arcee).unwrap();
 
@@ -1488,7 +1474,7 @@ mod tests {
         let dir = TestDir::new("logout-coexistence");
         let codex_path = dir.path("auth.json");
         let arcee_path = dir.path("arcee_auth.json");
-        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
         fs::write(&arcee_path, arcee).unwrap();
         write_auth_file_to_path(&codex_path, &stored_codex_auth("access-token")).unwrap();
 
@@ -1521,7 +1507,7 @@ mod tests {
     fn codex_logout_preserves_valid_foreign_and_unknown_records() {
         let dir = TestDir::new("logout-foreign");
         let path = dir.path("auth.json");
-        let arcee = r#"{"type":"arcee_device_token","access_token":"jwt-valid"}"#;
+        let arcee = r#"{"type":"arcee_api_key","api_key":"rcai-valid"}"#;
         write_credential(&path, arcee);
         assert!(!remove_codex_auth_file_for_logout(&path).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), arcee);

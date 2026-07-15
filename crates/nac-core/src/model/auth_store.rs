@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use fs2::FileExt;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -354,36 +355,61 @@ impl Drop for FileLock {
     }
 }
 
-#[cfg(unix)]
 fn lock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    FileExt::lock_exclusive(file)
 }
 
-#[cfg(unix)]
 fn unlock_file(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
+    FileExt::unlock(file)
+}
+
+#[cfg(test)]
+pub(super) fn assert_lock_contention_and_release(
+    label: &str,
+    lock: fn(&File) -> io::Result<()>,
+    unlock: fn(&File) -> io::Result<()>,
+) {
+    let directory =
+        std::env::temp_dir().join(format!("nac-auth-lock-{label}-{}", Uuid::new_v4().simple()));
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("auth.lock");
+    let first = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let second = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+
+    lock(&first).unwrap();
+    let contention = FileExt::try_lock_exclusive(&second);
+    assert!(
+        contention.is_err(),
+        "a second auth lock unexpectedly succeeded while the first was held"
+    );
+
+    unlock(&first).unwrap();
+    FileExt::try_lock_exclusive(&second).unwrap();
+    FileExt::unlock(&second).unwrap();
+
+    drop(second);
+    drop(first);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(test)]
+mod cross_platform_lock_tests {
+    use super::*;
+
+    #[test]
+    fn arcee_lock_contends_until_release() {
+        assert_lock_contention_and_release("arcee", lock_file, unlock_file);
     }
-}
-
-#[cfg(not(unix))]
-fn lock_file(_file: &File) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn unlock_file(_file: &File) -> io::Result<()> {
-    Ok(())
 }
 
 #[cfg(all(test, unix))]
