@@ -75,6 +75,45 @@ pub fn load_all_thread_events(
     Ok(grouped)
 }
 
+pub fn load_thread_events_page(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    before_id: Option<i64>,
+    limit: usize,
+) -> Result<(Vec<ThreadEventRecord>, bool)> {
+    if limit == 0 {
+        return Ok((Vec::new(), false));
+    }
+    let conn = open_runtime_connection(path)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, thread_name, session_id, event_json, created_at
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+           AND (?3 IS NULL OR id < ?3)
+         ORDER BY id DESC
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(
+        params![session_id, thread_name, before_id, limit.saturating_add(1)],
+        |row| {
+            Ok(ThreadEventRecord {
+                id: row.get(0)?,
+                thread_name: row.get(1)?,
+                session_id: row.get(2)?,
+                event_json: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )?;
+    let mut events = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+    let has_older = events.len() > limit;
+    if has_older {
+        events.truncate(limit);
+    }
+    Ok((events, has_older))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +145,53 @@ mod tests {
             vec!["two", "three"]
         );
         assert_eq!(events["worker-b"][0].event_json, "only");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn thread_event_pages_are_newest_first_and_use_id_cursors() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "nac_thread_event_pages_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("store.db");
+        initialize(&path).unwrap();
+        for value in ["one", "two", "three", "four", "five"] {
+            append_thread_event(&path, "session-a", "worker-a", value).unwrap();
+        }
+
+        let (latest, has_older) =
+            load_thread_events_page(&path, "session-a", "worker-a", None, 2).unwrap();
+        assert!(has_older);
+        assert_eq!(
+            latest
+                .iter()
+                .map(|event| event.event_json.as_str())
+                .collect::<Vec<_>>(),
+            ["five", "four"]
+        );
+
+        let (older, has_older) = load_thread_events_page(
+            &path,
+            "session-a",
+            "worker-a",
+            Some(latest.last().unwrap().id),
+            2,
+        )
+        .unwrap();
+        assert!(has_older);
+        assert_eq!(
+            older
+                .iter()
+                .map(|event| event.event_json.as_str())
+                .collect::<Vec<_>>(),
+            ["three", "two"]
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

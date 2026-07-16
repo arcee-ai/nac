@@ -147,6 +147,20 @@ pub struct SessionFrontendSnapshot {
     pub workspace: WorkspaceSnapshot,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadEventPageItem {
+    pub id: i64,
+    pub created_at: String,
+    pub event: AgentEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadEventPage {
+    pub events: Vec<ThreadEventPageItem>,
+    pub has_older: bool,
+    pub next_before_id: Option<i64>,
+}
+
 pub struct SessionServiceParts {
     pub service: SessionService,
     pub init: SessionServiceInit,
@@ -597,10 +611,21 @@ impl SessionService {
     }
 
     pub fn all_thread_events(&self) -> Result<HashMap<String, Vec<AgentEvent>>> {
+        self.all_thread_events_with_limit(512)
+    }
+
+    pub fn all_thread_events_with_limit(
+        &self,
+        per_thread_limit: usize,
+    ) -> Result<HashMap<String, Vec<AgentEvent>>> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(HashMap::new());
         };
-        crate::store::load_all_thread_events(&self.metadata.store_path, session_id, 512)?
+        crate::store::load_all_thread_events(
+            &self.metadata.store_path,
+            session_id,
+            per_thread_limit,
+        )?
             .into_iter()
             .map(|(thread_name, records)| {
                 let events = records
@@ -618,6 +643,48 @@ impl SessionService {
                 Ok((thread_name, events))
             })
             .collect()
+    }
+
+    pub fn thread_events_page(
+        &self,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let (records, has_older) = crate::store::load_thread_events_page(
+            &self.metadata.store_path,
+            session_id,
+            thread_name,
+            before_id,
+            limit,
+        )?;
+        let events = records
+            .into_iter()
+            .map(|record| {
+                let event = serde_json::from_str(&record.event_json).map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid persisted event {} for thread '{}': {error}",
+                        record.id,
+                        thread_name
+                    )
+                })?;
+                Ok(ThreadEventPageItem {
+                    id: record.id,
+                    created_at: record.created_at,
+                    event,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(ThreadEventPage {
+            next_before_id: events.last().map(|event| event.id),
+            events,
+            has_older,
+        })
     }
 
     pub fn list_worksets(&self) -> Result<Vec<WorksetSummarySnapshot>> {
@@ -650,6 +717,13 @@ impl SessionService {
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
+        self.frontend_snapshot_with_thread_event_limit(512).await
+    }
+
+    pub async fn frontend_snapshot_with_thread_event_limit(
+        &self,
+        thread_event_limit: usize,
+    ) -> Result<SessionFrontendSnapshot> {
         let (response_timing, persisted_messages) = {
             let snapshot = self.session_snapshot.lock().await;
             (
@@ -674,7 +748,7 @@ impl SessionService {
             active_threads: self.active_thread_names().await,
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
-            thread_events: self.all_thread_events()?,
+            thread_events: self.all_thread_events_with_limit(thread_event_limit)?,
             thread_steering: self
                 .metadata
                 .session_id
@@ -696,6 +770,23 @@ impl SessionService {
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
         })
+    }
+
+    /// Returns the freshest orchestrator messages available without building
+    /// the considerably larger frontend snapshot. The persisted copy remains
+    /// a safe fallback while an active model turn owns the agent lock.
+    pub async fn messages_snapshot(&self) -> Vec<Message> {
+        let persisted_messages = self
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map(|snapshot| snapshot.messages.clone())
+            .unwrap_or_default();
+        match self.agent.try_lock() {
+            Ok(agent) => agent.messages.clone(),
+            Err(_) => persisted_messages,
+        }
     }
 
     pub async fn generate_overview(&self) -> Result<SessionOverviewRecord> {

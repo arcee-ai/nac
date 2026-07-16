@@ -61,8 +61,8 @@ pub struct Agent {
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
-    /// Token usage from the most recent `send()` call; `None` until the
-    /// final `AssistantMessage` is emitted or if the provider omitted usage.
+    /// Token usage from the most recent `send()` call, updated after each
+    /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
 }
 
@@ -369,7 +369,7 @@ impl Agent {
                     return Err(error);
                 }
             };
-            if let Some(usage) = &response.usage {
+            if let Some(usage) = response.usage.clone() {
                 accumulated_usage += usage.clone();
                 // orchestrator_context_tokens is the current context length, not a sum.
                 // Overwrite with the last call's total so it reflects the
@@ -380,6 +380,13 @@ impl Agent {
                 // last_usage retains the previous run's value and all token
                 // usage from the current run is lost on cancel.
                 self.last_usage = Some(accumulated_usage.clone());
+                // Emit the per-call delta rather than accumulated usage. The
+                // frontend can add orchestrator and worker calls exactly once,
+                // while using only orchestrator calls for current context.
+                self.emit(AgentEvent::TokenUsageUpdated {
+                    thread_name: self.thread_name.clone(),
+                    usage,
+                });
             }
             if response.finish_reason.as_deref() == Some("length") {
                 let error = anyhow!(

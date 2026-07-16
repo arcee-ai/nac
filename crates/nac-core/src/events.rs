@@ -102,6 +102,10 @@ pub enum AgentEvent {
         thread_name: Option<String>,
         iteration: usize,
     },
+    TokenUsageUpdated {
+        thread_name: Option<String>,
+        usage: crate::model::TokenUsage,
+    },
     ToolCallStarted {
         thread_name: Option<String>,
         call_id: String,
@@ -488,7 +492,11 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         | AgentEvent::ThreadSteeringDelivered { name, .. }
         | AgentEvent::ThreadSteeringExpired { name, .. }
         | AgentEvent::ThreadFinished { name, .. } => Some(name),
-        AgentEvent::ThreadLog { .. }
+        // Usage updates are deliberately live-only. Persisting them would
+        // consume slots in the user-facing thread-event pages and make a DB
+        // written by this version unreadable by older AgentEvent enums.
+        AgentEvent::TokenUsageUpdated { .. }
+        | AgentEvent::ThreadLog { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
         | AgentEvent::OrchestratorSteeringExpired { .. } => None,
@@ -1041,22 +1049,49 @@ mod tests {
             Some("session-persisted-events".to_string()),
             path.clone(),
         );
+        let mut live_events = bus.subscribe();
 
         bus.emit_agent(AgentEvent::ModelCallStarted {
             thread_name: Some("worker".to_string()),
             iteration: 2,
+        });
+        let usage = crate::model::TokenUsage {
+            input_tokens: 120,
+            output_tokens: 30,
+            cache_read_tokens: 80,
+            cache_write_tokens: 0,
+            reasoning_tokens: 4,
+            orchestrator_context_tokens: 230,
+        };
+        bus.emit_agent(AgentEvent::TokenUsageUpdated {
+            thread_name: Some("worker".to_string()),
+            usage: usage.clone(),
         });
         bus.emit_agent(AgentEvent::ThreadLog {
             name: "worker".to_string(),
             line: "noisy stderr".to_string(),
         });
 
-        let events = crate::store::load_all_thread_events(
-            &path,
-            "session-persisted-events",
-            20,
-        )
-        .unwrap();
+        assert!(matches!(
+            live_events.try_recv().unwrap().event,
+            SessionEvent::Agent {
+                event: AgentEvent::ModelCallStarted { .. }
+            }
+        ));
+        assert!(matches!(
+            live_events.try_recv().unwrap().event,
+            SessionEvent::Agent {
+                event: AgentEvent::TokenUsageUpdated {
+                    usage: live_usage,
+                    ..
+                }
+            } if live_usage == usage
+        ));
+
+        let events =
+            crate::store::load_all_thread_events(&path, "session-persisted-events", 20).unwrap();
+        // Live usage telemetry stays out of persisted event pages, so old
+        // binaries can continue to read stores written by this version.
         assert_eq!(events["worker"].len(), 1);
         let event: AgentEvent = serde_json::from_str(&events["worker"][0].event_json).unwrap();
         assert!(matches!(

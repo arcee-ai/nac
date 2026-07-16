@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/redesign.css?v=composer-alignment" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=live-usage-2" />
   </head>
   <body>
     <div id="app" class="app-frame">
@@ -19,7 +19,7 @@
           </div>
           <span id="pickerNavStatus" class="nav-status picker-nav-status" role="status" aria-live="polite" hidden></span>
         </header>
-        <p id="reorderInstructions" class="sr-only">Use a session move handle with the arrow, Home, or End keys to reorder it.</p>
+        <p id="reorderInstructions" class="sr-only">Drag this handle to reorder. With a keyboard, press Enter or Space, use the arrow, Home, or End keys, then press Enter or Space to save.</p>
         <div id="reorderLive" class="sr-only" aria-live="polite"></div>
         <main class="session-browser">
           <div class="session-list-heading">
@@ -46,7 +46,7 @@
           </div>
           <dl class="session-metrics" aria-label="Session metrics">
             <div><dt>Model</dt><dd id="metricModel">—</dd></div>
-            <div><dt>Context</dt><dd id="metricContext">—</dd></div>
+            <div><dt>Orch context</dt><dd id="metricContext">—</dd></div>
             <div><dt>Tokens</dt><dd id="metricTokens">—</dd></div>
             <div><dt>Changes</dt><dd id="metricChanges">—</dd></div>
           </dl>
@@ -160,6 +160,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=orchestrator-steering" defer></script>
+    <script src="/assets/app.js?v=live-usage-2" defer></script>
   </body>
 </html>

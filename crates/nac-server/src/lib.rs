@@ -32,9 +32,10 @@ use nac_core::{
     },
     session_service::{
         ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionOverviewRecord,
-        SessionRunHandle, SessionService, SessionSubmitError,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    types::Message,
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,10 @@ use tokio::{
 use tower_http::cors::CorsLayer;
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
+const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
+const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
+const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
+const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
@@ -314,6 +319,54 @@ pub struct ThreadSteeringResponse {
 pub struct EventsQuery {
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SessionSnapshotQuery {
+    pub message_limit: Option<usize>,
+    pub thread_event_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MessagesQuery {
+    pub before: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ThreadEventsQuery {
+    pub before_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessagePageMetadata {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesPageResponse {
+    pub messages: Vec<Message>,
+    pub page: MessagePageMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessageCycleMetadata {
+    pub marker: String,
+    pub thread_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSnapshotResponse {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_page: Option<MessagePageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_cycle: Option<MessageCycleMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -709,6 +762,37 @@ impl SessionManager {
             .await
     }
 
+    pub async fn snapshot_with_thread_event_limit(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<SessionFrontendSnapshot> {
+        self.attach_session(session_id)
+            .await?
+            .frontend_snapshot_with_thread_event_limit(limit)
+            .await
+    }
+
+    pub async fn messages(&self, session_id: &str) -> Result<Vec<Message>> {
+        Ok(self
+            .attach_session(session_id)
+            .await?
+            .messages_snapshot()
+            .await)
+    }
+
+    pub async fn thread_events(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        self.attach_session(session_id)
+            .await?
+            .thread_events_page(thread_name, before_id, limit)
+    }
+
     pub async fn generate_overview(
         &self,
         session_id: &str,
@@ -1012,6 +1096,11 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/presentation",
             put(update_session_presentation_handler),
         )
+        .route("/sessions/{session_id}/messages", get(session_messages))
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/events",
+            get(thread_events),
+        )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route(
             "/sessions/{session_id}",
@@ -1205,11 +1294,143 @@ async fn create_session(
     ))
 }
 
+fn message_page(
+    messages: Vec<Message>,
+    before: Option<usize>,
+    limit: usize,
+) -> MessagesPageResponse {
+    let visible = messages
+        .into_iter()
+        .filter(|message| !matches!(message, Message::System { .. }))
+        .collect::<Vec<_>>();
+    let total = visible.len();
+    let end = before.unwrap_or(total).min(total);
+    let limit = limit.clamp(1, MAX_MESSAGE_PAGE_LIMIT);
+    let start = end.saturating_sub(limit);
+    MessagesPageResponse {
+        messages: visible[start..end].to_vec(),
+        page: MessagePageMetadata {
+            start,
+            end,
+            total,
+            has_older: start > 0,
+        },
+    }
+}
+
+fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
+    let mut latest_user_index = None;
+    let mut user_count = 0usize;
+    for (index, message) in messages.iter().enumerate() {
+        if matches!(message, Message::User { .. }) {
+            latest_user_index = Some(index);
+            user_count += 1;
+        }
+    }
+
+    let Some(latest_user_index) = latest_user_index else {
+        return MessageCycleMetadata {
+            marker: "none".to_string(),
+            thread_names: Vec::new(),
+        };
+    };
+    let mut thread_names = BTreeMap::<String, ()>::new();
+    for message in &messages[latest_user_index + 1..] {
+        let Message::Assistant {
+            tool_calls: Some(tool_calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            if tool_call.function.name != "thread" {
+                continue;
+            }
+            let Ok(arguments) =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            else {
+                continue;
+            };
+            let Some(name) = arguments
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            thread_names.insert(name.to_string(), ());
+        }
+    }
+    MessageCycleMetadata {
+        marker: format!("history:{user_count}:{latest_user_index}"),
+        thread_names: thread_names.into_keys().collect(),
+    }
+}
+
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<SessionFrontendSnapshot>, ApiError> {
-    Ok(Json(manager.snapshot(&session_id).await?))
+    Query(query): Query<SessionSnapshotQuery>,
+) -> std::result::Result<Json<SessionSnapshotResponse>, ApiError> {
+    let mut snapshot = match query.thread_event_limit {
+        Some(limit) => {
+            manager
+                .snapshot_with_thread_event_limit(
+                    &session_id,
+                    limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
+                )
+                .await?
+        }
+        None => manager.snapshot(&session_id).await?,
+    };
+    let (message_page, message_cycle) = if let Some(limit) = query.message_limit {
+        let cycle = current_message_cycle(&snapshot.messages);
+        let response = message_page(std::mem::take(&mut snapshot.messages), None, limit);
+        snapshot.messages = response.messages;
+        (Some(response.page), Some(cycle))
+    } else {
+        (None, None)
+    };
+    Ok(Json(SessionSnapshotResponse {
+        snapshot,
+        message_page,
+        message_cycle,
+    }))
+}
+
+async fn session_messages(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<MessagesQuery>,
+) -> std::result::Result<Json<MessagesPageResponse>, ApiError> {
+    let messages = manager.messages(&session_id).await?;
+    Ok(Json(message_page(
+        messages,
+        query.before,
+        query.limit.unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT),
+    )))
+}
+
+async fn thread_events(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    Query(query): Query<ThreadEventsQuery>,
+) -> std::result::Result<Json<ThreadEventPage>, ApiError> {
+    Ok(Json(
+        manager
+            .thread_events(
+                &session_id,
+                &thread_name,
+                query.before_id,
+                query
+                    .limit
+                    .unwrap_or(DEFAULT_THREAD_EVENT_PAGE_LIMIT)
+                    .clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
+            )
+            .await?,
+    ))
 }
 
 async fn generate_overview_handler(
@@ -2056,6 +2277,8 @@ mod tests {
             ".session-layout",
             ".overview-rail",
             ".thread-board",
+            ".thread-current-grid",
+            ".thread-earlier-grid",
             ".thread-tile",
             ".action-ledger",
             ".focus-panel",
@@ -2070,6 +2293,7 @@ mod tests {
             ".composer",
             ".utility-drawer",
             ".session-card",
+            ".status-dot.attention",
             ".session-grid-button",
             ".move-handle",
             "overflow: hidden;",
@@ -2084,6 +2308,11 @@ mod tests {
         assert!(!css.contains(".toast"));
         assert!(css.contains(".nav-status"));
         assert!(css.contains("grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)"));
+        assert!(css.contains(".focus-panel.is-orchestrator .focus-orchestrator-sidebar,"));
+        assert!(css.contains(".focus-panel.is-thread .focus-activity { display: none; }"));
+        assert!(css.contains("--attention: #6ea8ff"));
+        assert!(css.contains("grid-template-columns: minmax(0, 1fr) max-content max-content"));
+        assert!(css.contains("font: 15px/1.62 var(--mono)"));
         assert!(css.contains("repeat(auto-fill, minmax(min(310px, 100%), 1fr))"));
         assert!(css.contains(".utility-drawer, .modal { font-family: var(--sans); }"));
         assert!(css.contains("--event-font: 12px/1.08 var(--mono);"));
@@ -2092,6 +2321,8 @@ mod tests {
         let app = include_str!("../assets/app.js");
         for contract in [
             "function buildThreadModels",
+            "function currentCycleThreadNames",
+            "function threadCycleSeed",
             "lastFinished > 0 && lastFinished >= lastStarted",
             "function buildThreadActions",
             "function buildOrchestratorActions",
@@ -2117,7 +2348,9 @@ mod tests {
             "function syncLaunchExecutionMode",
             "function toggleSessionPin",
             "function handleSessionGridKeydown",
-            "function handleSessionDragStart",
+            "function handleSessionPointerDown",
+            "function beginPointerSessionReorder",
+            "function startKeyboardSessionReorder",
         ] {
             assert!(
                 app.contains(contract),
@@ -4864,6 +5097,81 @@ extra_headers = { X-Config = "yes" }
         assert!(listed.iter().all(|entry| !entry.active));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn orchestrator_message_pages_exclude_system_prompts_and_use_stable_before_cursors() {
+        let messages = vec![
+            Message::System {
+                content: "large hidden instructions".to_string(),
+            },
+            Message::User {
+                content: "one".to_string(),
+            },
+            Message::Assistant {
+                content: Some("two".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "three".to_string(),
+            },
+            Message::Assistant {
+                content: Some("four".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "five".to_string(),
+            },
+        ];
+
+        let latest = message_page(messages.clone(), None, 2);
+        assert_eq!(latest.page.start, 3);
+        assert_eq!(latest.page.end, 5);
+        assert_eq!(latest.page.total, 5);
+        assert!(latest.page.has_older);
+        assert!(latest
+            .messages
+            .iter()
+            .all(|message| !matches!(message, Message::System { .. })));
+
+        let older = message_page(messages, Some(latest.page.start), 2);
+        assert_eq!(older.page.start, 1);
+        assert_eq!(older.page.end, 3);
+        assert_eq!(older.page.total, 5);
+        assert!(older.page.has_older);
+    }
+
+    #[test]
+    fn message_cycle_metadata_survives_transcript_pagination() {
+        let messages = vec![
+            Message::User {
+                content: "old cycle".to_string(),
+            },
+            Message::User {
+                content: "current cycle".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![nac_core::types::ToolCall {
+                    id: "call-1".to_string(),
+                    call_type: "function".to_string(),
+                    function: nac_core::types::FunctionCall {
+                        name: "thread".to_string(),
+                        arguments: r#"{"name":"current/research"}"#.to_string(),
+                    },
+                }]),
+            },
+        ];
+
+        let cycle = current_message_cycle(&messages);
+        assert_eq!(cycle.marker, "history:2:1");
+        assert_eq!(cycle.thread_names, ["current/research"]);
     }
 
     #[tokio::test]

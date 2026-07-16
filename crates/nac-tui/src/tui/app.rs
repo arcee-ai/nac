@@ -988,6 +988,7 @@ impl App {
                 let actor = thread_name.unwrap_or_else(|| "model".to_string());
                 self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
             }
+            AgentEvent::TokenUsageUpdated { .. } => {}
             AgentEvent::ToolCallStarted {
                 thread_name,
                 call_id,
