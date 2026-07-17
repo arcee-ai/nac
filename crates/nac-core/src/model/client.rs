@@ -384,8 +384,8 @@ impl ModelClient {
         match self.try_post_arcee_auth(url, body, &token).await {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
-                let token = arcee::force_refresh_access_token(&self.client).await?;
-                self.try_post_arcee_auth(url, body, &token)
+                let refreshed = arcee::force_refresh_access_token(&self.client, &token).await?;
+                self.try_post_arcee_auth(url, body, &refreshed)
                     .await
                     .map_err(|error| anyhow!(error.message))
             }

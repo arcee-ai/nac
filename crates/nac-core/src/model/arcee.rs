@@ -1,6 +1,6 @@
 use super::auth_store::{
-    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path, with_arcee_auth_lock,
-    write_arcee_auth_string,
+    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path,
+    try_acquire_arcee_auth_lock, with_arcee_auth_lock, write_arcee_auth_string, FileLock,
 };
 use super::*;
 use anyhow::Context;
@@ -16,6 +16,8 @@ const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
 const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 3600;
 const REFRESH_SKEW_MS: u64 = 60_000;
+const REFRESH_LOCK_POLL_INTERVAL_MS: u64 = 50;
+const REFRESH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
 
 pub(super) fn no_redirect_client() -> Result<Client> {
@@ -312,6 +314,7 @@ struct TokenSuccess {
 #[derive(Debug, Deserialize)]
 struct RefreshSuccess {
     access_token: String,
+    refresh_token: Option<String>,
     token_type: Option<String>,
     expires_in: Option<u64>,
 }
@@ -507,37 +510,72 @@ fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAu
     })
 }
 
-/// Process-wide async gate that single-flights token refreshes. It yields the
-/// executor while waiting (unlike a blocking file lock), so concurrent
-/// arcee-auth calls never stall Tokio workers during the refresh network round
-/// trip. Cross-process redundancy is acceptable: the refresh token is static
-/// and credential writes are atomic.
+fn near_expiry(auth: &StoredArceeAuth) -> bool {
+    auth.expires_at_ms <= now_ms().saturating_add(REFRESH_SKEW_MS)
+}
+
+/// Process-wide async gate that single-flights refreshes within this process. It
+/// yields the executor while waiting (unlike a blocking file lock), so
+/// concurrent arcee-auth calls never stall Tokio workers.
 fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
     static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     &GATE
 }
 
-/// Returns a valid access token, refreshing proactively when it is at or near
-/// expiry. Reads are lock-free (credential writes are atomic renames, so a
-/// reader always sees a complete record); only the refresh itself is gated.
-pub(super) async fn fresh_access_token(client: &Client) -> Result<String> {
-    let auth = read_stored_auth()?;
-    if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
-        return Ok(auth.access_token);
+/// Acquires the cross-process refresh lock without ever blocking a Tokio worker:
+/// it polls the non-blocking file lock and yields between attempts. The server
+/// rotates the refresh token on every call, so two nac processes refreshing at
+/// once could invalidate each other's tokens; this serializes them.
+async fn acquire_refresh_lock() -> Result<FileLock> {
+    let started = now_ms();
+    loop {
+        if let Some(lock) = try_acquire_arcee_auth_lock()? {
+            return Ok(lock);
+        }
+        if now_ms().saturating_sub(started) >= REFRESH_LOCK_TIMEOUT_MS {
+            return Err(anyhow!(
+                "timed out waiting for the Arcee auth refresh lock; another nac process may be refreshing"
+            ));
+        }
+        sleep(Duration::from_millis(REFRESH_LOCK_POLL_INTERVAL_MS)).await;
     }
-    let _gate = refresh_gate().lock().await;
-    // A concurrent caller may have refreshed while we waited on the gate.
-    let auth = read_stored_auth()?;
-    if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
-        return Ok(auth.access_token);
-    }
-    Ok(refresh_and_store_auth(client, auth).await?.access_token)
 }
 
-/// Forces a refresh regardless of the stored expiry, used as the 401 fallback.
-pub(super) async fn force_refresh_access_token(client: &Client) -> Result<String> {
-    let _gate = refresh_gate().lock().await;
+/// Returns a valid access token, refreshing proactively when it is at or near
+/// expiry. The pre-check read is lock-free (credential writes are atomic
+/// renames, so a reader always sees a complete record); the refresh itself is
+/// serialized in- and cross-process.
+pub(super) async fn fresh_access_token(client: &Client) -> Result<String> {
     let auth = read_stored_auth()?;
+    if !near_expiry(&auth) {
+        return Ok(auth.access_token);
+    }
+    refresh_locked(client, near_expiry).await
+}
+
+/// Refreshes after a 401. Passing the access token that failed lets a queued
+/// caller detect that another holder already rotated past it and reuse the new
+/// token instead of triggering a redundant rotation.
+pub(super) async fn force_refresh_access_token(
+    client: &Client,
+    stale_access_token: &str,
+) -> Result<String> {
+    refresh_locked(client, |auth| auth.access_token == stale_access_token).await
+}
+
+/// Serializes the refresh across this process (async gate) and across processes
+/// (polled file lock), re-reads the freshest stored record under both locks, and
+/// only performs the network refresh when `should_refresh` still holds.
+async fn refresh_locked(
+    client: &Client,
+    should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+) -> Result<String> {
+    let _gate = refresh_gate().lock().await;
+    let _lock = acquire_refresh_lock().await?;
+    let auth = read_stored_auth()?;
+    if !should_refresh(&auth) {
+        return Ok(auth.access_token);
+    }
     Ok(refresh_and_store_auth(client, auth).await?.access_token)
 }
 
@@ -549,11 +587,11 @@ async fn refresh_and_store_auth(
     match request_token_refresh(client, &service, &current.refresh_token).await? {
         RefreshOutcome::Success(refreshed) => {
             let updated = stored_auth_from_refresh(current, refreshed);
-            with_arcee_auth_lock(|| write_stored_auth(&updated))?;
+            write_stored_auth(&updated)?;
             Ok(updated)
         }
         RefreshOutcome::Revoked => {
-            let _ = with_arcee_auth_lock(|| remove_auth_path(&arcee_auth_file_path()?));
+            let _ = remove_auth_path(&arcee_auth_file_path()?);
             Err(stored_auth_configuration_error(
                 "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
             ))
@@ -566,7 +604,9 @@ fn stored_auth_from_refresh(current: StoredArceeAuth, refreshed: RefreshSuccess)
     StoredArceeAuth {
         auth_type: AUTH_TYPE.to_string(),
         access_token: refreshed.access_token,
-        refresh_token: current.refresh_token,
+        // The server rotates the refresh token on every refresh; persist the new
+        // one. Fall back to the current token only if the response omits it.
+        refresh_token: refreshed.refresh_token.unwrap_or(current.refresh_token),
         token_type: refreshed.token_type.unwrap_or(current.token_type),
         expires_at_ms: now_ms().saturating_add(expires_in.saturating_mul(1000)),
         base_url: current.base_url,
@@ -1668,11 +1708,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn token_refresh_parses_success_and_preserves_refresh_token() {
+    async fn token_refresh_rotates_and_persists_new_refresh_token() {
         let server = ScriptedServer::start(vec![ScriptedResponse::json(
             "200 OK",
             json!({
                 "access_token": "jwt-access-2",
+                "refresh_token": "rotated-refresh-token",
                 "token_type": "bearer",
                 "expires_in": 3600
             })
@@ -1693,12 +1734,15 @@ mod tests {
             RefreshOutcome::Revoked => panic!("unexpected revoked outcome"),
         };
         assert_eq!(refreshed.access_token, "jwt-access-2");
+        assert_eq!(refreshed.refresh_token.as_deref(), Some("rotated-refresh-token"));
         assert_eq!(refreshed.expires_in, Some(3600));
 
+        // The rotated refresh token replaces the one we sent — persisting the old
+        // one would lock the user out on the next refresh.
         let current = stored_auth("jwt-access-1");
         let updated = stored_auth_from_refresh(current, refreshed);
         assert_eq!(updated.access_token, "jwt-access-2");
-        assert_eq!(updated.refresh_token, "refresh-1");
+        assert_eq!(updated.refresh_token, "rotated-refresh-token");
 
         assert_eq!(requests.len(), 1);
         assert_device_request(&requests[0], "/app/v1/device/refresh");
@@ -1706,6 +1750,21 @@ mod tests {
             serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
             json!({"refresh_token": "opaque-refresh", "client_id": CLIENT_ID})
         );
+    }
+
+    #[test]
+    fn refresh_without_rotated_token_keeps_current_refresh_token() {
+        let refreshed = RefreshSuccess {
+            access_token: "jwt-access-2".to_string(),
+            refresh_token: None,
+            token_type: None,
+            expires_in: Some(3600),
+        };
+
+        let updated = stored_auth_from_refresh(stored_auth("jwt-access-1"), refreshed);
+
+        assert_eq!(updated.access_token, "jwt-access-2");
+        assert_eq!(updated.refresh_token, "refresh-1");
     }
 
     #[tokio::test]
