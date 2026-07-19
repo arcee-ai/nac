@@ -147,6 +147,70 @@ pub struct SessionFrontendSnapshot {
     pub workspace: WorkspaceSnapshot,
 }
 
+/// A visible-message cursor request. `before` is an index in the filtered
+/// (rather than raw) transcript, matching the web API's existing cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessagePageRequest {
+    pub before: Option<usize>,
+    pub limit: usize,
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendSnapshotMessages {
+    All,
+    Page(MessagePageRequest),
+}
+
+/// Controls expensive, independently projectable portions of a frontend
+/// snapshot. The default exactly preserves the historical snapshot contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrontendSnapshotLoadOptions {
+    pub thread_event_limit: usize,
+    pub include_sessions: bool,
+    pub messages: FrontendSnapshotMessages,
+}
+
+impl Default for FrontendSnapshotLoadOptions {
+    fn default() -> Self {
+        Self {
+            thread_event_limit: 512,
+            include_sessions: true,
+            messages: FrontendSnapshotMessages::All,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessagePageMetadata {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageCycleMetadata {
+    pub marker: String,
+    pub thread_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagesPageSnapshot {
+    pub messages: Vec<Message>,
+    pub page: MessagePageMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFrontendSnapshotLoad {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_page: Option<MessagePageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_cycle: Option<MessageCycleMetadata>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ThreadEventPageItem {
     pub id: i64,
@@ -717,38 +781,57 @@ impl SessionService {
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
-        self.frontend_snapshot_with_thread_event_limit(512).await
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions::default())
+            .await?
+            .snapshot)
     }
 
     pub async fn frontend_snapshot_with_thread_event_limit(
         &self,
         thread_event_limit: usize,
     ) -> Result<SessionFrontendSnapshot> {
-        let (response_timing, persisted_messages) = {
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit,
+                ..FrontendSnapshotLoadOptions::default()
+            })
+            .await?
+            .snapshot)
+    }
+
+    pub async fn frontend_snapshot_with_options(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        let (response_timing, loaded_messages) = {
             let snapshot = self.session_snapshot.lock().await;
-            (
-                ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref()),
-                snapshot
-                    .as_ref()
-                    .map(|snapshot| snapshot.messages.clone())
-                    .unwrap_or_default(),
-            )
-        };
-        let messages = match self.agent.try_lock() {
-            Ok(agent) => agent.messages.clone(),
-            Err(_) => persisted_messages,
+            let response_timing = ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref());
+            let persisted_messages = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            let loaded_messages = match self.agent.try_lock() {
+                Ok(agent) => load_frontend_messages(&agent.messages, options.messages),
+                Err(_) => load_frontend_messages(persisted_messages, options.messages),
+            };
+            (response_timing, loaded_messages)
         };
 
-        Ok(SessionFrontendSnapshot {
+        let snapshot = SessionFrontendSnapshot {
             metadata: self.metadata(),
-            messages,
+            messages: loaded_messages.messages,
             response_timing,
             active_run: self.active_run(),
-            sessions: self.list_sessions()?,
+            sessions: if options.include_sessions {
+                self.list_sessions()?
+            } else {
+                Vec::new()
+            },
             active_threads: self.active_thread_names().await,
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
-            thread_events: self.all_thread_events_with_limit(thread_event_limit)?,
+            thread_events: self.all_thread_events_with_limit(options.thread_event_limit)?,
             thread_steering: self
                 .metadata
                 .session_id
@@ -769,6 +852,11 @@ impl SessionService {
                 .flatten(),
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
+        };
+        Ok(SessionFrontendSnapshotLoad {
+            snapshot,
+            message_page: loaded_messages.page,
+            message_cycle: loaded_messages.cycle,
         })
     }
 
@@ -776,17 +864,41 @@ impl SessionService {
     /// the considerably larger frontend snapshot. The persisted copy remains
     /// a safe fallback while an active model turn owns the agent lock.
     pub async fn messages_snapshot(&self) -> Vec<Message> {
-        let persisted_messages = self
-            .session_snapshot
-            .lock()
-            .await
+        let snapshot = self.session_snapshot.lock().await;
+        let persisted_messages = snapshot
             .as_ref()
-            .map(|snapshot| snapshot.messages.clone())
+            .map(|snapshot| snapshot.messages.as_slice())
             .unwrap_or_default();
         match self.agent.try_lock() {
             Ok(agent) => agent.messages.clone(),
-            Err(_) => persisted_messages,
+            Err(_) => persisted_messages.to_vec(),
         }
+    }
+
+    /// Pages the freshest available transcript without cloning messages outside
+    /// the requested visible window. Callers remain responsible for any
+    /// transport-specific maximum; a zero limit retains the web API's minimum
+    /// page size of one.
+    pub async fn messages_page(&self, request: MessagePageRequest) -> MessagesPageSnapshot {
+        let snapshot = self.session_snapshot.lock().await;
+        let persisted_messages = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.messages.as_slice())
+            .unwrap_or_default();
+        match self.agent.try_lock() {
+            Ok(agent) => page_messages(&agent.messages, request),
+            Err(_) => page_messages(persisted_messages, request),
+        }
+    }
+
+    async fn overview_snapshot(&self) -> Result<SessionFrontendSnapshot> {
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit: 0,
+                ..FrontendSnapshotLoadOptions::default()
+            })
+            .await?
+            .snapshot)
     }
 
     pub async fn generate_overview(&self) -> Result<SessionOverviewRecord> {
@@ -796,7 +908,7 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let snapshot = self.frontend_snapshot().await?;
+        let snapshot = self.overview_snapshot().await?;
         let source_updated_at = snapshot
             .sessions
             .iter()
@@ -1337,6 +1449,110 @@ impl SessionService {
     }
 }
 
+struct LoadedFrontendMessages {
+    messages: Vec<Message>,
+    page: Option<MessagePageMetadata>,
+    cycle: Option<MessageCycleMetadata>,
+}
+
+fn load_frontend_messages(
+    messages: &[Message],
+    selection: FrontendSnapshotMessages,
+) -> LoadedFrontendMessages {
+    match selection {
+        FrontendSnapshotMessages::All => LoadedFrontendMessages {
+            messages: messages.to_vec(),
+            page: None,
+            cycle: None,
+        },
+        FrontendSnapshotMessages::Page(request) => {
+            let cycle = current_message_cycle(messages);
+            let page = page_messages(messages, request);
+            LoadedFrontendMessages {
+                messages: page.messages,
+                page: Some(page.page),
+                cycle: Some(cycle),
+            }
+        }
+    }
+}
+
+fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesPageSnapshot {
+    let is_visible =
+        |message: &&Message| request.include_system || !matches!(message, Message::System { .. });
+    let total = messages.iter().filter(is_visible).count();
+    let end = request.before.unwrap_or(total).min(total);
+    let limit = request.limit.max(1);
+    let start = end.saturating_sub(limit);
+    let messages = messages
+        .iter()
+        .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+        .skip(start)
+        .take(end - start)
+        .cloned()
+        .collect();
+    MessagesPageSnapshot {
+        messages,
+        page: MessagePageMetadata {
+            start,
+            end,
+            total,
+            has_older: start > 0,
+        },
+    }
+}
+
+fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
+    let mut latest_user_index = None;
+    let mut user_count = 0usize;
+    for (index, message) in messages.iter().enumerate() {
+        if matches!(message, Message::User { .. }) {
+            latest_user_index = Some(index);
+            user_count += 1;
+        }
+    }
+
+    let Some(latest_user_index) = latest_user_index else {
+        return MessageCycleMetadata {
+            marker: "none".to_string(),
+            thread_names: Vec::new(),
+        };
+    };
+    let mut thread_names = BTreeMap::<String, ()>::new();
+    for message in &messages[latest_user_index + 1..] {
+        let Message::Assistant {
+            tool_calls: Some(tool_calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            if tool_call.function.name != "thread" {
+                continue;
+            }
+            let Ok(arguments) =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            else {
+                continue;
+            };
+            let Some(name) = arguments
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            thread_names.insert(name.to_string(), ());
+        }
+    }
+    MessageCycleMetadata {
+        marker: format!("history:{user_count}:{latest_user_index}"),
+        thread_names: thread_names.into_keys().collect(),
+    }
+}
+
 const OVERVIEW_SYSTEM_PROMPT: &str = "You synthesize the current state of a coding orchestration session for an operator dashboard. Use only the supplied snapshot. Give priority to the latest user message, every thread dispatched after that message and its current outcome, and what each active thread is currently assigned to do. Use durable thread records to recover completed work when live dispatch history is unavailable; use worksets and workspace changes only when they clarify the current state. Do not address the user, quote the transcript, narrate your process, invent progress, or use headings or lists. Return exactly one JSON object with this schema: {\"summary\":\"one dense paragraph of two to four sentences\"}. The paragraph must state the current objective, distinguish active work from completed work, and mention a blocker or immediate next step only when supported. Keep it under 700 characters. Output JSON only.";
 
 #[derive(Debug, Deserialize)]
@@ -1830,6 +2046,182 @@ mod tests {
         assert_eq!(payload.summary, "UI implementation is active.");
     }
 
+    fn thread_call(id: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "thread".to_string(),
+                arguments: arguments.to_string(),
+            },
+        }
+    }
+
+    fn mixed_message_history() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "system-one".to_string(),
+            },
+            Message::User {
+                content: "older request".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("reasoning without visible content".to_string()),
+                reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
+                tool_calls: None,
+            },
+            Message::Tool {
+                tool_call_id: "older-tool".to_string(),
+                content: "older result".to_string(),
+            },
+            Message::System {
+                content: "system-two".to_string(),
+            },
+            Message::User {
+                content: "latest request".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![
+                    thread_call(
+                        "thread-zeta",
+                        r#"{"name":" zeta ","action":"outside the returned tail"}"#,
+                    ),
+                    thread_call("thread-malformed", r#"{"name":"broken"#),
+                    thread_call("thread-empty", r#"{"name":"   "}"#),
+                ]),
+            },
+            Message::Tool {
+                tool_call_id: "thread-zeta".to_string(),
+                content: "zeta started".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("new reasoning".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::System {
+                content: "system-three".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![thread_call(
+                    "thread-alpha",
+                    r#"{"name":"alpha","action":"inside the cycle"}"#,
+                )]),
+            },
+            Message::Tool {
+                tool_call_id: "thread-alpha".to_string(),
+                content: "alpha started".to_string(),
+            },
+            Message::Assistant {
+                content: Some("latest answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ]
+    }
+
+    fn legacy_page_messages(
+        messages: &[Message],
+        request: MessagePageRequest,
+    ) -> MessagesPageSnapshot {
+        let visible = messages
+            .iter()
+            .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = visible.len();
+        let end = request.before.unwrap_or(total).min(total);
+        let start = end.saturating_sub(request.limit.max(1));
+        MessagesPageSnapshot {
+            messages: visible[start..end].to_vec(),
+            page: MessagePageMetadata {
+                start,
+                end,
+                total,
+                has_older: start > 0,
+            },
+        }
+    }
+
+    #[test]
+    fn paged_messages_match_legacy_windows_for_mixed_history_and_cursor_bounds() {
+        let messages = mixed_message_history();
+        for include_system in [false, true] {
+            for before in [None, Some(0), Some(1), Some(3), Some(usize::MAX)] {
+                for limit in [0, 1, 4, 100] {
+                    let request = MessagePageRequest {
+                        before,
+                        limit,
+                        include_system,
+                    };
+                    let expected = legacy_page_messages(&messages, request);
+                    let actual = page_messages(&messages, request);
+                    assert_eq!(actual.page, expected.page, "request: {request:?}");
+                    assert_eq!(
+                        serde_json::to_value(&actual.messages).unwrap(),
+                        serde_json::to_value(&expected.messages).unwrap(),
+                        "request: {request:?}"
+                    );
+                }
+            }
+        }
+
+        let beyond_end = page_messages(
+            &messages,
+            MessagePageRequest {
+                before: Some(usize::MAX),
+                limit: 4,
+                include_system: false,
+            },
+        );
+        assert_eq!(beyond_end.page.end, beyond_end.page.total);
+        assert_eq!(beyond_end.page.total, 10);
+        assert_eq!(beyond_end.messages.len(), 4);
+    }
+
+    #[test]
+    fn message_cycle_uses_complete_raw_history_and_ignores_malformed_thread_calls() {
+        let messages = mixed_message_history();
+        let loaded = load_frontend_messages(
+            &messages,
+            FrontendSnapshotMessages::Page(MessagePageRequest {
+                before: None,
+                limit: 2,
+                include_system: false,
+            }),
+        );
+
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(
+            loaded.cycle,
+            Some(MessageCycleMetadata {
+                marker: "history:2:5".to_string(),
+                thread_names: vec!["alpha".to_string(), "zeta".to_string()],
+            })
+        );
+        assert!(!serde_json::to_string(&loaded.messages)
+            .unwrap()
+            .contains("zeta"));
+        assert_eq!(
+            current_message_cycle(&[Message::System {
+                content: "only system".to_string(),
+            }]),
+            MessageCycleMetadata {
+                marker: "none".to_string(),
+                thread_names: Vec::new(),
+            }
+        );
+    }
+
     #[test]
     fn overview_source_prioritizes_latest_user_dispatches_and_active_assignments() {
         let mut snapshot = SessionFrontendSnapshot {
@@ -1914,6 +2306,18 @@ mod tests {
         assert_eq!(
             source["active_threads"][0]["current_assignment"],
             "Build the two-column board"
+        );
+
+        snapshot.thread_events.insert(
+            "ui".to_string(),
+            vec![AgentEvent::ThreadLog {
+                name: "ui".to_string(),
+                line: "event payload deliberately ignored by overview".to_string(),
+            }],
+        );
+        assert_eq!(
+            serde_json::to_vec(&overview_source(&snapshot, &[])).unwrap(),
+            serde_json::to_vec(&source).unwrap()
         );
 
         let run_id = SessionRunId::new();
@@ -2059,6 +2463,148 @@ mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
+    }
+
+    #[tokio::test]
+    async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_contract() {
+        let (parts, store_path) = test_active_service("paged_snapshot", "paged-session");
+        let messages = mixed_message_history();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages = messages.clone();
+        }
+        let request = MessagePageRequest {
+            before: None,
+            limit: 2,
+            include_system: false,
+        };
+        let expected_page = page_messages(&messages, request);
+
+        let loaded = parts
+            .service
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit: 0,
+                include_sessions: false,
+                messages: FrontendSnapshotMessages::Page(request),
+            })
+            .await
+            .unwrap();
+        assert!(loaded.snapshot.sessions.is_empty());
+        assert!(loaded.snapshot.thread_events.is_empty());
+        assert_eq!(loaded.message_page, Some(expected_page.page));
+        assert_eq!(
+            loaded.message_cycle,
+            Some(MessageCycleMetadata {
+                marker: "history:2:5".to_string(),
+                thread_names: vec!["alpha".to_string(), "zeta".to_string()],
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&loaded.snapshot.messages).unwrap(),
+            serde_json::to_value(&expected_page.messages).unwrap()
+        );
+
+        let full = parts
+            .service
+            .frontend_snapshot_with_thread_event_limit(0)
+            .await
+            .unwrap();
+        assert_eq!(full.sessions.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&full.messages).unwrap(),
+            serde_json::to_value(&messages).unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn paged_snapshot_and_message_method_use_persisted_history_when_agent_is_busy() {
+        let (parts, store_path) = test_active_service("paged_fallback", "fallback-session");
+        let persisted_messages = mixed_message_history();
+        parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .messages = persisted_messages.clone();
+        let request = MessagePageRequest {
+            before: Some(usize::MAX),
+            limit: 3,
+            include_system: false,
+        };
+        let expected = page_messages(&persisted_messages, request);
+        let agent_guard = parts.service.agent.lock().await;
+
+        let direct = tokio::time::timeout(
+            Duration::from_millis(500),
+            parts.service.messages_page(request),
+        )
+        .await
+        .expect("paged messages should not wait for the held agent mutex");
+        assert_eq!(direct.page, expected.page);
+        assert_eq!(
+            serde_json::to_value(&direct.messages).unwrap(),
+            serde_json::to_value(&expected.messages).unwrap()
+        );
+
+        let loaded = tokio::time::timeout(
+            Duration::from_secs(2),
+            parts
+                .service
+                .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                    thread_event_limit: 0,
+                    include_sessions: false,
+                    messages: FrontendSnapshotMessages::Page(request),
+                }),
+        )
+        .await
+        .expect("paged snapshot should not wait for the held agent mutex")
+        .unwrap();
+        assert_eq!(loaded.message_page, Some(expected.page));
+        assert_eq!(
+            serde_json::to_value(&loaded.snapshot.messages).unwrap(),
+            serde_json::to_value(&expected.messages).unwrap()
+        );
+
+        drop(agent_guard);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn overview_snapshot_skips_unused_malformed_persisted_thread_events() {
+        let (parts, store_path) = test_active_service("overview_events", "overview-session");
+        crate::store::append_thread_event(
+            &store_path,
+            "overview-session",
+            "worker-a",
+            "{malformed event json",
+        )
+        .unwrap();
+        assert!(parts
+            .service
+            .all_thread_events_with_limit(1)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid persisted event"));
+
+        let snapshot = parts.service.overview_snapshot().await.unwrap();
+        assert!(snapshot.thread_events.is_empty());
+        assert_eq!(snapshot.sessions.len(), 1);
+        let source = overview_source(&snapshot, &[]);
+        let mut with_events = snapshot.clone();
+        with_events.thread_events.insert(
+            "worker-a".to_string(),
+            vec![AgentEvent::ThreadLog {
+                name: "worker-a".to_string(),
+                line: "ignored".to_string(),
+            }],
+        );
+        assert_eq!(overview_source(&with_events, &[]), source);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[tokio::test]

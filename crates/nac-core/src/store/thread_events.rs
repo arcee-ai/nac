@@ -46,12 +46,21 @@ pub fn load_all_thread_events(
     }
     let conn = open_runtime_connection(path)?;
     let mut stmt = conn.prepare(
-        "SELECT id, thread_name, session_id, event_json, created_at
-         FROM thread_events
-         WHERE session_id = ?1
-         ORDER BY thread_name ASC, id DESC",
+        "WITH ranked AS (
+             SELECT id, thread_name, session_id, event_json, created_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY thread_name
+                        ORDER BY id DESC
+                    ) AS event_rank
+             FROM thread_events
+             WHERE session_id = ?1
+         )
+         SELECT id, thread_name, session_id, event_json, created_at
+         FROM ranked
+         WHERE event_rank <= ?2
+         ORDER BY thread_name ASC, id ASC",
     )?;
-    let rows = stmt.query_map(params![session_id], |row| {
+    let rows = stmt.query_map(params![session_id, per_thread_limit], |row| {
         Ok(ThreadEventRecord {
             id: row.get(0)?,
             thread_name: row.get(1)?,
@@ -64,13 +73,10 @@ pub fn load_all_thread_events(
     let mut grouped: HashMap<String, Vec<ThreadEventRecord>> = HashMap::new();
     for row in rows {
         let event = row?;
-        let events = grouped.entry(event.thread_name.clone()).or_default();
-        if events.len() < per_thread_limit {
-            events.push(event);
-        }
-    }
-    for events in grouped.values_mut() {
-        events.reverse();
+        grouped
+            .entry(event.thread_name.clone())
+            .or_default()
+            .push(event);
     }
     Ok(grouped)
 }
@@ -119,7 +125,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thread_events_round_trip_in_order_and_respect_per_thread_limit() {
+    fn thread_events_are_sql_bounded_newest_first_per_thread_then_returned_chronologically() {
         let path = std::env::temp_dir()
             .join(format!(
                 "nac_thread_events_{}",
@@ -131,20 +137,57 @@ mod tests {
             .join("store.db");
         initialize(&path).unwrap();
 
-        for value in ["one", "two", "three"] {
-            append_thread_event(&path, "session-a", "worker-a", value).unwrap();
+        for thread_name in ["worker-a", "worker-b"] {
+            for index in 0..125 {
+                append_thread_event(
+                    &path,
+                    "session-a",
+                    thread_name,
+                    &format!("{thread_name}-{index:03}"),
+                )
+                .unwrap();
+            }
         }
-        append_thread_event(&path, "session-a", "worker-b", "only").unwrap();
+        for index in 0..125 {
+            append_thread_event(
+                &path,
+                "session-b",
+                "worker-a",
+                &format!("other-session-{index:03}"),
+            )
+            .unwrap();
+        }
 
-        let events = load_all_thread_events(&path, "session-a", 2).unwrap();
-        assert_eq!(
-            events["worker-a"]
-                .iter()
-                .map(|event| event.event_json.as_str())
-                .collect::<Vec<_>>(),
-            vec!["two", "three"]
-        );
-        assert_eq!(events["worker-b"][0].event_json, "only");
+        assert!(load_all_thread_events(&path, "session-a", 0)
+            .unwrap()
+            .is_empty());
+        for limit in [1, 24, 100] {
+            let events = load_all_thread_events(&path, "session-a", limit).unwrap();
+            assert_eq!(events.len(), 2);
+            for thread_name in ["worker-a", "worker-b"] {
+                let records = &events[thread_name];
+                assert_eq!(records.len(), limit);
+                assert!(records.iter().all(|event| event.session_id == "session-a"));
+                assert_eq!(
+                    records
+                        .iter()
+                        .map(|event| event.event_json.clone())
+                        .collect::<Vec<_>>(),
+                    (125 - limit..125)
+                        .map(|index| format!("{thread_name}-{index:03}"))
+                        .collect::<Vec<_>>()
+                );
+                assert!(records.windows(2).all(|pair| pair[0].id < pair[1].id));
+            }
+        }
+
+        let other_session = load_all_thread_events(&path, "session-b", 24).unwrap();
+        assert_eq!(other_session.len(), 1);
+        assert_eq!(other_session["worker-a"].len(), 24);
+        assert!(other_session["worker-a"]
+            .iter()
+            .all(|event| event.session_id == "session-b"
+                && event.event_json.starts_with("other-session-")));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

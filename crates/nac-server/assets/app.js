@@ -13,8 +13,8 @@ const state = {
   composerDrafts: new Map(),
   sessionReorder: null,
   snapshotTimers: new Map(),
-  snapshotRequestGenerations: new Map(),
-  sessionsRequestGeneration: 0,
+  snapshotRefreshCoordinators: new Map(),
+  sessionListRefreshCoordinator: null,
   pollTimer: null,
   statsLoadedAt: 0,
   statusTimer: null,
@@ -168,7 +168,7 @@ async function boot() {
   await loadSessions({ workspaceStats: true });
   syncRouteFromHash();
   state.pollTimer = window.setInterval(() => {
-    if (document.hidden) return;
+    if (document.hidden || state.sessionListRefreshCoordinator) return;
     const workspaceStats = Date.now() - state.statsLoadedAt > 30_000;
     loadSessions({ workspaceStats });
   }, 5_000);
@@ -230,37 +230,104 @@ const apiPut = (path, body = {}) => apiRequest(path, { method: "PUT", body: JSON
 const apiPatch = (path, body = {}) => apiRequest(path, { method: "PATCH", body: JSON.stringify(body) });
 const apiDelete = (path) => apiRequest(path, { method: "DELETE" });
 
-async function loadSessions({ workspaceStats = false, preserveSessionId = null } = {}) {
-  if (state.sessionReorder) return state.sessions;
-  const generation = state.sessionsRequestGeneration + 1;
-  state.sessionsRequestGeneration = generation;
-  const currentIdAtRequest = state.currentId;
+function loadSessions({ workspaceStats = false, preserveSessionId = null } = {}) {
+  if (state.sessionReorder) return Promise.resolve(state.sessions);
+  const existing = state.sessionListRefreshCoordinator;
+  if (existing) {
+    existing.invalidation += 1;
+    existing.dirty = true;
+    existing.workspaceStats ||= Boolean(workspaceStats);
+    retainSessionForListRefresh(existing, preserveSessionId);
+    return existing.promise;
+  }
+
+  const coordinator = {
+    invalidation: 1,
+    dirty: true,
+    workspaceStats: Boolean(workspaceStats),
+    preservedSessions: new Map(),
+    deletedSessionIds: new Set(),
+    promise: null,
+  };
+  retainSessionForListRefresh(coordinator, preserveSessionId);
+  state.sessionListRefreshCoordinator = coordinator;
+  coordinator.promise = drainSessionListRefreshes(coordinator);
+  return coordinator.promise;
+}
+
+function retainSessionForListRefresh(coordinator, sessionId) {
+  if (sessionId == null) return;
+  const key = String(sessionId);
+  if (coordinator.deletedSessionIds.has(key)) return;
+  const entry = sessionEntry(key);
+  if (entry || !coordinator.preservedSessions.has(key)) {
+    coordinator.preservedSessions.set(key, entry);
+  }
+}
+
+function tombstoneDeletedSessionForListRefresh(sessionId) {
+  const coordinator = state.sessionListRefreshCoordinator;
+  if (!coordinator || sessionId == null) return;
+  const key = String(sessionId);
+  coordinator.preservedSessions.delete(key);
+  coordinator.deletedSessionIds.add(key);
+}
+
+async function drainSessionListRefreshes(coordinator) {
+  let accepted = null;
   try {
-    const loaded = await apiGet(`/sessions${workspaceStats ? "?workspace_stats=true" : ""}`);
-    if (generation !== state.sessionsRequestGeneration || state.currentId !== currentIdAtRequest || state.sessionReorder) return null;
-    const previous = new Map(state.sessions.map((entry) => [entry.summary.session_id, entry]));
-    if (workspaceStats) state.statsLoadedAt = Date.now();
-    const sessions = loaded.map((entry) => {
-      const old = previous.get(entry.summary.session_id);
-      if (entry.workspace_diff == null && old?.workspace_diff != null) return { ...entry, workspace_diff: old.workspace_diff };
-      return entry;
-    });
-    if (preserveSessionId && !sessions.some((entry) => entry.summary.session_id === preserveSessionId) && previous.has(preserveSessionId)) {
-      sessions.push(previous.get(preserveSessionId));
+    while (coordinator.dirty) {
+      if (state.sessionReorder) return accepted;
+      coordinator.dirty = false;
+      const requestInvalidation = coordinator.invalidation;
+      const currentIdAtRequest = state.currentId;
+      const workspaceStats = coordinator.workspaceStats;
+      try {
+        const loaded = await apiGet(`/sessions${workspaceStats ? "?workspace_stats=true" : ""}`);
+        if (coordinator.invalidation !== requestInvalidation
+            || state.currentId !== currentIdAtRequest
+            || state.sessionReorder) continue;
+        const previous = new Map(state.sessions
+          .filter((entry) => !coordinator.deletedSessionIds.has(String(entry.summary.session_id)))
+          .map((entry) => [String(entry.summary.session_id), entry]));
+        for (const [sessionId, entry] of coordinator.preservedSessions) {
+          if (entry && !previous.has(sessionId)) previous.set(sessionId, entry);
+        }
+        if (workspaceStats) state.statsLoadedAt = Date.now();
+        const sessions = loaded
+          .filter((entry) => !coordinator.deletedSessionIds.has(String(entry.summary.session_id)))
+          .map((entry) => {
+            const old = previous.get(String(entry.summary.session_id));
+            if (entry.workspace_diff == null && old?.workspace_diff != null) return { ...entry, workspace_diff: old.workspace_diff };
+            return entry;
+          });
+        const loadedIds = new Set(sessions.map((entry) => String(entry.summary.session_id)));
+        for (const [sessionId, entry] of coordinator.preservedSessions) {
+          const preserved = previous.get(sessionId) || entry;
+          if (!loadedIds.has(sessionId) && preserved) sessions.push(preserved);
+        }
+        syncSessionRunIndicators(sessions);
+        state.sessions = sessions;
+        if (workspaceStats) {
+          for (const entry of sessions) invalidateWorkspaceDiffs(entry?.summary?.session_id);
+        }
+        if (state.currentId && !sessionEntry(state.currentId)) showPicker();
+        renderPicker();
+        if (state.currentId) scheduleWorkspaceRender(state.currentId);
+        accepted = state.sessions;
+      } catch (error) {
+        if (coordinator.invalidation !== requestInvalidation
+            || state.currentId !== currentIdAtRequest
+            || state.sessionReorder) continue;
+        showToast(error.message, true);
+        accepted = null;
+      }
     }
-    syncSessionRunIndicators(sessions);
-    state.sessions = sessions;
-    if (workspaceStats) {
-      for (const entry of sessions) invalidateWorkspaceDiffs(entry?.summary?.session_id);
+    return accepted;
+  } finally {
+    if (state.sessionListRefreshCoordinator === coordinator) {
+      state.sessionListRefreshCoordinator = null;
     }
-    if (state.currentId && !sessionEntry(state.currentId)) showPicker();
-    renderPicker();
-    if (state.currentId) scheduleWorkspaceRender(state.currentId);
-    return state.sessions;
-  } catch (error) {
-    if (generation !== state.sessionsRequestGeneration || state.currentId !== currentIdAtRequest || state.sessionReorder) return null;
-    showToast(error.message, true);
-    return null;
   }
 }
 
@@ -805,7 +872,7 @@ function syncRouteFromHash() {
   if (sessionEntry(sessionId) && state.currentId !== sessionId) openSession(sessionId, false);
 }
 
-function openSession(sessionId, updateHash = true) {
+function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}) {
   if (!sessionEntry(sessionId)) return;
   persistComposerDraft(state.currentId);
   clearSessionAttention(sessionId);
@@ -819,7 +886,7 @@ function openSession(sessionId, updateHash = true) {
   el.sessionWorkspace.hidden = false;
   if (updateHash) history.pushState(null, "", `#session/${encodeURIComponent(sessionId)}`);
   renderWorkspace();
-  loadSnapshot(sessionId, true);
+  if (fetchSnapshot) loadSnapshot(sessionId, true);
   connectEventStream(sessionId);
 }
 
@@ -840,30 +907,64 @@ function showPicker(updateHash = true) {
   renderPicker();
 }
 
-async function loadSnapshot(sessionId, announce = false) {
-  if (!sessionId) return null;
-  const generation = (state.snapshotRequestGenerations.get(sessionId) || 0) + 1;
-  state.snapshotRequestGenerations.set(sessionId, generation);
-  const currentIdAtRequest = state.currentId;
-  try {
-    const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}?message_limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}&thread_event_limit=${THREAD_EVENT_PAGE_LIMIT}`);
-    if (state.snapshotRequestGenerations.get(sessionId) !== generation || state.currentId !== currentIdAtRequest) return null;
-    const responseSessionId = snapshot?.metadata?.session_id;
-    if (responseSessionId != null && String(responseSessionId) !== String(sessionId)) {
-      throw new Error(`Snapshot identity mismatch: requested ${sessionId}, received ${responseSessionId}`);
-    }
-    mergeSnapshotMessageWindow(sessionId, snapshot);
-    reconcileAcceptedRun(sessionId, snapshot);
-    invalidateWorkspaceDiffs(sessionId);
-    state.snapshots.set(sessionId, snapshot);
-    if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
-    if (announce && state.currentId === sessionId) showToast("Session refreshed");
-    return snapshot;
-  } catch (error) {
-    if (state.snapshotRequestGenerations.get(sessionId) !== generation || state.currentId !== currentIdAtRequest) return null;
-    if (state.currentId === sessionId) showToast(error.message, true);
-    return null;
+function loadSnapshot(sessionId, announce = false) {
+  if (!sessionId) return Promise.resolve(null);
+  const existing = state.snapshotRefreshCoordinators.get(sessionId);
+  if (existing) {
+    existing.invalidation += 1;
+    existing.dirty = true;
+    existing.announce ||= Boolean(announce);
+    return existing.promise;
   }
+
+  const coordinator = {
+    invalidation: 1,
+    dirty: true,
+    announce: Boolean(announce),
+    promise: null,
+  };
+  state.snapshotRefreshCoordinators.set(sessionId, coordinator);
+  coordinator.promise = drainSnapshotRefreshes(sessionId, coordinator);
+  return coordinator.promise;
+}
+
+async function drainSnapshotRefreshes(sessionId, coordinator) {
+  let accepted = null;
+  try {
+    while (coordinator.dirty) {
+      coordinator.dirty = false;
+      const requestInvalidation = coordinator.invalidation;
+      const currentIdAtRequest = state.currentId;
+      try {
+        const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}?message_limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}&thread_event_limit=${THREAD_EVENT_PAGE_LIMIT}&include_sessions=false`);
+        if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
+        accepted = acceptSnapshot(sessionId, snapshot, { announce: coordinator.announce });
+      } catch (error) {
+        if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
+        if (state.currentId === sessionId) showToast(error.message, true);
+        accepted = null;
+      }
+    }
+    return accepted;
+  } finally {
+    if (state.snapshotRefreshCoordinators.get(sessionId) === coordinator) {
+      state.snapshotRefreshCoordinators.delete(sessionId);
+    }
+  }
+}
+
+function acceptSnapshot(sessionId, snapshot, { announce = false } = {}) {
+  const responseSessionId = snapshot?.metadata?.session_id;
+  if (responseSessionId != null && String(responseSessionId) !== String(sessionId)) {
+    throw new Error(`Snapshot identity mismatch: requested ${sessionId}, received ${responseSessionId}`);
+  }
+  mergeSnapshotMessageWindow(sessionId, snapshot);
+  reconcileAcceptedRun(sessionId, snapshot);
+  invalidateWorkspaceDiffs(sessionId);
+  state.snapshots.set(sessionId, snapshot);
+  if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
+  if (announce && state.currentId === sessionId) showToast("Session refreshed");
+  return snapshot;
 }
 
 function mergeSnapshotMessageWindow(sessionId, snapshot) {
@@ -4865,9 +4966,12 @@ function deleteCurrentSession() {
 
 async function confirmSessionDeletion(formElement) {
   const status = formElement.querySelector("[data-delete-status]");
+  const sessionId = state.currentId;
+  if (!sessionId) return;
   status.textContent = "Deleting…";
   try {
-    await apiDelete(`/sessions/${encodeURIComponent(state.currentId)}`);
+    await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
+    tombstoneDeletedSessionForListRefresh(sessionId);
     closeDrawer();
     showPicker();
     await loadSessions({ workspaceStats: true });
@@ -5253,8 +5357,8 @@ async function createSession(event) {
   try {
     const snapshot = await apiPost("/sessions", body);
     const sessionId = snapshot.metadata.session_id;
-    state.snapshots.set(sessionId, snapshot);
     upsertCreatedSession(snapshot, body);
+    acceptSnapshot(sessionId, snapshot);
     const initialPrompt = el.initialPrompt.value.trim();
     el.launchDialog.close();
     el.launchForm.reset();
@@ -5263,7 +5367,7 @@ async function createSession(event) {
     state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
     syncLaunchApiKeyMode();
     renderLaunchDefaultsPreview();
-    openSession(sessionId);
+    openSession(sessionId, true, { fetchSnapshot: false });
     if (initialPrompt) {
       state.composerDrafts.set(sessionId, initialPrompt);
       el.promptInput.value = initialPrompt;

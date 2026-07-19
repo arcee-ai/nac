@@ -710,7 +710,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   outline: 0;
   background: var(--surface);
   color: var(--ink);
-  font: var(--event-font);
+  font: 15px/1.62 var(--mono);
 }
 
 .composer textarea::placeholder { color: #767676; font: inherit; }
@@ -882,10 +882,8 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   .rail-section { border-right: 1px solid var(--line); }
   .thread-canvas { min-height: 560px; }
   .composer { position: sticky; bottom: 0; grid-column: 1; z-index: 15; }
-  .focus-panel.is-orchestrator .focus-content { overflow: auto; }
-  .focus-panel.is-orchestrator .focus-orchestrator-layout { height: auto; min-height: 100%; grid-template-columns: 1fr; grid-template-rows: auto minmax(420px, 1fr); }
-  .focus-panel.is-orchestrator .focus-orchestrator-sidebar { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(220px, 36dvh); border-bottom: 1px solid var(--line); }
-  .focus-panel.is-orchestrator .focus-chat { min-height: 420px; }
+  .focus-panel.is-orchestrator .focus-orchestrator-layout { grid-template-columns: minmax(0, 1fr); }
+  .focus-panel.is-orchestrator .focus-orchestrator-sidebar { display: none; }
   .focus-panel.is-thread .focus-content { overflow: auto; }
   .focus-panel.is-thread .focus-thread-layout { display: grid; height: auto; min-height: 100%; grid-template-columns: 1fr; grid-template-rows: minmax(260px, auto) auto; }
   .focus-panel.is-thread .focus-activity { min-height: 260px; max-height: 52dvh; display: block; border-right: 0; border-bottom: 1px solid var(--line); }

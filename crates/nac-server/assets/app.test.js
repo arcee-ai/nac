@@ -47,7 +47,7 @@ function loadApp(overrides = {}) {
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
-      renderSessionInfo, loadSessions, loadSnapshot, loadOlderOrchestratorMessages,
+      renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
       normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
       effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
       responseDurationAssignments, runTimingPresentation, updateRuntimeMetric, threadFocusActions,
@@ -67,6 +67,7 @@ function loadApp(overrides = {}) {
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, submitComposer, upsertCreatedSession, createSession,
+      confirmSessionDeletion,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -174,6 +175,17 @@ function sessionSnapshot(sessionId, overrides = {}) {
     worksets: { items: [], error: null }, ...overrides, };
 }
 
+function sessionListEntry(sessionId, overrides = {}) {
+  return {
+    active_run: null,
+    ...overrides,
+    summary: {
+      session_id: sessionId, cwd: `/${sessionId}`, model: "test-model", backend: "test",
+      pinned: false, visible_message_count: 0, ...overrides.summary,
+    },
+  };
+}
+
 function launchValues(overrides = {}) {
   return { mode: "local", reasoning_mode: "inherit",
     api_key_mode: "inherit", extra_headers: "", ...overrides, };
@@ -238,6 +250,19 @@ function fakeElement() {
     textContent: "", title: "", };
 }
 
+function installWorkspaceElements(uiInstance) {
+  const element = () => ({ ...fakeElement(), style: {}, value: "", scrollHeight: 40,
+    hidden: false, innerHTML: "", querySelector() { return null; }, querySelectorAll() { return []; }, });
+  for (const name of [
+    "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
+    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
+    "refreshSession", "generatedOverview", "worksetRailSummary", "worksetRailCount",
+    "orchestratorState", "orchestratorLedger", "threadGrid", "composerTarget", "composerTargetName",
+    "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
+    "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
+  ]) uiInstance.el[name] = element();
+}
+
 test("production shell, mobile access, and privacy exclusions stay compact", () => {
   for (const id of [
     "sessionPicker", "sessionWorkspace", "generatedOverview", "orchestratorLedger", "threadGrid",
@@ -252,10 +277,21 @@ test("production shell, mobile access, and privacy exclusions stay compact", () 
   assert.match(indexSource, /Message the orchestrator · \/ for commands/);
   assert.match(indexSource, /id="focusTitle" tabindex="-1"/);
   assert.doesNotMatch(indexSource, /id="focusContent"[^>]*aria-live/);
+  assert.match(indexSource, /href="\/assets\/redesign\.css\?v=quality-12"/);
+  assert.match(indexSource, /src="\/assets\/app\.js\?v=quality-12"/);
+  assert.doesNotMatch(indexSource, /quality-11/);
   const mobile = redesignSource.match(/@media \(max-width: 780px\) \{[\s\S]*?\n\}/)?.[0] || "";
-  const narrow = redesignSource.match(/@media \(max-width: 560px\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.doesNotMatch(mobile + narrow, /(?:focus-live|focus-activity)[^{]*\{[^}]*display: none/);
+  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-sidebar \{[^}]*display: none/);
+  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator \.focus-content \{[^}]*overflow: auto/);
+  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator \.focus-chat \{[^}]*min-height: 420px/);
+  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator[^}]*420px/);
+  assert.match(redesignSource, /\.focus-panel\.is-orchestrator \.focus-content,[\s\S]*?\{ overflow: hidden; \}/);
+  assert.match(redesignSource, /\.focus-chat \{[^}]*min-height: 0;[^}]*overflow: auto/);
   assert.match(mobile, /\.focus-panel\.is-thread \.focus-activity \{[^}]*display: block/);
+  assert.doesNotMatch(mobile, /\.focus-panel\.is-thread \.focus-activity \{[^}]*display: none/);
+  assert.match(redesignSource, /\.composer textarea \{[^}]*font: 15px\/1\.62 var\(--mono\)/);
+  assert.match(redesignSource, /\.focus-message-copy \{[^}]*font: 15px\/1\.62 var\(--mono\)/);
   assert.ok(ui.commands.some(({ name }) => name === "worksets"));
   assert.ok(!ui.commands.some(({ name }) => name === "activity"));
 });
@@ -265,19 +301,12 @@ test("session opening renders the workspace and starts snapshot and SSE without 
   const requests = [];
   const isolated = loadApp({ EventSource: FakeEventSource,
     fetch(path) { requests.push(path); return new Promise(() => {}); }, });
-  const element = () => ({ ...fakeElement(), style: {}, value: "", scrollHeight: 40,
-    hidden: false, innerHTML: "", querySelector() { return null; }, querySelectorAll() { return []; }, });
-  for (const name of [
-    "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
-    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
-    "refreshSession", "generatedOverview", "worksetRailSummary", "worksetRailCount",
-    "orchestratorState", "orchestratorLedger", "threadGrid", "composerTarget", "composerTargetName",
-    "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
-  ]) isolated.el[name] = element();
+  installWorkspaceElements(isolated);
   isolated.state.sessions = [{ summary: { session_id: "release-session", cwd: "/repo", model: "gpt-5" } }];
+  isolated.state.snapshots.set("release-session", sessionSnapshot("release-session"));
   assert.doesNotThrow(() => isolated.openSession("release-session"));
   assert.equal(isolated.el.sessionWorkspace.hidden, false);
-  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=24"]);
+  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=24&include_sessions=false"]);
   assert.equal(instances[0].url, "/sessions/release-session/events/stream?limit=512");
 });
 
@@ -374,8 +403,11 @@ scenario("SSE", "SSE reconciles gaps and lag, rejects malformed boundaries, and 
   malformed.emit("session_event", { session_id: sessionId, sequence_id: 14, event: { type: "future", value: "ignored" } });
   assert.equal(isolated.state.lastSequence.get(sessionId), 13);
   assert.equal(isolated.state.replayBoundaries.get(sessionId), 13);
-  await flushPromises();
-  assert.equal(requests.filter((path) => path.startsWith(`/sessions/${sessionId}?`)).length, 3);
+  const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
+  assert.ok(refreshDrain);
+  await refreshDrain;
+  assert.equal(requests.filter((path) => path.startsWith(`/sessions/${sessionId}?`)).length, 2,
+    "gap, lag, and malformed-stream invalidations coalesce into one sequential trailing refresh");
 });
 
 scenario("SSE", "initial replay hydrates chronology without replaying stale run-attention side effects", () => {
@@ -621,7 +653,7 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
   isolated = loadApp({ fetch });
   const snapshot = await isolated.loadSnapshot("page/session");
   assert.equal(snapshot.messages[0].reasoning_text, "retained reasoning");
-  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=24");
+  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=24&include_sessions=false");
   isolated.state.currentId = "page/session";
   isolated.state.focusView = { type: "orchestrator" };
   isolated.state.snapshots.set("page/session", {
@@ -637,50 +669,385 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
   assert.equal(isolated.state.messageWindows.get("page/session").loading, false);
 });
 
-test("session-list generations and navigation identity reject stale responses without ejecting the selected session", async () => {
+test("session-list refreshes coalesce bursts, strengthen options, and accept only the final fresh ordering", async () => {
   const first = deferred();
-  const second = deferred();
-  const navigation = deferred();
-  const pending = [first, second, navigation];
-  const isolated = loadApp({ fetch: () => pending.shift().promise });
+  const trailing = deferred();
+  const final = deferred();
+  const pending = [first, trailing, final];
+  const requests = [];
+  const isolated = loadApp({ fetch(path) {
+      requests.push(path);
+      return pending.shift().promise;
+    }, });
   isolated.el.pickerSessionTotal = fakeElement();
   isolated.el.sessionGrid = fakeElement();
-  const olderLoad = isolated.loadSessions();
-  const newerLoad = isolated.loadSessions();
-  second.resolve(jsonResponse([{
-    summary: { session_id: "new-session", cwd: "/new", model: "new-model", backend: "test", pinned: false, visible_message_count: 0 },
-    active_run: null, }]));
-  await newerLoad;
-  first.resolve(jsonResponse([{
-    summary: { session_id: "old-session", cwd: "/old", model: "old-model", backend: "test", pinned: false, visible_message_count: 0 },
-    active_run: null, }]));
-  assert.equal(await olderLoad, null);
-  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["new-session"]);
-  const startedFromPicker = isolated.loadSessions();
-  isolated.state.currentId = "new-session";
-  navigation.resolve(jsonResponse([]));
-  assert.equal(await startedFromPicker, null);
-  assert.equal(isolated.state.currentId, "new-session");
-  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["new-session"]);
+  isolated.state.sessions = [sessionListEntry("baseline")];
+
+  const initialLoad = isolated.loadSessions();
+  let queuedSettled = false;
+  const burstLoad = isolated.loadSessions();
+  const strengthenedLoad = isolated.loadSessions({ workspaceStats: true });
+  strengthenedLoad.then(() => { queuedSettled = true; });
+  assert.equal(initialLoad, burstLoad);
+  assert.equal(burstLoad, strengthenedLoad);
+  assert.deepEqual(requests, ["/sessions"], "a request burst never overlaps the active list GET");
+
+  first.resolve(jsonResponse([sessionListEntry("stale-first")]));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.deepEqual(requests, ["/sessions", "/sessions?workspace_stats=true"],
+    "a false-to-true trigger strengthens the sequential trailing request");
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["baseline"]);
+  assert.equal(queuedSettled, false);
+
+  const dirtiedTrailingLoad = isolated.loadSessions();
+  assert.equal(dirtiedTrailingLoad, initialLoad);
+  assert.equal(requests.length, 2);
+  trailing.resolve(jsonResponse([sessionListEntry("stale-trailing")]));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.deepEqual(requests, ["/sessions", "/sessions?workspace_stats=true", "/sessions?workspace_stats=true"],
+    "dirty state observed during a trailing GET schedules one stronger final GET");
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["baseline"],
+    "invalidated responses never overwrite the displayed list");
+  assert.equal(queuedSettled, false, "queued callers wait for the coordinator to drain");
+
+  final.resolve(jsonResponse([sessionListEntry("fresh-second"), sessionListEntry("fresh-first")]));
+  const results = await Promise.all([initialLoad, burstLoad, strengthenedLoad, dirtiedTrailingLoad]);
+  assert.deepEqual(plain(results.map((sessions) => sessions.map((entry) => entry.summary.session_id))),
+    Array(4).fill(null).map(() => ["fresh-second", "fresh-first"]));
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["fresh-second", "fresh-first"],
+    "authoritative picker ordering comes from the final response");
+  assert.ok(isolated.state.statsLoadedAt > 0);
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
 });
 
-test("snapshot generations and response identity prevent stale snapshots from overwriting newer state", async () => {
+test("a failed list GET yields to its strengthened trailing refresh and retains every queued created session", async () => {
+  const failed = deferred();
+  const recovered = deferred();
+  const pending = [failed, recovered];
+  const requests = [];
+  const isolated = loadApp({ fetch(path) {
+      requests.push(path);
+      return pending.shift().promise;
+    }, });
+  isolated.el.sessionWorkspace = { hidden: true };
+  isolated.el.pickerNavStatus = fakeElement();
+  isolated.el.sessionNavStatus = fakeElement();
+  isolated.el.pickerSessionTotal = fakeElement();
+  isolated.el.sessionGrid = fakeElement();
+  isolated.state.sessions = [sessionListEntry("existing")];
+
+  const initialLoad = isolated.loadSessions();
+  const createdA = sessionSnapshot("created-A", {
+    metadata: { session_id: "created-A", cwd: "/a", model: "a-model", backend: "test" },
+    sessions: [sessionListEntry("created-A").summary],
+  });
+  isolated.upsertCreatedSession(createdA);
+  const preserveA = isolated.loadSessions({ workspaceStats: true, preserveSessionId: "created-A" });
+  const createdB = sessionSnapshot("created-B", {
+    metadata: { session_id: "created-B", cwd: "/b", model: "b-model", backend: "test" },
+    sessions: [sessionListEntry("created-B").summary],
+  });
+  isolated.upsertCreatedSession(createdB);
+  const preserveB = isolated.loadSessions({ preserveSessionId: "created-B" });
+  assert.equal(initialLoad, preserveA);
+  assert.equal(preserveA, preserveB);
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)),
+    ["existing", "created-A", "created-B"]);
+
+  failed.resolve(errorResponse(503, { error: "superseded list failure" }));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.deepEqual(requests, ["/sessions", "/sessions?workspace_stats=true"],
+    "failure of an invalidated request cannot suppress its queued trailing GET");
+  assert.equal(isolated.el.pickerNavStatus.textContent, "", "superseded failures remain silent");
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)),
+    ["existing", "created-A", "created-B"], "failure leaves the current and created entries untouched");
+
+  recovered.resolve(jsonResponse([sessionListEntry("server-first"), sessionListEntry("existing")]));
+  const results = await Promise.all([initialLoad, preserveA, preserveB]);
+  assert.deepEqual(plain(results.map((sessions) => sessions.map((entry) => entry.summary.session_id))),
+    Array(3).fill(null).map(() => ["server-first", "existing", "created-A", "created-B"]));
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)),
+    ["server-first", "existing", "created-A", "created-B"],
+    "all queued preserve entries survive an authoritative response that does not list them yet");
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
+});
+
+test("a successfully deleted preserved session cannot be resurrected by its active list coordinator", async () => {
+  const active = deferred();
+  const trailing = deferred();
+  const requests = [];
+  let listRequestCount = 0;
+  const isolated = loadApp({
+    fetch(path, options = {}) {
+      const method = options.method || "GET";
+      requests.push({ path, method });
+      if (method === "DELETE" && path === "/sessions/created-session") return jsonResponse({});
+      if (method === "GET" && path.startsWith("/sessions")) {
+        listRequestCount += 1;
+        return listRequestCount === 1 ? active.promise : trailing.promise;
+      }
+      throw new Error(`unexpected request ${method} ${path}`);
+    },
+    window: { setTimeout: () => 84, clearTimeout() {} },
+  });
+  installWorkspaceElements(isolated);
+  isolated.el.utilityDrawer = { hidden: true };
+  isolated.el.drawerBackdrop = { hidden: true };
+  isolated.el.drawerContent = { innerHTML: "" };
+  isolated.state.currentId = "created-session";
+  isolated.upsertCreatedSession(sessionSnapshot("created-session", {
+    metadata: { session_id: "created-session", cwd: "/created", model: "model", backend: "test" },
+    sessions: [sessionListEntry("created-session").summary],
+  }));
+
+  const preservingLoad = isolated.loadSessions({ preserveSessionId: "created-session" });
+  const deletionStatus = fakeElement();
+  const deletion = isolated.confirmSessionDeletion({
+    querySelector(selector) { return selector === "[data-delete-status]" ? deletionStatus : null; },
+  });
+  await flushPromises();
+  await flushPromises();
+
+  const coordinator = isolated.state.sessionListRefreshCoordinator;
+  assert.ok(coordinator);
+  assert.equal(coordinator.preservedSessions.has("created-session"), false,
+    "successful deletion removes the captured created-session entry before joining the refresh");
+  assert.equal(coordinator.deletedSessionIds.has("created-session"), true);
+  assert.deepEqual(requests, [
+    { path: "/sessions", method: "GET" },
+    { path: "/sessions/created-session", method: "DELETE" },
+  ]);
+
+  active.resolve(jsonResponse([]));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.deepEqual(requests, [
+    { path: "/sessions", method: "GET" },
+    { path: "/sessions/created-session", method: "DELETE" },
+    { path: "/sessions?workspace_stats=true", method: "GET" },
+  ]);
+  trailing.resolve(jsonResponse([]));
+
+  const [loaded] = await Promise.all([preservingLoad, deletion]);
+  assert.deepEqual(plain(loaded), []);
+  assert.deepEqual(plain(isolated.state.sessions), [],
+    "the authoritative empty response cannot be overwritten by the old preservation entry");
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
+  assert.equal(deletionStatus.classList.contains("is-error"), false);
+});
+
+test("session-list polling skips slow active drains and resumes on the next poll", async () => {
+  const store = deferred();
+  const slowPoll = deferred();
+  const laterPoll = deferred();
+  const requests = [];
+  let interval = null;
+  let sessionRequestCount = 0;
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      if (path === "/store") return store.promise;
+      sessionRequestCount += 1;
+      if (sessionRequestCount === 1) return Promise.resolve(jsonResponse([sessionListEntry("boot")]));
+      if (sessionRequestCount === 2) return slowPoll.promise;
+      if (sessionRequestCount === 3) return laterPoll.promise;
+      throw new Error(`unexpected session request ${path}`);
+    },
+    window: {
+      setInterval(callback, delay) { interval = { callback, delay }; return 85; },
+      clearInterval() {},
+    },
+  });
+  isolated.el.pickerStorePath = fakeElement();
+  isolated.el.pickerSessionTotal = fakeElement();
+  isolated.el.sessionGrid = { innerHTML: "" };
+  await isolated.boot();
+  assert.deepEqual(requests, ["/store", "/sessions?workspace_stats=true"]);
+  assert.equal(interval.delay, 5_000);
+
+  isolated.state.statsLoadedAt = 0;
+  interval.callback();
+  const slowDrain = isolated.state.sessionListRefreshCoordinator.promise;
+  let slowDrainSettled = false;
+  slowDrain.then(() => { slowDrainSettled = true; });
+  for (let elapsed = 5_000; elapsed <= 20_000; elapsed += 5_000) interval.callback();
+  assert.deepEqual(requests, [
+    "/store",
+    "/sessions?workspace_stats=true",
+    "/sessions?workspace_stats=true",
+  ], "workspace-stat poll ticks do not dirty or chain behind an active slow list request");
+
+  slowPoll.resolve(jsonResponse([sessionListEntry("slow-fresh")]));
+  assert.deepEqual(plain((await slowDrain).map((entry) => entry.summary.session_id)), ["slow-fresh"]);
+  assert.equal(slowDrainSettled, true);
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["slow-fresh"]);
+
+  interval.callback();
+  assert.deepEqual(requests, [
+    "/store",
+    "/sessions?workspace_stats=true",
+    "/sessions?workspace_stats=true",
+    "/sessions",
+  ], "a later poll starts normally after the slow coordinator drains");
+  const laterDrain = isolated.state.sessionListRefreshCoordinator.promise;
+  laterPoll.resolve(jsonResponse([sessionListEntry("later-fresh")]));
+  assert.deepEqual(plain((await laterDrain).map((entry) => entry.summary.session_id)), ["later-fresh"]);
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["later-fresh"]);
+});
+
+test("session-list acceptance retains the navigation identity guard without ejecting the selected session", async () => {
+  const navigation = deferred();
+  const isolated = loadApp({ fetch: () => navigation.promise });
+  isolated.el.pickerSessionTotal = fakeElement();
+  isolated.el.sessionGrid = fakeElement();
+  isolated.state.sessions = [sessionListEntry("selected-session")];
+  const startedFromPicker = isolated.loadSessions();
+  isolated.state.currentId = "selected-session";
+  navigation.resolve(jsonResponse([]));
+  assert.equal(await startedFromPicker, null);
+  assert.equal(isolated.state.currentId, "selected-session");
+  assert.deepEqual(plain(isolated.state.sessions.map((entry) => entry.summary.session_id)), ["selected-session"]);
+  assert.equal(isolated.state.sessionListRefreshCoordinator, null);
+});
+
+test("snapshot refreshes coalesce bursts, carry dirty state through trailing requests, and accept only the final fresh response", async () => {
   const first = deferred();
-  const second = deferred();
+  const trailing = deferred();
+  const final = deferred();
+  const pending = [first, trailing, final];
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      return pending.shift().promise;
+    },
+    window: { setTimeout: () => 81, clearTimeout() {} },
+  });
+  isolated.el.sessionWorkspace = { hidden: false };
+  isolated.el.pickerNavStatus = fakeElement();
+  isolated.el.sessionNavStatus = fakeElement();
+  isolated.state.currentId = "snapshot-session";
+
+  const initialLoad = isolated.loadSnapshot("snapshot-session");
+  let queuedSettled = false;
+  const announcedLoad = isolated.loadSnapshot("snapshot-session", true);
+  announcedLoad.then(() => { queuedSettled = true; });
+  const burstLoad = isolated.loadSnapshot("snapshot-session");
+  assert.equal(initialLoad, announcedLoad);
+  assert.equal(announcedLoad, burstLoad);
+  assert.equal(requests.length, 1, "a burst during the active GET queues only one trailing GET");
+
+  first.resolve(jsonResponse({ metadata: { session_id: "snapshot-session", model: "stale-first" }, messages: [] }));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(requests.length, 2);
+  assert.equal(queuedSettled, false);
+  assert.equal(isolated.state.snapshots.has("snapshot-session"), false, "an invalidated response is never accepted");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "", "announcement waits for an accepted refresh");
+
+  const dirtiedTrailingLoad = isolated.loadSnapshot("snapshot-session");
+  assert.equal(dirtiedTrailingLoad, initialLoad);
+  assert.equal(requests.length, 2, "dirtying a trailing GET does not overlap it");
+  trailing.resolve(jsonResponse({ metadata: { session_id: "snapshot-session", model: "stale-trailing" }, messages: [] }));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(requests.length, 3, "dirty state observed during the trailing GET schedules a sequential final GET");
+  assert.equal(queuedSettled, false, "queued callers wait until the coordinator drains");
+  assert.equal(isolated.state.snapshots.has("snapshot-session"), false);
+
+  final.resolve(jsonResponse({ metadata: { session_id: "snapshot-session", model: "fresh-final" }, messages: [] }));
+  const results = await Promise.all([initialLoad, announcedLoad, burstLoad, dirtiedTrailingLoad]);
+  assert.deepEqual(results.map((snapshot) => snapshot.metadata.model), Array(4).fill("fresh-final"));
+  assert.equal(isolated.state.snapshots.get("snapshot-session").metadata.model, "fresh-final");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "Session refreshed", "queued announce intent reaches the final accepted request");
+  assert.equal(isolated.state.snapshotRefreshCoordinators.has("snapshot-session"), false);
+  assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=24&include_sessions=false"));
+});
+
+test("a failed invalidated snapshot GET yields to its successful trailing refresh while terminal errors remain visible", async () => {
+  const failed = deferred();
+  const recovered = deferred();
+  const terminal = deferred();
+  const pending = [failed, recovered, terminal];
+  const isolated = loadApp({
+    fetch: () => pending.shift().promise,
+    window: { setTimeout: () => 82, clearTimeout() {} },
+  });
+  isolated.el.sessionWorkspace = { hidden: false };
+  isolated.el.pickerNavStatus = fakeElement();
+  isolated.el.sessionNavStatus = fakeElement();
+  isolated.state.currentId = "recovery-session";
+
+  const initialLoad = isolated.loadSnapshot("recovery-session");
+  const queuedLoad = isolated.loadSnapshot("recovery-session");
+  failed.resolve(errorResponse(503, { error: "superseded failure" }));
+  await flushPromises();
+  await flushPromises();
+  assert.equal(isolated.el.sessionNavStatus.textContent, "", "a superseded error does not replace the pending trailing result");
+  recovered.resolve(jsonResponse({ metadata: { session_id: "recovery-session", model: "recovered" }, messages: [] }));
+  assert.equal((await initialLoad).metadata.model, "recovered");
+  assert.equal((await queuedLoad).metadata.model, "recovered");
+
+  const terminalLoad = isolated.loadSnapshot("recovery-session");
+  terminal.resolve(errorResponse(500, { error: "latest refresh failed" }));
+  assert.equal(await terminalLoad, null);
+  assert.equal(isolated.state.snapshots.get("recovery-session").metadata.model, "recovered");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "latest refresh failed");
+  assert.equal(isolated.el.sessionNavStatus.classList.contains("is-error"), true);
+});
+
+test("snapshot coordinators remain independent across navigation and retain response identity guards", async () => {
+  const sessionA = deferred();
+  const sessionB = deferred();
   const mismatch = deferred();
-  const pending = [first, second, mismatch];
-  const isolated = loadApp({ fetch: () => pending.shift().promise });
-  const olderLoad = isolated.loadSnapshot("snapshot-session");
-  const newerLoad = isolated.loadSnapshot("snapshot-session");
-  second.resolve(jsonResponse({ metadata: { session_id: "snapshot-session", model: "new-model" }, messages: [] }));
-  await newerLoad;
-  first.resolve(jsonResponse({ metadata: { session_id: "snapshot-session", model: "stale-model" }, messages: [] }));
-  assert.equal(await olderLoad, null);
-  assert.equal(isolated.state.snapshots.get("snapshot-session").metadata.model, "new-model");
-  const mismatchedLoad = isolated.loadSnapshot("snapshot-session");
+  const pending = [sessionA, sessionB, mismatch];
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      return pending.shift().promise;
+    },
+    window: { setTimeout: () => 83, clearTimeout() {} },
+  });
+  isolated.el.sessionWorkspace = { hidden: false };
+  isolated.el.pickerNavStatus = fakeElement();
+  isolated.el.sessionNavStatus = fakeElement();
+  isolated.state.currentId = "session-A";
+  const loadA = isolated.loadSnapshot("session-A");
+  isolated.state.currentId = "session-B";
+  const loadB = isolated.loadSnapshot("session-B");
+  assert.equal(requests.length, 2, "different sessions may load concurrently");
+  assert.equal(isolated.state.snapshotRefreshCoordinators.size, 2);
+
+  sessionA.resolve(jsonResponse({ metadata: { session_id: "session-A", model: "stale-after-navigation" }, messages: [] }));
+  sessionB.resolve(jsonResponse({ metadata: { session_id: "session-B", model: "current-B" }, messages: [] }));
+  assert.equal(await loadA, null);
+  assert.equal((await loadB).metadata.model, "current-B");
+  assert.equal(isolated.state.snapshots.has("session-A"), false, "navigation rejects the response started in the stale view");
+  assert.equal(isolated.state.snapshots.get("session-B").metadata.model, "current-B");
+
+  isolated.state.currentId = "session-A";
+  const mismatchedLoad = isolated.loadSnapshot("session-A");
   mismatch.resolve(jsonResponse({ metadata: { session_id: "different-session", model: "wrong-model" }, messages: [] }));
   assert.equal(await mismatchedLoad, null);
-  assert.equal(isolated.state.snapshots.get("snapshot-session").metadata.model, "new-model");
+  assert.equal(isolated.state.snapshots.has("session-A"), false);
+  assert.match(isolated.el.sessionNavStatus.textContent, /Snapshot identity mismatch: requested session-A, received different-session/);
+  assert.deepEqual(requests, [
+    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/session-B?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
+  ]);
 });
 
 test("pending messages reconcile only against canonical rows after their authoritative baseline", () => {
@@ -2234,7 +2601,7 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   assert.equal(requests.filter(([, options]) => options.method === "PATCH").length, 1);
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsSubmission, null);
   assert.equal(isolated.state.settingsFocus.config.model, "authoritative-model");
@@ -2282,7 +2649,7 @@ test("empty PATCH responses reload config and reconcile snapshot and session sta
   assert.deepEqual(JSON.parse(requests[0][1].body), { model: "gpt-5.1" });
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsFocus.config.model, "gpt-5.1");
   assert.equal(isolated.state.snapshots.get("settings-session").metadata.session_id, "settings-session");
@@ -2471,7 +2838,116 @@ test("session creation serializes every execution mode through the exclusive req
   assert.equal(submit.disabled, false);
 });
 
-test("created sessions remain openable and initial-prompt dispatch precedes a fallible list refresh", async () => {
+test("created snapshots initialize state without a duplicate GET while SSE, prompts, and list refreshes continue", async () => {
+  const timeline = [];
+  const requests = [];
+  const timers = [];
+  const { FakeEventSource, instances } = eventSourceHarness();
+  class TrackingEventSource extends FakeEventSource {
+    constructor(url) {
+      super(url);
+      timeline.push(`sse:${url}`);
+    }
+  }
+  const summary = {
+    session_id: "created-session", cwd: "/repo", model: "model", backend: "backend",
+    visible_message_count: 1, last_user_prompt: "created prompt", sandboxed: false, ssh_host: null,
+    title: null, pinned: false, sort_order: 0, presentation_version: 0,
+    created_at: "created", updated_at: "created",
+  };
+  const snapshot = sessionSnapshot("created-session", {
+    metadata: { session_id: "created-session", cwd: "/repo", model: "model", backend: "backend", sandbox_status: "off" },
+    messages: [{ role: "system", content: "policy" }, { role: "user", content: "created prompt" }],
+    sessions: [summary],
+    worksets: { items: [], error: null },
+  });
+  const isolated = loadApp({ FormData: FakeFormData, EventSource: TrackingEventSource,
+    fetch: async (path, options = {}) => {
+      const method = options.method || "GET";
+      requests.push({ path, method });
+      timeline.push(`${method}:${path}`);
+      if (path === "/sessions" && method === "POST") return jsonResponse(snapshot);
+      if (path === "/sessions?workspace_stats=true" || path === "/sessions") {
+        return errorResponse(503, { error: "list unavailable" });
+      }
+      throw new Error(`unexpected request ${method} ${path}`); },
+    window: {
+      setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+      clearTimeout() {}, setInterval: () => 91, clearInterval() {},
+    }, });
+  installWorkspaceElements(isolated);
+  const submit = { disabled: false };
+  isolated.el.launchForm = { mode: "local", querySelector: () => submit,
+    reset() { this.resetCalled = true; }, };
+  isolated.el.launchDialog = { close() { this.closed = true; } };
+  isolated.el.launchStatus = fakeElement();
+  isolated.el.launchExecutionModes = fakeElement();
+  isolated.el.launchCwd = { value: "/repo", placeholder: "", dataset: {} };
+  isolated.el.launchCwdLabel = fakeElement();
+  isolated.el.launchSshField = { hidden: false, inert: false };
+  isolated.el.launchSshHost = { value: "", disabled: false, required: false };
+  isolated.el.launchBackend = { value: "backend" };
+  isolated.el.launchEffort = { value: "inherit" };
+  isolated.el.launchModel = { value: "model" };
+  isolated.el.launchBaseUrl = { value: "" };
+  isolated.el.launchApiKeyMode = { value: "inherit" };
+  isolated.el.launchApiKeyEnv = { value: "", disabled: false, required: false };
+  isolated.el.launchExtraHeaders = { value: "" };
+  isolated.el.sandboxFields = { hidden: false, inert: false };
+  isolated.el.sandboxNoMount = { checked: false, disabled: false };
+  isolated.el.sandboxImage = { value: "", disabled: false };
+  isolated.el.sandboxGpu = { value: "", disabled: false };
+  isolated.el.sandboxWorkdir = { value: "", disabled: false };
+  isolated.el.sandboxShm = { value: "", disabled: false };
+  isolated.el.sandboxMounts = { value: "", disabled: false };
+  isolated.el.launchDefaultsPreview = fakeElement();
+  isolated.el.launchDefaultsBody = { innerHTML: "" };
+  isolated.el.refreshLaunchDefaults = { disabled: false };
+  isolated.el.initialPrompt = { value: "start immediately" };
+  isolated.el.commandComposer = { requestSubmit() { timeline.push("initial-prompt"); } };
+  isolated.state.workspaceDiffs.set("created-session:src/old.js", { status: "ready" });
+  isolated.state.acceptedRuns.set("created-session", {
+    run_id: "preexisting", baseline_message_total: 0,
+    submitted_user_message: { content: "created prompt", baseline_user_message_count: null },
+  });
+
+  await isolated.createSession({ preventDefault() {} });
+
+  assert.deepEqual(requests, [
+    { path: "/sessions", method: "POST" },
+    { path: "/sessions?workspace_stats=true", method: "GET" },
+  ]);
+  assert.equal(requests.some(({ path, method }) => method === "GET" && path.startsWith("/sessions/created-session?")), false);
+  assert.equal(instances.length, 1);
+  assert.equal(instances[0].url, "/sessions/created-session/events/stream?limit=512");
+  assert.ok(timeline.indexOf(`sse:${instances[0].url}`) < timeline.indexOf("initial-prompt"));
+  assert.ok(timeline.indexOf("initial-prompt") < timeline.indexOf("GET:/sessions?workspace_stats=true"));
+  assert.equal(isolated.state.currentId, "created-session");
+  assert.deepEqual(plain(isolated.state.snapshots.get("created-session")), snapshot);
+  assert.deepEqual(plain(isolated.state.messageWindows.get("created-session")), {
+    start: 0, end: 2, total: 2, hasOlder: false, loading: false,
+    messages: snapshot.messages,
+  });
+  assert.equal(isolated.state.workspaceDiffs.has("created-session:src/old.js"), false);
+  assert.equal(isolated.state.acceptedRuns.has("created-session"), false);
+  assert.equal(isolated.state.sessions[0].summary.session_id, "created-session");
+  assert.equal(isolated.el.promptInput.value, "start immediately");
+  assert.equal(isolated.el.launchDialog.closed, true);
+  assert.equal(submit.disabled, false);
+
+  instances[0].emit("replay_boundary", { replay_boundary_sequence_id: 0 });
+  instances[0].emit("session_event", {
+    session_id: "created-session", sequence_id: 1, run_id: "created-run",
+    event: { type: "run_started", prompt_preview: "start immediately", started_at_epoch_ms: 100 },
+  });
+  await flushPromises();
+  assert.equal(isolated.state.events.get("created-session").length, 1);
+  assert.equal(requests.filter(({ path, method }) => method === "GET" && path === "/sessions").length, 1);
+  assert.equal(isolated.state.sessions[0].summary.session_id, "created-session");
+  assert.ok(timers.some(({ delay }) => delay === 120), "the existing event-driven snapshot refresh remains scheduled");
+});
+
+test("a failed session-list refresh preserves a newly upserted session", async () => {
   const isolated = loadApp({
     fetch: async () => errorResponse(503, { error: "list unavailable" }),
     window: { setTimeout: () => 1, clearTimeout() {} }, });

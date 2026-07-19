@@ -31,8 +31,10 @@ use nac_core::{
         StoreOptions,
     },
     session_service::{
-        ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionOverviewRecord,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
+        MessagePageRequest, MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
+        SessionFrontendSnapshotLoad, SessionOverviewRecord, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -43,7 +45,13 @@ use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::{
+    compression::{
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+        CompressionLayer,
+    },
+    cors::CorsLayer,
+};
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
@@ -325,6 +333,7 @@ pub struct EventsQuery {
 pub struct SessionSnapshotQuery {
     pub message_limit: Option<usize>,
     pub thread_event_limit: Option<usize>,
+    pub include_sessions: Option<bool>,
     #[serde(default)]
     pub include_system: bool,
 }
@@ -371,6 +380,35 @@ pub struct SessionSnapshotResponse {
     pub message_page: Option<MessagePageMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {
+    fn from(page: nac_core::session_service::MessagePageMetadata) -> Self {
+        Self {
+            start: page.start,
+            end: page.end,
+            total: page.total,
+            has_older: page.has_older,
+        }
+    }
+}
+
+impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetadata {
+    fn from(cycle: nac_core::session_service::MessageCycleMetadata) -> Self {
+        Self {
+            marker: cycle.marker,
+            thread_names: cycle.thread_names,
+        }
+    }
+}
+
+impl From<MessagesPageSnapshot> for MessagesPageResponse {
+    fn from(page: MessagesPageSnapshot) -> Self {
+        Self {
+            messages: page.messages,
+            page: page.page.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -777,11 +815,34 @@ impl SessionManager {
             .await
     }
 
+    pub async fn snapshot_with_options(
+        &self,
+        session_id: &str,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        self.attach_session(session_id)
+            .await?
+            .frontend_snapshot_with_options(options)
+            .await
+    }
+
     pub async fn messages(&self, session_id: &str) -> Result<Vec<Message>> {
         Ok(self
             .attach_session(session_id)
             .await?
             .messages_snapshot()
+            .await)
+    }
+
+    pub async fn messages_page(
+        &self,
+        session_id: &str,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        Ok(self
+            .attach_session(session_id)
+            .await?
+            .messages_page(request)
             .await)
     }
 
@@ -1068,6 +1129,12 @@ impl SessionManager {
     }
 }
 
+fn response_compression_layer() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new()
+        .gzip(true)
+        .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
+}
+
 pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
@@ -1130,6 +1197,7 @@ pub fn router(manager: SessionManager) -> Router {
             post(cancel_active_run),
         )
         .layer(CorsLayer::permissive())
+        .layer(response_compression_layer())
         .with_state(manager)
 }
 
@@ -1266,6 +1334,7 @@ async fn create_session(
     ))
 }
 
+#[cfg(test)]
 fn message_page(
     messages: Vec<Message>,
     before: Option<usize>,
@@ -1291,6 +1360,7 @@ fn message_page(
     }
 }
 
+#[cfg(test)]
 fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
     let mut latest_user_index = None;
     let mut user_count = 0usize;
@@ -1347,34 +1417,24 @@ async fn session_snapshot(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<SessionSnapshotQuery>,
 ) -> std::result::Result<Json<SessionSnapshotResponse>, ApiError> {
-    let mut snapshot = match query.thread_event_limit {
-        Some(limit) => {
-            manager
-                .snapshot_with_thread_event_limit(
-                    &session_id,
-                    limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
-                )
-                .await?
-        }
-        None => manager.snapshot(&session_id).await?,
-    };
-    let (message_page, message_cycle) = if let Some(limit) = query.message_limit {
-        let cycle = current_message_cycle(&snapshot.messages);
-        let response = message_page(
-            std::mem::take(&mut snapshot.messages),
-            None,
-            limit,
-            query.include_system,
-        );
-        snapshot.messages = response.messages;
-        (Some(response.page), Some(cycle))
-    } else {
-        (None, None)
-    };
+    let mut options = FrontendSnapshotLoadOptions::default();
+    if let Some(limit) = query.thread_event_limit {
+        options.thread_event_limit = limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT);
+    }
+    options.include_sessions = query.include_sessions.unwrap_or(true);
+    if let Some(limit) = query.message_limit {
+        options.messages = FrontendSnapshotMessages::Page(MessagePageRequest {
+            before: None,
+            limit: limit.clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+            include_system: query.include_system,
+        });
+    }
+
+    let loaded = manager.snapshot_with_options(&session_id, options).await?;
     Ok(Json(SessionSnapshotResponse {
-        snapshot,
-        message_page,
-        message_cycle,
+        snapshot: loaded.snapshot,
+        message_page: loaded.message_page.map(Into::into),
+        message_cycle: loaded.message_cycle.map(Into::into),
     }))
 }
 
@@ -1383,13 +1443,20 @@ async fn session_messages(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<MessagesQuery>,
 ) -> std::result::Result<Json<MessagesPageResponse>, ApiError> {
-    let messages = manager.messages(&session_id).await?;
-    Ok(Json(message_page(
-        messages,
-        query.before,
-        query.limit.unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT),
-        query.include_system,
-    )))
+    let page = manager
+        .messages_page(
+            &session_id,
+            MessagePageRequest {
+                before: query.before,
+                limit: query
+                    .limit
+                    .unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT)
+                    .clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+                include_system: query.include_system,
+            },
+        )
+        .await?;
+    Ok(Json(page.into()))
 }
 
 async fn thread_events(
@@ -1987,6 +2054,14 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    use axum::{
+        body::{to_bytes, Body, Bytes},
+        http::Request,
+    };
+    use flate2::read::GzDecoder;
+    use tower::ServiceExt;
 
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
@@ -2141,6 +2216,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
+        let root = temp_root("route_compression");
+        let app = router(test_manager(&root));
+
+        let identity = get_response(app.clone(), "/assets/app.js", None).await;
+        assert_eq!(identity.status(), StatusCode::OK);
+        assert!(identity.headers().get(header::CONTENT_ENCODING).is_none());
+        let identity_body = response_body(identity).await;
+        assert_eq!(identity_body.as_ref(), include_bytes!("../assets/app.js"));
+
+        let compressed = get_response(app.clone(), "/assets/app.js", Some("gzip")).await;
+        assert_eq!(compressed.status(), StatusCode::OK);
+        assert_eq!(
+            compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(gunzip(&response_body(compressed).await), identity_body);
+
+        let json_identity = get_response(app.clone(), "/store", None).await;
+        assert_eq!(json_identity.status(), StatusCode::OK);
+        assert!(json_identity
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .is_none());
+        let json_identity_body = response_body(json_identity).await;
+        let _: serde_json::Value = serde_json::from_slice(&json_identity_body).unwrap();
+
+        let json_compressed = get_response(app, "/store", Some("gzip")).await;
+        assert_eq!(json_compressed.status(), StatusCode::OK);
+        assert_eq!(
+            json_compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(
+            gunzip(&response_body(json_compressed).await),
+            json_identity_body
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn session_event_envelope_serializes_for_sse_payloads() {
         let envelope = SessionEventEnvelope {
@@ -2289,6 +2406,26 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
+        let mut request = Request::builder().uri(uri);
+        if let Some(accept_encoding) = accept_encoding {
+            request = request.header(header::ACCEPT_ENCODING, accept_encoding);
+        }
+        app.oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn response_body(response: Response) -> Bytes {
+        to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    fn gunzip(body: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::new();
+        GzDecoder::new(body).read_to_end(&mut decoded).unwrap();
+        decoded
     }
 
     #[test]
@@ -2658,6 +2795,78 @@ mod tests {
         snapshot.created_at = created_at.to_string();
         snapshot.updated_at = created_at.to_string();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
+    }
+
+    fn test_transcript() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "hidden system preface".to_string(),
+            },
+            Message::User {
+                content: "old cycle".to_string(),
+            },
+            Message::Assistant {
+                content: Some("old answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "current cycle".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("thinking".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![nac_core::types::ToolCall {
+                    id: "call-thread".to_string(),
+                    call_type: "function".to_string(),
+                    function: nac_core::types::FunctionCall {
+                        name: "thread".to_string(),
+                        arguments: r#"{"name":"current/research"}"#.to_string(),
+                    },
+                }]),
+            },
+            Message::System {
+                content: "hidden tail".to_string(),
+            },
+            Message::Assistant {
+                content: Some("done".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ]
+    }
+
+    fn seed_session_with_messages(
+        root: &std::path::Path,
+        session_id: &str,
+        created_at: &str,
+        messages: Vec<Message>,
+    ) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            messages,
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        snapshot.created_at = created_at.to_string();
+        snapshot.updated_at = created_at.to_string();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session messages");
     }
 
     fn seed_editable_session(root: &std::path::Path, session_id: &str) {
@@ -4809,6 +5018,136 @@ extra_headers = { X-Config = "yes" }
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[tokio::test]
+    async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("snapshot_projection");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let transcript = test_transcript();
+        seed_session_with_messages(
+            &root,
+            "target",
+            "2026-01-02 00:00:00.000000000",
+            transcript.clone(),
+        );
+        seed_session(&root, "other", "2026-01-01 00:00:00.000000000");
+        let app = router(test_manager(&root));
+        let query = "message_limit=2&thread_event_limit=24";
+
+        let default_response =
+            get_response(app.clone(), &format!("/sessions/target?{query}"), None).await;
+        let default_status = default_response.status();
+        let default_body = response_body(default_response).await;
+        assert_eq!(
+            default_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&default_body)
+        );
+        let default: serde_json::Value = serde_json::from_slice(&default_body).unwrap();
+
+        let true_response = get_response(
+            app.clone(),
+            &format!("/sessions/target?{query}&include_sessions=true"),
+            None,
+        )
+        .await;
+        assert_eq!(true_response.status(), StatusCode::OK);
+        let included: serde_json::Value =
+            serde_json::from_slice(&response_body(true_response).await).unwrap();
+        assert_eq!(included, default);
+        assert_eq!(default["sessions"].as_array().unwrap().len(), 2);
+
+        let false_response = get_response(
+            app,
+            &format!("/sessions/target?{query}&include_sessions=false"),
+            None,
+        )
+        .await;
+        assert_eq!(false_response.status(), StatusCode::OK);
+        let projected: serde_json::Value =
+            serde_json::from_slice(&response_body(false_response).await).unwrap();
+        assert_eq!(projected["sessions"], serde_json::json!([]));
+        let mut expected_projected = default.clone();
+        expected_projected["sessions"] = serde_json::json!([]);
+        assert_eq!(projected, expected_projected);
+
+        let expected_page = message_page(transcript.clone(), None, 2, false);
+        let expected_cycle = current_message_cycle(&transcript);
+        assert_eq!(
+            default["messages"],
+            serde_json::to_value(expected_page.messages).unwrap()
+        );
+        assert_eq!(
+            default["message_page"],
+            serde_json::to_value(expected_page.page).unwrap()
+        );
+        assert_eq!(
+            default["message_cycle"],
+            serde_json::to_value(expected_cycle).unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn messages_route_matches_legacy_paging_after_http_limit_clamping() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("messages_core_page");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let transcript = test_transcript();
+        seed_session_with_messages(&root, "target", "2026-01-01 00:00:00.000000000", transcript);
+        let manager = test_manager(&root);
+        let legacy_messages = manager.messages("target").await.unwrap();
+        let app = router(manager);
+
+        for (uri, before, limit, include_system) in [
+            (
+                "/sessions/target/messages?before=5&limit=2",
+                Some(5),
+                2,
+                false,
+            ),
+            (
+                "/sessions/target/messages?before=99&limit=0",
+                Some(99),
+                0,
+                false,
+            ),
+            (
+                "/sessions/target/messages?before=7&limit=1000&include_system=true",
+                Some(7),
+                1000,
+                true,
+            ),
+            (
+                "/sessions/target/messages",
+                None,
+                DEFAULT_MESSAGE_PAGE_LIMIT,
+                false,
+            ),
+        ] {
+            let response = get_response(app.clone(), uri, None).await;
+            let status = response.status();
+            let body = response_body(response).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "{uri}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            let actual: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let expected = message_page(legacy_messages.clone(), before, limit, include_system);
+            assert_eq!(actual, serde_json::to_value(expected).unwrap(), "{uri}");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn paged_message_queries_exclude_system_prompts_by_default() {
         let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
@@ -4977,26 +5316,37 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
-    async fn sse_orders_boundary_then_gap_replay_and_live_events() {
-        let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
-        let live = test_event(6, "live-6");
-        let (sender, receiver) = tokio::sync::broadcast::channel(4);
-        sender.send(live).unwrap();
-        drop(sender);
+    async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
+        async fn finite_sse_route(
+        ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
+            let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
+            let live = test_event(6, "live-6");
+            let (sender, receiver) = tokio::sync::broadcast::channel(4);
+            sender.send(live).unwrap();
+            drop(sender);
 
-        let stream = session_event_stream(
-            5,
-            Some(SessionReplayGap {
-                missing_from_sequence_id: 2,
-                missing_to_sequence_id: 3,
-            }),
-            replayed,
-            receiver,
+            Sse::new(session_event_stream(
+                5,
+                Some(SessionReplayGap {
+                    missing_from_sequence_id: 2,
+                    missing_to_sequence_id: 3,
+                }),
+                replayed,
+                receiver,
+            ))
+        }
+
+        let app = Router::new()
+            .route("/events", get(finite_sse_route))
+            .layer(response_compression_layer());
+        let response = get_response(app, "/events", Some("gzip")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
         );
-        let response = Sse::new(stream).into_response();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = response_body(response).await;
         let body = String::from_utf8(body.to_vec()).unwrap();
 
         let boundary = body.find("event: replay_boundary").unwrap();
