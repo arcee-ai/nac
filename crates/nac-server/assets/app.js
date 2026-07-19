@@ -33,8 +33,6 @@ const state = {
   threadCycles: new Map(),
   attentionSessions: new Set(),
   sessionRunActivity: new Map(),
-  streamHealthBySession: new Map(),
-  streamNotices: new Map(),
   acceptedRuns: new Map(),
   runtimeTimer: null,
   launchMode: "local",
@@ -52,15 +50,14 @@ const state = {
 };
 
 const ACTION_LEDGER_LIMIT = 5;
-const STREAM_NOTICE_LIMIT = 32;
 const ORCHESTRATOR_MESSAGE_PAGE_LIMIT = 24;
 const THREAD_EVENT_PAGE_LIMIT = 24;
+const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const REORDER_DRAG_THRESHOLD_PX = 6;
 const ORCHESTRATOR_STEERING_TARGET = "__orchestrator__";
 let focusMarkdownRenderer = null;
 
 const commands = [
-  { name: "activity", description: "inspect the current event replay window" },
   { name: "worksets", description: "inspect complete persisted worksets" },
   { name: "transcript", description: "open the orchestrator transcript" },
   { name: "workspace", description: "inspect changed files and diffs" },
@@ -86,7 +83,7 @@ function bindElements() {
     "app", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
-    "metricChanges", "streamHealth", "streamHealthLabel", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
+    "metricChanges", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
     "worksetRail", "worksetRailCount", "worksetRailSummary", "expandWorksets",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
     "orchestratorState", "orchestratorLedger", "expandOrchestrator",
@@ -119,7 +116,6 @@ function bindEvents() {
   el.renameSession.addEventListener("click", renameCurrentSession);
   el.sessionInfo.addEventListener("click", () => openFocusView("info"));
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
-  el.streamHealth.addEventListener("click", () => openFocusView("activity"));
   el.stopRun.addEventListener("click", stopActiveRun);
   el.refreshSession.addEventListener("click", generateOverview);
   el.expandWorksets.addEventListener("click", () => openFocusView("worksets"));
@@ -1243,62 +1239,10 @@ function loadOlderThreadEvents(threadName) {
   loadThreadEventPage(threadName);
 }
 
-function streamHealthPresentation(health) {
-  const status = health?.status || "connecting";
-  const defaults = {
-    connecting: ["Connecting", "Opening the event stream"],
-    live: ["Live", "Receiving session events"],
-    reconnecting: ["Reconnecting", "The event stream was interrupted; retrying automatically"],
-    interrupted: ["Interrupted", "The event stream stopped and could not reconnect"],
-    replay_gap: ["Replay gap", "The replay window is incomplete; snapshot reconciliation requested"],
-    lagged: ["Lagged", "Live events were missed; snapshot reconciliation requested"],
-  };
-  const [label, fallbackDetail] = defaults[status] || ["Connecting", "Opening the event stream"];
-  const chipLabel = status === "live" ? "Session Events" : `Session Events · ${label}`;
-  return { status, label, chipLabel, detail: health?.detail || fallbackDetail };
-}
-
-function streamHealthForSession(sessionId = state.currentId) {
-  return streamHealthPresentation(state.streamHealthBySession.get(sessionId));
-}
-
-function renderStreamHealth(sessionId = state.currentId) {
-  if (!sessionId || !el.streamHealth || !el.streamHealthLabel) return;
-  const health = streamHealthForSession(sessionId);
-  const degraded = ["reconnecting", "interrupted", "replay_gap", "lagged"].includes(health.status);
-  el.streamHealth.dataset.state = health.status;
-  el.streamHealth.classList.toggle("is-degraded", degraded);
-  el.streamHealthLabel.textContent = health.chipLabel;
-  const description = `${health.chipLabel}. ${health.detail}. Open activity`;
-  el.streamHealth.title = description;
-  el.streamHealth.setAttribute("aria-label", description);
-}
-
-function refreshStreamPresentation(sessionId) {
-  if (state.currentId !== sessionId) return;
-  renderStreamHealth(sessionId);
-  if (state.focusView?.type === "activity" && el.focusContent) renderFocusView(currentSnapshot());
-}
-
-function setStreamHealth(sessionId, status, detail = "") {
-  if (!sessionId) return;
-  state.streamHealthBySession.set(sessionId, { status, detail });
-  refreshStreamPresentation(sessionId);
-}
-
-function appendStreamNotice(sessionId, kind, detail, payload = null) {
-  if (!sessionId) return;
-  const notices = state.streamNotices.get(sessionId) || [];
-  notices.push({ kind, detail: compactActionDetail(String(detail || ""), 1200), payload });
-  if (notices.length > STREAM_NOTICE_LIMIT) notices.splice(0, notices.length - STREAM_NOTICE_LIMIT);
-  state.streamNotices.set(sessionId, notices);
-}
-
 function resetSessionSequenceEpoch(sessionId, boundary = 0) {
   state.events.delete(sessionId);
   state.lastSequence.delete(sessionId);
   state.replayBoundaries.set(sessionId, boundary);
-  state.streamNotices.delete(sessionId);
   state.threadCycles.delete(sessionId);
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
@@ -1321,18 +1265,11 @@ function applyReplayBoundary(sessionId, boundary, { requestedPriorSequence = nul
     : Number.isSafeInteger(requestedPriorSequence) ? requestedPriorSequence : null;
   if (prior !== null && boundary < prior) {
     resetSessionSequenceEpoch(sessionId, boundary);
-    appendStreamNotice(
-      sessionId,
-      "sequence_epoch_reset",
-      `Sequence epoch reset from ${prior} to boundary ${boundary}; replay restarted without a cursor.`,
-      { previous_sequence_id: prior, replay_boundary_sequence_id: boundary },
-    );
     loadSnapshot(sessionId, false);
     if (reconnect) {
       reconnect();
       return { valid: true, reset: true, reconnected: true };
     }
-    setStreamHealth(sessionId, "connecting", "Sequence epoch changed; replaying the current window");
     return { valid: true, reset: true, reconnected: false };
   }
 
@@ -1374,11 +1311,7 @@ function parseStreamPayload(event) {
   catch (_) { return null; }
 }
 
-function connectEventStream(sessionId, {
-  replayFromBeginning = false,
-  healthStatus = "connecting",
-  healthDetail = "",
-} = {}) {
+function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
   const previousSource = state.eventSource;
   state.eventSource = null;
   if (previousSource) previousSource.close();
@@ -1389,23 +1322,15 @@ function connectEventStream(sessionId, {
   const query = requestedPriorSequence !== null
     ? `?after_sequence_id=${encodeURIComponent(requestedPriorSequence)}&limit=512`
     : "?limit=512";
-  setStreamHealth(sessionId, healthStatus, healthDetail);
   let source;
   try {
     source = new EventSource(`/sessions/${encodeURIComponent(sessionId)}/events/stream${query}`);
-  } catch (error) {
-    const detail = `The event stream could not be opened: ${error?.message || "unknown error"}`;
-    appendStreamNotice(sessionId, "stream_interrupted", detail);
-    setStreamHealth(sessionId, "interrupted", detail);
+  } catch (_) {
     return null;
   }
   state.eventSource = source;
   let observationFloor = null;
   let boundaryState = "pending";
-  source.onopen = () => {
-    if (state.eventSource !== source) return;
-    setStreamHealth(sessionId, "live");
-  };
   source.addEventListener("replay_boundary", (event) => {
     if (state.eventSource !== source) return;
     const payload = parseStreamPayload(event);
@@ -1420,8 +1345,6 @@ function connectEventStream(sessionId, {
     if (!result.valid) {
       boundaryState = "invalid";
       observationFloor = Number.isSafeInteger(priorAtBoundary) ? priorAtBoundary : Number.POSITIVE_INFINITY;
-      appendStreamNotice(sessionId, "replay_gap", "Invalid replay boundary received; snapshot reconciliation requested.", payload ?? event?.data ?? null);
-      setStreamHealth(sessionId, "replay_gap", "Invalid replay boundary; snapshot reconciliation requested");
       loadSnapshot(sessionId, false);
       return;
     }
@@ -1433,28 +1356,16 @@ function connectEventStream(sessionId, {
     if (boundaryState !== "valid") {
       if (boundaryState === "pending") {
         boundaryState = "invalid";
-        const detail = "Session event received before a valid replay boundary; event ignored and snapshot reconciliation requested.";
-        appendStreamNotice(sessionId, "replay_gap", detail, event?.data ?? null);
-        setStreamHealth(sessionId, "replay_gap", detail);
         loadSnapshot(sessionId, false);
       }
       return;
     }
     const envelope = parseStreamPayload(event);
-    if (!envelope) {
-      appendStreamNotice(sessionId, "stream_error", "Invalid session event payload; snapshot reconciliation requested.", event?.data ?? null);
-      setStreamHealth(sessionId, "interrupted", "Invalid event payload; chronology may be incomplete");
+    if (!envelope || !Number.isSafeInteger(envelope.sequence_id) || envelope.sequence_id < 1) {
       loadSnapshot(sessionId, false);
       return;
     }
-    const sequence = envelope.sequence_id;
-    if (!Number.isSafeInteger(sequence) || sequence < 1) {
-      appendStreamNotice(sessionId, "stream_error", "Invalid session event sequence; snapshot reconciliation requested.", envelope);
-      setStreamHealth(sessionId, "interrupted", "Invalid event sequence; chronology may be incomplete");
-      loadSnapshot(sessionId, false);
-      return;
-    }
-    const historical = observationFloor === null || sequence <= observationFloor;
+    const historical = observationFloor === null || envelope.sequence_id <= observationFloor;
     if (!recordSessionEnvelope(sessionId, envelope, { historical })) return;
     if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
     if (!historical && eventNeedsSnapshot(envelope)) scheduleSnapshot(sessionId);
@@ -1463,48 +1374,21 @@ function connectEventStream(sessionId, {
       loadSessions({ workspaceStats: false });
     }
   });
-  source.addEventListener("replay_gap", (event) => {
+  source.addEventListener("replay_gap", () => {
     if (state.eventSource !== source) return;
-    const payload = parseStreamPayload(event);
-    const gap = payload?.replay_gap;
-    const from = gap?.missing_from_sequence_id;
-    const to = gap?.missing_to_sequence_id;
-    const detail = Number.isSafeInteger(from) && from >= 1 && Number.isSafeInteger(to) && to >= from
-      ? `Missing sequences ${from}–${to}; snapshot reconciliation requested.`
-      : "Replay window is incomplete; snapshot reconciliation requested.";
-    appendStreamNotice(sessionId, "replay_gap", detail, payload ?? event?.data ?? null);
-    setStreamHealth(sessionId, "replay_gap", detail);
     loadSnapshot(sessionId, false);
   });
-  source.addEventListener("lagged", (event) => {
+  source.addEventListener("lagged", () => {
     if (state.eventSource !== source) return;
-    const payload = parseStreamPayload(event);
-    const missed = payload?.missed;
-    const incompleteDetail = Number.isSafeInteger(missed) && missed >= 0
-      ? `Missed ${missed} live event${missed === 1 ? "" : "s"}; snapshot reconciliation requested.`
-      : "Live events were missed; snapshot reconciliation requested.";
-    const resumeAfter = state.lastSequence.get(sessionId);
-    const resumeDetail = Number.isSafeInteger(resumeAfter)
-      ? ` Reconnecting from last accepted sequence #${resumeAfter}.`
-      : " Reconnecting without a sequence cursor.";
-    const detail = `${incompleteDetail}${resumeDetail}`;
-    appendStreamNotice(sessionId, "lagged", detail, payload ?? event?.data ?? null);
-    setStreamHealth(sessionId, "lagged", detail);
     loadSnapshot(sessionId, false);
-    connectEventStream(sessionId, { healthStatus: "lagged", healthDetail: detail });
+    connectEventStream(sessionId);
   });
   source.onerror = () => {
-    if (state.eventSource !== source) return;
-    const stopped = source.readyState === 2;
-    const status = stopped ? "interrupted" : "reconnecting";
-    if (state.streamHealthBySession.get(sessionId)?.status !== status) {
-      appendStreamNotice(
-        sessionId,
-        "stream_interrupted",
-        stopped ? "Connection stopped; use Retry stream in Activity to reconnect." : "Connection interrupted; EventSource is reconnecting automatically.",
-      );
-    }
-    setStreamHealth(sessionId, status);
+    if (state.eventSource !== source || source.readyState !== 2) return;
+    window.setTimeout(() => {
+      if (state.eventSource !== source || state.currentId !== sessionId || source.readyState !== 2) return;
+      connectEventStream(sessionId);
+    }, EVENT_STREAM_RECONNECT_DELAY_MS);
   };
   return source;
 }
@@ -1528,113 +1412,6 @@ function scheduleSnapshot(sessionId) {
 
 function agentEvent(envelope) { return envelope?.event?.type === "agent" ? envelope.event.event : null; }
 
-function eventKind(envelope) {
-  const event = envelope?.event;
-  if (event?.type === "agent") return event.event?.type || "agent";
-  return event?.type || "event";
-}
-
-function serializedEventPayload(envelope, maxChars = 1600) {
-  const payload = envelope?.event?.type === "agent" ? envelope.event.event : envelope?.event;
-  let serialized;
-  try { serialized = JSON.stringify(payload ?? {}); }
-  catch (_) { serialized = String(payload ?? ""); }
-  return serialized.length <= maxChars ? serialized : `${serialized.slice(0, maxChars - 1)}…`;
-}
-
-function eventDetail(envelope) {
-  const event = envelope?.event?.type === "agent" ? envelope.event.event || {} : envelope?.event || {};
-  const kind = eventKind(envelope);
-  if (kind === "run_started") return compactActionDetail(event.prompt_preview || "Run started", 800);
-  if (kind === "run_completed") return compactActionDetail(event.response || "Run completed", 800);
-  if (kind === "run_failed" || kind === "error") return compactActionDetail(event.message || "Run failed", 800);
-  if (kind === "snapshot_saved") return `Snapshot saved${event.session_id ? ` for ${event.session_id}` : ""}`;
-  if (kind === "model_call_started") return `Iteration ${event.iteration ?? "unknown"}`;
-  if (kind === "token_usage_updated") return serializedEventPayload(envelope);
-  if (kind === "tool_call_started") {
-    const args = formatToolArguments(event.name, event.args_detail, event.args_preview);
-    return compactActionDetail(`${event.name || "tool"}${event.call_id ? ` · ${event.call_id}` : ""}${args ? ` · ${args}` : ""}`, 800);
-  }
-  if (kind === "tool_call_finished") {
-    return compactActionDetail(`${event.name || "tool"}${event.call_id ? ` · ${event.call_id}` : ""}${event.content_preview ? ` · ${event.content_preview}` : ""}`, 800);
-  }
-  if (kind === "thread_started") return compactActionDetail(event.action || event.name || "Thread started", 800);
-  if (kind === "thread_log") return compactActionDetail(event.line || "Thread log", 800);
-  if (["thread_steering_queued", "thread_steering_delivered", "thread_steering_expired", "orchestrator_steering_queued", "orchestrator_steering_delivered", "orchestrator_steering_expired"].includes(kind)) {
-    return compactActionDetail(event.instruction_preview || `Steering ${kind.split("_").at(-1)}`, 800);
-  }
-  if (kind === "thread_finished") {
-    const outcome = event.timed_out ? `Timed out${event.timeout_reason ? ` · ${event.timeout_reason}` : ""}` : `Exit ${event.exit_code ?? "unknown"}`;
-    return compactActionDetail(outcome, 800);
-  }
-  if (kind === "assistant_message") return compactActionDetail(event.content || "Assistant message emitted", 800);
-  if (kind === "run_finished") return "Agent run finished";
-  return serializedEventPayload(envelope);
-}
-
-function eventAssociation(envelope) {
-  const associations = [];
-  const threadName = eventThreadName(agentEvent(envelope));
-  if (threadName) associations.push(`thread ${threadName}`);
-  if (envelope?.run_id) associations.push(`run ${envelope.run_id}`);
-  return associations.join(" · ");
-}
-
-function eventIsError(envelope) {
-  const kind = eventKind(envelope);
-  const event = envelope?.event?.type === "agent" ? envelope.event.event : envelope?.event;
-  const exitCode = Number(event?.exit_code);
-  return kind === "error" || kind.endsWith("_failed")
-    || Boolean(event?.is_error) || Boolean(event?.error)
-    || (kind === "thread_finished" && (Boolean(event?.timed_out) || (Number.isFinite(exitCode) && exitCode !== 0)));
-}
-
-function renderActivityEvent(envelope) {
-  const kind = eventKind(envelope);
-  const detail = eventDetail(envelope);
-  const association = eventAssociation(envelope);
-  const serialized = serializedEventPayload(envelope);
-  const generic = detail === serialized;
-  const numericSequence = Number.isSafeInteger(Number(envelope?.sequence_id)) ? Number(envelope.sequence_id) : null;
-  const sequence = numericSequence === null ? "—" : `#${numericSequence}`;
-  const isError = eventIsError(envelope);
-  return `<li class="activity-event ${isError ? "is-error" : ""}" data-state="${isError ? "error" : "event"}">
-    <span class="activity-sequence">${sequence}</span>
-    <div class="activity-event-body"><header><div class="activity-event-heading"><strong>${escapeHtml(kind)}</strong>${isError ? `<span class="activity-event-status">error</span>` : ""}</div>${association ? `<span class="activity-association">${escapeHtml(association)}</span>` : ""}</header>
-      <p>${escapeHtml(detail)}</p>
-      ${generic ? "" : `<details class="activity-payload"><summary data-activity-payload="${escapeAttr(numericSequence ?? "")}">payload</summary><pre>${escapeHtml(serialized)}</pre></details>`}
-    </div>
-  </li>`;
-}
-
-function renderActivityNotice(notice) {
-  const payload = notice?.payload == null ? "" : (() => {
-    let serialized;
-    try { serialized = JSON.stringify(notice.payload); } catch (_) { serialized = String(notice.payload); }
-    return compactActionDetail(serialized, 1200);
-  })();
-  return `<li class="activity-notice"><strong>${escapeHtml(notice?.kind || "stream")}</strong><span>${escapeHtml(notice?.detail || "")}</span>${payload ? `<code>${escapeHtml(payload)}</code>` : ""}</li>`;
-}
-
-function renderActivityFocus(envelopes = [], notices = [], health = null) {
-  const presentation = streamHealthPresentation(health);
-  const events = [...envelopes].reverse();
-  const retry = presentation.status === "interrupted"
-    ? `<button class="button mini-button" type="button" data-retry-event-stream aria-label="Retry session event stream">Retry stream</button>`
-    : "";
-  const noticeList = notices.length
-    ? `<section class="activity-notices" aria-labelledby="activityNoticesTitle"><h3 id="activityNoticesTitle">Stream notices</h3><ol>${[...notices].reverse().map(renderActivityNotice).join("")}</ol></section>`
-    : "";
-  const eventList = events.length
-    ? `<ol class="activity-timeline">${events.map(renderActivityEvent).join("")}</ol>`
-    : `<div class="focus-empty">No events captured in this replay window.</div>`;
-  return `<div class="focus-activity-scroll"><section class="activity-summary" data-state="${escapeAttr(presentation.status)}">
-      <div><span class="stream-health-dot" aria-hidden="true"></span><strong>${escapeHtml(presentation.label)}</strong></div>
-      <p>${escapeHtml(presentation.detail)}</p>
-      <small>Current in-memory replay window · ${events.length} event${events.length === 1 ? "" : "s"} · newest first</small>
-      ${retry}
-    </section>${noticeList}<section class="activity-events" aria-labelledby="activityEventsTitle"><h3 id="activityEventsTitle">Session events</h3>${eventList}</section></div>`;
-}
 
 function renderConfigRepairGuidance(summary) {
   const modelConfigError = String(summary?.model_config_error || "").trim();
@@ -1722,7 +1499,7 @@ function scheduleWorkspaceRender(sessionId = state.currentId, render = renderWor
 
 const RESTORABLE_DATA_KEYS = [
   "focusThread", "threadName", "focusWorkspaceFile", "commandOption",
-  "episodeSummary", "activityPayload", "retrySettings", "action",
+  "episodeSummary", "retrySettings", "action",
 ];
 
 function captureFocusTarget(element) {
@@ -1829,7 +1606,6 @@ function focusScrollTargets() {
     ["orchestrator-live", ".focus-live"],
     ["thread-activity", ".focus-activity"],
     ["thread-episodes", ".focus-episodes"],
-    ["activity", ".focus-activity-scroll"],
     ["worksets", ".focus-worksets-scroll"],
     ["workspace-files", ".focus-files"],
     ["workspace-diff", ".focus-diff"],
@@ -1959,7 +1735,6 @@ function renderWorkspace() {
   const timing = syncRuntimeTimer();
   const diff = workspace ?? entry.workspace_diff;
   applyWorkspaceSummaryMetric(el.metricChanges, workspaceSummaryPresentation(diff));
-  renderStreamHealth(state.currentId);
   const active = timing?.state === "active";
   el.stopRun.hidden = !active;
   renderOverview(snapshot);
@@ -2533,9 +2308,8 @@ function closeFocusView() {
   const fallback = state.focusView?.type === "thread"
     ? el.threadGrid.querySelector(`[data-focus-thread="${cssEscape(state.focusView.name)}"]`)
     : state.focusView?.type === "orchestrator" ? el.expandOrchestrator
-      : state.focusView?.type === "activity" ? el.streamHealth
-        : state.focusView?.type === "worksets" ? el.expandWorksets
-          : state.focusView?.type === "info" ? el.sessionInfo : el.promptInput;
+      : state.focusView?.type === "worksets" ? el.expandWorksets
+        : state.focusView?.type === "info" ? el.sessionInfo : el.promptInput;
   const openerTarget = state.focusOpener;
   const fallbackTarget = captureFocusTarget(fallback);
   if (state.focusView?.type === "settings") {
@@ -2558,7 +2332,6 @@ function renderFocusView(snapshot) {
   el.sessionLayout.classList.toggle("is-focused", Boolean(view));
   el.focusPanel.classList.toggle("is-thread", view?.type === "thread");
   el.focusPanel.classList.toggle("is-orchestrator", view?.type === "orchestrator");
-  el.focusPanel.classList.toggle("is-activity", view?.type === "activity");
   el.focusPanel.classList.toggle("is-worksets", view?.type === "worksets");
   el.focusPanel.classList.toggle("is-workspace", view?.type === "workspace");
   el.focusPanel.classList.toggle("is-info", view?.type === "info");
@@ -2600,16 +2373,6 @@ function renderFocusView(snapshot) {
         episode.open = restoration.openEpisodes.has(key);
       }
     }
-  } else if (view.type === "activity") {
-    const health = state.streamHealthBySession.get(state.currentId);
-    el.focusTitle.textContent = "Activity";
-    el.focusState.textContent = streamHealthPresentation(health).label;
-    el.focusState.classList.toggle("is-active", health?.status === "live");
-    el.focusContent.innerHTML = renderActivityFocus(
-      state.events.get(state.currentId) || [],
-      state.streamNotices.get(state.currentId) || [],
-      health,
-    );
   } else if (view.type === "worksets") {
     const presentation = worksetsPresentation(snapshot);
     el.focusTitle.textContent = "Worksets";
@@ -3162,10 +2925,6 @@ function renderWorkspaceFocusDiff(path, cached) {
 }
 
 function handleFocusClick(event) {
-  const retryEventStream = event.target.closest("[data-retry-event-stream]");
-  if (retryEventStream && state.focusView?.type === "activity" && state.currentId) {
-    return Boolean(connectEventStream(state.currentId));
-  }
   const retrySettings = event.target.closest("[data-retry-settings]");
   if (retrySettings && state.focusView?.type === "settings") {
     loadFocusSettings();
@@ -4878,8 +4637,7 @@ function runCommand(name) {
   el.promptInput.value = "";
   if (state.currentId) state.composerDrafts.set(state.currentId, "");
   resizeComposer();
-  if (name === "activity") openFocusView("activity");
-  else if (name === "worksets") openFocusView("worksets");
+  if (name === "worksets") openFocusView("worksets");
   else if (name === "transcript") openFocusView("orchestrator");
   else if (name === "workspace") openFocusView("workspace");
   else if (name === "info") openFocusView("info");
