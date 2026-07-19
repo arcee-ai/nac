@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/redesign.css?v=live-usage-2" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=quality-11" />
   </head>
   <body>
     <div id="app" class="app-frame">
@@ -17,10 +17,11 @@
           <div class="brand-lockup">
             <span class="wordmark">NAC</span>
           </div>
+          <dl class="picker-store"><dt>Store</dt><dd id="pickerStorePath" data-state="loading" title="Loading store…" aria-label="Session store loading">Loading store…</dd></dl>
           <span id="pickerNavStatus" class="nav-status picker-nav-status" role="status" aria-live="polite" hidden></span>
         </header>
-        <p id="reorderInstructions" class="sr-only">Drag this handle to reorder. With a keyboard, press Enter or Space, use the arrow, Home, or End keys, then press Enter or Space to save.</p>
-        <div id="reorderLive" class="sr-only" aria-live="polite"></div>
+        <p id="reorderInstructions" class="sr-only">Drag this handle to reorder within its pinned or unpinned group. With a keyboard, press Enter or Space, use the arrow, Home, or End keys, then press Enter or Space to save. Press Escape to cancel.</p>
+        <div id="reorderLive" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         <main class="session-browser">
           <div class="session-list-heading">
             <div class="session-list-title">
@@ -44,12 +45,19 @@
             <button id="renameSession" class="session-title-button" type="button" title="Rename session"><span id="sessionTitle">Session</span></button>
             <span id="sessionLocation" class="session-location"></span>
           </div>
+          <button id="sessionInfo" class="icon-button session-info-button" type="button" aria-label="Open full session information" title="Full session information">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7h.01"></path></svg>
+          </button>
           <dl class="session-metrics" aria-label="Session metrics">
             <div><dt>Model</dt><dd id="metricModel">—</dd></div>
             <div><dt>Orch context</dt><dd id="metricContext">—</dd></div>
             <div><dt>Tokens</dt><dd id="metricTokens">—</dd></div>
+            <div><dt>Run</dt><dd id="metricRun" data-state="idle" title="No response duration recorded">—</dd></div>
             <div><dt>Changes</dt><dd id="metricChanges">—</dd></div>
           </dl>
+          <button id="streamHealth" class="stream-health-chip" type="button" data-state="connecting" aria-label="Session Events · Connecting. Opening the event stream. Open activity" title="Session Events · Connecting. Opening the event stream. Open activity">
+            <span class="stream-health-dot" aria-hidden="true"></span><span id="streamHealthLabel" aria-live="polite">Session Events · Connecting</span>
+          </button>
           <span id="sessionNavStatus" class="nav-status session-nav-status" role="status" aria-live="polite" hidden></span>
           <button id="stopRun" class="icon-button danger-button" type="button" aria-label="Stop active run" title="Stop active run" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
@@ -58,6 +66,11 @@
 
         <div id="sessionLayout" class="session-layout">
           <aside class="overview-rail" aria-label="Session overview">
+            <section id="configRepairNotice" class="config-repair-notice" role="alert" hidden>
+              <strong>Model configuration needs repair</strong>
+              <p id="configRepairDetail"></p>
+              <button id="configRepairAction" class="button" type="button">open settings</button>
+            </section>
             <section class="rail-section overview-section">
               <div class="section-heading">
                 <h2>Overview</h2>
@@ -71,31 +84,43 @@
               <div class="section-heading">
                 <h2 id="orchestratorTitle">Orchestrator</h2>
                 <div class="section-actions">
-                  <span id="orchestratorState" class="orchestrator-state">Idle</span>
+                  <span id="orchestratorState" class="orchestrator-state" data-state="no-run" role="status" aria-live="polite">no-run</span>
                   <button id="expandOrchestrator" class="expand-button" type="button" aria-label="Open orchestrator conversation" title="Open orchestrator conversation">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>
                   </button>
                 </div>
               </div>
-              <ol id="orchestratorLedger" class="action-ledger orchestrator-ledger" aria-live="polite"></ol>
+              <ol id="orchestratorLedger" class="action-ledger orchestrator-ledger"></ol>
+            </section>
+            <section id="worksetRail" class="rail-section worksets-section" aria-labelledby="worksetsTitle">
+              <div class="section-heading">
+                <h2 id="worksetsTitle">Worksets</h2>
+                <div class="section-actions">
+                  <span id="worksetRailCount" class="workset-rail-count" aria-live="polite">…</span>
+                  <button id="expandWorksets" class="expand-button" type="button" aria-label="Open complete worksets" title="Open complete worksets">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <div id="worksetRailSummary" class="workset-rail-summary" data-state="loading"><p>Loading worksets…</p></div>
             </section>
           </aside>
 
           <section id="focusPanel" class="focus-panel" aria-labelledby="focusTitle" hidden>
             <header class="focus-header">
               <div class="focus-identity">
-                <h2 id="focusTitle">Detail</h2>
+                <h2 id="focusTitle" tabindex="-1">Detail</h2>
                 <span id="focusState" class="focus-state"></span>
               </div>
               <button id="closeFocusPanel" class="expand-button" type="button" aria-label="Close fullscreen view" title="Close fullscreen view">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"></path></svg>
               </button>
             </header>
-            <div id="focusContent" class="focus-content" aria-live="polite"></div>
+            <div id="focusContent" class="focus-content"></div>
           </section>
 
           <main class="thread-canvas" aria-label="Threads">
-            <div id="threadGrid" class="thread-board" aria-live="polite"></div>
+            <div id="threadGrid" class="thread-board"></div>
           </main>
 
           <form id="commandComposer" class="composer">
@@ -114,7 +139,7 @@
     </div>
 
     <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
-    <aside id="utilityDrawer" class="utility-drawer" hidden aria-modal="true" role="dialog" aria-labelledby="drawerTitle">
+    <aside id="utilityDrawer" class="utility-drawer" tabindex="-1" hidden aria-modal="true" role="dialog" aria-labelledby="drawerTitle">
       <header class="drawer-header">
         <h2 id="drawerTitle">Details</h2>
         <button id="closeDrawer" class="icon-button" type="button" aria-label="Close">
@@ -127,30 +152,35 @@
     <dialog id="launchDialog" class="modal">
       <form id="launchForm" method="dialog" class="modal-form">
         <header class="modal-header"><h2>new session</h2><button class="icon-button" type="button" data-close-dialog="launchDialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></header>
-        <fieldset id="launchExecutionModes" class="execution-modes">
+        <fieldset id="launchExecutionModes" class="execution-modes" data-mode="local" aria-label="Execution target">
           <legend>execution</legend>
           <label><input type="radio" name="execution_mode" value="local" checked><span>local</span></label>
           <label><input type="radio" name="execution_mode" value="ssh"><span>ssh</span></label>
           <label><input type="radio" name="execution_mode" value="sandbox"><span>sandbox</span></label>
         </fieldset>
         <div class="field-grid">
-          <label class="field span-two"><span>working directory</span><input id="launchCwd" name="cwd" autocomplete="off" placeholder="/path/to/repository"></label>
-          <label id="launchSshField" class="field span-two" hidden><span>ssh host</span><input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="user@host"></label>
+          <label class="field span-two"><span id="launchCwdLabel">working directory</span><input id="launchCwd" name="cwd" autocomplete="off" placeholder="/path/to/repository"></label>
+          <label id="launchSshField" class="field span-two" hidden><span>ssh host</span><input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="user@host" disabled><small>SSH paths are remote. The first switch to SSH starts at <code>~</code> and never copies the local server root.</small></label>
+          <section id="launchDefaultsPreview" class="launch-default-preview span-two" data-state="idle" aria-live="polite" aria-busy="false">
+            <header><div><strong>configured launch defaults</strong><span>for this execution location</span></div><button id="refreshLaunchDefaults" class="button" type="button">refresh</button></header>
+            <div id="launchDefaultsBody"><p class="launch-default-state">Open this dialog or refresh to inspect configured defaults.</p></div>
+          </section>
           <label class="field"><span>backend</span><select id="launchBackend" name="backend">
             <option value="">from config</option><option value="openai-responses">openai-responses</option><option value="chatgpt-codex-responses">chatgpt-codex-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="deepseek-chat">deepseek-chat</option><option value="fireworks-chat">fireworks-chat</option><option value="together-chat">together-chat</option><option value="arcee-auth">arcee-auth</option><option value="arcee-api">arcee-api</option>
-          </select></label>
-          <label class="field"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="">from config</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
-          <label class="field"><span>model</span><input id="launchModel" name="model" autocomplete="off" placeholder="from config"></label>
-          <label class="field"><span>base url</span><input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="from config"></label>
-          <label class="field"><span>api key environment variable</span><input id="launchApiKeyEnv" name="api_key_env" autocomplete="off" placeholder="from config"></label>
-          <label class="field"><span>extra headers</span><input id="launchExtraHeaders" name="extra_headers" autocomplete="off" placeholder='{"X-Header":"value"}'></label>
+          </select><small>Blank inherits the configured backend.</small></label>
+          <label class="field"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="inherit">inherit (from config)</option><option value="unset">unset (backend default)</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select><small>Inherit omits the field; unset explicitly clears configured effort.</small></label>
+          <label class="field"><span>model</span><input id="launchModel" name="model" autocomplete="off" placeholder="from config"><small>Blank inherits the configured model.</small></label>
+          <label class="field"><span>base url</span><input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="from config"><small>Blank inherits the configured or managed base URL.</small></label>
+          <label class="field"><span>API key mode</span><select id="launchApiKeyMode" name="api_key_mode" aria-describedby="launchApiKeyHelp"><option value="inherit">inherit configured selector</option><option value="none">no environment selector</option><option value="named">named environment variable</option></select><small id="launchApiKeyHelp" aria-live="polite">Inherit omits this field; no environment selector explicitly clears it. Managed stored-login backends default to no environment selector.</small></label>
+          <label id="launchApiKeyEnvField" class="field" hidden><span>API key environment variable</span><input id="launchApiKeyEnv" name="api_key_env" autocomplete="off" placeholder="OPENAI_API_KEY" disabled><small>Enter an environment-variable name only; never paste a credential value.</small></label>
+          <label class="field span-two"><span>extra headers (JSON object)</span><textarea id="launchExtraHeaders" name="extra_headers" rows="3" spellcheck="false" placeholder='{"X-Header":"value"}'></textarea><small>Blank inherits configured headers. Enter <code>{}</code> to explicitly clear them for the new session; header values must be strings.</small></label>
           <div id="sandboxFields" class="field-grid nested-grid span-two" hidden>
-            <label class="field"><span>image</span><input id="sandboxImage" autocomplete="off" placeholder="default image"></label>
-            <label class="field"><span>gpu</span><input id="sandboxGpu" autocomplete="off" placeholder="none"></label>
-            <label class="field"><span>container working directory</span><input id="sandboxWorkdir" autocomplete="off" placeholder="default"></label>
-            <label class="field"><span>shared memory</span><input id="sandboxShm" autocomplete="off" placeholder="e.g. 2g"></label>
-            <label class="field span-two"><span>mounts</span><input id="sandboxMounts" autocomplete="off" placeholder="host:container, host:container"></label>
-            <label class="checkbox-field span-two"><input id="sandboxNoMount" type="checkbox"><span>do not mount the current working directory</span></label>
+            <label class="field"><span>image</span><input id="sandboxImage" autocomplete="off" placeholder="default image" disabled></label>
+            <label class="field"><span>gpu</span><input id="sandboxGpu" autocomplete="off" placeholder="none" disabled></label>
+            <label class="field"><span>container working directory</span><input id="sandboxWorkdir" autocomplete="off" placeholder="default" disabled></label>
+            <label class="field"><span>shared memory</span><input id="sandboxShm" autocomplete="off" placeholder="e.g. 2g" disabled></label>
+            <label class="field span-two"><span>mounts</span><input id="sandboxMounts" autocomplete="off" placeholder="host:container, host:container" disabled></label>
+            <label class="checkbox-field span-two"><input id="sandboxNoMount" type="checkbox" disabled><span>do not mount the current working directory</span></label>
           </div>
           <label class="field span-two"><span>initial prompt</span><textarea id="initialPrompt" rows="3" placeholder="optional"></textarea></label>
         </div>
@@ -160,6 +190,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=live-usage-2" defer></script>
+    <script src="/assets/app.js?v=quality-11" defer></script>
   </body>
 </html>

@@ -325,12 +325,16 @@ pub struct EventsQuery {
 pub struct SessionSnapshotQuery {
     pub message_limit: Option<usize>,
     pub thread_event_limit: Option<usize>,
+    #[serde(default)]
+    pub include_system: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct MessagesQuery {
     pub before: Option<usize>,
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub include_system: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1068,12 +1072,9 @@ pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
-        .route("/prototype", get(prototype_html))
         .route("/assets/app.css", get(app_css))
         .route("/assets/redesign.css", get(redesign_css))
         .route("/assets/app.js", get(app_js))
-        .route("/assets/prototype.css", get(prototype_css))
-        .route("/assets/prototype.js", get(prototype_js))
         .route(
             "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
             get(doto_rounded_extra_bold_font),
@@ -1150,10 +1151,6 @@ async fn index_html() -> Html<&'static str> {
     Html(include_str!("../assets/index.html"))
 }
 
-async fn prototype_html() -> Html<&'static str> {
-    Html(include_str!("../assets/prototype.html"))
-}
-
 async fn app_css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
@@ -1175,23 +1172,6 @@ async fn app_js() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/app.js"),
-    )
-}
-
-async fn prototype_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/prototype.css"),
-    )
-}
-
-async fn prototype_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/prototype.js"),
     )
 }
 
@@ -1298,10 +1278,11 @@ fn message_page(
     messages: Vec<Message>,
     before: Option<usize>,
     limit: usize,
+    include_system: bool,
 ) -> MessagesPageResponse {
     let visible = messages
         .into_iter()
-        .filter(|message| !matches!(message, Message::System { .. }))
+        .filter(|message| include_system || !matches!(message, Message::System { .. }))
         .collect::<Vec<_>>();
     let total = visible.len();
     let end = before.unwrap_or(total).min(total);
@@ -1387,7 +1368,12 @@ async fn session_snapshot(
     };
     let (message_page, message_cycle) = if let Some(limit) = query.message_limit {
         let cycle = current_message_cycle(&snapshot.messages);
-        let response = message_page(std::mem::take(&mut snapshot.messages), None, limit);
+        let response = message_page(
+            std::mem::take(&mut snapshot.messages),
+            None,
+            limit,
+            query.include_system,
+        );
         snapshot.messages = response.messages;
         (Some(response.page), Some(cycle))
     } else {
@@ -1410,6 +1396,7 @@ async fn session_messages(
         messages,
         query.before,
         query.limit.unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT),
+        query.include_system,
     )))
 }
 
@@ -2159,70 +2146,11 @@ mod tests {
         assert!(app.contains("function backendOptions"));
         assert!(app.contains("\"together-chat\""));
         assert!(app.contains("function createSession"));
-        assert!(app.contains("body.extra_headers = headers"));
+        assert!(app.contains("function buildLaunchSessionRequest"));
+        assert!(app.contains("body.extra_headers = Object.keys(headers).length ? headers : null"));
         assert!(app.contains("function handleDrawerSubmit"));
         assert!(app
-            .contains("await apiPatch(`/sessions/${encodeURIComponent(state.currentId)}/config`"));
-    }
-
-    #[test]
-    fn ui_exploration_prototype_preserves_the_embedded_asset_contract() {
-        let html = include_str!("../assets/prototype.html");
-        for contract in [
-            "id=\"sessionPicker\"",
-            "id=\"sessionWorkspace\"",
-            "id=\"threadGrid\"",
-            "id=\"threadFilters\"",
-            "id=\"commandComposer\"",
-            "id=\"launchDialog\"",
-            "id=\"sessionReorderInstructions\"",
-            "data-action=\"toggle-pin\"",
-            "data-action=\"reorder-session\"",
-            "<h2>Run brief</h2>",
-            "<time>now</time>",
-            "Confirm embedded-asset contract",
-            "class=\"execution-modes\"",
-            "<path d=\"M12 19V5\"></path>",
-            "/assets/prototype.css",
-            "/assets/prototype.js",
-        ] {
-            assert!(
-                html.contains(contract),
-                "missing prototype contract {contract}"
-            );
-        }
-        assert!(!html.contains("thread-objective"));
-        assert!(!html.contains("new-session-card"));
-        assert!(!html.contains("picker-hero"));
-        assert!(!html.contains("hero-copy"));
-        assert!(!html.contains("session-intent"));
-        assert!(!html.contains("class=\"eyebrow\""));
-        for removed_chrome in [
-            "class=\"system-state\"",
-            "class=\"workspace-nav\"",
-            "class=\"workspace-actions\"",
-            "Recent orchestration",
-        ] {
-            assert!(!html.contains(removed_chrome));
-        }
-
-        let css = include_str!("../assets/prototype.css");
-        assert!(css.contains(".session-grid"));
-        assert!(css.contains(".cockpit-layout"));
-        assert!(css.contains("font-family: \"Doto\""));
-        assert!(css.contains("Fixed run context: deliberately no internal scrolling."));
-        assert!(css.contains("@media (max-width: 640px)"));
-        assert!(!css.contains("--green"));
-
-        let app = include_str!("../assets/prototype.js");
-        assert!(app.contains("function showWorkspace"));
-        assert!(app.contains("function selectThread"));
-        assert!(app.contains("function applyThreadFilters"));
-        assert!(app.contains("function syncExecutionMode"));
-        assert!(app.contains("function openLaunchDialog"));
-        assert!(app.contains("function toggleSessionPin"));
-        assert!(app.contains("function startKeyboardSessionReorder"));
-        assert!(app.contains("function startPointerSessionReorder"));
+            .contains("await apiPatch(`/sessions/${encodeURIComponent(sessionId)}/config`, body)"));
     }
 
     #[test]
@@ -2233,11 +2161,17 @@ mod tests {
             "id=\"sessionPicker\"",
             "id=\"sessionWorkspace\"",
             "id=\"pickerSessionTotal\"",
+            "id=\"pickerStorePath\"",
             "id=\"pickerNavStatus\"",
             "id=\"newSessionBtn\"",
+            "id=\"sessionInfo\"",
+            "id=\"metricRun\"",
             "id=\"metricChanges\"",
+            "id=\"streamHealth\"",
             "id=\"sessionNavStatus\"",
             "id=\"generatedOverview\"",
+            "id=\"worksetRail\"",
+            "id=\"expandWorksets\"",
             "id=\"orchestratorState\"",
             "id=\"orchestratorLedger\"",
             "id=\"expandOrchestrator\"",
@@ -2248,6 +2182,8 @@ mod tests {
             "id=\"commandComposer\"",
             "id=\"utilityDrawer\"",
             "id=\"launchExecutionModes\"",
+            "id=\"launchDefaultsPreview\"",
+            "id=\"launchApiKeyMode\"",
             "aria-label=\"Send\"",
         ] {
             assert!(
@@ -2270,6 +2206,18 @@ mod tests {
         assert!(!html.contains("id=\"toast\""));
         assert!(html.contains("<h2>new session</h2>"));
         assert!(html.contains("<option value=\"\">from config</option>"));
+        assert!(html.contains("<option value=\"inherit\">inherit (from config)</option>"));
+        assert!(html.contains("<option value=\"unset\">unset (backend default)</option>"));
+        assert!(html.contains("<option value=\"none\">no environment selector</option>"));
+        assert!(html
+            .contains("Enter an environment-variable name only; never paste a credential value."));
+        assert!(html.contains(
+            "aria-label=\"Session Events · Connecting. Opening the event stream. Open activity\""
+        ));
+        assert!(html.contains(
+            "id=\"streamHealthLabel\" aria-live=\"polite\">Session Events · Connecting</span>"
+        ));
+        assert!(!html.contains("id=\"streamHealthLabel\">Live</span>"));
         assert!(!html.contains("From config"));
 
         let css = include_str!("../assets/redesign.css");
@@ -2285,11 +2233,17 @@ mod tests {
             ".focus-conversation",
             ".focus-orchestrator-layout",
             ".focus-orchestrator-sidebar",
-            ".focus-worksets",
+            ".focus-worksets-scroll",
+            ".worksets-focus-list",
             ".focus-thread-layout",
+            ".focus-activity-scroll",
             ".focus-episode-prompt",
+            ".episode-identity",
+            ".worker-usage",
             ".focus-workspace-layout",
             ".focus-settings-layout",
+            ".session-info-grid",
+            ".launch-default-preview",
             ".composer",
             ".utility-drawer",
             ".session-card",
@@ -2307,9 +2261,28 @@ mod tests {
         assert!(!css.contains("--green"));
         assert!(!css.contains(".toast"));
         assert!(css.contains(".nav-status"));
-        assert!(css.contains("grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)"));
-        assert!(css.contains(".focus-panel.is-orchestrator .focus-orchestrator-sidebar,"));
-        assert!(css.contains(".focus-panel.is-thread .focus-activity { display: none; }"));
+        assert!(css.contains(
+            ".focus-orchestrator-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }"
+        ));
+        assert!(!css.contains("grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)"));
+        let responsive_css = css
+            .split("@media (max-width: 780px) {")
+            .nth(1)
+            .and_then(|source| source.split("@media (pointer: coarse) {").next())
+            .expect("missing responsive orchestrator styles");
+        assert!(responsive_css.contains(
+            ".focus-panel.is-orchestrator .focus-orchestrator-layout { height: auto; min-height: 100%; grid-template-columns: 1fr; grid-template-rows: auto minmax(420px, 1fr); }"
+        ));
+        assert!(css
+            .contains(".focus-orchestrator-sidebar { min-width: 0; min-height: 0; display: grid;"));
+        assert!(css
+            .contains(".focus-panel.is-orchestrator .focus-orchestrator-sidebar { display: grid;"));
+        assert!(css.contains(
+            ".focus-panel.is-thread .focus-activity { min-height: 260px; max-height: 52dvh; display: block;"
+        ));
+        assert!(responsive_css.contains(
+            ".focus-panel.is-orchestrator .focus-orchestrator-sidebar { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(220px, 36dvh);"
+        ));
         assert!(css.contains("--attention: #6ea8ff"));
         assert!(css.contains("grid-template-columns: minmax(0, 1fr) max-content max-content"));
         assert!(css.contains("font: 15px/1.62 var(--mono)"));
@@ -2323,29 +2296,39 @@ mod tests {
             "function buildThreadModels",
             "function currentCycleThreadNames",
             "function threadCycleSeed",
-            "lastFinished > 0 && lastFinished >= lastStarted",
+            "function threadLifecycleFromEvidence",
+            "const finishAfterStart = latestFinish && (!latestStart || latestFinish.index > latestStart.index)",
             "function buildThreadActions",
             "function buildOrchestratorActions",
             "function renderActionRows",
             "function formatToolArguments",
+            "function renderActivityFocus",
+            "function renderSessionInfo",
             "const ACTION_LEDGER_LIMIT = 5",
             "function renderThreadTile",
             "function openFocusView",
             "function renderFocusView",
             "function renderOrchestratorConversation",
-            "function renderFocusWorksets",
+            "function renderWorksetsFocus",
+            "} else if (view.type === \"worksets\") {",
+            "el.focusContent.innerHTML = renderWorksetsFocus(snapshot)",
+            "el.expandWorksets.addEventListener(\"click\", () => openFocusView(\"worksets\"))",
             "function renderThreadFocus",
+            "function renderThreadEvidence",
             "function renderWorkspaceFocus",
             "function renderFocusSettings",
             "function loadFocusSettings",
+            "function buildSettingsPatch",
             "function generateOverview",
             "/overview`",
             "function submitComposer",
-            "/sessions/${encodeURIComponent(state.currentId)}/steering",
+            "/sessions/${encodeURIComponent(sessionId)}/steering",
             "/threads/${encodeURIComponent(target)}/steering",
             "function runCommand",
             "function openDrawer(title, html, view = \"detail\")",
             "function syncLaunchExecutionMode",
+            "function buildLaunchSessionRequest",
+            "function renderLaunchDefaultsPreviewHtml",
             "function toggleSessionPin",
             "function handleSessionGridKeydown",
             "function handleSessionPointerDown",
@@ -2365,21 +2348,189 @@ mod tests {
         assert!(!app.contains("Open retained episodes for"));
         assert!(!app.contains("sessionQuery"));
         assert!(!app.contains("el.toast"));
-        assert!(app.contains("const target = el.sessionWorkspace.hidden ? el.pickerNavStatus : el.sessionNavStatus"));
+        assert!(app.contains(
+            "const chipLabel = status === \"live\" ? \"Session Events\" : `Session Events · ${label}`;"
+        ));
+        for degraded_label in ["Reconnecting", "Replay gap", "Lagged", "Interrupted"] {
+            assert!(
+                app.contains(degraded_label),
+                "missing degraded Session Events label {degraded_label}"
+            );
+        }
+        assert!(app.contains(
+            "const description = `${health.chipLabel}. ${health.detail}. Open activity`"
+        ));
+        assert!(app.contains("el.streamHealth.setAttribute(\"aria-label\", description)"));
+        assert!(app.contains(
+            "const target = el.sessionWorkspace.hidden ? el.pickerNavStatus : el.sessionNavStatus"
+        ));
         assert!(!app.contains("action-detail\" title="));
-        assert!(!app.contains("{ name: \"worksets\""));
-        assert!(app.contains("class=\"focus-orchestrator-sidebar\""));
+        for contract in [
+            "{ name: \"activity\", description:",
+            "{ name: \"worksets\", description:",
+            "{ name: \"info\", description:",
+            "if (name === \"activity\") openFocusView(\"activity\")",
+            "else if (name === \"worksets\") openFocusView(\"worksets\")",
+            "else if (name === \"info\") openFocusView(\"info\")",
+        ] {
+            assert!(
+                app.contains(contract),
+                "missing utility contract {contract}"
+            );
+        }
+        assert!(app.contains(
+            "?message_limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}&thread_event_limit=${THREAD_EVENT_PAGE_LIMIT}`"
+        ));
+        assert!(app.contains(
+            "/messages?before=${messageWindow.start}&limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}`"
+        ));
+        assert!(
+            !app.contains("include_system"),
+            "production frontend must not opt into system messages"
+        );
+        let orchestrator_focus = app
+            .split("function renderOrchestratorConversation")
+            .nth(1)
+            .and_then(|source| source.split("function worksetValueHtml").next())
+            .expect("missing orchestrator focus renderer");
+        assert!(orchestrator_focus.contains("class=\"focus-orchestrator-sidebar\""));
+        assert!(orchestrator_focus.contains("class=\"focus-chat\""));
+        assert!(orchestrator_focus.contains("<span>Live activity</span>"));
+        assert!(orchestrator_focus.contains("const lifecycle = orchestratorLifecycle(snapshot)"));
+        assert!(!orchestrator_focus.contains("focus-worksets"));
+        assert!(!orchestrator_focus.contains("renderWorksetsFocus"));
+        assert!(!orchestrator_focus.contains("Run lifecycle"));
         assert!(app.contains("function renderThreadEpisodes"));
-        assert!(app.contains("Episode ${index + 1}"));
-        assert!(app.contains("<details class=\"focus-episode\""));
-        assert!(!app.contains("Episode ${episode.id}"));
+        let episode_renderer = app
+            .split("function renderThreadEpisodes")
+            .nth(1)
+            .and_then(|source| source.split("function renderFocusActions").next())
+            .expect("missing thread episode renderer");
+        assert!(episode_renderer.contains("Episode ${index + 1} · ${escapeHtml(durableId)}"));
+        assert!(episode_renderer.contains("<details class=\"focus-episode\""));
+        assert!(episode_renderer
+            .contains("data-episode-id=\"${escapeAttr(episode.id ?? \"\")}\""));
+        assert!(episode_renderer
+            .contains("renderEvidenceField(\"Durable episode ID\", episode.id)"));
+        assert!(episode_renderer
+            .contains("renderEvidenceField(\"Session ID\", episode.session_id)"));
+        assert!(episode_renderer
+            .contains("renderEvidenceField(\"Thread\", episode.thread_name)"));
+        assert!(episode_renderer
+            .contains("renderEvidenceField(\"Created\", episode.created_at)"));
+        assert!(!episode_renderer
+            .contains("renderEvidenceField(\"Action\", episode.action)"));
+        assert!(episode_renderer.contains("<strong>${escapeHtml(action)}</strong>"));
+        assert!(episode_renderer.contains(
+            "<section class=\"focus-episode-prompt\"><span>Action</span><p>${escapeHtml(action)}</p></section>"
+        ));
+        assert!(app.contains("<h3>Episodes</h3>"));
+        assert!(app.contains("<h3>Lifecycle</h3>"));
+        assert!(!app.contains("Durable episodes"));
+        assert!(!app.contains("Lifecycle evidence"));
+        let thread_focus = app
+            .split("function renderThreadFocus")
+            .nth(1)
+            .and_then(|source| source.split("function renderThreadEpisodes").next())
+            .expect("missing thread focus renderer");
+        assert!(thread_focus.contains(
+            "${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}"
+        ));
+
+        let thread_lifecycle = app
+            .split("function threadLifecycleFromEvidence")
+            .nth(1)
+            .and_then(|source| source.split("function buildThreadModels").next())
+            .expect("missing thread lifecycle derivation");
+        assert!(thread_lifecycle.contains(
+            "const stateName = terminalEvidence ? \"finished\" : active ? (launchEvidence ? \"running\" : \"queued\") : \"finished\""
+        ));
+        assert!(thread_lifecycle.contains("usageEvidence: threadUsageEvidence(entries)"));
+        let thread_status = app
+            .split("function threadStatusPresentation")
+            .nth(1)
+            .and_then(|source| source.split("function renderThreadEvidence").next())
+            .expect("missing thread status presentation");
+        assert!(thread_status.contains(
+            "const stateName = value === \"queued\" || value === \"running\" ? value : \"finished\""
+        ));
+        assert!(thread_status.contains(
+            "stateName === \"queued\" ? \"Queued\" : stateName === \"running\" ? \"Running\" : \"Finished\""
+        ));
+        for removed_status in [
+            "outcome-unobserved",
+            "history-only",
+            "timed-out",
+            "dispatch-error",
+        ] {
+            assert!(!app.contains(removed_status));
+            assert!(!css.contains(removed_status));
+        }
+
+        let model_response_plan = app
+            .split("function threadModelResponsePlan")
+            .nth(1)
+            .and_then(|source| source.split("function threadActionsFromEntries").next())
+            .expect("missing model response pairing plan");
+        assert!(model_response_plan.contains(
+            "models.findLast((candidate) => candidate.evidenceSequence === evidenceSequence && !candidate.paired)"
+        ));
+        assert!(model_response_plan.contains(
+            "const model = { index, evidenceSequence, paired: false, usableReturnedText: false }"
+        ));
+        assert!(model_response_plan
+            .contains("const returnedText = compactActionDetail(event.content, 800)"));
+        assert!(model_response_plan.contains("model.paired = true"));
+        assert!(model_response_plan
+            .contains("model.usableReturnedText = Boolean(returnedText)"));
+        assert!(model_response_plan.contains("pairedAssistantIndexes.add(index)"));
+        assert!(model_response_plan.contains(
+            "modelDetails.set(model.index, returnedText || \"Returned text unavailable\")"
+        ));
+        assert!(model_response_plan.contains(
+            "modelDetails.set(index, \"Returned text unavailable\")"
+        ));
+        assert!(model_response_plan.contains(
+            "latestModel && !latestModel.usableReturnedText && retainedContent && successfullyFinishedSequences.has(latestModel.evidenceSequence)"
+        ));
+        assert!(model_response_plan.contains(
+            "successfullyFinishedSequences.has(latestModel.evidenceSequence)"
+        ));
+        assert!(model_response_plan.contains(
+            "Final-call fallback from latest retained episode: ${retainedContent}"
+        ));
+        let transformed_thread_actions = app
+            .split("function threadActionsFromEntries")
+            .nth(1)
+            .and_then(|source| source.split("function threadFocusActions").next())
+            .expect("missing transformed thread actions");
+        assert!(transformed_thread_actions.contains(
+            "event?.type === \"assistant_message\" && modelResponses.pairedAssistantIndexes.has(index)"
+        ));
+        assert!(transformed_thread_actions.contains(
+            "event?.type === \"model_call_started\") action.detail = modelResponses.modelDetails.get(index)"
+        ));
+        let thread_focus_actions = app
+            .split("function threadFocusActions")
+            .nth(1)
+            .and_then(|source| source.split("function latestThreadEvidence").next())
+            .expect("missing thread focus action builder");
+        assert!(thread_focus_actions.contains(
+            ".filter((entry) => entry.event?.type !== \"token_usage_updated\")"
+        ));
+        assert!(app.contains("renderWorkerUsage(model?.usageEvidence)"));
+        assert!(app.contains("patch.extra_headers = headers"));
+        assert!(app.contains("if (reasoningMode === \"unset\") body.reasoning_effort = null"));
+        assert!(app.contains("if (apiKeyMode === \"none\") body.api_key_env = null"));
+        assert!(app.contains("body.extra_headers = Object.keys(headers).length ? headers : null"));
+        assert!(app.contains("apiPost(\"/sessions/launch-defaults\", request.body)"));
+        assert!(app.contains("const MANAGED_LAUNCH_BACKENDS"));
         assert!(app.contains("<span>Live activity</span>"));
         assert!(app.contains("openFocusView(\"settings\")"));
         assert!(app.contains("\"compact\")"));
         assert!(!html.contains("id=\"sessionMenu\""));
         assert!(!html.contains("id=\"sessionFilters\""));
         assert!(!html.contains("id=\"sessionCount\""));
-        assert!(!html.contains("id=\"worksetRail\""));
     }
 
     #[test]
@@ -2408,14 +2559,20 @@ mod tests {
         assert!(app.contains("event.args_detail"));
         assert!(app.contains("actions.slice(-ACTION_LEDGER_LIMIT)"));
         assert!(!app.contains("function renderEvents"));
-        let thread_actions = app
-            .split("function buildThreadActions")
+        let thread_event_actions = app
+            .split("function threadEventAction")
             .nth(1)
-            .and_then(|source| source.split("function buildRetainedThreadActions").next())
-            .expect("missing thread action builder");
-        assert!(!thread_actions.contains("name: \"model\""));
-        assert!(thread_actions.contains("name: \"response\""));
-        assert!(thread_actions.contains("latestEpisode?.content"));
+            .and_then(|source| source.split("function threadActionsFromEntries").next())
+            .expect("missing thread event action builder");
+        assert!(thread_event_actions.contains("event.type === \"model_call_started\""));
+        assert!(thread_event_actions.contains("name: \"model\""));
+        assert!(thread_event_actions.contains("event.type === \"thread_log\""));
+        assert!(thread_event_actions.contains("name: \"thread log\""));
+        assert!(thread_event_actions.contains("name: \"response\""));
+        assert!(thread_event_actions.contains("threadFinishDetail(event, latestEpisode)"));
+        assert!(app.contains("renderEvidenceField(\"Model-call iterations\", iterations"));
+        assert!(app.contains("renderEvidenceField(\"Latest log\", model?.latestLog)"));
+        assert!(app.contains("renderWorkerUsage(model?.usageEvidence)"));
 
         let css = include_str!("../assets/redesign.css");
         assert!(css.contains(".action-ledger"));
@@ -5100,8 +5257,19 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[test]
-    fn orchestrator_message_pages_exclude_system_prompts_and_use_stable_before_cursors() {
-        let messages = vec![
+    fn paged_message_queries_exclude_system_prompts_by_default() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(!snapshot_query.include_system);
+        assert!(!messages_query.include_system);
+
+        let mut messages = vec![
             Message::System {
                 content: "large hidden instructions".to_string(),
             },
@@ -5128,7 +5296,7 @@ extra_headers = { X-Config = "yes" }
             },
         ];
 
-        let latest = message_page(messages.clone(), None, 2);
+        let latest = message_page(messages.clone(), None, 2, false);
         assert_eq!(latest.page.start, 3);
         assert_eq!(latest.page.end, 5);
         assert_eq!(latest.page.total, 5);
@@ -5138,11 +5306,92 @@ extra_headers = { X-Config = "yes" }
             .iter()
             .all(|message| !matches!(message, Message::System { .. })));
 
-        let older = message_page(messages, Some(latest.page.start), 2);
+        messages.push(Message::User {
+            content: "six".to_string(),
+        });
+        let older = message_page(messages, Some(latest.page.start), 2, false);
         assert_eq!(older.page.start, 1);
         assert_eq!(older.page.end, 3);
-        assert_eq!(older.page.total, 5);
+        assert_eq!(older.page.total, 6);
         assert!(older.page.has_older);
+        assert!(matches!(
+            &older.messages[..],
+            [
+                Message::Assistant {
+                    content: Some(content),
+                    ..
+                },
+                Message::User { content: user_content }
+            ] if content == "two" && user_content == "three"
+        ));
+    }
+
+    #[test]
+    fn paged_message_queries_include_system_prompts_when_requested() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(snapshot_query.include_system);
+        assert!(messages_query.include_system);
+
+        let mut messages = vec![
+            Message::System {
+                content: "system zero".to_string(),
+            },
+            Message::User {
+                content: "one".to_string(),
+            },
+            Message::Assistant {
+                content: Some("two".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::System {
+                content: "system one".to_string(),
+            },
+            Message::User {
+                content: "three".to_string(),
+            },
+            Message::Assistant {
+                content: Some("four".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ];
+
+        let latest = message_page(messages.clone(), None, 3, true);
+        assert_eq!(latest.page.start, 3);
+        assert_eq!(latest.page.end, 6);
+        assert_eq!(latest.page.total, 6);
+        assert!(latest.page.has_older);
+        assert!(matches!(
+            latest.messages.first(),
+            Some(Message::System { content }) if content == "system one"
+        ));
+
+        messages.push(Message::System {
+            content: "system two".to_string(),
+        });
+        let older = message_page(messages, Some(latest.page.start), 3, true);
+        assert_eq!(older.page.start, 0);
+        assert_eq!(older.page.end, 3);
+        assert_eq!(older.page.total, 7);
+        assert!(!older.page.has_older);
+        assert!(matches!(
+            older.messages.first(),
+            Some(Message::System { content }) if content == "system zero"
+        ));
     }
 
     #[test]
