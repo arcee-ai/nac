@@ -4,5 +4,6 @@ images/nac
 nac.db
 .nac/
 .dots/
+.hypa/
 # local-only model client overrides
 crates/nac-core/src/model/client_local.rs

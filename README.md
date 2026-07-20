@@ -89,6 +89,39 @@ nac --sandbox --sandbox-backend smolvm
 
 smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mount flags as Podman. Network is always enabled for smolvm VMs. On macOS, smolvm runs natively via the Hypervisor.framework — no separate machine init step is needed.
 
+## Build from source
+
+To build from source, you will need the rust/cargo tool chain installed on your workstation
+
+```sh
+    # install rust
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    
+    # Follow the prompts (default install is fine), then load the environment:
+    source ~/.cargo/env
+
+    # verify
+    rustc --version && cargo --version
+```
+
+Now that you have the pre-reqs, you can proceed to build and install like so:
+
+```sh                                                                                                                                                                                                            
+    # build both apps
+    cargo build --release --workspace
+
+    # create the install dir (this is almost surely already on your PATH)
+    mkdir -p ~/bin
+
+    # install the apps
+    cp target/release/nac target/release/nac-web ~/bin/
+
+    # verify.  you may need to open a new shell if this fails
+    nac --help
+    nac-web --help
+```
+
+
 ## Model configuration
 
 Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
