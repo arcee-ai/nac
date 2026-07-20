@@ -272,6 +272,7 @@ test("production shell preserves privacy and mobile chat-only access", () => {
     assert.match(indexSource, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(indexSource, /Session Events/i);
+  assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(620px, 40vw\) minmax\(0, 1fr\)/s);
   const mobile = redesignSource.match(/@media \(max-width: 780px\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-sidebar \{[^}]*display: none/);

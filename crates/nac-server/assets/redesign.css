@@ -308,7 +308,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .session-layout {
   height: calc(100dvh - 72px);
   display: grid;
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: min(620px, 40vw) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
 }
