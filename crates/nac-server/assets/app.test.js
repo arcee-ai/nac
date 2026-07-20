@@ -47,6 +47,7 @@ function loadApp(overrides = {}) {
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
       renderSessionInfo, loadSessions, loadSnapshot, loadOlderOrchestratorMessages,
+      orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
       normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
       effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
       responseDurationAssignments, runTimingPresentation, updateRuntimeMetric,
@@ -282,10 +283,15 @@ test("session opening renders the workspace and starts snapshot and SSE without 
   const isolated = loadApp({ EventSource: FakeEventSource,
     fetch(path) { requests.push(path); return new Promise(() => {}); }, });
   installWorkspaceElements(isolated);
+  isolated.el.sessionWorkspace.hidden = true;
+  Object.defineProperty(isolated.el.promptInput, "scrollHeight", {
+    get() { return isolated.el.sessionWorkspace.hidden ? 0 : 50; },
+  });
   isolated.state.sessions = [{ summary: { session_id: "release-session", cwd: "/repo", model: "gpt-5" } }];
   isolated.state.snapshots.set("release-session", sessionSnapshot("release-session"));
   assert.doesNotThrow(() => isolated.openSession("release-session"));
   assert.equal(isolated.el.sessionWorkspace.hidden, false);
+  assert.equal(isolated.el.promptInput.style.height, "50px");
   assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=24&include_sessions=false"]);
   assert.equal(instances[0].url, "/sessions/release-session/events/stream?limit=512");
 });
@@ -526,16 +532,40 @@ test("session reordering uses pointer capture with touch targets and keyboard gr
   assert.equal(occurrences(card, /<circle /g), 6);
 });
 
-scenario("Transcript privacy", "orchestrator tool-call messages render blocks without a duplicate name summary", () => {
-  const html = ui.renderFocusMessage({ role: "assistant", content: "",
-    tool_calls: [
-      { function: { name: "thread_delete", arguments: '{"name":"ops/one"}' } },
-      { function: { name: "thread_delete", arguments: '{"name":"ops/two"}' } },
-    ], });
-  assert.equal(occurrences(html, /class="focus-tool-call"/g), 2);
-  assert.equal(occurrences(html, />thread_delete</g), 2);
-  assert.doesNotMatch(html, /thread_delete, thread_delete/);
-  assert.doesNotMatch(html, /focus-message-copy/);
+scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, and omit result rows", () => {
+  const html = ui.renderOrchestratorConversation({
+    messages: [
+      { role: "user", content: "build the feature" },
+      { role: "assistant", content: "private intermediate narration", reasoning_text: "private reasoning", tool_calls: [
+        { id: "call-workset", function: { name: "workset_define", arguments: '{"id":"ui-refresh","goal":"RAW_WORKSET_GOAL"}' } },
+        { id: "call-one", function: { name: "thread", arguments: '{"name":"impl/shell","action":"RAW_THREAD_ACTION"}' } },
+        { id: "call-two", function: { name: "thread", arguments: '{"name":"verify/ui","action":"RAW_THREAD_ACTION_TWO"}' } },
+      ] },
+      { role: "tool", tool_call_id: "call-workset", content: "RAW_WORKSET_RESULT" },
+      { role: "tool", tool_call_id: "call-one", content: "RAW_THREAD_RESULT" },
+      { role: "assistant", content: "The feature is complete.", reasoning_text: null, tool_calls: null },
+    ],
+    active_run: null,
+  });
+  assert.match(html, /build the feature/);
+  assert.match(html, /The feature is complete\./);
+  assert.match(html, /focus-tool-summary/);
+  assert.match(html, /workset_define/);
+  assert.match(html, /ui-refresh/);
+  assert.match(html, /threads dispatched/);
+  assert.match(html, /impl\/shell, verify\/ui/);
+  assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
+  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL|RAW_THREAD_ACTION/);
+});
+
+test("orchestrator fullscreen activity renders newest actions first", () => {
+  ui.state.currentId = "activity-order-session";
+  ui.state.events.set("activity-order-session", [
+    agentEnvelope(1, { type: "assistant_message", content: "older activity" }),
+    agentEnvelope(2, { type: "assistant_message", content: "newer activity" }),
+  ]);
+  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
+  assert.ok(html.indexOf("newer activity") < html.indexOf("older activity"));
 });
 
 scenario("Transcript privacy", "shared transcript message rendering excludes system rows without dropping supported message fields", () => {
@@ -544,21 +574,15 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   const assistant = ui.renderFocusMessage({ role: "assistant",
     reasoning_text: "reason <carefully>", content: "answer <safely>",
     tool_calls: [{ id: "call-<42>",
-      function: { name: "read<file>", arguments: '{"path":"RAW_TOOL_ARGUMENT_CANARY"}' },
+      function: { name: "thread", arguments: '{"name":"review/<unsafe>","action":"RAW_TOOL_ARGUMENT_CANARY"}' },
     }], }, { ordinal: 26, durationMs: 2_500 });
-  assert.match(assistant, /focus-message-copy is-reasoning/);
-  assert.match(assistant, />reasoning</);
-  assert.ok(assistant.indexOf("reason &lt;carefully&gt;") < assistant.indexOf("answer &lt;safely&gt;"));
-  assert.match(assistant, /focus-tool-call-id[^>]*>call-&lt;42&gt;</);
-  assert.match(assistant, /read&lt;file&gt;/);
-  assert.match(assistant, /title="call-&lt;42&gt;"/);
-  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|<pre>/);
-  assert.match(assistant, /response 00:00:02/);
-  assert.doesNotMatch(assistant, /<secret>|<carefully>|<safely>/);
+  assert.match(assistant, /focus-message is-tool-turn/);
+  assert.match(assistant, /threads dispatched/);
+  assert.match(assistant, /review\/&lt;unsafe&gt;/);
+  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;|response 00:00:02/);
+  assert.doesNotMatch(assistant, /<unsafe>|<carefully>|<safely>/);
   const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" }, { ordinal: 27 });
-  assert.match(tool, /Tool result/);
-  assert.doesNotMatch(tool, /RAW_TOOL_RESULT_CANARY/);
-  assert.match(tool, /call call-&lt;42&gt;/);
+  assert.equal(tool, "");
   const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] }, { ordinal: 28 });
   assert.match(empty, /focus-message-copy is-empty/);
   assert.match(empty, /empty message/);
@@ -651,6 +675,35 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
     scrollTop: 0, querySelector() { return null; }, });
   assert.equal(urls[1], "/sessions/page%2Fsession/messages?before=3&limit=24");
   assert.equal(isolated.state.messageWindows.get("page/session").loading, false);
+});
+
+test("orchestrator history auto-fills an underflowing viewport until scrolling is possible", () => {
+  const windowState = { hasOlder: true, loading: false };
+  assert.equal(ui.orchestratorHistoryNeedsFill({ scrollHeight: 620, clientHeight: 900 }, windowState), true);
+  assert.equal(ui.orchestratorHistoryNeedsFill({ scrollHeight: 902, clientHeight: 900 }, windowState), false);
+  assert.equal(ui.orchestratorHistoryNeedsFill({ scrollHeight: 620, clientHeight: 900 }, { ...windowState, loading: true }), false);
+  assert.equal(ui.orchestratorHistoryNeedsFill({ scrollHeight: 620, clientHeight: 900 }, { ...windowState, hasOlder: false }), false);
+
+  const requests = [];
+  const isolated = loadApp({ fetch(url) {
+      requests.push(url);
+      return new Promise(() => {});
+    }, });
+  const scroller = { scrollHeight: 620, clientHeight: 900, scrollTop: 0,
+    querySelector() { return null; }, };
+  isolated.state.currentId = "underfilled-session";
+  isolated.state.focusView = { type: "orchestrator" };
+  isolated.state.focusRenderId = 7;
+  isolated.state.snapshots.set("underfilled-session", sessionSnapshot("underfilled-session"));
+  isolated.state.messageWindows.set("underfilled-session", {
+    start: 24, end: 48, total: 80, hasOlder: true, loading: false, messages: [],
+  });
+  isolated.el.focusContent = { querySelector(selector) {
+      return selector === ".focus-chat" ? scroller : null;
+    }, };
+  isolated.ensureOrchestratorScrollableHistory(7);
+  assert.deepEqual(requests, ["/sessions/underfilled-session/messages?before=24&limit=24"]);
+  assert.equal(isolated.state.messageWindows.get("underfilled-session").loading, true);
 });
 
 test("session-list refreshes coalesce bursts, strengthen options, and accept only the final fresh ordering", async () => {

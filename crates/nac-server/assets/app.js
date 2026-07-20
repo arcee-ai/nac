@@ -899,9 +899,9 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   state.focusView = null;
   state.settingsFocus = null;
   state.settingsRequestGeneration += 1;
-  restoreComposerDraft(sessionId);
   el.sessionPicker.hidden = true;
   el.sessionWorkspace.hidden = false;
+  restoreComposerDraft(sessionId);
   if (updateHash) history.pushState(null, "", `#session/${encodeURIComponent(sessionId)}`);
   renderWorkspace();
   requestAnimationFrame(() => el.renameSession?.focus?.({ preventScroll: true }));
@@ -1310,6 +1310,25 @@ async function loadOlderOrchestratorMessages(scroller) {
       const label = loader.querySelector("span");
       if (label) label.textContent = "scroll up for earlier messages";
     }
+  }
+}
+
+function orchestratorHistoryNeedsFill(scroller, messageWindow) {
+  return Boolean(
+    scroller
+    && messageWindow?.hasOlder
+    && !messageWindow.loading
+    && scroller.scrollHeight <= scroller.clientHeight + 1
+  );
+}
+
+function ensureOrchestratorScrollableHistory(renderId = state.focusRenderId) {
+  if (renderId !== state.focusRenderId || state.focusView?.type !== "orchestrator") return;
+  const sessionId = state.currentId;
+  const scroller = el.focusContent?.querySelector?.(".focus-chat");
+  const messageWindow = sessionId ? state.messageWindows.get(sessionId) : null;
+  if (orchestratorHistoryNeedsFill(scroller, messageWindow)) {
+    loadOlderOrchestratorMessages(scroller);
   }
 }
 
@@ -2440,6 +2459,9 @@ function renderFocusView(snapshot) {
     el.focusContent.innerHTML = renderFocusSettings();
   }
   restoreFocusViewState(restoration, { renderId, prependAnchor });
+  if (view.type === "orchestrator") {
+    requestAnimationFrame(() => ensureOrchestratorScrollableHistory(renderId));
+  }
 }
 
 function settingsContextIsCurrent(requestGeneration, sessionId) {
@@ -2679,7 +2701,7 @@ function renderOrchestratorConversation(snapshot) {
       durationMs: durations.get(index) ?? null,
     })),
     ...pending.map((message) => ({ message, ordinal: null, durationMs: null })),
-  ].filter(({ message }) => message?.role !== "system");
+  ].filter(({ message }) => message?.role !== "system" && message?.role !== "tool");
   const transcript = transcriptEntries.map(({ message, ordinal, durationMs }) => renderFocusMessage(message, {
     ordinal,
     durationMs,
@@ -2689,7 +2711,7 @@ function renderOrchestratorConversation(snapshot) {
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "loading earlier messages" : "scroll up for earlier messages"}</span></div>`
     : "";
   const lifecycle = orchestratorLifecycle(snapshot);
-  const actions = buildOrchestratorActions(snapshot, { limit: false });
+  const actions = buildOrchestratorActions(snapshot, { limit: false }).reverse();
   const live = `<section class="focus-live"><div class="focus-column-heading"><span>Live activity</span><strong>${actions.length} persisted + observed</strong></div>${renderFocusActions(actions, { showTechnicalEvidence: true })}</section>`;
   return `<div class="focus-orchestrator-layout" data-state="${escapeAttr(lifecycle.state)}"><div class="focus-orchestrator-sidebar">${live}</div><section class="focus-chat"><div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div></section></div>`;
 }
@@ -3007,15 +3029,78 @@ function focusMessageRoleLabel(role) {
   if (role === "system") return "System";
   if (role === "user") return "You";
   if (role === "assistant") return "Orchestrator";
-  if (role === "tool") return "Tool result";
   return role || "Message";
 }
 
+function focusToolArguments(call) {
+  const raw = call?.function?.arguments;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function focusToolTarget(argumentsValue, ...keys) {
+  for (const key of keys) {
+    const value = argumentsValue?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function orchestratorToolSummaries(toolCalls) {
+  const calls = toolCalls || [];
+  const dispatched = calls
+    .filter((call) => call?.function?.name === "thread")
+    .map((call) => focusToolTarget(focusToolArguments(call), "name"))
+    .filter(Boolean);
+  const summaries = [];
+  let emittedDispatches = false;
+  for (const call of calls) {
+    const name = call?.function?.name || "tool";
+    const argumentsValue = focusToolArguments(call);
+    if (name === "thread") {
+      if (!emittedDispatches) {
+        summaries.push({ operation: "threads dispatched", target: dispatched.join(", ") });
+        emittedDispatches = true;
+      }
+      continue;
+    }
+    if (name.startsWith("workset_")) {
+      summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "id", "name") });
+      continue;
+    }
+    if (name === "threads") {
+      summaries.push({ operation: "threads listed", target: "" });
+      continue;
+    }
+    summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "name", "id") });
+  }
+  return summaries;
+}
+
+function renderOrchestratorToolTurn(message, { ordinal = null } = {}) {
+  const summaries = orchestratorToolSummaries(message?.tool_calls);
+  const body = summaries.map(({ operation, target }) => `<div class="focus-tool-summary"><span>${escapeHtml(operation)}</span>${target ? `<strong>${escapeHtml(target)}</strong>` : ""}</div>`).join("");
+  const ordinalLabel = ordinal === null
+    ? ""
+    : `<span class="focus-message-ordinal" title="Transcript ordinal among messages included by this query; not a durable message ID">#${escapeHtml(ordinal)}</span>`;
+  const meta = ordinalLabel ? `<div class="focus-message-meta">${ordinalLabel}</div>` : "";
+  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span>${meta}</div><div class="focus-message-body"><div class="focus-tool-summaries">${body}</div></div></article>`;
+}
+
 function renderFocusMessage(message, { ordinal = null, durationMs = null } = {}) {
-  if (message?.role === "system") return "";
+  if (message?.role === "system" || message?.role === "tool") return "";
   const role = message?.role || "message";
+  if (role === "assistant" && message?.tool_calls?.length) {
+    return renderOrchestratorToolTurn(message, { ordinal });
+  }
   const label = focusMessageRoleLabel(role);
-  const content = role !== "tool" && message?.content !== null && message?.content !== undefined
+  const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)
     : "";
   const reasoning = role === "assistant"
@@ -3023,24 +3108,14 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
     && message?.reasoning_text !== undefined
     ? String(message.reasoning_text)
     : "";
-  const calls = (message?.tool_calls || []).map((call) => {
-    const name = call.function?.name || "tool";
-    const callId = call.id
-      ? `<code class="focus-tool-call-id" title="${escapeAttr(call.id)}">${escapeHtml(call.id)}</code>`
-      : `<span class="evidence-unavailable">Call ID unavailable</span>`;
-    return `<div class="focus-tool-call"><div><span>Tool call</span><strong>${escapeHtml(name)}</strong>${callId}</div></div>`;
-  }).join("");
-  const toolResultId = role === "tool"
-    ? `<span class="focus-message-call-id">${message?.tool_call_id ? `call ${escapeHtml(message.tool_call_id)}` : "Call ID unavailable"}</span>`
-    : "";
   const reasoningBlock = reasoning
     ? `<div class="focus-message-copy is-reasoning"><span class="focus-message-content-kind">reasoning</span>${renderFocusMarkdown(reasoning)}</div>`
     : "";
   const copy = content
     ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
     : "";
-  const body = reasoningBlock || copy || calls
-    ? `${reasoningBlock}${copy}${calls}`
+  const body = reasoningBlock || copy
+    ? `${reasoningBlock}${copy}`
     : `<div class="focus-message-copy is-empty"><span class="focus-message-content-kind">empty message</span>${renderFocusMarkdown("[empty]")}</div>`;
   const ordinalLabel = message?.pending
     ? `<span class="focus-message-ordinal is-submitted" title="Pending user message from ${escapeAttr(message.pendingSource || "submission")}; removed when its canonical transcript row arrives">submitted · pending</span>`
@@ -3048,8 +3123,8 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
   const duration = durationMs !== null && durationMs !== undefined && Number.isFinite(Number(durationMs))
     ? `<span class="focus-message-duration" title="Response duration: ${escapeAttr(Number(durationMs).toLocaleString())} ms">response ${escapeHtml(formatDuration(Number(durationMs)))}</span>`
     : "";
-  const meta = ordinalLabel || duration || toolResultId
-    ? `<div class="focus-message-meta">${ordinalLabel}${duration}${toolResultId}</div>`
+  const meta = ordinalLabel || duration
+    ? `<div class="focus-message-meta">${ordinalLabel}${duration}</div>`
     : "";
   return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-label"><span class="focus-message-role">${escapeHtml(label)}</span>${meta}</div><div class="focus-message-body">${body}</div></article>`;
 }

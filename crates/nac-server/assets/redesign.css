@@ -551,7 +551,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .focus-message-meta > * { overflow-wrap: anywhere; }
 .focus-message-ordinal.is-submitted { color: #8a8a8a; }
 .focus-message-duration { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
-.focus-message-call-id { color: #777; }
 .focus-message-body { min-width: 0; display: grid; gap: 10px; }
 .focus-message-copy { min-width: 0; overflow-wrap: anywhere; color: #d0d0d0; font: 15px/1.62 var(--mono); }
 .focus-message-copy.is-reasoning { padding: 10px 12px; border-left: 2px solid #3d3d3d; background: #0b0b0b; color: #929292; font-size: 13px; }
@@ -567,12 +566,12 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .focus-message-copy pre, .focus-episode-copy pre { overflow: auto; margin: 10px 0; padding: 10px 11px; border: 1px solid #262626; border-radius: 7px; background: #090909; color: #a9a9a9; font: 12px/1.5 var(--mono); white-space: pre; }
 .focus-message-copy code, .focus-episode-copy code { color: #bdbdbd; font: .9em/1.4 var(--mono); }
 .focus-message-copy a, .focus-episode-copy a { color: #d2d2d2; text-decoration-color: #5c5c5c; }
-.focus-message[data-role="tool"] .focus-message-copy { color: #929292; font-size: 13px; line-height: 1.55; }
-.focus-tool-call { overflow: hidden; border: 1px solid #272727; border-radius: 9px; background: #0d0d0d; }
-.focus-tool-call > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; }
-.focus-tool-call span { color: #686868; font: 10px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
-.focus-tool-call strong { min-width: 0; margin-right: auto; overflow-wrap: anywhere; color: #c3c3c3; font: 13px/1 var(--mono); }
-.focus-tool-call-id { max-width: 45%; overflow: hidden; color: #777; font: 9px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.focus-message.is-tool-turn { padding-block: 8px; }
+.focus-message.is-tool-turn .focus-message-label { align-content: center; }
+.focus-tool-summaries { min-width: 0; display: grid; gap: 3px; }
+.focus-tool-summary { min-width: 0; display: flex; align-items: baseline; gap: 9px; font-family: var(--mono); }
+.focus-tool-summary span { flex: 0 0 auto; color: #858585; font-size: 11px; line-height: 1.35; }
+.focus-tool-summary strong { min-width: 0; overflow: hidden; color: #bcbcbc; font-size: 12px; font-weight: 500; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .focus-live { min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: 14px; border: 0; }
 .focus-activity h3, .focus-episodes h3 { margin: 0 0 10px; color: var(--ink-muted); font: 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 
