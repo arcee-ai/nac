@@ -67,6 +67,7 @@ nac --sandbox
 By default this mounts the current directory into the sandbox at `/workspace`.
 
 For a custom setup:
+
 - `--no-mount-cwd` disables the default current-directory mount
 - `--mount HOST:GUEST` adds a read-write mount
 - `--mount-ro HOST:GUEST` adds a read-only mount

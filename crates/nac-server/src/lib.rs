@@ -2012,8 +2012,11 @@ mod tests {
         write_managed_credential(
             &nac_home.join("arcee_auth.json"),
             serde_json::json!({
-                "type": "arcee_api_key",
-                "api_key": "rcai-server-test",
+                "type": "arcee_device_token",
+                "access_token": "arcee-access-server-test",
+                "refresh_token": "arcee-refresh-server-test",
+                "token_type": "bearer",
+                "expires_at_ms": u64::MAX,
                 "base_url": base_url,
                 "organization_id": "org-server-test",
                 "workspace_name": "server-test"
@@ -2347,7 +2350,7 @@ mod tests {
                 .unwrap_err();
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             assert!(error.to_string().contains("unsafe permissions 0644"));
-            assert!(!format!("{error:#}").contains("rcai-server-test"));
+            assert!(!format!("{error:#}").contains("arcee-access-server-test"));
             let response = ApiError::from(error);
             assert_eq!(response.status, StatusCode::BAD_REQUEST);
             assert!(response.message.contains("mode to 0600"));

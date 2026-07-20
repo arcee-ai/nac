@@ -22,6 +22,15 @@ fn acquire_arcee_auth_lock() -> Result<FileLock> {
     acquire_lock(&arcee_auth_lock_path()?)
 }
 
+pub(super) fn try_acquire_arcee_auth_lock() -> Result<Option<FileLock>> {
+    let path = arcee_auth_lock_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    FileLock::try_acquire(&path)
+}
+
 fn acquire_lock(path: &Path) -> Result<FileLock> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -310,7 +319,7 @@ pub(super) struct FileLock {
 }
 
 impl FileLock {
-    fn acquire(path: &Path) -> Result<Self> {
+    fn open_lock_file(path: &Path) -> Result<File> {
         validate_lock_destination(path)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(false).read(true).write(true);
@@ -326,8 +335,26 @@ impl FileLock {
             .with_context(|| format!("failed to open auth lock {}", path.display()))?;
         ensure_open_file_is_regular(&file, path, "auth lock")?;
         make_file_private(&file, path)?;
+        Ok(file)
+    }
+
+    fn acquire(path: &Path) -> Result<Self> {
+        let file = Self::open_lock_file(path)?;
         lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
         Ok(Self { file })
+    }
+
+    /// Attempts to take the lock without blocking. Returns `Ok(None)` when the
+    /// lock is already held (by another process or open file description), so
+    /// async callers can poll instead of parking a worker thread.
+    fn try_acquire(path: &Path) -> Result<Option<Self>> {
+        let file = Self::open_lock_file(path)?;
+        match try_lock_file(&file) {
+            Ok(true) => Ok(Some(Self { file })),
+            Ok(false) => Ok(None),
+            Err(error) => Err(anyhow::Error::new(error))
+                .with_context(|| format!("failed to lock {}", path.display())),
+        }
     }
 }
 
@@ -357,6 +384,14 @@ impl Drop for FileLock {
 
 fn lock_file(file: &File) -> io::Result<()> {
     FileExt::lock_exclusive(file)
+}
+
+fn try_lock_file(file: &File) -> io::Result<bool> {
+    match FileExt::try_lock_exclusive(file) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn unlock_file(file: &File) -> io::Result<()> {

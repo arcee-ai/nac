@@ -209,10 +209,13 @@ mod tests {
         }
     }
 
-    fn stored_arcee_auth(api_key: &str, base_url: &str) -> String {
+    fn stored_arcee_auth(access_token: &str, base_url: &str) -> String {
         json!({
-            "type": "arcee_api_key",
-            "api_key": api_key,
+            "type": "arcee_device_token",
+            "access_token": access_token,
+            "refresh_token": "refresh-test",
+            "token_type": "bearer",
+            "expires_at_ms": u64::MAX,
             "base_url": base_url,
             "organization_id": "org-test",
             "workspace_name": "workspace-test"
@@ -957,7 +960,7 @@ mod tests {
         write_test_credential(&env.home.join("arcee_auth.json"), &arcee);
 
         let loaded = arcee::read_stored_auth().unwrap();
-        assert_eq!(loaded.api_key, "rcai-test");
+        assert_eq!(loaded.access_token, "rcai-test");
         codex_auth_status().unwrap();
 
         arcee_auth_logout().unwrap();
