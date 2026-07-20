@@ -158,7 +158,6 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -185,7 +184,7 @@ mod tests {
             store_path: PathBuf::new(),
             session_id: None,
             worker_executable: None,
-            active_threads: Arc::new(Mutex::new(HashSet::new())),
+            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
             event_sink: EventSink::none(),
             backend,
             mcp: None,

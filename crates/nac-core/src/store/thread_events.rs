@@ -136,6 +136,8 @@ mod tests {
             ))
             .join("store.db");
         initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        crate::store::insert_test_session(&path, "session-b");
 
         for thread_name in ["worker-a", "worker-b"] {
             for index in 0..125 {
@@ -204,6 +206,7 @@ mod tests {
             ))
             .join("store.db");
         initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
         for value in ["one", "two", "three", "four", "five"] {
             append_thread_event(&path, "session-a", "worker-a", value).unwrap();
         }

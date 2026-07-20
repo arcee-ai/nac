@@ -981,13 +981,7 @@ impl App {
                     Tone::Muted,
                 );
             }
-            AgentEvent::ModelCallStarted {
-                thread_name,
-                iteration,
-            } => {
-                let actor = thread_name.unwrap_or_else(|| "model".to_string());
-                self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
-            }
+            AgentEvent::ModelCallStarted { .. } => {}
             AgentEvent::TokenUsageUpdated { .. } => {}
             AgentEvent::ToolCallStarted {
                 thread_name,
@@ -1090,9 +1084,7 @@ impl App {
                 };
                 self.push_timeline(name, detail, Tone::Success);
             }
-            AgentEvent::ThreadLog { name, line } => {
-                self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
-            }
+            AgentEvent::ThreadLog { .. } => {}
             AgentEvent::ThreadSteeringQueued {
                 name,
                 instruction_preview,

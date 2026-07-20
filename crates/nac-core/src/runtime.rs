@@ -11,7 +11,8 @@ use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
-    BackendKind, EffectiveModelSettings, ModelClient, ModelConfigurationError, ReasoningEffort,
+    managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
+    ModelConfigurationError, ReasoningEffort,
 };
 use crate::paths::PathContext;
 use crate::sandbox::{
@@ -218,6 +219,7 @@ impl SandboxOptions {
 pub struct WorkerDispatchOptions {
     pub session_id: String,
     pub thread_name: String,
+    pub dispatch_id: String,
     pub action: String,
     pub source_threads: Vec<String>,
     pub skills: Vec<String>,
@@ -424,20 +426,36 @@ pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
+    let backend = model.backend.or(config.model.backend);
+    let selected_managed_base_url = model
+        .backend
+        .and_then(managed_backend_base_url)
+        .map(str::to_string);
+    let base_url = model
+        .api_base_url
+        .clone()
+        .or_else(|| selected_managed_base_url.or_else(|| config.model.base_url.clone()));
+    let api_key_env = match (
+        &model.api_key_env,
+        backend.and_then(managed_backend_base_url),
+    ) {
+        // A managed backend always selects its stored credential mode unless
+        // the caller explicitly supplies a selector (which validation rejects).
+        (OptionalModelOption::Inherit, Some(_)) => None,
+        _ => model.api_key_env.resolve(configured_api_key_env(config)),
+    };
+
     EffectiveModelSettings::from_optional(
-        model.backend.or(config.model.backend),
+        backend,
         model
             .api_model
             .clone()
             .or_else(|| config.model.model.clone()),
-        model
-            .api_base_url
-            .clone()
-            .or_else(|| config.model.base_url.clone()),
+        base_url,
         model
             .reasoning_effort
             .resolve(config.model.reasoning_effort),
-        model.api_key_env.resolve(configured_api_key_env(config)),
+        api_key_env,
         model
             .extra_headers
             .clone()
@@ -533,6 +551,7 @@ pub async fn build_run_config(
                 session_id: Some(session_id.clone()),
                 initial_messages: Vec::new(),
                 thread_name: None,
+                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: remote_cwd.clone(),
                 config_cwd: config_cwd.clone(),
@@ -614,6 +633,7 @@ pub async fn build_run_config(
             session_id: Some(session_id.clone()),
             initial_messages: Vec::new(),
             thread_name: None,
+            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: workspace_cwd.clone(),
             config_cwd: config_cwd.clone(),
@@ -740,6 +760,7 @@ pub async fn build_managed_worker_config(
             session_id: Some(options.dispatch.session_id.clone()),
             initial_messages,
             thread_name: Some(options.dispatch.thread_name.clone()),
+            dispatch_id: Some(options.dispatch.dispatch_id.clone()),
             event_sink: EventSink::stderr_prefixed(),
             workspace_cwd,
             config_cwd,
@@ -936,6 +957,7 @@ async fn build_resume_config_from_snapshot(
             session_id: Some(snapshot.session_id.clone()),
             initial_messages: Vec::new(),
             thread_name: None,
+            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd,
             config_cwd,
@@ -1255,6 +1277,49 @@ mod tests {
     }
 
     #[test]
+    fn openai_to_managed_launch_normalizes_omitted_url_and_credentials() {
+        let config = complete_model_config();
+
+        for (backend, expected_base_url) in [
+            (
+                BackendKind::ChatGptCodexResponses,
+                crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+            ),
+            (
+                BackendKind::ArceeAuth,
+                crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
+        ] {
+            let settings = effective_model_settings(
+                &ModelOptions {
+                    backend: Some(backend),
+                    api_model: Some("managed-model".to_string()),
+                    ..ModelOptions::default()
+                },
+                &config,
+            )
+            .expect("managed selection must not inherit the OpenAI tuple");
+            assert_eq!(settings.backend, backend);
+            assert_eq!(settings.base_url, expected_base_url);
+            assert_eq!(settings.api_key_env, None);
+
+            let explicit = effective_model_settings(
+                &ModelOptions {
+                    backend: Some(backend),
+                    api_model: Some("managed-model".to_string()),
+                    api_base_url: Some("https://explicit.example/v1".to_string()),
+                    api_key_env: OptionalModelOption::Value("EXPLICIT_KEY".to_string()),
+                    ..ModelOptions::default()
+                },
+                &config,
+            )
+            .expect("explicit values must survive merge for validation");
+            assert_eq!(explicit.base_url, "https://explicit.example/v1");
+            assert_eq!(explicit.api_key_env.as_deref(), Some("EXPLICIT_KEY"));
+        }
+    }
+
+    #[test]
     fn optional_model_overrides_distinguish_inherit_value_and_clear() {
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
@@ -1289,7 +1354,7 @@ mod tests {
     }
 
     #[test]
-    fn configured_api_key_selectors_are_preserved_and_validated_exactly() {
+    fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_auth() {
         for selector in ["", "   ", " SURROUNDED_KEY "] {
             let mut config = complete_model_config();
             config.model.api_key_env = Some(selector.to_string());
@@ -1305,13 +1370,9 @@ mod tests {
         let mut managed = complete_model_config();
         managed.model.backend = Some(BackendKind::ArceeAuth);
         managed.model.base_url = Some("https://api.arcee.ai".to_string());
-        managed.model.api_key_env = Some("   ".to_string());
+        managed.model.api_key_env = Some("STALE_CONFIG_KEY".to_string());
         let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
-        assert_eq!(settings.api_key_env.as_deref(), Some("   "));
-        let error = ModelClient::from_effective_settings(settings)
-            .expect_err("managed backend must reject even a blank present selector");
-        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-        assert!(error.to_string().contains("is not supported"), "{error:#}");
+        assert_eq!(settings.api_key_env, None);
     }
 
     #[test]
@@ -1924,6 +1985,7 @@ url = "https://mcp.context7.com/mcp"
                 dispatch: WorkerDispatchOptions {
                     session_id: "session".to_string(),
                     thread_name: "impl".to_string(),
+                    dispatch_id: "test-dispatch".to_string(),
                     action: "work".to_string(),
                     source_threads: Vec::new(),
                     skills: Vec::new(),
@@ -2005,6 +2067,7 @@ url = "https://mcp.context7.com/mcp"
             dispatch: WorkerDispatchOptions {
                 session_id: session_id.to_string(),
                 thread_name: "impl".to_string(),
+                dispatch_id: "test-dispatch".to_string(),
                 action: "implement the next step".to_string(),
                 source_threads: vec!["auth".to_string(), "tests".to_string()],
                 skills: Vec::new(),
@@ -2718,6 +2781,7 @@ url = "https://mcp.context7.com/mcp"
                 dispatch: WorkerDispatchOptions {
                     session_id: "remote-session".to_string(),
                     thread_name: "impl".to_string(),
+                    dispatch_id: "test-dispatch".to_string(),
                     action: "do remote work".to_string(),
                     source_threads: Vec::new(),
                     skills: Vec::new(),
@@ -2839,6 +2903,7 @@ url = "https://mcp.context7.com/mcp"
                 dispatch: WorkerDispatchOptions {
                     session_id: "remote-session".to_string(),
                     thread_name: "impl".to_string(),
+                    dispatch_id: "test-dispatch".to_string(),
                     action: "do remote work".to_string(),
                     source_threads: Vec::new(),
                     skills: Vec::new(),
@@ -2912,6 +2977,7 @@ args = ["-c", {}]
                 dispatch: WorkerDispatchOptions {
                     session_id: "remote-session".to_string(),
                     thread_name: "impl".to_string(),
+                    dispatch_id: "test-dispatch".to_string(),
                     action: "do remote work".to_string(),
                     source_threads: Vec::new(),
                     skills: Vec::new(),
@@ -3000,6 +3066,7 @@ args = ["-c", {}]
                 dispatch: WorkerDispatchOptions {
                     session_id: "remote-session".to_string(),
                     thread_name: "impl".to_string(),
+                    dispatch_id: "test-dispatch".to_string(),
                     action: "do remote work".to_string(),
                     source_threads: Vec::new(),
                     skills: Vec::new(),

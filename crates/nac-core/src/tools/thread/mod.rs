@@ -108,6 +108,7 @@ pub fn thread_delete_definition() -> ToolDefinition {
 #[derive(Debug, Clone)]
 pub struct ParsedDispatchParams {
     pub thread_name: String,
+    pub dispatch_id: String,
     pub action: String,
     pub source_threads: Vec<String>,
     pub scheduled_skills: Vec<String>,
@@ -129,6 +130,7 @@ pub fn parse_dispatch_args(
 
     Ok(ParsedDispatchParams {
         thread_name,
+        dispatch_id: uuid::Uuid::new_v4().to_string(),
         action,
         source_threads,
         scheduled_skills,
@@ -139,8 +141,8 @@ pub fn parse_dispatch_args(
 
 /// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
 /// calls `run_worker`, folds worker usage, and maps the `WorkerRun` to a
-/// `ToolResult`.  Does **not** call `mark_thread_active` / `unmark_thread_active`
-/// — the caller manages the `active_threads` lifecycle.
+/// `ToolResult`. The caller registers the dispatch before this function;
+/// completion closes that exact identity and expires unresolved steering.
 pub async fn execute_parsed_dispatch(
     params: ParsedDispatchParams,
     runtime: &ToolRuntime,
@@ -148,6 +150,7 @@ pub async fn execute_parsed_dispatch(
 ) -> ToolResult {
     let ParsedDispatchParams {
         thread_name,
+        dispatch_id,
         action,
         source_threads,
         scheduled_skills,
@@ -167,6 +170,7 @@ pub async fn execute_parsed_dispatch(
         WorkerInvocation {
             session_id: &session_id,
             thread_name: &thread_name,
+            dispatch_id: &dispatch_id,
             action: &action,
             source_threads: &source_threads,
             scheduled_skills: &scheduled_skills,
@@ -175,36 +179,7 @@ pub async fn execute_parsed_dispatch(
     )
     .await;
 
-    let expire_store_path = runtime.store_path.clone();
-    let expire_session_id = session_id.clone();
-    let expire_thread_name = thread_name.clone();
-    let expired_result = tokio::task::spawn_blocking(move || {
-        crate::store::expire_thread_steering(
-            &expire_store_path,
-            &expire_session_id,
-            &expire_thread_name,
-        )
-    })
-    .await;
-    match expired_result {
-        Ok(Ok(expired)) => {
-            for record in expired {
-                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
-                    name: thread_name.clone(),
-                    steering_id: record.id,
-                    instruction_preview: record.instruction.chars().take(160).collect(),
-                });
-            }
-        }
-        Ok(Err(error)) => runtime.event_sink.emit(AgentEvent::Error {
-            thread_name: Some(thread_name.clone()),
-            message: format!("failed to expire undelivered steering: {error}"),
-        }),
-        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
-            thread_name: Some(thread_name.clone()),
-            message: format!("steering expiry task failed: {error}"),
-        }),
-    }
+    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
 
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
@@ -299,7 +274,8 @@ pub async fn execute_dispatch(
         Err(e) => return e,
     };
     let thread_name = params.thread_name.clone();
-    if !mark_thread_active(runtime, &thread_name).await {
+    let dispatch_id = params.dispatch_id.clone();
+    if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
         return ToolResult {
             content: format!(
                 "Thread '{}' is already running; retry after the current dispatch completes.",
@@ -309,7 +285,9 @@ pub async fn execute_dispatch(
         };
     }
     let result = execute_parsed_dispatch(params, runtime, client).await;
-    unmark_thread_active(runtime, &thread_name).await;
+    if let Some(session_id) = runtime.session_id.as_deref() {
+        close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
+    }
     result
 }
 
@@ -404,7 +382,7 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
         Err(e) => return e,
     };
 
-    if is_thread_active(runtime, &thread_name).await {
+    if is_thread_active(runtime, &thread_name) {
         return ToolResult {
             content: format!(
                 "Thread '{}' is currently running; wait for it to finish before deleting it.",
@@ -502,22 +480,42 @@ fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
         .max(MIN_THREAD_TIMEOUT_SECS)
 }
 
-pub(crate) async fn mark_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
-    let mut active = runtime.active_threads.lock().await;
-    if active.contains(thread_name) {
-        false
-    } else {
-        active.insert(thread_name.to_string());
-        true
+pub(crate) fn mark_thread_active(
+    runtime: &ToolRuntime,
+    thread_name: &str,
+    dispatch_id: &str,
+) -> bool {
+    runtime.active_threads.mark(thread_name, dispatch_id)
+}
+
+pub(crate) fn close_thread_dispatch(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+) {
+    match runtime
+        .active_threads
+        .close(&runtime.store_path, session_id, thread_name, dispatch_id)
+    {
+        Ok(expired) => {
+            for record in expired {
+                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
+                    name: record.thread_name,
+                    steering_id: record.id,
+                    instruction_preview: record.instruction.chars().take(160).collect(),
+                });
+            }
+        }
+        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
+            thread_name: Some(thread_name.to_string()),
+            message: format!("failed to expire undelivered steering: {error}"),
+        }),
     }
 }
 
-pub(crate) async fn unmark_thread_active(runtime: &ToolRuntime, thread_name: &str) {
-    runtime.active_threads.lock().await.remove(thread_name);
-}
-
-async fn is_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
-    runtime.active_threads.lock().await.contains(thread_name)
+fn is_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
+    runtime.active_threads.is_active(thread_name)
 }
 
 #[cfg(test)]
@@ -525,7 +523,6 @@ mod tests {
     use super::*;
     use crate::tools::test_runtime;
     use serde_json::json;
-    use std::collections::HashSet;
     use std::sync::Arc;
 
     fn skill_record(
@@ -692,85 +689,49 @@ mod tests {
         assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
     }
 
-    // ------------------------------------------------------------------
-    // Active threads lifecycle tests
-    // ------------------------------------------------------------------
+    #[test]
+    fn queue_close_ordering_and_name_reuse_are_dispatch_exact() {
+        let mut runtime = test_runtime();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        runtime.store_path = std::env::temp_dir()
+            .join(format!("nac_registry_ordering_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "test-session");
 
-    /// Verify the basic mark/unmark lifecycle: marking a new thread succeeds,
-    /// marking it again fails, and unmarking removes it.
-    #[tokio::test]
-    async fn test_active_threads_lifecycle() {
-        let runtime = test_runtime();
-        let active = runtime.active_threads.clone();
-
-        // Initially no threads are active.
-        assert!(active.lock().await.is_empty());
-
-        // Mark thread A → succeeds (returns true).
-        assert!(mark_thread_active(&runtime, "A").await);
-        assert!(active.lock().await.contains("A"));
-
-        // Mark thread A again → fails (returns false, already active).
-        assert!(!mark_thread_active(&runtime, "A").await);
-
-        // Mark thread B → succeeds.
-        assert!(mark_thread_active(&runtime, "B").await);
-        assert!(active.lock().await.contains("B"));
-
-        // Unmark thread A → removes only A.
-        unmark_thread_active(&runtime, "A").await;
-        assert!(!active.lock().await.contains("A"));
-        assert!(active.lock().await.contains("B"), "B should still be active");
-
-        // Unmark thread B.
-        unmark_thread_active(&runtime, "B").await;
-        assert!(active.lock().await.is_empty());
-    }
-
-    /// Simulate the `marked_by_us` pattern from `execute_with_dag`: a
-    /// pre-existing thread that was already active should NOT be unmarked
-    /// by us, because `mark_thread_active` returns false for it and it
-    /// never enters the `marked_by_us` set.
-    #[tokio::test]
-    async fn test_marked_by_us_prevents_clobbering_preexisting_threads() {
-        let runtime = test_runtime();
-        let active = runtime.active_threads.clone();
-
-        // Pre-existing thread "preexisting" is already active.
-        active.lock().await.insert("preexisting".to_string());
-
-        // Simulate execute_with_dag's marking phase.
-        let mut marked_by_us: HashSet<String> = HashSet::new();
-
-        // Try to mark "preexisting" → returns false, not added to marked_by_us.
-        if mark_thread_active(&runtime, "preexisting").await {
-            marked_by_us.insert("preexisting".to_string());
-        }
-        assert!(
-            !marked_by_us.contains("preexisting"),
-            "pre-existing thread should not be in marked_by_us"
+        assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
+        runtime
+            .active_threads
+            .queue(&runtime.store_path, "test-session", "worker", "for A")
+            .unwrap()
+            .unwrap();
+        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
+        assert!(!runtime.active_threads.is_active("worker"));
+        assert_eq!(
+            crate::store::list_thread_steering(&runtime.store_path, "test-session").unwrap()[0]
+                .status,
+            "expired",
+            "queue-before-close must be expired"
         );
 
-        // Mark a new thread "new_thread" → returns true, added to marked_by_us.
-        if mark_thread_active(&runtime, "new_thread").await {
-            marked_by_us.insert("new_thread".to_string());
-        }
-        assert!(marked_by_us.contains("new_thread"));
+        assert!(mark_thread_active(&runtime, "worker", "dispatch-b"));
+        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
+        let reused = runtime
+            .active_threads
+            .queue(&runtime.store_path, "test-session", "worker", "for B")
+            .unwrap()
+            .unwrap();
+        assert_eq!(reused.dispatch_id, "dispatch-b");
 
-        // Simulate the unmarking phase: only unmark threads we marked.
-        for name in &marked_by_us {
-            unmark_thread_active(&runtime, name).await;
-        }
-
-        // "preexisting" should still be active (we didn't unmark it).
-        assert!(
-            active.lock().await.contains("preexisting"),
-            "pre-existing thread should not be clobbered"
-        );
-        // "new_thread" should be unmarked.
-        assert!(
-            !active.lock().await.contains("new_thread"),
-            "our thread should be unmarked"
-        );
+        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
+        assert!(runtime
+            .active_threads
+            .queue(&runtime.store_path, "test-session", "worker", "too late",)
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
     }
 }

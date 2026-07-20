@@ -43,12 +43,23 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/messages`
+- `GET /sessions/{session_id}/threads/{thread_name}/events`
 - `GET /sessions/{session_id}/config`
 - `PATCH /sessions/{session_id}/config`
+- `POST /sessions/{session_id}/overview`
 - `POST /sessions/{session_id}/runs`
+- `POST /sessions/{session_id}/steering`
+- `POST /sessions/{session_id}/threads/{thread_name}/steering`
 - `GET /sessions/{session_id}/events?after_sequence_id=0`
 - `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
 - `POST /sessions/{session_id}/cancel-active-run`
+
+The web server is an unauthenticated local control plane: it accepts only IPv4/IPv6 loopback binds and local `Host` values, and browser requests must be same-origin. Originless requests remain accepted for local CLI and `curl` clients. Anyone able to issue local requests is trusted, so do not expose `nac-web` through a remote listener or proxy.
+
+Snapshot messages can be bounded with `message_limit`; only then does snapshot `include_system=true` affect the selected page and add `message_page`/`message_cycle`. `GET .../messages` pages backward with `before` and `limit` (and accepts `include_system`), while thread events page with `before_id` and `limit` and return `next_before_id`. Persisted snapshot and initial thread-event-page baselines carry `thread_event_boundary: {epoch_id, sequence_id}`; merge only later envelopes from the same epoch. SSE first reports `{epoch_id, replay_boundary_sequence_id}` and supports sequence replay within that epoch. Finite responses may be gzip-compressed; SSE is never compressed.
+
+The store schema is version 2 and upgrades forward. Back up each store before upgrading; v2 stores must not be opened with older binaries or downgraded. Do not use mixed-version writers against one store. Parent binaries and custom worker executables must use matching releases; mixed versions are unsupported because the required `--dispatch-id` worker protocol is version-coupled. Operational tool telemetry is intentionally lossy and fail-closed: tool/log/error text is omitted or sanitized before persistence and streaming. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view. `/assets/app.css` is a compatibility alias for `/assets/redesign.css`. Generating an overview invokes model inference and can consume provider tokens or incur cost.
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
 

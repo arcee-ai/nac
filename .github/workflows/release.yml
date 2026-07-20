@@ -3,6 +3,7 @@ name: Edge Release
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -77,6 +78,7 @@ jobs:
           path: dist/nac-${{ matrix.target }}.tar.gz
 
   publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:

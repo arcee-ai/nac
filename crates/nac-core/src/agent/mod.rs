@@ -14,9 +14,9 @@ use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
+mod dag;
 mod preview;
 mod tool_exec;
-mod dag;
 
 #[cfg(test)]
 mod live_tests;
@@ -38,6 +38,7 @@ pub struct AgentConfig {
     pub session_id: Option<String>,
     pub initial_messages: Vec<Message>,
     pub thread_name: Option<String>,
+    pub dispatch_id: Option<String>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
     /// Local cwd for nac config/store paths; differs from workspace_cwd for SSH.
@@ -61,6 +62,8 @@ pub struct Agent {
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
+    steering_dispatch_id: Option<String>,
+    appended_steering_ids: HashSet<i64>,
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
@@ -256,7 +259,7 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
-                active_threads: Arc::new(Mutex::new(HashSet::new())),
+                active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
@@ -268,6 +271,8 @@ impl Agent {
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
+            steering_dispatch_id: config.dispatch_id,
+            appended_steering_ids: HashSet::new(),
             last_usage: None,
         })
     }
@@ -285,6 +290,7 @@ impl Agent {
                 session_id: None,
                 initial_messages: Vec::new(),
                 thread_name: None,
+                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),
                 config_cwd: workspace_cwd,
@@ -318,11 +324,6 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
-        // Clear any stale active_threads from a previous turn that was
-        // cancelled or panicked. At the start of a new turn, no threads
-        // should be running — prior child processes were killed by kill_on_drop.
-        self.tool_runtime.active_threads.lock().await.clear();
-
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
@@ -493,8 +494,13 @@ impl Agent {
         self.tool_runtime.event_sink = sink;
     }
 
-    pub fn active_threads_handle(&self) -> Arc<Mutex<HashSet<String>>> {
+    pub fn active_threads_handle(&self) -> Arc<crate::tools::ActiveThreadRegistry> {
         self.tool_runtime.active_threads.clone()
+    }
+
+    pub fn set_steering_dispatch_id(&mut self, dispatch_id: Option<String>) {
+        self.steering_dispatch_id = dispatch_id;
+        self.appended_steering_ids.clear();
     }
 
     /// Restore a stored transcript while keeping the current system prompt.
@@ -511,54 +517,79 @@ impl Agent {
         let Some(session_id) = self.tool_runtime.session_id.clone() else {
             return Ok(0);
         };
+        let dispatch_id = self
+            .steering_dispatch_id
+            .clone()
+            .ok_or_else(|| anyhow!("steering dispatch id is unavailable"))?;
         let thread_name = self.thread_name.clone();
-        let steering_target = thread_name
-            .as_deref()
-            .unwrap_or(crate::store::ORCHESTRATOR_STEERING_TARGET)
-            .to_string();
         let store_path = self.tool_runtime.store_path.clone();
-        let session_id_for_store = session_id.clone();
-        let steering_target_for_store = steering_target.clone();
+        let claim_store_path = store_path.clone();
+        let claim_session_id = session_id.clone();
+        let claim_dispatch_id = dispatch_id.clone();
         let records = tokio::task::spawn_blocking(move || {
             crate::store::claim_thread_steering(
-                &store_path,
-                &session_id_for_store,
-                &steering_target_for_store,
+                &claim_store_path,
+                &claim_session_id,
+                &claim_dispatch_id,
             )
         })
         .await
         .map_err(|error| anyhow!("steering claim task failed: {error}"))??;
 
+        let message_checkpoint = self.messages.len();
+        let mut staged_ids = Vec::new();
         for record in &records {
+            if self.appended_steering_ids.insert(record.id) {
+                staged_ids.push(record.id);
+                if thread_name.is_some() {
+                    self.messages.push(Message::User {
+                        content: format!(
+                            "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
+                            record.instruction
+                        ),
+                    });
+                } else {
+                    self.messages.push(Message::User {
+                        content: record.instruction.clone(),
+                    });
+                }
+            }
+        }
+
+        let steering_ids = records.iter().map(|record| record.id).collect::<Vec<_>>();
+        if let Err(error) = crate::store::acknowledge_thread_steering_batch(
+            &store_path,
+            &steering_ids,
+            &session_id,
+            &dispatch_id,
+        ) {
+            self.messages.truncate(message_checkpoint);
+            for id in &staged_ids {
+                self.appended_steering_ids.remove(id);
+            }
+            return Err(error);
+        }
+
+        for record in records {
             if let Some(thread_name) = &thread_name {
                 self.emit(AgentEvent::ThreadSteeringDelivered {
                     name: thread_name.clone(),
                     steering_id: record.id,
                     instruction_preview: preview(&record.instruction, 160),
                 });
-                self.messages.push(Message::User {
-                    content: format!(
-                        "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
-                        record.instruction
-                    ),
-                });
             } else {
                 self.emit(AgentEvent::OrchestratorSteeringDelivered {
                     steering_id: record.id,
                     instruction_preview: preview(&record.instruction, 160),
                 });
-                self.messages.push(Message::User {
-                    content: record.instruction.clone(),
-                });
             }
         }
-        Ok(records.len())
+        Ok(staged_ids.len())
     }
 
     async fn append_pending_steering_checked(&mut self) -> Result<usize> {
         match self.append_pending_steering().await {
             Ok(count) => Ok(count),
-            Err(error) if crate::store::is_sqlite_busy(&error) => Ok(0),
             Err(error) => {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
@@ -598,6 +629,7 @@ mod tests {
                 session_id: None,
                 initial_messages: Vec::new(),
                 thread_name: None,
+                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("/resolved/workspace"),
                 config_cwd: PathBuf::from("/resolved/workspace"),
@@ -696,6 +728,7 @@ mod tests {
                     session_id: None,
                     initial_messages: Vec::new(),
                     thread_name: None,
+                    dispatch_id: None,
                     event_sink: EventSink::none(),
                     workspace_cwd: PathBuf::from("."),
                     config_cwd: PathBuf::from("."),
@@ -780,7 +813,7 @@ Here's the quick summary of what was discovered:\n\n\
     }
 
     #[tokio::test]
-    async fn worker_claims_targeted_steering_into_its_own_conversation() {
+    async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -789,6 +822,7 @@ Here's the quick summary of what was discovered:\n\n\
             .join(format!("nac_agent_steering_{unique}"))
             .join("store.db");
         crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session");
         let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut agent = Agent::with_config(
             ModelClient::new_for_test(),
@@ -798,6 +832,7 @@ Here's the quick summary of what was discovered:\n\n\
                 session_id: Some("session".to_string()),
                 initial_messages: Vec::new(),
                 thread_name: Some("impl/ui".to_string()),
+                dispatch_id: Some("worker-dispatch".to_string()),
                 event_sink: EventSink::channel(events_tx),
                 workspace_cwd: PathBuf::from("."),
                 config_cwd: PathBuf::from("."),
@@ -813,25 +848,83 @@ Here's the quick summary of what was discovered:\n\n\
             },
         )
         .unwrap();
-        let queued = crate::store::queue_thread_steering(
+        let message_checkpoint = agent.messages.len();
+        let first = crate::store::queue_thread_steering(
             &store_path,
             "session",
             "impl/ui",
+            "worker-dispatch",
             "Keep the picker keyboard accessible.",
         )
         .unwrap();
+        let second = crate::store::queue_thread_steering(
+            &store_path,
+            "session",
+            "impl/ui",
+            "worker-dispatch",
+            "Preserve visible focus states.",
+        )
+        .unwrap();
+        let connection = rusqlite::Connection::open(&store_path).unwrap();
+        connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER fail_second_steering_ack
+                 BEFORE UPDATE OF status ON thread_steering
+                 WHEN OLD.id = {} AND NEW.status = 'delivered'
+                 BEGIN
+                     SELECT RAISE(FAIL, 'forced batch acknowledgement failure');
+                 END;",
+                second.id
+            ))
+            .unwrap();
 
-        assert_eq!(agent.append_pending_steering().await.unwrap(), 1);
+        assert!(agent.append_pending_steering().await.is_err());
+        assert_eq!(agent.messages.len(), message_checkpoint);
+        assert!(agent.appended_steering_ids.is_empty());
+        assert!(events_rx.try_recv().is_err());
+        let claimed = crate::store::list_thread_steering(&store_path, "session").unwrap();
+        assert_eq!(claimed.len(), 2);
+        assert!(claimed.iter().all(|record| record.status == "claimed"));
+
+        connection
+            .execute_batch("DROP TRIGGER fail_second_steering_ack")
+            .unwrap();
+        assert_eq!(agent.append_pending_steering().await.unwrap(), 2);
         assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
-        assert!(matches!(
-            agent.messages.last(),
-            Some(Message::User { content })
-                if content.contains("Keep the picker keyboard accessible.")
-        ));
-        assert!(matches!(
-            events_rx.try_recv().unwrap(),
-            AgentEvent::ThreadSteeringDelivered { steering_id, .. } if steering_id == queued.id
-        ));
+        let appended = agent.messages[message_checkpoint..]
+            .iter()
+            .filter_map(|message| match message {
+                Message::User { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(appended.len(), 2);
+        assert_eq!(
+            appended
+                .iter()
+                .filter(|content| content.contains("Keep the picker keyboard accessible."))
+                .count(),
+            1
+        );
+        assert_eq!(
+            appended
+                .iter()
+                .filter(|content| content.contains("Preserve visible focus states."))
+                .count(),
+            1
+        );
+        assert!(crate::store::list_thread_steering(&store_path, "session")
+            .unwrap()
+            .iter()
+            .all(|record| record.status == "delivered"));
+        let delivered_ids = [events_rx.try_recv().unwrap(), events_rx.try_recv().unwrap()].map(
+            |event| match event {
+                AgentEvent::ThreadSteeringDelivered { steering_id, .. } => steering_id,
+                event => panic!("expected delivered event, got {event:?}"),
+            },
+        );
+        assert_eq!(delivered_ids, [first.id, second.id]);
+        assert!(events_rx.try_recv().is_err());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -846,6 +939,7 @@ Here's the quick summary of what was discovered:\n\n\
             .join(format!("nac_orchestrator_steering_{unique}"))
             .join("store.db");
         crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session");
         let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut agent = Agent::with_config(
             ModelClient::new_for_test(),
@@ -855,6 +949,7 @@ Here's the quick summary of what was discovered:\n\n\
                 session_id: Some("session".to_string()),
                 initial_messages: Vec::new(),
                 thread_name: None,
+                dispatch_id: Some("run-dispatch".to_string()),
                 event_sink: EventSink::channel(events_tx),
                 workspace_cwd: PathBuf::from("."),
                 config_cwd: PathBuf::from("."),
@@ -875,6 +970,7 @@ Here's the quick summary of what was discovered:\n\n\
             &store_path,
             "session",
             crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-dispatch",
             instruction,
         )
         .unwrap();

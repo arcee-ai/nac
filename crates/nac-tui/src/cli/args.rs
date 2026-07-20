@@ -223,6 +223,10 @@ pub(super) struct WorkerDispatchArgs {
     #[arg(long)]
     pub(super) thread_name: String,
 
+    /// Exact identity for this managed worker dispatch
+    #[arg(long, hide = true)]
+    pub(super) dispatch_id: String,
+
     /// Action for the managed worker dispatch
     #[arg(long)]
     pub(super) action: String,
@@ -564,11 +568,16 @@ mod tests {
         config.model.api_key_env = Some("CONFIG_API_KEY".to_string());
         config.model.reasoning_effort = Some(ReasoningEffort::High);
 
-        for (backend, expected_backend) in [
-            ("arcee-auth", BackendKind::ArceeAuth),
+        for (backend, expected_backend, expected_base_url) in [
+            (
+                "arcee-auth",
+                BackendKind::ArceeAuth,
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
             (
                 "chatgpt-codex-responses",
                 BackendKind::ChatGptCodexResponses,
+                nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
             ),
         ] {
             let cli = RunCli::try_parse_from([
@@ -584,7 +593,7 @@ mod tests {
             let expected = nac_core::model::EffectiveModelSettings::new(
                 expected_backend,
                 "config-model".to_string(),
-                "https://config.example/v1".to_string(),
+                expected_base_url.to_string(),
                 None,
                 None,
                 std::collections::BTreeMap::new(),
@@ -593,7 +602,7 @@ mod tests {
             assert_eq!(settings, expected, "backend {backend}");
             nac_core::model::validate_backend_api_key_env(
                 expected_backend,
-                Some("https://config.example/v1"),
+                Some(expected_base_url),
                 None,
             )
             .unwrap();
@@ -787,6 +796,8 @@ mod tests {
             "session",
             "--thread-name",
             "thread",
+            "--dispatch-id",
+            "dispatch-123",
             "--action",
             "work",
             "--backend",
@@ -823,6 +834,8 @@ mod tests {
             "session",
             "--thread-name",
             "thread",
+            "--dispatch-id",
+            "dispatch-123",
             "--action",
             "work",
             "--extra-headers",

@@ -27,25 +27,16 @@ pub fn write_session_overview(
     let generated_at = now_utc();
     conn.execute(
         "INSERT INTO session_overviews
-         (session_id, status, focus_json, completed_json, blockers_json,
-          next_steps_json, model, generated_at, source_updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         (session_id, summary, model, generated_at, source_updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(session_id) DO UPDATE SET
-             status = excluded.status,
-             focus_json = excluded.focus_json,
-             completed_json = excluded.completed_json,
-             blockers_json = excluded.blockers_json,
-             next_steps_json = excluded.next_steps_json,
+             summary = excluded.summary,
              model = excluded.model,
              generated_at = excluded.generated_at,
              source_updated_at = excluded.source_updated_at",
         params![
             session_id,
             summary.trim(),
-            "[]",
-            "[]",
-            "[]",
-            "[]",
             model,
             generated_at,
             source_updated_at,
@@ -68,19 +59,19 @@ pub fn read_session_overview(
     let conn = open_runtime_connection(path)?;
     Ok(conn
         .query_row(
-        "SELECT session_id, status, model, generated_at, source_updated_at
+            "SELECT session_id, summary, model, generated_at, source_updated_at
          FROM session_overviews
          WHERE session_id = ?1",
-        params![session_id],
-        |row| {
-            Ok(SessionOverviewRecord {
-                session_id: row.get(0)?,
-                summary: row.get(1)?,
-                model: row.get(2)?,
-                generated_at: row.get(3)?,
-                source_updated_at: row.get(4)?,
-            })
-        },
+            params![session_id],
+            |row| {
+                Ok(SessionOverviewRecord {
+                    session_id: row.get(0)?,
+                    summary: row.get(1)?,
+                    model: row.get(2)?,
+                    generated_at: row.get(3)?,
+                    source_updated_at: row.get(4)?,
+                })
+            },
         )
         .optional()?)
 }

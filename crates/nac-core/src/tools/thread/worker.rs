@@ -146,6 +146,7 @@ impl WorkerTimeoutTrace {
 pub(super) struct WorkerInvocation<'a> {
     pub(super) session_id: &'a str,
     pub(super) thread_name: &'a str,
+    pub(super) dispatch_id: &'a str,
     pub(super) action: &'a str,
     pub(super) source_threads: &'a [String],
     pub(super) scheduled_skills: &'a [String],
@@ -207,6 +208,8 @@ pub(super) async fn run_worker(
         .arg(invocation.session_id)
         .arg("--thread-name")
         .arg(invocation.thread_name)
+        .arg("--dispatch-id")
+        .arg(invocation.dispatch_id)
         .arg("--action")
         .arg(invocation.action)
         .arg("--store-path")

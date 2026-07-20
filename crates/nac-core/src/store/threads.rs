@@ -114,14 +114,22 @@ pub fn thread_read(path: &Path, session_id: &str, thread_name: &str) -> Result<V
 
 pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result<bool> {
     let mut conn = open_runtime_connection(path)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute(
-        "DELETE FROM episodes WHERE thread_name = ?1 AND session_id = ?2",
-        params![thread_name, session_id],
+        "DELETE FROM thread_steering WHERE session_id = ?1 AND thread_name = ?2",
+        params![session_id, thread_name],
+    )?;
+    tx.execute(
+        "DELETE FROM thread_events WHERE session_id = ?1 AND thread_name = ?2",
+        params![session_id, thread_name],
+    )?;
+    tx.execute(
+        "DELETE FROM episodes WHERE session_id = ?1 AND thread_name = ?2",
+        params![session_id, thread_name],
     )?;
     let deleted = tx.execute(
-        "DELETE FROM threads WHERE name = ?1 AND session_id = ?2",
-        params![thread_name, session_id],
+        "DELETE FROM threads WHERE session_id = ?1 AND name = ?2",
+        params![session_id, thread_name],
     )?;
     tx.commit()?;
     Ok(deleted > 0)

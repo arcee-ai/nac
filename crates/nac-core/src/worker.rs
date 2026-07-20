@@ -163,6 +163,7 @@ mod tests {
                 session_id: None,
                 initial_messages: messages.clone(),
                 thread_name: Some("impl".to_string()),
+                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("."),
                 config_cwd: PathBuf::from("."),

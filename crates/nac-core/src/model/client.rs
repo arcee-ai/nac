@@ -380,11 +380,12 @@ impl ModelClient {
             self.arcee_credential_source,
             Some(ArceeCredentialSource::StoredLogin)
         ));
-        let token = arcee::fresh_access_token(&self.client).await?;
+        let token = arcee::fresh_access_token(&self.client, &self.base_url).await?;
         match self.try_post_arcee_auth(url, body, &token).await {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
-                let refreshed = arcee::force_refresh_access_token(&self.client, &token).await?;
+                let refreshed =
+                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token).await?;
                 self.try_post_arcee_auth(url, body, &refreshed)
                     .await
                     .map_err(|error| anyhow!(error.message))

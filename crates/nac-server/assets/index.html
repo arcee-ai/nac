@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>nac</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/assets/redesign.css?v=quality-12" />
   </head>
   <body>
@@ -25,7 +22,7 @@
         <main class="session-browser">
           <div class="session-list-heading">
             <div class="session-list-title">
-              <h1 id="pickerTitle">All sessions</h1>
+              <h1 id="pickerTitle" tabindex="-1">All sessions</h1>
               <span id="pickerSessionTotal">0</span>
             </div>
             <button id="newSessionBtn" class="picker-new-session icon-button" type="button" aria-label="New session" title="New session">
@@ -125,11 +122,12 @@
               <span>Thread</span><strong id="composerTargetName"></strong>
               <button id="clearTarget" type="button" aria-label="Clear thread target">×</button>
             </div>
-            <textarea id="promptInput" rows="1" spellcheck="false" placeholder="Message the orchestrator · / for commands" aria-label="Message the orchestrator"></textarea>
+            <textarea id="promptInput" rows="1" spellcheck="false" placeholder="Message the orchestrator · / for commands" aria-label="Message the orchestrator" role="combobox" aria-autocomplete="list" aria-controls="commandMenu" aria-expanded="false" aria-describedby="commandHint"></textarea>
+            <span id="commandHint" class="sr-only">Type slash to open session commands. Use the arrow keys to choose a command.</span>
             <button id="sendPrompt" class="composer-send" type="submit" aria-label="Send">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg>
             </button>
-            <div id="commandMenu" class="command-menu" hidden></div>
+            <div id="commandMenu" class="command-menu" role="listbox" aria-label="Session commands" hidden></div>
           </form>
         </div>
       </section>
@@ -146,9 +144,9 @@
       <div id="drawerContent" class="drawer-content"></div>
     </aside>
 
-    <dialog id="launchDialog" class="modal">
+    <dialog id="launchDialog" class="modal" aria-labelledby="launchDialogTitle">
       <form id="launchForm" method="dialog" class="modal-form">
-        <header class="modal-header"><h2>new session</h2><button class="icon-button" type="button" data-close-dialog="launchDialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></header>
+        <header class="modal-header"><h2 id="launchDialogTitle">new session</h2><button class="icon-button" type="button" data-close-dialog="launchDialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></header>
         <fieldset id="launchExecutionModes" class="execution-modes" data-mode="local" aria-label="Execution target">
           <legend>execution</legend>
           <label><input type="radio" name="execution_mode" value="local" checked><span>local</span></label>

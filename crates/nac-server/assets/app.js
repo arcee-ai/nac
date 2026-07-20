@@ -6,6 +6,7 @@ const state = {
   events: new Map(),
   lastSequence: new Map(),
   replayBoundaries: new Map(),
+  eventEpochs: new Map(),
   currentId: null,
   targetedThread: null,
   eventSource: null,
@@ -15,7 +16,6 @@ const state = {
   snapshotTimers: new Map(),
   snapshotRefreshCoordinators: new Map(),
   sessionListRefreshCoordinator: null,
-  pollTimer: null,
   statsLoadedAt: 0,
   statusTimer: null,
   commandIndex: 0,
@@ -80,7 +80,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function bindElements() {
   for (const id of [
-    "app", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
+    "app", "pickerTitle", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
     "metricChanges", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
@@ -167,7 +167,7 @@ async function boot() {
   void loadStoreInfo();
   await loadSessions({ workspaceStats: true });
   syncRouteFromHash();
-  state.pollTimer = window.setInterval(() => {
+  window.setInterval(() => {
     if (document.hidden || state.sessionListRefreshCoordinator) return;
     const workspaceStats = Date.now() - state.statsLoadedAt > 30_000;
     loadSessions({ workspaceStats });
@@ -313,6 +313,7 @@ async function drainSessionListRefreshes(coordinator) {
         }
         if (state.currentId && !sessionEntry(state.currentId)) showPicker();
         renderPicker();
+        if (window.location.hash) syncRouteFromHash();
         if (state.currentId) scheduleWorkspaceRender(state.currentId);
         accepted = state.sessions;
       } catch (error) {
@@ -362,17 +363,33 @@ function syncSessionRunIndicators(entries) {
   }
 }
 
-function noteSessionRunEvent(sessionId, type) {
+function noteSessionRunEvent(sessionId, type, runId = null) {
   if (!sessionId) return;
   if (type === "run_started") {
     state.sessionRunActivity.set(sessionId, true);
     state.attentionSessions.delete(sessionId);
     return;
   }
-  if (!["run_completed", "run_failed"].includes(type)) return;
-  const wasActive = state.sessionRunActivity.get(sessionId) === true || Boolean(sessionEntry(sessionId)?.active_run);
-  state.sessionRunActivity.set(sessionId, false);
-  if (wasActive) state.attentionSessions.add(sessionId);
+  if (!["run_completed", "run_failed"].includes(type) || !runId) return;
+  const matches = (run) => run && String(run.run_id || "") === String(runId);
+  let cleared = false;
+  if (matches(state.acceptedRuns.get(sessionId))) {
+    state.acceptedRuns.delete(sessionId);
+    cleared = true;
+  }
+  const entry = sessionEntry(sessionId);
+  if (matches(entry?.active_run)) {
+    entry.active_run = null;
+    cleared = true;
+  }
+  const snapshot = state.snapshots.get(sessionId);
+  if (matches(snapshot?.active_run)) {
+    state.snapshots.set(sessionId, { ...snapshot, active_run: null });
+    cleared = true;
+  }
+  const stillActive = Boolean(state.acceptedRuns.get(sessionId) || entry?.active_run || state.snapshots.get(sessionId)?.active_run);
+  state.sessionRunActivity.set(sessionId, stillActive);
+  if (cleared && !stillActive) state.attentionSessions.add(sessionId);
 }
 
 function clearSessionAttention(sessionId) {
@@ -508,13 +525,14 @@ function renderSessionCard(entry, index = 0, entries = []) {
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
   const identity = `${displaySessionTitle(summary)} · session ${sessionId}`;
   const prompt = summary.last_user_prompt || "No prompt submitted";
+  const statusLabel = status === "running" ? "Running" : status === "attention" ? "Finished, needs attention" : "Idle";
   const changes = workspaceSummaryPresentation(entry.workspace_diff);
   return `
     <article class="session-card" data-session-id="${escapeAttr(sessionId)}" data-pinned="${summary.pinned}">
-      <button class="session-select" type="button" data-action="open-session" data-session-id="${escapeAttr(sessionId)}" aria-label="${escapeAttr(`${identity}. ${topology.detail}. Working directory ${summary.cwd || "unavailable"}. Model ${fullModel}. ${changes.ariaLabel}.`)}">
-        <span class="card-title-row"><i class="status-dot ${status}"></i><span class="card-title" title="${escapeAttr(identity)}">${escapeHtml(displaySessionTitle(summary))}</span></span>
+      <button class="session-select" type="button" data-action="open-session" data-session-id="${escapeAttr(sessionId)}" aria-label="${escapeAttr(`${identity}. ${statusLabel}. ${prompt}. ${topology.detail}. Working directory ${summary.cwd || "unavailable"}. Model ${fullModel}. ${changes.ariaLabel}.`)}">
+        <span class="card-title-row"><i class="status-dot ${status}" aria-hidden="true"></i><span class="card-title" title="${escapeAttr(identity)}">${escapeHtml(displaySessionTitle(summary))}</span></span>
         <span class="card-location" title="${escapeAttr(fullLocation)}"><span class="card-topology" data-mode="${escapeAttr(topology.mode)}" title="${escapeAttr(`Execution target: ${topology.detail}`)}">${escapeHtml(topology.detail)}</span><span class="card-workspace-location">${escapeHtml(workspaceLocation)}</span></span>
-        <span class="card-prompt">${escapeHtml(prompt)}</span>
+        <span class="card-prompt" title="${escapeAttr(prompt)}">${escapeHtml(prompt)}</span>
         <span class="card-metrics"><span title="${escapeAttr(fullModel)}" aria-label="Model: ${escapeAttr(fullModel)}">${escapeHtml(shortModel(fullModel))}</span><span>${summary.visible_message_count || 0} messages</span><span class="changes" data-state="${escapeAttr(changes.state)}" title="${escapeAttr(changes.detail)}" aria-label="${escapeAttr(changes.ariaLabel)}">${escapeHtml(changes.label)}</span></span>
       </button>
       <div class="card-controls">
@@ -886,12 +904,14 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   el.sessionWorkspace.hidden = false;
   if (updateHash) history.pushState(null, "", `#session/${encodeURIComponent(sessionId)}`);
   renderWorkspace();
+  requestAnimationFrame(() => el.renameSession?.focus?.({ preventScroll: true }));
   if (fetchSnapshot) loadSnapshot(sessionId, true);
   connectEventStream(sessionId);
 }
 
 function showPicker(updateHash = true) {
-  persistComposerDraft(state.currentId);
+  const returningSessionId = state.currentId;
+  persistComposerDraft(returningSessionId);
   state.currentId = null;
   state.targetedThread = null;
   state.focusView = null;
@@ -905,6 +925,12 @@ function showPicker(updateHash = true) {
   el.sessionPicker.hidden = false;
   if (updateHash) history.pushState(null, "", window.location.pathname);
   renderPicker();
+  requestAnimationFrame(() => {
+    const sessionButton = returningSessionId
+      ? el.sessionGrid?.querySelector?.(`[data-action="open-session"][data-session-id="${cssEscape(returningSessionId)}"]`)
+      : null;
+    (sessionButton || el.pickerTitle)?.focus?.({ preventScroll: true });
+  });
 }
 
 function loadSnapshot(sessionId, announce = false) {
@@ -1300,7 +1326,7 @@ async function loadThreadEventPage(threadName, { reset = false } = {}) {
   if (!reset && current && !current.hasOlder) return;
 
   const windowState = reset
-    ? { events: [], hasOlder: true, nextBeforeId: null, loading: true, afterSequence: state.replayBoundaries.get(sessionId) ?? state.lastSequence.get(sessionId) ?? 0 }
+    ? { events: [], hasOlder: true, nextBeforeId: null, loading: true, boundary: null }
     : { ...current, loading: true };
   state.threadEventWindows.set(key, windowState);
   if (!reset && state.focusView?.type === "thread" && state.focusView.name === threadName) {
@@ -1319,7 +1345,7 @@ async function loadThreadEventPage(threadName, { reset = false } = {}) {
       hasOlder: Boolean(response.has_older),
       nextBeforeId: response.next_before_id ?? null,
       loading: false,
-      afterSequence: windowState.afterSequence,
+      boundary: reset ? response.thread_event_boundary ?? null : windowState.boundary,
     });
   } catch (error) {
     if (state.threadEventWindows.get(key) === windowState) {
@@ -1340,10 +1366,12 @@ function loadOlderThreadEvents(threadName) {
   loadThreadEventPage(threadName);
 }
 
-function resetSessionSequenceEpoch(sessionId, boundary = 0) {
+function resetSessionSequenceEpoch(sessionId, boundary = 0, epochId = null) {
   state.events.delete(sessionId);
   state.lastSequence.delete(sessionId);
   state.replayBoundaries.set(sessionId, boundary);
+  if (epochId) state.eventEpochs.set(sessionId, epochId);
+  else state.eventEpochs.delete(sessionId);
   state.threadCycles.delete(sessionId);
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
@@ -1359,13 +1387,14 @@ function resetSessionSequenceEpoch(sessionId, boundary = 0) {
   if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
 }
 
-function applyReplayBoundary(sessionId, boundary, { requestedPriorSequence = null, reconnect = null } = {}) {
-  if (!Number.isSafeInteger(boundary) || boundary < 0) return { valid: false, reset: false, reconnected: false };
+function applyReplayBoundary(sessionId, boundary, { epochId = "", requestedPriorSequence = null, reconnect = null } = {}) {
+  if (!epochId || !Number.isSafeInteger(boundary) || boundary < 0) return { valid: false, reset: false, reconnected: false };
   const observed = state.lastSequence.get(sessionId);
   const prior = Number.isSafeInteger(observed) ? observed
     : Number.isSafeInteger(requestedPriorSequence) ? requestedPriorSequence : null;
-  if (prior !== null && boundary < prior) {
-    resetSessionSequenceEpoch(sessionId, boundary);
+  const knownEpoch = state.eventEpochs.get(sessionId);
+  if ((knownEpoch && knownEpoch !== epochId) || (prior !== null && boundary < prior)) {
+    resetSessionSequenceEpoch(sessionId, boundary, epochId);
     loadSnapshot(sessionId, false);
     if (reconnect) {
       reconnect();
@@ -1374,18 +1403,16 @@ function applyReplayBoundary(sessionId, boundary, { requestedPriorSequence = nul
     return { valid: true, reset: true, reconnected: false };
   }
 
+  state.eventEpochs.set(sessionId, epochId);
   state.replayBoundaries.set(sessionId, boundary);
-  const prefix = `${sessionId}:`;
-  for (const [key, windowState] of state.threadEventWindows) {
-    if (!key.startsWith(prefix)) continue;
-    windowState.afterSequence = Math.max(Number(windowState.afterSequence || 0), boundary);
-  }
   return { valid: true, reset: false, reconnected: false };
 }
 
 function recordSessionEnvelope(sessionId, envelope, { historical = false } = {}) {
   const sequence = envelope?.sequence_id;
-  if (!Number.isSafeInteger(sequence) || sequence < 1) return false;
+  const epochId = String(envelope?.epoch_id || "");
+  if (!epochId || epochId !== state.eventEpochs.get(sessionId)
+      || !Number.isSafeInteger(sequence) || sequence < 1) return false;
   const lastSequence = state.lastSequence.get(sessionId);
   if (Number.isSafeInteger(lastSequence) && sequence <= lastSequence) return false;
   state.lastSequence.set(sessionId, sequence);
@@ -1396,13 +1423,7 @@ function recordSessionEnvelope(sessionId, envelope, { historical = false } = {})
   if (!historical) {
     const type = envelope.event?.type;
     if (type === "run_started") captureStartedRun(sessionId, envelope);
-    if (["run_completed", "run_failed"].includes(type)) {
-      const accepted = state.acceptedRuns.get(sessionId);
-      if (!accepted || !envelope.run_id || String(envelope.run_id) === String(accepted.run_id || "")) {
-        state.acceptedRuns.delete(sessionId);
-      }
-    }
-    noteSessionRunEvent(sessionId, type);
+    noteSessionRunEvent(sessionId, type, envelope.run_id || null);
   }
   return true;
 }
@@ -1436,9 +1457,11 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
     if (state.eventSource !== source) return;
     const payload = parseStreamPayload(event);
     const boundary = payload?.replay_boundary_sequence_id;
+    const epochId = String(payload?.epoch_id || "");
     const observedPrior = state.lastSequence.get(sessionId);
     const priorAtBoundary = Number.isSafeInteger(observedPrior) ? observedPrior : requestedPriorSequence;
     const result = applyReplayBoundary(sessionId, boundary, {
+      epochId,
       requestedPriorSequence,
       reconnect: () => connectEventStream(sessionId, { replayFromBeginning: true }),
     });
@@ -2094,92 +2117,6 @@ function combineActionDetail(...values) {
   return compactActionDetail(values.filter((value) => String(value ?? "").trim()).join(" · "), 800);
 }
 
-function threadDispatchArguments(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
-    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-    if (!name) return null;
-    return {
-      name,
-      action: typeof parsed.action === "string" ? parsed.action : "",
-      sourceThreads: Array.isArray(parsed.threads) ? parsed.threads.map(String) : [],
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-function threadDispatchEvidence(snapshot, sessionId = state.currentId) {
-  const records = [];
-  const persistedCalls = new Map();
-  for (const [messageIndex, message] of (snapshot?.messages || []).entries()) {
-    if (message?.role === "assistant") {
-      for (const call of message.tool_calls || []) {
-        if (call.function?.name !== "thread") continue;
-        const parsed = threadDispatchArguments(call.function?.arguments);
-        if (!parsed) continue;
-        const record = {
-          ...parsed,
-          callId: call.id || null,
-          provenance: "persisted",
-          sequenceId: null,
-          eventId: null,
-          timestamp: null,
-          completed: false,
-          isError: null,
-          preview: "",
-          order: messageIndex,
-        };
-        records.push(record);
-        if (call.id) persistedCalls.set(call.id, record);
-      }
-    } else if (message?.role === "tool") {
-      const record = persistedCalls.get(message.tool_call_id);
-      if (record) {
-        record.completed = true;
-        record.preview = compactActionDetail(message.content, 800);
-      }
-    }
-  }
-
-  const observedCalls = new Map();
-  for (const [order, envelope] of (state.events.get(sessionId) || []).entries()) {
-    const event = agentEvent(envelope);
-    if (!event || eventThreadName(event) || event.name !== "thread") continue;
-    if (event.type === "tool_call_started") {
-      const parsed = threadDispatchArguments(event.args_detail || event.args_preview);
-      if (!parsed) continue;
-      const record = {
-        ...parsed,
-        callId: event.call_id || null,
-        provenance: "observed",
-        sequenceId: Number.isSafeInteger(Number(envelope.sequence_id)) ? Number(envelope.sequence_id) : null,
-        eventId: null,
-        timestamp: null,
-        completed: false,
-        isError: null,
-        preview: "",
-        order,
-      };
-      records.push(record);
-      if (event.call_id) observedCalls.set(event.call_id, record);
-    } else if (event.type === "tool_call_finished") {
-      const record = observedCalls.get(event.call_id);
-      if (record) {
-        record.completed = true;
-        record.isError = Boolean(event.is_error);
-        record.preview = compactActionDetail(event.content_preview, 800);
-        record.finishSequenceId = Number.isSafeInteger(Number(envelope.sequence_id)) ? Number(envelope.sequence_id) : null;
-      }
-    }
-  }
-  const observedIds = new Set(records.filter((record) => record.provenance === "observed" && record.callId).map((record) => record.callId));
-  return records.filter((record) => record.provenance === "observed" || !record.callId || !observedIds.has(record.callId));
-}
-
 function buildOrchestratorActions(snapshot, { limit = true } = {}) {
   const persisted = buildPersistedOrchestratorActions(snapshot?.messages || [], { limit: false });
   const actions = [];
@@ -2214,12 +2151,12 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
     const event = agentEvent(envelope);
     if (!event || eventThreadName(event)) continue;
     const evidence = actionEvidence({ ...entry, event });
-    if (event.type === "model_call_started") {
-      actions.push({ name: "model", result: `iteration ${event.iteration ?? "unavailable"}`, state: "live", detail: "", ...evidence });
+    if (event.type.startsWith("model_call_")) {
+      continue;
     } else if (event.type === "token_usage_updated") {
       actions.push({ name: "usage", result: "updated", state: "done", detail: usageDetail(event.usage), ...evidence });
     } else if (event.type === "tool_call_started") {
-      const argumentsDetail = formatToolArguments(event.name, event.args_detail, event.args_preview);
+      const argumentsDetail = formatToolArguments(event.args_preview);
       const action = {
         name: event.name || "tool",
         result: "running",
@@ -2294,7 +2231,6 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
   for (const message of messages || []) {
     if (message.role === "assistant" && message.tool_calls?.length) {
       for (const call of message.tool_calls) {
-        const argumentsDetail = formatToolArguments(call.function?.name, call.function?.arguments, "");
         const action = {
           name: call.function?.name || "tool",
           result: "called",
@@ -2302,8 +2238,8 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           provenance: "persisted",
           kind: "tool_call",
           callId: call.id || null,
-          argumentsDetail,
-          detail: combineActionDetail(call.id ? `call ${call.id}` : "Call ID unavailable", argumentsDetail),
+          argumentsDetail: "",
+          detail: call.id ? `call ${call.id}` : "Call ID unavailable",
         };
         actions.push(action);
         if (call.id) calls.set(call.id, action);
@@ -2313,11 +2249,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
       if (existing) {
         existing.result = "completed";
         existing.state = "done";
-        existing.detail = combineActionDetail(
-          message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable",
-          existing.argumentsDetail,
-          message.content ? `result: ${compactActionDetail(message.content, 500)}` : "Result preview unavailable",
-        );
+        existing.detail = message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable";
       } else {
         actions.push({
           name: "tool result",
@@ -2326,7 +2258,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           provenance: "persisted",
           kind: "tool_result",
           callId: message.tool_call_id || null,
-          detail: combineActionDetail(message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable", message.content),
+          detail: message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable",
         });
       }
     } else if (message.role === "assistant" && message.content) {
@@ -3083,7 +3015,7 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
   if (message?.role === "system") return "";
   const role = message?.role || "message";
   const label = focusMessageRoleLabel(role);
-  const content = message?.content !== null && message?.content !== undefined
+  const content = role !== "tool" && message?.content !== null && message?.content !== undefined
     ? String(message.content)
     : "";
   const reasoning = role === "assistant"
@@ -3094,9 +3026,9 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
   const calls = (message?.tool_calls || []).map((call) => {
     const name = call.function?.name || "tool";
     const callId = call.id
-      ? `<code class="focus-tool-call-id" title="Tool call ID">${escapeHtml(call.id)}</code>`
+      ? `<code class="focus-tool-call-id" title="${escapeAttr(call.id)}">${escapeHtml(call.id)}</code>`
       : `<span class="evidence-unavailable">Call ID unavailable</span>`;
-    return `<div class="focus-tool-call"><div><span>Tool call</span><strong>${escapeHtml(name)}</strong>${callId}</div><pre>${escapeHtml(formatFocusArguments(call.function?.arguments))}</pre></div>`;
+    return `<div class="focus-tool-call"><div><span>Tool call</span><strong>${escapeHtml(name)}</strong>${callId}</div></div>`;
   }).join("");
   const toolResultId = role === "tool"
     ? `<span class="focus-message-call-id">${message?.tool_call_id ? `call ${escapeHtml(message.tool_call_id)}` : "Call ID unavailable"}</span>`
@@ -3129,51 +3061,42 @@ function serializedAgentEvent(event, maxChars = 1200) {
   return compactActionDetail(serialized, maxChars);
 }
 
-function threadEventSignature(event) {
-  try { return JSON.stringify(event ?? {}); }
-  catch (_) { return String(event ?? ""); }
-}
-
 function threadEntrySequence(entry) {
   if (entry?.sequenceId === null || entry?.sequenceId === undefined || entry?.sequenceId === "") return null;
   const sequenceId = Number(entry.sequenceId);
   return Number.isSafeInteger(sequenceId) ? sequenceId : null;
 }
 
-function overlayThreadEvidence(persistedEntries, observedEntries, { appendObserved = () => true } = {}) {
+function normalizedEventBoundary(value) {
+  const epochId = String(value?.epoch_id || "");
+  const sequenceId = Number(value?.sequence_id);
+  return epochId && Number.isSafeInteger(sequenceId) && sequenceId >= 0 ? { epochId, sequenceId } : null;
+}
+
+function mergeThreadEvidence(persistedEntries, observedEntries, boundaryValue) {
+  const boundary = normalizedEventBoundary(boundaryValue);
+  if (!boundary) return [...(persistedEntries || [])];
   const observed = (observedEntries || [])
-    .map((entry, index) => ({ entry, index, sequenceId: threadEntrySequence(entry) }))
-    .sort((left, right) => {
-      if (left.sequenceId === null && right.sequenceId === null) return left.index - right.index;
-      if (left.sequenceId === null) return 1;
-      if (right.sequenceId === null) return -1;
-      return left.sequenceId - right.sequenceId || left.index - right.index;
-    })
+    .filter((entry) => entry.epochId === boundary.epochId
+      && threadEntrySequence(entry) !== null
+      && threadEntrySequence(entry) > boundary.sequenceId)
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => threadEntrySequence(left.entry) - threadEntrySequence(right.entry) || left.index - right.index)
     .map(({ entry }) => entry);
-  const observedBySignature = new Map();
-  for (const entry of observed) {
-    const signature = threadEventSignature(entry.event);
-    const occurrences = observedBySignature.get(signature) || [];
-    occurrences.push(entry);
-    observedBySignature.set(signature, occurrences);
-  }
-  const matched = new Set();
-  const overlaid = (persistedEntries || []).map((entry) => {
-    const signature = threadEventSignature(entry.event);
-    const observedEntry = (observedBySignature.get(signature) || []).shift();
-    if (!observedEntry) return entry;
-    matched.add(observedEntry);
-    return {
-      ...entry,
+  return [...(persistedEntries || []), ...observed];
+}
+
+function observedThreadEntries(name, envelopes = state.events.get(state.currentId) || []) {
+  return envelopes
+    .filter((envelope) => eventThreadName(agentEvent(envelope)) === name)
+    .map((envelope) => ({
+      event: agentEvent(envelope),
       provenance: "observed",
-      sequenceId: observedEntry.sequenceId ?? entry.sequenceId ?? null,
-      eventId: entry.eventId ?? observedEntry.eventId ?? null,
-      timestamp: entry.timestamp ?? observedEntry.timestamp ?? null,
-      persisted: true,
-    };
-  });
-  const unmatched = observed.filter((entry) => !matched.has(entry) && appendObserved(entry));
-  return [...overlaid, ...unmatched];
+      epochId: String(envelope.epoch_id || ""),
+      sequenceId: Number.isSafeInteger(Number(envelope.sequence_id)) ? Number(envelope.sequence_id) : null,
+      eventId: null,
+      timestamp: null,
+    }));
 }
 
 function threadFocusEvidenceEntries(name, snapshot, windowState) {
@@ -3192,23 +3115,11 @@ function threadFocusEvidenceEntries(name, snapshot, windowState) {
         timestamp: null,
         sequenceId: null,
       }));
-  const liveAfterSequence = windowState ? Number(windowState.afterSequence ?? 0) : Number.NEGATIVE_INFINITY;
-  const observed = (state.events.get(state.currentId) || [])
-    .filter((envelope) => eventThreadName(agentEvent(envelope)) === name)
-    .map((envelope) => ({
-      event: agentEvent(envelope),
-      provenance: "observed",
-      sequenceId: Number.isSafeInteger(Number(envelope.sequence_id)) ? Number(envelope.sequence_id) : null,
-      eventId: null,
-      timestamp: null,
-    }));
-  const chronological = overlayThreadEvidence(persisted, observed, {
-    appendObserved: (entry) => Number(entry.sequenceId || 0) > liveAfterSequence,
-  });
-  return chronological.reverse();
+  const boundary = windowState ? windowState.boundary : snapshot?.thread_event_boundary;
+  return mergeThreadEvidence(persisted, observedThreadEntries(name), boundary);
 }
 
-function threadFinishDetail(event, _latestEpisode = null) {
+function threadFinishDetail(event) {
   const exit = event.exit_code === null || event.exit_code === undefined ? "exit unavailable" : `exit ${event.exit_code}`;
   const timeout = event.timed_out
     ? `timed out${event.timeout_reason ? `: ${event.timeout_reason}` : " (reason unavailable)"}`
@@ -3216,17 +3127,12 @@ function threadFinishDetail(event, _latestEpisode = null) {
   return combineActionDetail(exit, timeout);
 }
 
-function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null) {
-  if (!event) return null;
+function threadEventAction(event, entry = {}, matchedStart = null) {
+  if (!event || event.type.startsWith("model_call_")
+      || event.type === "token_usage_updated" || event.type === "thread_log") return null;
   const evidence = actionEvidence({ ...entry, event });
   if (event.type === "run_started") {
     return { name: "agent run", result: "started", state: "live", detail: compactActionDetail(event.prompt_preview), ...evidence };
-  }
-  if (event.type === "model_call_started") {
-    return { name: "model", result: `iteration ${event.iteration ?? "unavailable"}`, state: "recorded", detail: "Returned text unavailable", ...evidence };
-  }
-  if (event.type === "token_usage_updated") {
-    return { name: "usage", result: "updated", state: "done", detail: usageDetail(event.usage), ...evidence };
   }
   if (event.type === "thread_started") {
     const sources = Array.isArray(event.source_threads) ? event.source_threads : null;
@@ -3235,19 +3141,11 @@ function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null
       : "source threads unavailable";
     return { name: "dispatch", result: "started", state: "live", detail: combineActionDetail(event.action, sourceDetail), sourceThreads: sources, ...evidence };
   }
-  if (event.type === "thread_log") {
-    return { name: "thread log", result: "recorded", state: "recorded", detail: compactActionDetail(event.line), ...evidence };
-  }
   if (event.type === "tool_call_started") {
-    const argumentsDetail = formatToolArguments(event.name, event.args_detail, event.args_preview);
+    const argumentsDetail = formatToolArguments(event.args_preview);
     return {
-      name: toolDisplayName(event.name),
-      result: "Running",
-      state: "live",
-      callId: event.call_id || null,
-      argumentsDetail,
-      detail: argumentsDetail,
-      ...evidence,
+      name: toolDisplayName(event.name), result: "Running", state: "live",
+      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, ...evidence,
     };
   }
   if (event.type === "tool_call_finished") {
@@ -3257,13 +3155,12 @@ function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null
       result: event.is_error ? "Failed" : "Done",
       state: event.is_error ? "error" : "done",
       callId: event.call_id || matchedStart?.callId || null,
-      argumentsDetail,
-      detail: toolCompletionDetail(argumentsDetail, event),
-      ...evidence,
+      argumentsDetail, detail: toolCompletionDetail(argumentsDetail, event), ...evidence,
     };
   }
   if (event.type === "assistant_message") {
-    return { name: "response", result: "returned", state: "done", detail: combineActionDetail(event.content, event.usage ? usageDetail(event.usage) : ""), ...evidence };
+    const detail = combineActionDetail(event.content, event.usage ? usageDetail(event.usage) : "");
+    return detail ? { name: "response", result: "returned", state: "done", detail, ...evidence } : null;
   }
   if (event.type === "error") {
     return { name: "error", result: "failed", state: "error", detail: compactActionDetail(event.message), ...evidence };
@@ -3273,8 +3170,7 @@ function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null
       || event.type === "thread_steering_expired") {
     const result = event.type.split("_").at(-1);
     return {
-      name: "steering",
-      result,
+      name: "steering", result,
       state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
       steeringId: event.steering_id ?? null,
       detail: combineActionDetail(event.steering_id == null ? "Steering ID unavailable" : `steering #${event.steering_id}`, event.instruction_preview),
@@ -3286,9 +3182,7 @@ function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null
     return {
       name: "thread",
       result: event.timed_out ? "timed out" : succeeded ? "finished" : event.exit_code == null ? "finished" : `failed (exit ${event.exit_code})`,
-      state: succeeded ? "done" : "error",
-      detail: threadFinishDetail(event, latestEpisode),
-      ...evidence,
+      state: succeeded ? "done" : "error", detail: threadFinishDetail(event), ...evidence,
     };
   }
   if (event.type === "run_finished") {
@@ -3297,88 +3191,45 @@ function threadEventAction(event, latestEpisode, entry = {}, matchedStart = null
   return { name: "Activity", result: "recorded", state: "recorded", detail: "Activity recorded", ...evidence };
 }
 
-function threadModelResponsePlan(entries, latestEpisode) {
-  const modelDetails = new Map();
-  const pairedAssistantIndexes = new Set();
-  const models = [];
-  const successfullyFinishedSequences = new Set();
-  let evidenceSequence = 0;
-
-  for (const [index, entry] of entries.entries()) {
-    const event = entry?.event;
-    if (!event) continue;
-    if ((event.type === "thread_started" || event.type === "run_started") && index > 0) evidenceSequence += 1;
-    if (event.type === "model_call_started") {
-      const model = { index, evidenceSequence, paired: false, usableReturnedText: false };
-      models.push(model);
-      modelDetails.set(index, "Returned text unavailable");
-    } else if (event.type === "assistant_message") {
-      const model = models.findLast((candidate) => candidate.evidenceSequence === evidenceSequence && !candidate.paired);
-      if (model) {
-        const returnedText = compactActionDetail(event.content, 800);
-        model.paired = true;
-        model.usableReturnedText = Boolean(returnedText);
-        pairedAssistantIndexes.add(index);
-        modelDetails.set(model.index, returnedText || "Returned text unavailable");
-      }
-    }
-    if (event.type === "thread_finished") {
-      if (Number(event.exit_code) === 0 && !event.timed_out) successfullyFinishedSequences.add(evidenceSequence);
-      evidenceSequence += 1;
-    } else if (event.type === "run_finished") {
-      evidenceSequence += 1;
-    }
-  }
-
-  const latestModel = models.at(-1);
-  const retainedContent = compactActionDetail(latestEpisode?.content, 800);
-  if (latestModel && !latestModel.usableReturnedText && retainedContent && successfullyFinishedSequences.has(latestModel.evidenceSequence)) {
-    modelDetails.set(latestModel.index, `Final-call fallback from latest retained episode: ${retainedContent}`);
-  }
-  return { modelDetails, pairedAssistantIndexes };
-}
-
-function threadActionsFromEntries(entries, latestEpisode, { newestFirst = false } = {}) {
-  const chronological = newestFirst ? [...entries].reverse() : [...entries];
-  const modelResponses = threadModelResponsePlan(chronological, latestEpisode);
+function projectThreadActions(entries, { newestFirst = false } = {}) {
+  const chronological = [...(entries || [])];
   const hasCanonicalStart = chronological.some((entry) => entry?.event?.type === "thread_started");
   const hasCanonicalFinish = chronological.some((entry) => entry?.event?.type === "thread_finished");
   const calls = new Map();
   const actions = [];
-  for (const [index, entry] of chronological.entries()) {
+  for (const entry of chronological) {
     const event = entry?.event;
-    if (event?.type === "assistant_message" && modelResponses.pairedAssistantIndexes.has(index)) continue;
-    if ((event?.type === "run_started" && hasCanonicalStart) || (event?.type === "run_finished" && hasCanonicalFinish)) continue;
-    if (event?.type === "tool_call_finished") {
+    if (!event || event.type.startsWith("model_call_")
+        || event.type === "token_usage_updated" || event.type === "thread_log") continue;
+    if ((event.type === "run_started" && hasCanonicalStart) || (event.type === "run_finished" && hasCanonicalFinish)) continue;
+    if (event.type === "tool_call_finished") {
       const matchedStart = takeThreadToolStart(calls, event);
       if (matchedStart) {
         completeThreadToolAction(matchedStart, event, entry);
         continue;
       }
     }
-    const action = threadEventAction(event, latestEpisode, entry);
-    if (!action || (event?.type === "assistant_message" && !action.detail)) continue;
-    if (event?.type === "model_call_started") action.detail = modelResponses.modelDetails.get(index);
+    const action = threadEventAction(event, entry);
+    if (!action) continue;
     actions.push(action);
-    if (event?.type === "tool_call_started") queueThreadToolStart(calls, event, action);
+    if (event.type === "tool_call_started") queueThreadToolStart(calls, event, action);
   }
   return newestFirst ? actions.reverse() : actions;
 }
 
 function threadFocusActions(name, snapshot, windowState) {
-  const entries = threadFocusEvidenceEntries(name, snapshot, windowState)
-    .filter((entry) => entry.event?.type !== "token_usage_updated");
-  const actions = threadActionsFromEntries(entries, snapshot?.thread_episodes?.[name]?.at(-1), { newestFirst: true });
-  const observedSteering = new Set(entries.map((entry) => entry.event).filter((event) => event?.type?.startsWith("thread_steering_")).map((event) => event.steering_id));
+  const entries = threadFocusEvidenceEntries(name, snapshot, windowState);
+  const actions = projectThreadActions(entries, { newestFirst: true });
+  const observedSteering = new Set(entries.map((entry) => entry.event)
+    .filter((event) => event?.type?.startsWith("thread_steering_")).map((event) => event.steering_id));
   const durable = (snapshot?.thread_steering || [])
     .filter((record) => record.thread_name === name && !observedSteering.has(record.id))
-    .map(steeringRecordAction)
-    .reverse();
+    .map(steeringRecordAction).reverse();
   return [...actions, ...durable];
 }
 
 function latestThreadEvidence(entries, type) {
-  return entries.find((entry) => entry.event?.type === type) || null;
+  return entries.findLast((entry) => entry.event?.type === type) || null;
 }
 
 function renderWorkerUsage(usageEvidence) {
@@ -3421,7 +3272,6 @@ function renderThreadEvidence(name, model, snapshot, entries) {
     ? `${startSources.length} source thread${startSources.length === 1 ? "" : "s"}${startSources.length ? ` · ${startSources.join(", ")}` : " · none"}`
     : null;
   const steering = (snapshot?.thread_steering || []).filter((item) => item.thread_name === name);
-  const iterations = model?.iterations?.length ? model.iterations.join(", ") : null;
   const status = threadStatusPresentation(model?.state);
   return `<section class="thread-evidence" data-state="${escapeAttr(status.state)}">
     <div class="thread-evidence-heading"><h3>Lifecycle</h3><span>${escapeHtml(status.label)}</span></div>
@@ -3434,14 +3284,12 @@ function renderThreadEvidence(name, model, snapshot, entries) {
       ${renderEvidenceField("Thread updated", record?.updated_at)}
       ${renderEvidenceField("Persisted episode count", record?.episode_count)}
       ${renderEvidenceField("Source threads", sourceText, start ? "Source-thread field unavailable" : "No start event in current evidence")}
-      ${renderEvidenceField("Model-call iterations", iterations, "No model-call iteration events")}
       ${renderEvidenceField("Start time", start?.timestamp)}
       ${renderEvidenceField("Finish time", finish?.timestamp)}
       ${renderEvidenceField("Exit", model?.finish?.exit_code == null ? null : model.finish.exit_code)}
       ${renderEvidenceField("Timed out", model?.finish ? (model.finish.timed_out ? "yes" : "no") : null)}
       ${renderEvidenceField("Timeout reason", model?.finish?.timeout_reason)}
       ${renderEvidenceField("Latest error", model?.latestError)}
-      ${renderEvidenceField("Latest log", model?.latestLog)}
     </dl>
     ${renderWorkerUsage(model?.usageEvidence)}
     <section class="thread-steering"><div class="thread-evidence-heading"><h4>Steering history</h4><span>${steering.length}</span></div>${renderThreadSteering(steering)}</section>
@@ -3499,16 +3347,9 @@ function renderFocusActions(actions, { showTechnicalEvidence = false } = {}) {
       action.steeringId == null ? null : `steering #${action.steeringId}`,
     ].filter(Boolean) : [];
     const provenance = showTechnicalEvidence ? ` data-provenance="${escapeAttr(action.provenance || "unavailable")}"` : "";
-    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"${provenance}><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${evidence.length ? `<div class="focus-action-evidence">${evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}${action.detail ? `<p>${escapeHtml(action.detail)}</p>` : ""}</li>`;
+    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"${provenance}><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${evidence.length ? `<div class="focus-action-evidence">${evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}${action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : ""}</li>`;
   }).join("")}</ol>`;
 }
-function formatFocusArguments(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "No arguments";
-  try { return JSON.stringify(JSON.parse(raw), null, 2); }
-  catch (_) { return raw; }
-}
-
 function renderMarkdownImageToken(tokens, index, options, env, renderer) {
   const token = tokens[index];
   const target = String(token?.attrGet?.("src") || "");
@@ -3517,14 +3358,45 @@ function renderMarkdownImageToken(tokens, index, options, env, renderer) {
   return `<span class="md-image-text">${escapeHtml(text)}</span>`;
 }
 
+function safeMarkdownHref(value) {
+  const target = String(value || "");
+  if (!target || /[\u0000-\u0020\u007f]/.test(target)) return null;
+  try {
+    const parsed = new URL(target);
+    return ["http:", "https:", "mailto:"].includes(parsed.protocol) ? target : null;
+  } catch (_) { return null; }
+}
+
+function renderMarkdownLinkOpen(tokens, index) {
+  const target = safeMarkdownHref(tokens[index]?.attrGet?.("href"));
+  tokens[index].meta = { ...(tokens[index].meta || {}), safeLink: Boolean(target) };
+  return target
+    ? `<a href="${escapeAttr(target)}" target="_blank" rel="noopener noreferrer">`
+    : '<span class="md-link-text">';
+}
+
+function renderMarkdownLinkClose(tokens, index) {
+  let nested = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor]?.type === "link_close") nested += 1;
+    if (tokens[cursor]?.type !== "link_open") continue;
+    if (nested) { nested -= 1; continue; }
+    return tokens[cursor].meta?.safeLink ? "</a>" : "</span>";
+  }
+  return "</span>";
+}
+
 function renderFocusMarkdown(value) {
   if (typeof window.markdownit !== "function" || !window.DOMPurify) return escapeHtml(value);
   if (!focusMarkdownRenderer) {
     focusMarkdownRenderer = window.markdownit({ html: false, linkify: true, typographer: false });
     focusMarkdownRenderer.renderer.rules.image = renderMarkdownImageToken;
+    focusMarkdownRenderer.renderer.rules.link_open = renderMarkdownLinkOpen;
+    focusMarkdownRenderer.renderer.rules.link_close = renderMarkdownLinkClose;
   }
   return window.DOMPurify.sanitize(focusMarkdownRenderer.render(String(value || "")), {
-    USE_PROFILES: { html: true },
+    ALLOWED_TAGS: ["p", "br", "strong", "em", "s", "blockquote", "code", "pre", "ul", "ol", "li", "a", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "table", "thead", "tbody", "tr", "th", "td", "span"],
+    ALLOWED_ATTR: ["href", "target", "rel", "class"],
     FORBID_TAGS: ["img", "style", "script", "iframe", "object", "embed", "form", "input", "button"],
     FORBID_ATTR: ["style", "id", "name"],
   });
@@ -3532,22 +3404,9 @@ function renderFocusMarkdown(value) {
 
 function threadModelEntries(name, snapshot, liveEvents = state.events.get(state.currentId) || []) {
   const persisted = (snapshot?.thread_events?.[name] || []).map((event) => ({
-    event,
-    provenance: "persisted",
-    sequenceId: null,
-    eventId: null,
-    timestamp: null,
+    event, provenance: "persisted", sequenceId: null, eventId: null, timestamp: null,
   }));
-  const observed = liveEvents
-    .filter((envelope) => eventThreadName(agentEvent(envelope)) === name)
-    .map((envelope) => ({
-      event: agentEvent(envelope),
-      provenance: "observed",
-      sequenceId: Number.isSafeInteger(Number(envelope.sequence_id)) ? Number(envelope.sequence_id) : null,
-      eventId: null,
-      timestamp: null,
-    }));
-  return overlayThreadEvidence(persisted, observed);
+  return mergeThreadEvidence(persisted, observedThreadEntries(name, liveEvents), snapshot?.thread_event_boundary);
 }
 
 function threadUsageEvidence(entries) {
@@ -3562,146 +3421,46 @@ function threadUsageEvidence(entries) {
   return evidence;
 }
 
-function threadEntryIsPersisted(entry) {
-  return Boolean(entry?.persisted || entry?.provenance === "persisted");
-}
-
-function threadDispatchAfterDurableFinish(entries, durableFinish, dispatches) {
-  if (!durableFinish) return false;
-  const priorStart = entries
-    .slice(0, durableFinish.index + 1)
-    .findLast((entry) => entry.event?.type === "thread_started");
-  const baselineSequence = threadEntrySequence(durableFinish.entry) ?? threadEntrySequence(priorStart);
-  if (baselineSequence === null) return false;
-  return (dispatches || []).some((dispatch) => {
-    const dispatchSequence = threadEntrySequence(dispatch);
-    return dispatch?.provenance === "observed"
-      && dispatch?.isError !== true
-      && dispatchSequence !== null
-      && dispatchSequence > baselineSequence;
-  });
-}
-
-function threadRestartAfterDurableFinish(entries, durableFinish, active, dispatches) {
-  const laterStarts = entries
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry, index }) => index > durableFinish.index && entry.event?.type === "thread_started");
-  if (!laterStarts.length) return false;
-
-  // A durable start or a complete start/finish pair is itself evidence of another cycle.
-  if (laterStarts.some(({ entry }) => threadEntryIsPersisted(entry))) return true;
-  if (laterStarts.some(({ index }) => entries.slice(index + 1).some((entry) => entry.event?.type === "thread_finished"))) return true;
-
-  // Active membership makes a later observed start authoritative. Without it, an
-  // excess replayed start is only duplicate evidence and must not reopen a durable exit.
-  if (active) return true;
-
-  const priorStart = entries
-    .slice(0, durableFinish.index + 1)
-    .map((entry, index) => ({ entry, index }))
-    .findLast(({ entry }) => entry.event?.type === "thread_started")?.entry;
-  const baselineSequence = threadEntrySequence(durableFinish.entry) ?? threadEntrySequence(priorStart);
-  if (baselineSequence === null) return false;
-
-  // A distinct observed dispatch after the terminal cycle's known sequence can
-  // establish a restart even before active membership reaches the snapshot.
-  return laterStarts.some(({ entry }) => {
-    const startSequence = threadEntrySequence(entry);
-    if (startSequence === null) return false;
-    return (dispatches || []).some((dispatch) => {
-      const dispatchSequence = threadEntrySequence(dispatch);
-      return dispatch?.provenance === "observed"
-        && dispatch?.isError !== true
-        && dispatchSequence !== null
-        && dispatchSequence > baselineSequence
-        && dispatchSequence <= startSequence;
-    });
-  });
-}
-
-function threadLifecycleFromEvidence(name, entries, active, dispatches) {
-  const durableFinish = entries
-    .map((entry, index) => ({ entry, index }))
-    .findLast(({ entry }) => entry.event?.type === "thread_finished" && threadEntryIsPersisted(entry));
-  const dispatchRestartAfterDurableFinish = threadDispatchAfterDurableFinish(entries, durableFinish, dispatches);
-  const durableFinishRemainsTerminal = durableFinish
-    && !dispatchRestartAfterDurableFinish
-    && !threadRestartAfterDurableFinish(entries, durableFinish, active, dispatches);
-  const lifecycleStartIndex = dispatchRestartAfterDurableFinish ? durableFinish.index + 1 : 0;
-  const lifecycleEndIndex = durableFinishRemainsTerminal ? durableFinish.index : Number.POSITIVE_INFINITY;
-
+function threadLifecycleFromEvidence(entries, active) {
   let latestStart = null;
   let latestFinish = null;
-  let latestError = null;
-  let latestLifecycleError = null;
-  let latestErrorEntry = null;
   let latestRunFinish = null;
+  let latestErrorEntry = null;
   let latestExecutionEntry = null;
-  let latestLog = null;
-  const iterations = [];
+  let latestError = null;
   const provenance = new Set();
   for (const [index, entry] of entries.entries()) {
-    const event = entry.event;
+    const event = entry?.event;
     if (!event) continue;
     provenance.add(entry.provenance);
-    if (entry.persisted) provenance.add("persisted");
-    if (index >= lifecycleStartIndex && index <= lifecycleEndIndex) {
-      if (event.type === "thread_started") latestStart = { ...entry, index };
-      if (event.type === "thread_finished") latestFinish = { ...entry, index };
-      if (event.type === "run_finished") latestRunFinish = { ...entry, index };
-      if (["run_started", "model_call_started", "tool_call_started", "tool_call_finished", "assistant_message", "thread_log"].includes(event.type)) {
-        latestExecutionEntry = { ...entry, index };
-      }
-      if (event.type === "error") {
-        latestLifecycleError = event.message || null;
-        latestErrorEntry = { ...entry, index };
-      }
+    if (event.type === "thread_started") latestStart = { ...entry, index };
+    if (event.type === "thread_finished") latestFinish = { ...entry, index };
+    if (event.type === "run_finished") latestRunFinish = { ...entry, index };
+    if (["run_started", "thread_started", "tool_call_started", "tool_call_finished", "assistant_message"].includes(event.type)) {
+      latestExecutionEntry = { ...entry, index };
     }
-    if (event.type === "error") latestError = event.message || null;
-    if (event.type === "thread_log") latestLog = event.line || null;
-    if (event.type === "model_call_started") iterations.push(event.iteration ?? "unavailable");
+    if (event.type === "error") {
+      latestError = event.message || null;
+      latestErrorEntry = { ...entry, index };
+    }
   }
-  for (const dispatch of dispatches) provenance.add(dispatch.provenance);
-
-  const finishAfterStart = latestFinish && (!latestStart || latestFinish.index > latestStart.index);
-  const terminalErrorAfterStart = latestErrorEntry && (!latestStart || latestErrorEntry.index > latestStart.index);
-  const runFinishAfterStart = latestRunFinish && (!latestStart || latestRunFinish.index > latestStart.index);
-  const latestDispatch = dispatches.at(-1) || null;
-  const startSequence = threadEntrySequence(latestStart);
-  const dispatchFinishSequence = Number.isSafeInteger(Number(latestDispatch?.finishSequenceId))
-    ? Number(latestDispatch.finishSequenceId)
-    : null;
-  const dispatchCompletionIsCurrent = Boolean(latestDispatch?.completed)
-    && (startSequence === null || dispatchFinishSequence === null || dispatchFinishSequence > startSequence)
-    && !(latestStart?.provenance === "observed" && latestDispatch?.provenance === "persisted");
-  const dispatchFailureWithoutStart = !latestStart
-    && (latestDispatch?.isError === true || (latestLifecycleError && /(?:dispatch|failed to spawn)/i.test(latestLifecycleError)));
-  const terminalEvidence = Boolean(
-    finishAfterStart
-    || terminalErrorAfterStart
-    || runFinishAfterStart
-    || dispatchCompletionIsCurrent
-    || dispatchFailureWithoutStart
-  );
-  const launchEvidence = Boolean(latestStart || latestExecutionEntry || latestDispatch);
-  const stateName = terminalEvidence ? "finished" : active ? (launchEvidence ? "running" : "queued") : "finished";
+  const terminal = [latestFinish, latestRunFinish, latestErrorEntry]
+    .filter(Boolean).sort((left, right) => left.index - right.index).at(-1) || null;
+  const terminalIsCurrent = Boolean(terminal)
+    && (!latestStart || terminal.index > latestStart.index)
+    && (!latestExecutionEntry || terminal.index >= latestExecutionEntry.index);
+  const launchEvidence = Boolean(latestStart || latestExecutionEntry);
+  const stateName = terminalIsCurrent ? "finished" : active ? (launchEvidence ? "running" : "queued") : "finished";
   let outcome;
-  if (finishAfterStart) {
+  if (terminalIsCurrent && terminal === latestFinish) {
     const exitCode = latestFinish.event.exit_code == null ? null : Number(latestFinish.event.exit_code);
-    outcome = latestFinish.event.timed_out
-      ? "timed out"
+    outcome = latestFinish.event.timed_out ? "timed out"
       : exitCode === 0 ? "completed (exit 0)"
         : exitCode === null || !Number.isFinite(exitCode) ? "finished; exit unavailable"
           : `failed (exit ${latestFinish.event.exit_code})`;
-  } else if (dispatchFailureWithoutStart) {
-    outcome = latestDispatch?.preview || latestLifecycleError || "dispatch failed; result preview unavailable";
-  } else if (terminalErrorAfterStart) {
-    outcome = latestLifecycleError || (latestStart ? "worker failed after starting; error detail unavailable" : "worker failed; error detail unavailable");
-  } else if (dispatchCompletionIsCurrent) {
-    outcome = latestDispatch.preview
-      ? `dispatch completed: ${latestDispatch.preview}`
-      : "dispatch completed; worker outcome unavailable";
-  } else if (runFinishAfterStart) {
+  } else if (terminalIsCurrent && terminal === latestErrorEntry) {
+    outcome = latestError || "worker failed; error detail unavailable";
+  } else if (terminalIsCurrent) {
     outcome = "worker run finished; exit outcome unavailable";
   } else if (active) {
     outcome = launchEvidence ? "running; no terminal evidence yet" : "queued; no start event yet";
@@ -3710,20 +3469,13 @@ function threadLifecycleFromEvidence(name, entries, active, dispatches) {
   } else {
     outcome = "no start/finish lifecycle evidence in the current window";
   }
-
   return {
-    state: stateName,
-    outcome,
+    state: stateName, outcome,
     start: latestStart?.event || null,
-    finish: latestFinish?.event || null,
+    finish: terminalIsCurrent && latestFinish === terminal ? latestFinish.event : null,
     startSequence: latestStart?.sequenceId ?? null,
-    finishSequence: latestFinish?.sequenceId ?? null,
-    latestError,
-    latestLog,
-    iterations,
-    provenance: [...provenance],
-    usageEvidence: threadUsageEvidence(entries),
-    latestDispatch,
+    finishSequence: terminalIsCurrent && latestFinish === terminal ? latestFinish.sequenceId ?? null : null,
+    latestError, provenance: [...provenance], usageEvidence: threadUsageEvidence(entries),
   };
 }
 
@@ -3737,13 +3489,6 @@ function buildThreadModels(snapshot = currentSnapshot()) {
     entries.push(envelope);
     liveEventsByThread.set(name, entries);
   }
-  const dispatches = threadDispatchEvidence(snapshot);
-  const dispatchesByThread = new Map();
-  for (const dispatch of dispatches) {
-    const entries = dispatchesByThread.get(dispatch.name) || [];
-    entries.push(dispatch);
-    dispatchesByThread.set(dispatch.name, entries);
-  }
   const steeringByThread = new Map();
   for (const record of snapshot?.thread_steering || []) {
     if (record.thread_name === ORCHESTRATOR_STEERING_TARGET) continue;
@@ -3753,47 +3498,40 @@ function buildThreadModels(snapshot = currentSnapshot()) {
   }
   const recordsByName = new Map((snapshot?.threads || []).map((thread) => [thread.name, thread]));
   const names = new Set([
-    ...recordsByName.keys(),
-    ...Object.keys(snapshot?.thread_episodes || {}),
-    ...Object.keys(snapshot?.thread_events || {}),
-    ...(snapshot?.active_threads || []),
-    ...(snapshot?.message_cycle?.thread_names || []),
-    ...steeringByThread.keys(),
-    ...dispatchesByThread.keys(),
+    ...recordsByName.keys(), ...Object.keys(snapshot?.thread_episodes || {}),
+    ...Object.keys(snapshot?.thread_events || {}), ...(snapshot?.active_threads || []),
+    ...(snapshot?.message_cycle?.thread_names || []), ...steeringByThread.keys(),
     ...liveEventsByThread.keys(),
   ]);
   const active = new Set(snapshot?.active_threads || []);
   const models = [...names].map((name) => {
     const entries = threadModelEntries(name, snapshot, liveEventsByThread.get(name) || []);
-    const threadDispatches = dispatchesByThread.get(name) || [];
-    const lifecycle = threadLifecycleFromEvidence(name, entries, active.has(name), threadDispatches);
+    const lifecycle = threadLifecycleFromEvidence(entries, active.has(name));
     const record = recordsByName.get(name) || null;
     const steering = steeringByThread.get(name) || [];
-    const observedActions = buildThreadActions(name, entries, snapshot, steering);
-    const actions = observedActions.length ? observedActions : buildRetainedThreadActions(name, record, snapshot, steering);
-    if (record || (snapshot?.thread_episodes?.[name] || []).length || steering.length || (snapshot?.message_cycle?.thread_names || []).includes(name)) {
+    const actions = projectThreadActions(entries);
+    const observedSteering = new Set(entries.map((entry) => entry.event)
+      .filter((event) => event?.type?.startsWith("thread_steering_")).map((event) => event.steering_id));
+    for (const durable of steering) if (!observedSteering.has(durable.id)) actions.push(steeringRecordAction(durable));
+    if (record || (snapshot?.thread_episodes?.[name] || []).length || steering.length
+        || (snapshot?.message_cycle?.thread_names || []).includes(name)) {
       if (!lifecycle.provenance.includes("persisted")) lifecycle.provenance.unshift("persisted");
     }
-    return {
-      name,
-      ...lifecycle,
-      record,
-      entries,
-      dispatches: threadDispatches,
-      actions,
-    };
+    return { name, ...lifecycle, record, entries, actions };
   });
   const currentCycle = currentCycleThreadNames(snapshot);
   return models.map((thread) => ({
     ...thread,
     compact: !["running", "queued"].includes(thread.state) && !currentCycle.has(thread.name),
   })).sort((a, b) => {
-    if (a.compact !== b.compact) return a.compact ? 1 : -1;
-    const rank = { running: 0, queued: 1, finished: 2 };
-    if ((rank[a.state] ?? 99) !== (rank[b.state] ?? 99)) return (rank[a.state] ?? 99) - (rank[b.state] ?? 99);
-    return String(b.record?.updated_at || "").localeCompare(String(a.record?.updated_at || "")) || a.name.localeCompare(b.name);
+    const rank = (thread) => thread.state === "running" ? 0 : thread.state === "queued" ? 1 : thread.compact ? 3 : 2;
+    const rankDifference = rank(a) - rank(b);
+    if (rankDifference) return rankDifference;
+    const updatedDifference = String(b.record?.updated_at || "").localeCompare(String(a.record?.updated_at || ""));
+    return updatedDifference || a.name.localeCompare(b.name);
   });
 }
+
 
 function currentCycleThreadNames(snapshot) {
   const seed = threadCycleSeed(snapshot);
@@ -3810,45 +3548,14 @@ function currentCycleThreadNames(snapshot) {
 function threadCycleSeed(snapshot) {
   const messages = snapshot?.messages || [];
   const serverCycle = snapshot?.message_cycle;
-  let latestUserIndex = -1;
-  let userCount = 0;
-  for (let index = 0; index < messages.length; index += 1) {
-    if (messages[index]?.role !== "user") continue;
-    latestUserIndex = index;
-    userCount += 1;
-  }
-
-  const submitted = effectiveActiveRun(snapshot)?.submitted_user_message;
-  let marker = "none";
-  let dispatchStart = messages.length;
   const names = new Set(snapshot?.active_threads || []);
-  if (submitted?.content) {
-    const baseline = Number(submitted.baseline_user_message_count);
-    const ordinal = Number.isFinite(baseline) ? baseline + 1 : Math.max(userCount, 1);
-    marker = `${ordinal}:${submitted.content}`;
-    const submittedIndex = messages.findLastIndex((message) => message?.role === "user" && message.content === submitted.content);
-    dispatchStart = submittedIndex >= 0 ? submittedIndex + 1 : messages.length;
-  } else if (serverCycle?.marker) {
+  if (serverCycle?.marker) {
     for (const name of serverCycle.thread_names || []) names.add(name);
     return { marker: serverCycle.marker, names };
-  } else if (latestUserIndex >= 0) {
-    marker = `${userCount}:${messages[latestUserIndex].content || ""}`;
-    dispatchStart = latestUserIndex + 1;
   }
-
-  for (const message of messages.slice(dispatchStart)) {
-    if (message?.role !== "assistant") continue;
-    for (const call of message.tool_calls || []) {
-      if (call.function?.name !== "thread") continue;
-      try {
-        const name = JSON.parse(call.function.arguments || "{}").name;
-        if (typeof name === "string" && name.trim()) names.add(name);
-      } catch (_) {
-        // Malformed historical tool arguments should not hide active work.
-      }
-    }
-  }
-  return { marker, names };
+  const users = messages.filter((message) => message?.role === "user");
+  const latest = users.at(-1);
+  return { marker: latest ? `${users.length}:${latest.content || ""}` : "none", names };
 }
 
 function eventThreadName(event) {
@@ -3856,12 +3563,6 @@ function eventThreadName(event) {
   if (event.thread_name) return event.thread_name;
   if (["thread_started", "thread_log", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(event.type)) return event.name || null;
   return null;
-}
-
-function lastSequenceOfType(events, type) {
-  let sequence = 0;
-  for (const envelope of events) if (agentEvent(envelope)?.type === type) sequence = Math.max(sequence, Number(envelope.sequence_id || 0));
-  return sequence;
 }
 
 function steeringRecordAction(record) {
@@ -3883,100 +3584,6 @@ function steeringRecordAction(record) {
       record?.expired_at ? `expired ${record.expired_at}` : "",
     ),
   };
-}
-
-function normalizeThreadActionEntries(events) {
-  return (events || []).map((item) => {
-    if (item?.provenance && item?.event) return item;
-    if (item?.event?.type === "agent") {
-      return {
-        event: agentEvent(item),
-        provenance: "observed",
-        sequenceId: Number.isSafeInteger(Number(item.sequence_id)) ? Number(item.sequence_id) : null,
-        eventId: null,
-        timestamp: null,
-      };
-    }
-    return { event: item, provenance: "persisted", sequenceId: null, eventId: null, timestamp: null };
-  }).filter((entry) => entry.event);
-}
-
-function buildThreadActions(name, events, snapshot, steeringRecords = null) {
-  const actions = [];
-  const calls = new Map();
-  const observedSteering = new Set();
-  const episodes = snapshot?.thread_episodes?.[name] || [];
-  const latestEpisode = episodes.at(-1);
-  const entries = normalizeThreadActionEntries(events);
-  const modelResponses = threadModelResponsePlan(entries, latestEpisode);
-  const hasCanonicalStart = entries.some((entry) => entry.event?.type === "thread_started");
-  const hasCanonicalFinish = entries.some((entry) => entry.event?.type === "thread_finished");
-  for (const [index, entry] of entries.entries()) {
-    const event = entry.event;
-    if ((event.type === "run_started" && hasCanonicalStart) || (event.type === "run_finished" && hasCanonicalFinish)) continue;
-    if (event.type === "tool_call_started") {
-      const action = threadEventAction(event, latestEpisode, entry);
-      actions.push(action);
-      queueThreadToolStart(calls, event, action);
-      continue;
-    }
-    if (event.type === "tool_call_finished") {
-      const existing = takeThreadToolStart(calls, event);
-      if (existing) completeThreadToolAction(existing, event, entry);
-      else actions.push(threadEventAction(event, latestEpisode, entry));
-      continue;
-    }
-    if (event.type === "assistant_message") {
-      if (!modelResponses.pairedAssistantIndexes.has(index)) {
-        const detail = combineActionDetail(event.content, event.usage ? usageDetail(event.usage) : "");
-        if (detail) actions.push({ name: "response", result: "returned", state: "done", detail, ...actionEvidence({ ...entry, event }) });
-      }
-      continue;
-    }
-    if (event.type === "thread_finished") {
-      const succeeded = Number(event.exit_code) === 0 && !event.timed_out;
-      actions.push({
-        name: "thread",
-        result: event.timed_out ? "timed out" : succeeded ? "finished" : event.exit_code == null ? "finished" : `failed (exit ${event.exit_code})`,
-        state: succeeded ? "done" : "error",
-        detail: threadFinishDetail(event, latestEpisode?.content ? latestEpisode : null),
-        ...actionEvidence({ ...entry, event }),
-      });
-      continue;
-    }
-    if (event.type === "thread_steering_queued"
-        || event.type === "thread_steering_delivered"
-        || event.type === "thread_steering_expired") observedSteering.add(event.steering_id);
-    const action = threadEventAction(event, latestEpisode, entry);
-    if (event.type === "model_call_started" && action) action.detail = modelResponses.modelDetails.get(index);
-    if (action) actions.push(action);
-  }
-  for (const record of steeringRecords || snapshot?.thread_steering || []) {
-    if (record.thread_name !== name || observedSteering.has(record.id)) continue;
-    actions.push(steeringRecordAction(record));
-  }
-  return actions;
-}
-
-function buildRetainedThreadActions(name, _record, snapshot, steeringRecords = null) {
-  const actions = [];
-  const episodes = snapshot?.thread_episodes?.[name] || [];
-  for (const episode of episodes.slice(-3)) {
-    actions.push({
-      name: "episode",
-      result: "retained",
-      state: "done",
-      provenance: "persisted",
-      kind: "episode",
-      eventId: episode.id ?? null,
-      timestamp: episode.created_at ?? null,
-      detail: combineActionDetail(episode.id == null ? "Episode ID unavailable" : `episode ${episode.id}`, episode.content),
-    });
-  }
-  for (const steering of steeringRecords || (snapshot?.thread_steering || []).filter((item) => item.thread_name === name)) {
-    actions.push(steeringRecordAction(steering));
-  }
-  return actions;
 }
 
 function renderThreads(snapshot) {
@@ -4002,8 +3609,25 @@ function renderThreadTile(thread) {
   return `<article class="thread-tile ${thread.compact ? "is-compact" : ""} ${selected ? "is-selected" : ""}" data-state="${escapeAttr(status.state)}"><header class="thread-tile-head"><button class="thread-select" type="button" data-thread-name="${escapeAttr(thread.name)}" data-thread-state="${escapeAttr(status.state)}" aria-pressed="${selected}" aria-label="${escapeAttr(label)}"><span class="thread-name" title="${escapeAttr(thread.name)}">${escapeHtml(thread.name)}</span><span class="thread-state" aria-label="${escapeAttr(status.label)}">${escapeHtml(status.label)}</span></button><button class="expand-button thread-expand" type="button" data-focus-thread="${escapeAttr(thread.name)}" aria-label="Open ${escapeAttr(thread.name)} fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg></button></header>${ledger}</article>`;
 }
 
+function selectTileActions(actions, limit = ACTION_LEDGER_LIMIT) {
+  if (actions.length <= limit) return [...actions];
+  const protectedIndexes = new Set();
+  for (const predicate of [
+    (action) => action.name === "response",
+    (action) => action.kind === "error" || action.name === "error",
+    (action) => ["thread_finished", "run_finished"].includes(action.kind),
+  ]) {
+    const index = actions.findLastIndex(predicate);
+    if (index >= 0) protectedIndexes.add(index);
+  }
+  for (let index = actions.length - 1; index >= 0 && protectedIndexes.size < limit; index -= 1) {
+    protectedIndexes.add(index);
+  }
+  return [...protectedIndexes].sort((left, right) => left - right).map((index) => actions[index]);
+}
+
 function renderActionRows(actions, emptyLabel) {
-  const visible = actions.slice(-ACTION_LEDGER_LIMIT);
+  const visible = selectTileActions(actions);
   const placeholders = Array.from({ length: ACTION_LEDGER_LIMIT - visible.length }, (_, index) => {
     const label = !visible.length && index === ACTION_LEDGER_LIMIT - 1 ? emptyLabel : "";
     return `<li class="action-row is-placeholder" aria-hidden="true">${label ? `<span class="action-detail">${escapeHtml(label)}</span>` : ""}</li>`;
@@ -4011,483 +3635,34 @@ function renderActionRows(actions, emptyLabel) {
   const rows = visible.map((action) => {
     const rowClass = action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : "";
     const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
-    const detail = action.detail ? `<span class="action-detail">${escapeHtml(action.detail)}</span>` : "";
+    const detail = action.detail ? `<span class="action-detail" title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</span>` : "";
     return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}"><span class="action-mark">${marker}</span><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
   });
   return placeholders.concat(rows).join("");
 }
 
-const TOOL_SUMMARY_MAX_CHARS = 280;
-const TOOL_VALUE_MAX_CHARS = 120;
-const TOOL_SAFE_CONTEXT_KEYS = new Set([
-  "action", "id", "library", "libraryId", "libraryName", "limit", "name", "offset", "path", "pattern", "query", "repo", "status", "workdir",
-]);
-const TOOL_SENSITIVE_KEY = /(?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|bearer|token|password|passwd|secret|credentials?|cookie|private[_-]?key|client[_-]?(?:secret|key)|headers?|body|content|patch|old[_-]?text|new[_-]?text)/i;
-
-function toolNameKey(value) {
-  return String(value || "tool").trim().toLowerCase();
-}
-
 function toolDisplayName(value) {
-  const key = toolNameKey(value);
-  const leaf = key.split("__").at(-1);
+  const leaf = String(value || "tool").trim().split("__").at(-1).toLowerCase();
   const names = {
-    read: "Read",
-    exec_command: "Command",
-    shell: "Command",
-    exec: "Command",
-    bash: "Command",
-    write: "Write",
-    edit: "Edit",
-    write_stdin: "Terminal input",
-    thread: "Thread",
-    threads: "Threads",
-    thread_read: "Read thread",
-    thread_delete: "Delete thread",
-    workset_define: "Define workset",
-    workset_read: "Read workset",
-    workset_list: "List worksets",
-    web_search_exa: "Web search",
-    web_fetch_exa: "Web fetch",
-    searchgithub: "GitHub search",
-    resolve_library_id: "Context library lookup",
-    query_docs: "Context documentation",
+    read: "Read", exec_command: "Command", shell: "Command", exec: "Command", bash: "Command",
+    write: "Write", edit: "Edit", write_stdin: "Terminal input", thread: "Thread",
+    threads: "Threads", thread_read: "Read thread", thread_delete: "Delete thread",
+    workset_define: "Define workset", workset_read: "Read workset", workset_list: "List worksets",
+    web_search_exa: "Web search", web_fetch_exa: "Web fetch", searchgithub: "GitHub search",
+    resolve_library_id: "Context library lookup", query_docs: "Context documentation",
   };
   if (names[leaf]) return names[leaf];
-  const humanized = leaf
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const humanized = leaf.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   return humanized ? humanized.charAt(0).toUpperCase() + humanized.slice(1) : "Tool";
 }
 
-function decodedToolKey(value) {
-  let decoded = String(value ?? "").replace(/\+/g, " ");
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next;
-    } catch (_) { break; }
-  }
-  return decoded.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function toolKeyIsSensitive(value) {
-  const key = decodedToolKey(value);
-  if (!key) return false;
-  return key === "authorization"
-    || key.endsWith("authorization")
-    || key === "header"
-    || key.endsWith("headers")
-    || key.includes("apikey")
-    || key.includes("accesskey")
-    || key === "key"
-    || key.includes("privatekey")
-    || key.includes("clientkey")
-    || key.includes("token")
-    || key === "bearer"
-    || key.endsWith("bearer")
-    || key === "cookie"
-    || key.endsWith("cookie")
-    || key.endsWith("cookies")
-    || key.includes("password")
-    || key.includes("passwd")
-    || key.includes("passphrase")
-    || key.includes("secret")
-    || key.includes("credential")
-    || key === "signature"
-    || key === "sig"
-    || key === "body"
-    || key.endsWith("body")
-    || key === "content"
-    || key.endsWith("content")
-    || key === "patch"
-    || key.endsWith("patch")
-    || key === "oldtext"
-    || key === "newtext";
-}
-
-function redactedToolStructure(value, depth = 0) {
-  if (depth > 8) return "[structured value omitted]";
-  if (Array.isArray(value)) {
-    const visible = value.slice(0, 40).map((item, index) => {
-      if (index === 1 && typeof value[0] === "string" && toolKeyIsSensitive(value[0])) return "[redacted]";
-      return redactedToolStructure(item, depth + 1);
-    });
-    if (value.length > visible.length) visible.push(`[${(value.length - visible.length).toLocaleString()} more items omitted]`);
-    return visible;
-  }
-  if (value && typeof value === "object") {
-    const redacted = {};
-    const entries = Object.entries(value);
-    for (const [key, candidate] of entries.slice(0, 40)) {
-      redacted[key] = toolKeyIsSensitive(key) ? "[redacted]" : redactedToolStructure(candidate, depth + 1);
-    }
-    if (entries.length > 40) redacted["[additional fields]"] = `${(entries.length - 40).toLocaleString()} omitted`;
-    return redacted;
-  }
-  if (typeof value === "string") return sanitizeToolText(value, false);
-  return value;
-}
-
-function jsonSegmentEnd(value, start) {
-  const opening = value[start];
-  if (opening !== "{" && opening !== "[") return -1;
-  const stack = [opening];
-  let quote = "";
-  let escaped = false;
-  for (let index = start + 1; index < value.length; index += 1) {
-    const character = value[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === quote) quote = "";
-      continue;
-    }
-    if (character === '"') { quote = character; continue; }
-    if (character === "{" || character === "[") stack.push(character);
-    else if (character === "}" || character === "]") {
-      const expected = character === "}" ? "{" : "[";
-      if (stack.at(-1) !== expected) return -1;
-      stack.pop();
-      if (!stack.length) return index + 1;
-    }
-  }
-  return -1;
-}
-
-function sanitizeEmbeddedJson(value) {
-  let result = "";
-  let cursor = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    if (value[index] !== "{" && value[index] !== "[") continue;
-    const end = jsonSegmentEnd(value, index);
-    if (end < 0) continue;
-    const candidate = value.slice(index, end);
-    try {
-      const parsed = JSON.parse(candidate);
-      result += value.slice(cursor, index) + JSON.stringify(redactedToolStructure(parsed));
-      cursor = end;
-      index = end - 1;
-    } catch (_) { /* A non-JSON brace is ordinary text. */ }
-  }
-  return cursor ? result + value.slice(cursor) : value;
-}
-
-function decodeToolQueryKey(value) {
-  let decoded = String(value ?? "");
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const next = decodeURIComponent(decoded.replace(/\+/g, " "));
-      if (next === decoded) break;
-      decoded = next;
-    } catch (_) { break; }
-  }
-  return decoded;
-}
-
-function sanitizeToolUrlParameters(value) {
-  return value.split(/([&;?])/).map((part) => {
-    if (part === "&" || part === ";" || part === "?" || !part) return part;
-    const equals = part.indexOf("=");
-    if (equals >= 0) {
-      const key = part.slice(0, equals);
-      return toolKeyIsSensitive(decodeToolQueryKey(key)) ? `${key}=[redacted]` : part;
-    }
-    const decoded = decodeToolQueryKey(part);
-    const decodedEquals = decoded.indexOf("=");
-    if (decodedEquals >= 0 && toolKeyIsSensitive(decoded.slice(0, decodedEquals))) {
-      return `${decoded.slice(0, decodedEquals)}=[redacted]`;
-    }
-    return part;
-  }).join("");
-}
-
-function sanitizeSingleToolUrl(value) {
-  const schemeEnd = value.indexOf("://");
-  if (schemeEnd < 0) return value;
-  const authorityStart = schemeEnd + 3;
-  let authorityEnd = value.length;
-  for (const separator of ["/", "?", "#"]) {
-    const found = value.indexOf(separator, authorityStart);
-    if (found >= 0) authorityEnd = Math.min(authorityEnd, found);
-  }
-  let safe = value;
-  const authority = safe.slice(authorityStart, authorityEnd);
-  const userinfoEnd = authority.lastIndexOf("@");
-  if (userinfoEnd >= 0) {
-    safe = `${safe.slice(0, authorityStart)}[redacted]@${authority.slice(userinfoEnd + 1)}${safe.slice(authorityEnd)}`;
-  }
-
-  const possibleQueryStart = safe.indexOf("?", authorityStart);
-  const fragmentStart = safe.indexOf("#", authorityStart);
-  const queryStart = possibleQueryStart >= 0 && (fragmentStart < 0 || possibleQueryStart < fragmentStart)
-    ? possibleQueryStart
-    : -1;
-  const pathEnd = Math.min(
-    queryStart < 0 ? safe.length : queryStart,
-    fragmentStart < 0 ? safe.length : fragmentStart,
-  );
-  const query = queryStart >= 0
-    ? `?${sanitizeToolUrlParameters(safe.slice(queryStart + 1, fragmentStart >= 0 ? fragmentStart : safe.length))}`
-    : "";
-  const fragment = fragmentStart >= 0
-    ? `#${sanitizeToolUrlParameters(safe.slice(fragmentStart + 1))}`
-    : "";
-  return `${safe.slice(0, pathEnd)}${query}${fragment}`;
-}
-
-function sanitizeToolUrls(value) {
-  return value.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi, (url) => sanitizeSingleToolUrl(url));
-}
-
-function sanitizeSensitiveAssignments(value) {
-  let safe = value.replace(/(["']?)([A-Za-z_%][A-Za-z0-9_.%+-]*)\1(\s*(?::|=)\s*)([\[{])[\s\S]*$/g, (match, quote, key, separator) => (
-    toolKeyIsSensitive(key) ? `${quote}${key}${quote}${separator}[redacted]` : match
-  ));
-  safe = safe.replace(/((?:["']?)(?:authorization|headers?)(?:["']?)\s*(?::|=)\s*)(?!(?:["']?)\[redacted\])[^\r\n]+/gi, "$1[redacted]");
-  safe = safe.replace(/(["']?)([A-Za-z_%][A-Za-z0-9_.%+-]*)\1(\s*(?::|=)\s*)((?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s&,;}]+))/gi,
-    (match, quote, key, separator) => (toolKeyIsSensitive(key) ? `${quote}${key}${quote}${separator}[redacted]` : match));
-  return safe.replace(/(\bBearer\s+)[A-Za-z0-9._~+/%=-]+/gi, "$1[redacted]");
-}
-
-function sanitizeToolText(value, parseJson = true) {
-  let summary = String(value ?? "");
-  if (parseJson) {
-    const trimmed = summary.trim();
-    if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-      try { return JSON.stringify(redactedToolStructure(JSON.parse(trimmed))); }
-      catch (_) { /* Continue with conservative text redaction. */ }
-    }
-    summary = sanitizeEmbeddedJson(summary);
-  }
-  summary = sanitizeToolUrls(summary);
-  summary = sanitizeSensitiveAssignments(summary);
-  return summary;
-}
-
-function sanitizeToolSummaryValue(value, maxChars = TOOL_VALUE_MAX_CHARS) {
-  return compactActionDetail(sanitizeToolText(value), maxChars);
-}
-
-function shellOperatorAt(value, allowed = new Set(["|", ">", ">>", "<<<"])) {
-  let quote = "";
-  let escaped = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (character === "\\" && quote === '"') escaped = true;
-      else if (character === quote) quote = "";
-      continue;
-    }
-    if (character === "'" || character === '"') { quote = character; continue; }
-    if (character === "\\") { index += 1; continue; }
-    const operator = value.startsWith("<<<", index) ? "<<<" : value.startsWith(">>", index) ? ">>" : character;
-    if (!allowed.has(operator)) continue;
-    if ((operator === ">" || operator === ">>") && value[index - 1] === "2" && !/\d/.test(value[index - 2] || "")) continue;
-    return { index, operator };
-  }
-  return null;
-}
-
-function shellOperation(value) {
-  const match = String(value).trim().match(/^(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*)([^\s]+)/);
-  return match?.[1] || "command";
-}
-
-function hasRecognizablePatchPayload(value) {
-  return /\*\*\*\s+Begin Patch/i.test(value)
-    || /\bdiff\s+--git\s+(?:["']?a\/|["']?b\/)/i.test(value)
-    || /(?:^|[\r\n]|\\n)---\s+(?:a\/|[^\s]+)[\s\S]*(?:^|[\r\n]|\\n)\+\+\+\s+(?:b\/|[^\s]+)/i.test(value)
-    || /(?:^|[\r\n]|\\n)@@\s+-\d/i.test(value);
-}
-
-function curlFileArgumentIsSafe(value) {
-  const candidate = String(value || "").replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2");
-  return /^(?:[.~]?\/)?[A-Za-z0-9_@+.-]+(?:\/[A-Za-z0-9_@+.-]+)*\.(?:pem|key|p12|pfx|crt|cer)$/i.test(candidate);
-}
-
-function redactCurlFileArguments(value) {
-  return value.replace(/(\s(?:--key|--cert|--proxy-key|--proxy-cert|-E))(=|\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/gi,
-    (match, flag, separator, argument) => (curlFileArgumentIsSafe(argument) ? match : `${flag}${separator}[redacted]`));
-}
-
-function redactCommandCredentialArguments(value) {
-  return redactCurlFileArguments(String(value)
-    .replace(/(\s(?:-H|--header|--proxy-header|--expand-header|-d|--data(?:-raw|-binary|-urlencode)?|--json|-u|--user|--proxy-user|--oauth2-bearer|--bearer|--token|--access-token|--refresh-token|--id-token|--pass|--tlsuser|--tlspassword|--proxy-tlsuser|--proxy-tlspassword|--login-options|--sasl-authzid|--aws-sigv4|-b|--cookie|-F|--form))(=|\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/gi, "$1$2[redacted]")
-    .replace(/(\s-(?:H|d|u|U|b|F))("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/g, "$1[redacted]"));
-}
-
-function sanitizeCommandSummaryValue(value) {
-  return sanitizeToolSummaryValue(redactCommandCredentialArguments(value));
-}
-
-function safeCommandSummary(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const firstLine = raw.split(/\r?\n/, 1)[0];
-  if (/<<-?\s*['"]?[A-Za-z0-9_]+/.test(firstLine) && /\n/.test(raw)) {
-    const prefix = firstLine.replace(/\s*<<-?\s*['"]?[A-Za-z0-9_]+['"]?/, "");
-    return sanitizeCommandSummaryValue(`${prefix || shellOperation(firstLine)} [content omitted]`);
-  }
-
-  const gitApply = raw.match(/^\s*(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*)(?:sudo\s+)?git\s+apply\b/i);
-  if (gitApply) {
-    const processSubstitution = raw.indexOf("<(", gitApply[0].length);
-    const patchMarker = hasRecognizablePatchPayload(raw) ? raw.search(/\*\*\*\s+Begin Patch|\bdiff\s+--git\s+(?:["']?a\/|["']?b\/)|(?:^|[\r\n]|\\n)---\s+|(?:^|[\r\n]|\\n)@@\s+-\d/im) : -1;
-    const bodyStart = processSubstitution >= 0 && patchMarker >= 0
-      ? Math.min(processSubstitution, patchMarker)
-      : Math.max(processSubstitution, patchMarker);
-    if (bodyStart >= 0) {
-      const prefix = raw.slice(0, bodyStart).trim().replace(/\s+\$?["']?$/, "") || gitApply[0].trim();
-      return sanitizeCommandSummaryValue(`${prefix} [content omitted]`);
-    }
-  }
-
-  const patchPipe = raw.match(/\|\s*((?:sudo\s+)?(?:apply_patch|patch)\b[^\r\n]*)/i);
-  if (patchPipe) {
-    const source = raw.slice(0, patchPipe.index);
-    const applyPatch = patchPipe[1].match(/^\s*(?:sudo\s+)?apply_patch\b([\s\S]*)/i);
-    const patchCommand = applyPatch
-      ? `apply_patch${applyPatch[1].trim() ? " [content omitted]" : ""}`
-      : patchPipe[1].replace(/\s*<<<[\s\S]*$/, " <<< [content omitted]");
-    return sanitizeCommandSummaryValue(`${shellOperation(source)} [content omitted] | ${patchCommand}`);
-  }
-
-  const hereString = shellOperatorAt(raw, new Set(["<<<"]));
-  if (hereString) return sanitizeCommandSummaryValue(`${raw.slice(0, hereString.index + 3).trim()} [content omitted]`);
-
-  if (/^(?:sudo\s+)?apply_patch\b/i.test(raw)) return "apply_patch [content omitted]";
-  if (/^(?:sudo\s+)?patch\b/i.test(raw) && /(?:\*\*\*\s+Begin Patch|---\s|\\n\+\+\+|@@)/i.test(raw)) {
-    const prefix = raw.match(/^(?:sudo\s+)?patch(?:\s+-[A-Za-z0-9]+)*/i)?.[0] || "patch";
-    return sanitizeCommandSummaryValue(`${prefix} [content omitted]`);
-  }
-  if (hasRecognizablePatchPayload(raw)) return sanitizeCommandSummaryValue(`${shellOperation(raw)} [content omitted]`);
-
-  const writer = raw.match(/^\s*(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*)(printf|echo)\b/i);
-  if (writer) {
-    const control = shellOperatorAt(raw);
-    const controlIndex = control && /\d/.test(raw[control.index - 1] || "") ? control.index - 1 : control?.index;
-    const tail = control ? ` ${raw.slice(controlIndex).trim()}` : "";
-    return sanitizeCommandSummaryValue(`${writer[1]} [content omitted]${tail}`);
-  }
-
-  const output = shellOperatorAt(raw, new Set([">", ">>"]));
-  if (output) {
-    const outputIndex = /\d/.test(raw[output.index - 1] || "") ? output.index - 1 : output.index;
-    return sanitizeCommandSummaryValue(`${shellOperation(raw.slice(0, outputIndex))} [content omitted] ${raw.slice(outputIndex).trim()}`);
-  }
-
-  return sanitizeCommandSummaryValue(raw);
-}
-
-function toolArgumentSize(value) {
-  if (typeof value === "string") return value.length;
-  if (value === null || value === undefined) return 0;
-  try { return JSON.stringify(value).length; }
-  catch (_) { return 0; }
-}
-
-function safeToolUrl(value) {
-  return sanitizeToolSummaryValue(value, TOOL_VALUE_MAX_CHARS);
-}
-
-function formatToolArguments(toolName, argsDetail, argsPreview) {
-  const raw = String(argsDetail || argsPreview || "").trim();
-  if (!raw) return "Arguments unavailable";
-  let parsed;
-  try { parsed = JSON.parse(raw); }
-  catch (_) { return "Arguments unavailable"; }
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return "Arguments unavailable";
-
-  const key = toolNameKey(toolName);
-  const leaf = key.split("__").at(-1);
-  const parts = [];
-  const has = (name) => Object.prototype.hasOwnProperty.call(parsed, name);
-  const add = (label, value, maxChars = TOOL_VALUE_MAX_CHARS) => {
-    if (value === null || value === undefined || typeof value === "object") return;
-    const safe = sanitizeToolSummaryValue(value, maxChars);
-    if (safe) parts.push(`${label}: ${safe}`);
-  };
-
-  if (leaf === "read") {
-    add("path", parsed.path);
-    add("offset", parsed.offset);
-    add("limit", parsed.limit);
-  } else if (["exec_command", "shell", "exec", "bash", "run_shell"].includes(leaf)) {
-    const command = safeCommandSummary(parsed.cmd ?? parsed.command);
-    if (command) parts.push(`command: ${command}`);
-    add("workdir", parsed.workdir);
-  } else if (leaf === "write") {
-    add("path", parsed.path);
-    if (has("content")) parts.push(`content: ${toolArgumentSize(parsed.content).toLocaleString()} chars`);
-  } else if (leaf === "edit") {
-    add("path", parsed.path);
-    if (has("old_text")) parts.push(`old: ${toolArgumentSize(parsed.old_text).toLocaleString()} chars`);
-    if (has("new_text")) parts.push(`new: ${toolArgumentSize(parsed.new_text).toLocaleString()} chars`);
-  } else if (leaf === "write_stdin") {
-    add("session", parsed.session_id ?? parsed.session);
-    const chars = parsed.chars ?? parsed.input;
-    parts.push(chars === "" || chars === null || chars === undefined ? "poll" : `input: ${toolArgumentSize(chars).toLocaleString()} chars`);
-  } else if (["thread", "threads", "thread_read", "thread_delete"].includes(leaf)) {
-    add("name", parsed.name);
-    add("action", parsed.action);
-    const sources = Array.isArray(parsed.threads) ? parsed.threads : Array.isArray(parsed.source_threads) ? parsed.source_threads : null;
-    if (sources) parts.push(`sources: ${sources.length.toLocaleString()}`);
-  } else if (leaf.startsWith("workset")) {
-    add("id", parsed.id);
-    add("status", parsed.status);
-    const items = Array.isArray(parsed.workset_items) ? parsed.workset_items : Array.isArray(parsed.items) ? parsed.items : null;
-    if (items) parts.push(`items: ${items.length.toLocaleString()}`);
-  } else if (leaf.includes("fetch")) {
-    const urls = Array.isArray(parsed.urls) ? parsed.urls : parsed.url == null ? [] : [parsed.url];
-    if (urls.length) parts.push(`url: ${safeToolUrl(urls[0])}`);
-    parts.push(`urls: ${urls.length.toLocaleString()}`);
-  } else if (leaf.includes("search") || leaf.includes("grep") || key.includes("context7") || leaf === "resolve_library_id" || leaf === "query_docs") {
-    add("query", parsed.query);
-    add("repo", parsed.repo);
-    add("path", parsed.path);
-    add("library", parsed.libraryId ?? parsed.libraryName ?? parsed.library);
-  } else {
-    for (const contextKey of ["query", "repo", "path", "libraryId", "libraryName", "name", "action", "workdir", "id", "status", "pattern", "offset", "limit"]) {
-      if (!TOOL_SAFE_CONTEXT_KEYS.has(contextKey) || TOOL_SENSITIVE_KEY.test(contextKey)) continue;
-      add(contextKey, parsed[contextKey]);
-    }
-  }
-
-  return compactActionDetail(parts.join(" · "), TOOL_SUMMARY_MAX_CHARS) || "Arguments available but hidden";
-}
-
-function safeToolFailurePreview(value, maxChars = 320) {
-  const raw = String(value || "").trim();
-  if (!raw) return "Error details unavailable";
-  if (/\*\*\*\s+Begin Patch/i.test(raw)) return "Patch content omitted";
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed === "string") return sanitizeToolSummaryValue(parsed, maxChars);
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return "Structured error details unavailable";
-    const nestedError = parsed.error && typeof parsed.error === "object" ? parsed.error : null;
-    const parts = [];
-    const add = (label, candidate) => {
-      if (["string", "number", "boolean"].includes(typeof candidate)) parts.push(`${label}: ${sanitizeToolSummaryValue(candidate, 160)}`);
-    };
-    add("message", parsed.message ?? nestedError?.message);
-    add("error", typeof parsed.error === "object" ? null : parsed.error);
-    add("code", parsed.code ?? nestedError?.code);
-    add("status", parsed.status ?? nestedError?.status);
-    return compactActionDetail(parts.join(" · "), maxChars) || "Structured error details unavailable";
-  } catch (_) {
-    if (/^(?:\{|\[)/.test(raw)) return "Malformed structured error details unavailable";
-    return sanitizeToolSummaryValue(raw, maxChars);
-  }
+function formatToolArguments(argsPreview) {
+  return compactActionDetail(argsPreview, 280) || "Arguments unavailable";
 }
 
 function toolCompletionDetail(argumentsDetail, event) {
-  if (!event?.is_error) return argumentsDetail || "";
-  return combineActionDetail(argumentsDetail, `Error: ${safeToolFailurePreview(event.content_preview)}`);
+  const result = compactActionDetail(event?.content_preview, 160);
+  return combineActionDetail(argumentsDetail, result ? `result: ${result}` : "");
 }
 
 function threadToolCallKey(event) {
@@ -4702,15 +3877,26 @@ function matchingCommands() {
   return commands.filter((command) => command.name.startsWith(query));
 }
 
+function closeCommandMenu() {
+  el.commandMenu.hidden = true;
+  el.commandMenu.innerHTML = "";
+  el.promptInput.setAttribute?.("aria-expanded", "false");
+  el.promptInput.removeAttribute?.("aria-activedescendant");
+}
+
+function commandOptionId(name) { return `command-option-${name}`; }
+
 function renderCommandMenu() {
   const matches = matchingCommands();
   if (!matches.length) {
-    el.commandMenu.hidden = true;
+    closeCommandMenu();
     return;
   }
   state.commandIndex = Math.min(state.commandIndex, matches.length - 1);
   el.commandMenu.hidden = false;
-  el.commandMenu.innerHTML = matches.map((command, index) => `<button class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" data-command-option="${command.name}"><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></button>`).join("");
+  el.promptInput.setAttribute?.("aria-expanded", "true");
+  el.promptInput.setAttribute?.("aria-activedescendant", commandOptionId(matches[state.commandIndex].name));
+  el.commandMenu.innerHTML = matches.map((command, index) => `<button id="${commandOptionId(command.name)}" class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" role="option" aria-selected="${index === state.commandIndex}" tabindex="-1" data-command-option="${command.name}"><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></button>`).join("");
 }
 
 function handleComposerKeydown(event) {
@@ -4723,7 +3909,7 @@ function handleComposerKeydown(event) {
   }
   if (event.key === "Escape" && !el.commandMenu.hidden) {
     event.preventDefault();
-    el.commandMenu.hidden = true;
+    closeCommandMenu();
     return;
   }
   if (event.key === "Enter" && !event.shiftKey) {
@@ -4734,7 +3920,7 @@ function handleComposerKeydown(event) {
 }
 
 function runCommand(name) {
-  el.commandMenu.hidden = true;
+  closeCommandMenu();
   el.promptInput.value = "";
   if (state.currentId) state.composerDrafts.set(state.currentId, "");
   resizeComposer();
@@ -4932,7 +4118,7 @@ async function stopActiveRun() {
 function renameCurrentSession() {
   const entry = sessionEntry();
   if (!entry) return;
-  openDrawer("rename session", `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry.summary.title || "")}" placeholder="${escapeAttr(shortId(entry.summary.session_id))}"></label><div class="settings-actions"><span class="form-status" data-rename-status></span><button class="button button-primary" type="submit">save title</button></div></form>`, "compact");
+  openDrawer("rename session", `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry.summary.title || "")}" placeholder="${escapeAttr(shortId(entry.summary.session_id))}"></label><div class="settings-actions"><span class="form-status" data-rename-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-primary" type="submit">save title</button></div></form>`, "compact");
   requestAnimationFrame(() => el.drawerContent.querySelector('input[name="title"]')?.focus());
 }
 
@@ -4961,24 +4147,27 @@ async function saveSessionRename(formElement) {
 function deleteCurrentSession() {
   const entry = sessionEntry();
   if (!entry) return;
-  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, retained episodes, and steering history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
+  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry.summary.session_id)}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, retained episodes, and steering history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
 }
 
 async function confirmSessionDeletion(formElement) {
   const status = formElement.querySelector("[data-delete-status]");
-  const sessionId = state.currentId;
+  const sessionId = String(formElement.dataset?.sessionId || state.currentId || "");
   if (!sessionId) return;
+  const ownsView = () => state.currentId === sessionId
+    && el.drawerContent?.querySelector?.("#deleteSessionForm") === formElement;
   status.textContent = "Deleting…";
   try {
     await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
     tombstoneDeletedSessionForListRefresh(sessionId);
-    closeDrawer();
-    showPicker();
+    if (ownsView()) showPicker();
     await loadSessions({ workspaceStats: true });
     showToast("Session deleted");
   } catch (error) {
-    status.textContent = error.message;
-    status.classList.add("is-error");
+    if (ownsView()) {
+      status.textContent = error.message;
+      status.classList.add("is-error");
+    }
   }
 }
 
@@ -5450,24 +4639,6 @@ function formatRuntime(value) {
 function formatDuration(value) {
   if (value === null || value === undefined) return null;
   return formatRuntime(value);
-}
-
-function relativeTime(value) {
-  const normalized = String(value || "").includes("T") ? String(value) : `${String(value || "").replace(" ", "T")}Z`;
-  const timestamp = new Date(normalized).getTime();
-  if (!Number.isFinite(timestamp)) return "Generated";
-  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return "now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86_400)}d ago`;
-}
-
-function messageText(message) {
-  if (message.content) return String(message.content);
-  if (message.reasoning_text) return String(message.reasoning_text);
-  if (message.tool_calls?.length) return message.tool_calls.map((call) => call.function?.name || "tool").join(", ");
-  return "";
 }
 
 function backendOptions(selected) {

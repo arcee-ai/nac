@@ -10,8 +10,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    extract::{rejection::JsonRejection, Path as AxumPath, Query, Request, State},
+    http::{header, uri::Authority, HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -45,12 +46,9 @@ use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
 };
-use tower_http::{
-    compression::{
-        predicate::{DefaultPredicate, NotForContentType, Predicate},
-        CompressionLayer,
-    },
-    cors::CorsLayer,
+use tower_http::compression::{
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+    CompressionLayer,
 };
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
@@ -425,6 +423,7 @@ pub struct WorkspaceDiffQuery {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayBoundaryEvent {
+    pub epoch_id: String,
     pub replay_boundary_sequence_id: u64,
 }
 
@@ -804,17 +803,6 @@ impl SessionManager {
             .await
     }
 
-    pub async fn snapshot_with_thread_event_limit(
-        &self,
-        session_id: &str,
-        limit: usize,
-    ) -> Result<SessionFrontendSnapshot> {
-        self.attach_session(session_id)
-            .await?
-            .frontend_snapshot_with_thread_event_limit(limit)
-            .await
-    }
-
     pub async fn snapshot_with_options(
         &self,
         session_id: &str,
@@ -824,14 +812,6 @@ impl SessionManager {
             .await?
             .frontend_snapshot_with_options(options)
             .await
-    }
-
-    pub async fn messages(&self, session_id: &str) -> Result<Vec<Message>> {
-        Ok(self
-            .attach_session(session_id)
-            .await?
-            .messages_snapshot()
-            .await)
     }
 
     pub async fn messages_page(
@@ -858,10 +838,7 @@ impl SessionManager {
             .thread_events_page(thread_name, before_id, limit)
     }
 
-    pub async fn generate_overview(
-        &self,
-        session_id: &str,
-    ) -> Result<SessionOverviewRecord> {
+    pub async fn generate_overview(&self, session_id: &str) -> Result<SessionOverviewRecord> {
         self.attach_session(session_id)
             .await?
             .generate_overview()
@@ -975,6 +952,7 @@ impl SessionManager {
         after_sequence_id: Option<u64>,
         limit: usize,
     ) -> Result<(
+        String,
         u64,
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
@@ -985,6 +963,7 @@ impl SessionManager {
             .connect_client()
             .subscribe_events_with_replay(after_sequence_id, limit);
         Ok((
+            subscription.epoch_id,
             subscription.replay_boundary_sequence_id,
             subscription.replay_gap,
             subscription.replayed_events,
@@ -1008,29 +987,44 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Cancel any active run, destroy the sandbox, and remove from the
-        // in-memory map.
-        {
-            let active = self.inner.active_sessions.read().await;
-            if let Some(service) = active.get(session_id) {
-                if let Some(active_run) = service.active_run() {
-                    let _ = service
-                        .connect_client()
-                        .request_cancel(&active_run.run_id)
-                        .await;
+        // Submission, config changes, and deletion share this gate. The run
+        // lease extends the exclusion to independent processes and remains held
+        // through the database delete, so an old run cannot save the row back.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let service = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        if let Some(service) = service.as_ref() {
+            if let Some(active_run) = service.active_run() {
+                if let Err(error) = service
+                    .connect_client()
+                    .request_cancel(&active_run.run_id)
+                    .await
+                {
+                    if service.active_run().is_some() {
+                        return Err(anyhow!(error.to_string()));
+                    }
                 }
-                // Explicitly destroy the sandbox so it is torn down even
-                // if SSE handlers or other clones keep the Arc alive.
-                service.destroy_sandbox().await;
             }
         }
-        self.inner.active_sessions.write().await.remove(session_id);
+        let _run_lease =
+            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        if let Some(service) = service {
+            // Explicitly destroy the sandbox even if SSE handlers retain the service.
+            service.destroy_sandbox().await;
+        }
 
-        // Cascade-delete all DB rows for this session.
+        // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
         }
+        self.inner.active_sessions.write().await.remove(session_id);
         Ok(())
     }
 
@@ -1042,11 +1036,28 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // An omitted patch is intentionally independent of persisted settings
-        // and credentials. In particular, it must not evict an attached service.
+        // An empty PATCH stays a cheap no-op for an already attached (and thus
+        // validated) service. Detached rows are inspected so legacy/incomplete
+        // managed tuples can be repaired without requiring a synthetic field.
         if request.is_empty() {
-            return Ok(());
+            if self
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key(session_id)
+            {
+                return Ok(());
+            }
+            let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+            if !managed_config_needs_repair(&current) {
+                return Ok(());
+            }
         }
+
+        let backend_selected = matches!(&request.backend, RequestField::Value(_));
+        let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
+        let api_key_env_omitted = matches!(&request.api_key_env, RequestField::Omitted);
 
         // Submission and update both hold this per-session gate. A submission
         // that wins establishes active-run state synchronously before releasing
@@ -1074,8 +1085,12 @@ impl SessionManager {
         let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
-        let (backend, reasoning_effort, extra_headers) =
-            parse_prospective_model_config(&mut prospective)?;
+        let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
+            &mut prospective,
+            backend_selected,
+            base_url_omitted,
+            api_key_env_omitted,
+        )?;
 
         let _settings = EffectiveModelSettings::new(
             backend,
@@ -1135,11 +1150,104 @@ fn response_compression_layer() -> CompressionLayer<impl Predicate> {
         .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
 }
 
+fn single_header<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> std::result::Result<Option<&'a HeaderValue>, ()> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next();
+    if values.next().is_some() {
+        return Err(());
+    }
+    Ok(value)
+}
+
+fn loopback_authority(value: &HeaderValue) -> Option<(String, Option<u16>)> {
+    let value = value.to_str().ok()?;
+    if value.is_empty() || value.contains('@') {
+        return None;
+    }
+    let authority = value.parse::<Authority>().ok()?;
+    let host = authority.host().trim_matches(['[', ']']);
+    let host = match host.parse::<std::net::IpAddr>() {
+        Ok(address) if address.is_loopback() => address.to_string(),
+        Err(_) if host.eq_ignore_ascii_case("localhost") => "localhost".to_string(),
+        _ => return None,
+    };
+    Some((host, authority.port_u16()))
+}
+
+fn browser_request_is_allowed(headers: &HeaderMap) -> bool {
+    let Ok(Some(host)) = single_header(headers, "host") else {
+        return false;
+    };
+    let Some((host_name, host_port)) = loopback_authority(host) else {
+        return false;
+    };
+
+    let Ok(fetch_site) = single_header(headers, "sec-fetch-site") else {
+        return false;
+    };
+    if let Some(value) = fetch_site {
+        match value.to_str() {
+            Ok(value) if !value.eq_ignore_ascii_case("cross-site") => {}
+            _ => return false,
+        }
+    }
+
+    let Ok(origin) = single_header(headers, "origin") else {
+        return false;
+    };
+    let Some(origin) = origin else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Some((scheme, origin_authority)) = origin.split_once("://") else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("http") {
+        return false;
+    }
+    if origin_authority.is_empty()
+        || origin_authority
+            .chars()
+            .any(|character| matches!(character, '/' | '?' | '#'))
+    {
+        return false;
+    }
+    let Ok(origin_value) = HeaderValue::from_str(origin_authority) else {
+        return false;
+    };
+    let Some((origin_name, origin_port)) = loopback_authority(&origin_value) else {
+        return false;
+    };
+    origin_name == host_name && origin_port.unwrap_or(80) == host_port.unwrap_or(80)
+}
+
+async fn browser_request_boundary(request: Request, next: Next) -> Response {
+    if !browser_request_is_allowed(request.headers()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+fn validate_bind_address(addr: SocketAddr) -> Result<()> {
+    if !addr.ip().is_loopback() {
+        anyhow::bail!(
+            "refusing non-loopback bind address {addr}; nac-web has no remote authentication"
+        );
+    }
+    Ok(())
+}
+
 pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/redesign.css", get(redesign_css))
+        .route("/assets/app.css", get(redesign_css))
         .route("/assets/app.js", get(app_js))
         .route(
             "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
@@ -1196,12 +1304,13 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(browser_request_boundary))
         .layer(response_compression_layer())
         .with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
@@ -1334,84 +1443,6 @@ async fn create_session(
     ))
 }
 
-#[cfg(test)]
-fn message_page(
-    messages: Vec<Message>,
-    before: Option<usize>,
-    limit: usize,
-    include_system: bool,
-) -> MessagesPageResponse {
-    let visible = messages
-        .into_iter()
-        .filter(|message| include_system || !matches!(message, Message::System { .. }))
-        .collect::<Vec<_>>();
-    let total = visible.len();
-    let end = before.unwrap_or(total).min(total);
-    let limit = limit.clamp(1, MAX_MESSAGE_PAGE_LIMIT);
-    let start = end.saturating_sub(limit);
-    MessagesPageResponse {
-        messages: visible[start..end].to_vec(),
-        page: MessagePageMetadata {
-            start,
-            end,
-            total,
-            has_older: start > 0,
-        },
-    }
-}
-
-#[cfg(test)]
-fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
-    let mut latest_user_index = None;
-    let mut user_count = 0usize;
-    for (index, message) in messages.iter().enumerate() {
-        if matches!(message, Message::User { .. }) {
-            latest_user_index = Some(index);
-            user_count += 1;
-        }
-    }
-
-    let Some(latest_user_index) = latest_user_index else {
-        return MessageCycleMetadata {
-            marker: "none".to_string(),
-            thread_names: Vec::new(),
-        };
-    };
-    let mut thread_names = BTreeMap::<String, ()>::new();
-    for message in &messages[latest_user_index + 1..] {
-        let Message::Assistant {
-            tool_calls: Some(tool_calls),
-            ..
-        } = message
-        else {
-            continue;
-        };
-        for tool_call in tool_calls {
-            if tool_call.function.name != "thread" {
-                continue;
-            }
-            let Ok(arguments) =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-            else {
-                continue;
-            };
-            let Some(name) = arguments
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            else {
-                continue;
-            };
-            thread_names.insert(name.to_string(), ());
-        }
-    }
-    MessageCycleMetadata {
-        marker: format!("history:{user_count}:{latest_user_index}"),
-        thread_names: thread_names.into_keys().collect(),
-    }
-}
-
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -1511,6 +1542,7 @@ async fn queue_orchestrator_steering_handler(
     payload: std::result::Result<Json<OrchestratorSteeringRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
     Ok((
         StatusCode::ACCEPTED,
         Json(
@@ -1527,6 +1559,7 @@ async fn queue_thread_steering_handler(
     payload: std::result::Result<Json<ThreadSteeringRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
     Ok((
         StatusCode::ACCEPTED,
         Json(
@@ -1560,7 +1593,7 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
+    let (epoch_id, replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
@@ -1568,6 +1601,7 @@ async fn stream_events(
         )
         .await?;
     let event_stream = session_event_stream(
+        epoch_id,
         replay_boundary_sequence_id,
         replay_gap,
         replayed_events,
@@ -1624,6 +1658,17 @@ impl std::fmt::Display for RequestConfigurationError {
 }
 
 impl std::error::Error for RequestConfigurationError {}
+
+fn validate_steering_instruction(
+    instruction: &str,
+) -> std::result::Result<(), RequestConfigurationError> {
+    if instruction.trim().is_empty() {
+        return Err(RequestConfigurationError(
+            "steering instruction must not be empty or whitespace-only".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(RequestConfigurationError(message.into()))
@@ -1758,8 +1803,23 @@ fn apply_raw_config_patch(
     Ok(())
 }
 
+fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool {
+    let Some(backend) = config
+        .backend
+        .as_deref()
+        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
+    else {
+        return false;
+    };
+    managed_backend_base_url(backend).is_some()
+        && (config.base_url.trim().is_empty() || config.api_key_env.is_some())
+}
+
 fn parse_prospective_model_config(
     config: &mut sessions::RawSessionModelConfig,
+    backend_selected: bool,
+    base_url_omitted: bool,
+    api_key_env_omitted: bool,
 ) -> Result<(
     BackendKind,
     Option<ReasoningEffort>,
@@ -1773,15 +1833,22 @@ fn parse_prospective_model_config(
     })?;
     let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
     let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
-    // A zero-length stored value is how legacy/incomplete rows represent an
-    // absent NOT NULL base_url. Concrete request values are rejected before
-    // reaching this point, so only repair can take the managed default path.
-    let stored_base_url = if config.base_url.is_empty() {
+    let managed_base_url = managed_backend_base_url(backend);
+    // Selecting a managed backend is a tuple-level operation: omitted fields
+    // select its canonical endpoint and stored credential mode rather than
+    // inheriting an unrelated API-key backend's values. Concrete request values
+    // remain authoritative and proceed to normal validation.
+    let use_managed_base_url = managed_base_url.is_some()
+        && ((backend_selected && base_url_omitted) || config.base_url.trim().is_empty());
+    let stored_base_url = if use_managed_base_url {
         None
     } else {
         Some(config.base_url.clone())
     };
     config.base_url = resolve_model_base_url(backend, stored_base_url)?;
+    if managed_base_url.is_some() && api_key_env_omitted {
+        config.api_key_env = None;
+    }
     let reasoning_effort = config
         .reasoning_effort
         .as_deref()
@@ -1881,6 +1948,7 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
 }
 
 fn session_event_stream(
+    epoch_id: String,
     replay_boundary_sequence_id: u64,
     replay_gap: Option<SessionReplayGap>,
     replayed_events: Vec<SessionEventEnvelope>,
@@ -1892,6 +1960,7 @@ fn session_event_stream(
             "replay_boundary",
             None,
             &ReplayBoundaryEvent {
+                epoch_id,
                 replay_boundary_sequence_id,
             },
         ));
@@ -1927,8 +1996,8 @@ fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
 
 fn sse_json_event<T: Serialize>(event: &str, id: Option<String>, payload: &T) -> Event {
     let data = serde_json::to_string(payload).unwrap_or_else(|error| {
-        serde_json::json!({ "error": format!("failed to serialize SSE payload: {error}") })
-            .to_string()
+        let _ = error;
+        serde_json::json!({ "error": "failed to serialize SSE payload" }).to_string()
     });
     let event = Event::default().event(event).data(data);
     match id {
@@ -1992,6 +2061,15 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
         };
         Self {
             status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<RequestConfigurationError> for ApiError {
+    fn from(error: RequestConfigurationError) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
             message: error.to_string(),
         }
     }
@@ -2217,6 +2295,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_boundary_accepts_only_local_same_origin_or_originless_requests() {
+        let root = temp_root("browser_boundary");
+        let app = router(test_manager(&root));
+        let cases = [
+            (Some("localhost"), None, None, StatusCode::OK),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:3210"),
+                Some("same-origin"),
+                StatusCode::OK,
+            ),
+            (
+                Some("127.0.0.1:3210"),
+                Some("http://127.0.0.1:3210"),
+                None,
+                StatusCode::OK,
+            ),
+            (
+                Some("[::1]:3210"),
+                Some("http://[::1]:3210"),
+                None,
+                StatusCode::OK,
+            ),
+            (Some("evil.example"), None, None, StatusCode::FORBIDDEN),
+            (
+                Some("localhost:3210"),
+                Some("http://evil.example:3210"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:9999"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("null"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:3210/path"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                None,
+                Some("cross-site"),
+                StatusCode::FORBIDDEN,
+            ),
+            (None, None, None, StatusCode::FORBIDDEN),
+        ];
+
+        for (host, origin, fetch_site, expected) in cases {
+            let mut request = Request::builder().uri("/health");
+            if let Some(host) = host {
+                request = request.header(header::HOST, host);
+            }
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            if let Some(fetch_site) = fetch_site {
+                request = request.header("sec-fetch-site", fetch_site);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                expected,
+                "host={host:?} origin={origin:?}"
+            );
+            assert!(response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none());
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bind_address_must_be_ipv4_or_ipv6_loopback() {
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            validate_bind_address(address.parse().unwrap()).unwrap();
+        }
+        for address in ["0.0.0.0:3210", "[::]:3210", "192.168.1.10:3210"] {
+            assert!(validate_bind_address(address.parse().unwrap()).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_css_route_is_an_exact_alias() {
+        let root = temp_root("css_alias");
+        let app = router(test_manager(&root));
+        let canonical = get_response(app.clone(), "/assets/redesign.css", None).await;
+        let alias = get_response(app, "/assets/app.css", None).await;
+        assert_eq!(canonical.status(), StatusCode::OK);
+        assert_eq!(alias.status(), StatusCode::OK);
+        assert_eq!(
+            canonical.headers().get(header::CONTENT_TYPE),
+            alias.headers().get(header::CONTENT_TYPE)
+        );
+        assert_eq!(response_body(canonical).await, response_body(alias).await);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
         let root = temp_root("route_compression");
         let app = router(test_manager(&root));
@@ -2262,6 +2453,7 @@ mod tests {
     fn session_event_envelope_serializes_for_sse_payloads() {
         let envelope = SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id: 42,
             client_id: None,
             run_id: None,
@@ -2409,7 +2601,9 @@ mod tests {
     }
 
     async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
-        let mut request = Request::builder().uri(uri);
+        let mut request = Request::builder()
+            .uri(uri)
+            .header(header::HOST, "localhost");
         if let Some(accept_encoding) = accept_encoding {
             request = request.header(header::ACCEPT_ENCODING, accept_encoding);
         }
@@ -3240,6 +3434,52 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
+    async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("steering_validation");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let app = router(test_manager(&root));
+
+        for (uri, instruction, expected) in [
+            (
+                "/sessions/missing/steering",
+                "  \n ",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/missing/threads/worker/steering",
+                "\t",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/session/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+            (
+                "/sessions/session/threads/worker/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "instruction": instruction }).to_string(),
+                ))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), expected, "{uri}: {instruction:?}");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn active_run_accepts_orchestrator_steering() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("orchestrator_steering");
@@ -3275,6 +3515,54 @@ thread_timeout_secs = 7200
 
         manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
+        let root = temp_root("delete_before_submit");
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+
+        let (delete_started_tx, delete_started_rx) = tokio::sync::oneshot::channel();
+        let delete_manager = manager.clone();
+        let delete = tokio::spawn(async move {
+            delete_started_tx.send(()).unwrap();
+            delete_manager.delete_session("session").await
+        });
+        delete_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "must not revive deleted state".to_string(),
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!delete.is_finished());
+        assert!(!submit.is_finished());
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), delete)
+            .await
+            .expect("delete should acquire the lifecycle gate")
+            .unwrap()
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should observe the deletion")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("was not found"), "{error:#}");
+        assert!(sessions::load_session(&root.join("store.db"), "session").is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3693,6 +3981,7 @@ extra_headers = { X-Config = "yes" }
             .create_session(CreateSessionRequest::default())
             .await
             .expect("omitted fields should inherit config");
+        assert!(inherited.metadata.extra_headers.is_empty());
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
@@ -3703,6 +3992,21 @@ extra_headers = { X-Config = "yes" }
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
         );
+        let Json(config) =
+            session_config_handler(State(manager.clone()), AxumPath(inherited_id.clone()))
+                .await
+                .unwrap();
+        assert_eq!(
+            config.extra_headers_json.as_deref(),
+            Some("{\"X-Config\":\"yes\"}")
+        );
+        assert!(manager
+            .snapshot(&inherited_id)
+            .await
+            .unwrap()
+            .metadata
+            .extra_headers
+            .is_empty());
 
         let cleared = manager
             .create_session(CreateSessionRequest {
@@ -3725,6 +4029,52 @@ extra_headers = { X-Config = "yes" }
         assert!(stored.extra_headers.is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("openai_to_arcee_launch");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"[model]
+backend = "openai-responses"
+model = "openai-model"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+"#,
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("arcee-model".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("managed launch must not inherit the OpenAI URL or selector");
+        assert_eq!(
+            created.metadata.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(created.metadata.api_key_env, None);
+
+        let session_id = created.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -3909,24 +4259,65 @@ extra_headers = { X-Config = "yes" }
             let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
             incomplete.backend = backend;
             incomplete.base_url.clear();
-            incomplete.api_key_env = None;
+            incomplete.api_key_env = Some("STALE_API_KEY".to_string());
             sessions::update_session_model_config(&store_path, &incomplete).unwrap();
 
             manager
-                .update_session_config(
-                    session_id,
-                    UpdateConfigRequest {
-                        model: RequestField::Value("repaired-model".to_string()),
-                        ..UpdateConfigRequest::default()
-                    },
-                )
+                .update_session_config(session_id, UpdateConfigRequest::default())
                 .await
-                .expect("repair PATCH should materialize an absent managed base URL");
+                .expect("empty repair PATCH should materialize the managed tuple");
             let repaired = sessions::load_session(&store_path, session_id).unwrap();
             assert_eq!(repaired.base_url, expected_base);
+            assert_eq!(repaired.api_key_env, None);
+            let rehydrated = manager.session_config(session_id).unwrap();
+            assert_eq!(rehydrated.base_url, expected_base);
+            assert_eq!(rehydrated.api_key_env, None);
             let resumed = manager.snapshot(session_id).await.unwrap();
             assert_eq!(resumed.metadata.base_url, expected_base);
         }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("api_key_to_arcee_patch");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
+        api_key_session.reasoning_effort = None;
+        sessions::update_session_model_config(&store_path, &api_key_session).unwrap();
+        let manager = test_manager(&root);
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("backend-only PATCH must select the complete managed tuple");
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+        let rehydrated = manager.session_config("session").unwrap();
+        assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
+        assert_eq!(
+            rehydrated.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(rehydrated.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -4785,6 +5176,7 @@ extra_headers = { X-Config = "yes" }
     fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id,
             client_id: None,
             run_id: None,
@@ -5074,77 +5466,6 @@ extra_headers = { X-Config = "yes" }
         expected_projected["sessions"] = serde_json::json!([]);
         assert_eq!(projected, expected_projected);
 
-        let expected_page = message_page(transcript.clone(), None, 2, false);
-        let expected_cycle = current_message_cycle(&transcript);
-        assert_eq!(
-            default["messages"],
-            serde_json::to_value(expected_page.messages).unwrap()
-        );
-        assert_eq!(
-            default["message_page"],
-            serde_json::to_value(expected_page.page).unwrap()
-        );
-        assert_eq!(
-            default["message_cycle"],
-            serde_json::to_value(expected_cycle).unwrap()
-        );
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
-    async fn messages_route_matches_legacy_paging_after_http_limit_clamping() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-        let root = temp_root("messages_core_page");
-        let nac_home = root.join("nac-home");
-        std::fs::create_dir_all(&nac_home).unwrap();
-        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
-        let transcript = test_transcript();
-        seed_session_with_messages(&root, "target", "2026-01-01 00:00:00.000000000", transcript);
-        let manager = test_manager(&root);
-        let legacy_messages = manager.messages("target").await.unwrap();
-        let app = router(manager);
-
-        for (uri, before, limit, include_system) in [
-            (
-                "/sessions/target/messages?before=5&limit=2",
-                Some(5),
-                2,
-                false,
-            ),
-            (
-                "/sessions/target/messages?before=99&limit=0",
-                Some(99),
-                0,
-                false,
-            ),
-            (
-                "/sessions/target/messages?before=7&limit=1000&include_system=true",
-                Some(7),
-                1000,
-                true,
-            ),
-            (
-                "/sessions/target/messages",
-                None,
-                DEFAULT_MESSAGE_PAGE_LIMIT,
-                false,
-            ),
-        ] {
-            let response = get_response(app.clone(), uri, None).await;
-            let status = response.status();
-            let body = response_body(response).await;
-            assert_eq!(
-                status,
-                StatusCode::OK,
-                "{uri}: {}",
-                String::from_utf8_lossy(&body)
-            );
-            let actual: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            let expected = message_page(legacy_messages.clone(), before, limit, include_system);
-            assert_eq!(actual, serde_json::to_value(expected).unwrap(), "{uri}");
-        }
-
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -5160,62 +5481,6 @@ extra_headers = { X-Config = "yes" }
         .unwrap();
         assert!(!snapshot_query.include_system);
         assert!(!messages_query.include_system);
-
-        let mut messages = vec![
-            Message::System {
-                content: "large hidden instructions".to_string(),
-            },
-            Message::User {
-                content: "one".to_string(),
-            },
-            Message::Assistant {
-                content: Some("two".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            },
-            Message::User {
-                content: "three".to_string(),
-            },
-            Message::Assistant {
-                content: Some("four".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            },
-            Message::User {
-                content: "five".to_string(),
-            },
-        ];
-
-        let latest = message_page(messages.clone(), None, 2, false);
-        assert_eq!(latest.page.start, 3);
-        assert_eq!(latest.page.end, 5);
-        assert_eq!(latest.page.total, 5);
-        assert!(latest.page.has_older);
-        assert!(latest
-            .messages
-            .iter()
-            .all(|message| !matches!(message, Message::System { .. })));
-
-        messages.push(Message::User {
-            content: "six".to_string(),
-        });
-        let older = message_page(messages, Some(latest.page.start), 2, false);
-        assert_eq!(older.page.start, 1);
-        assert_eq!(older.page.end, 3);
-        assert_eq!(older.page.total, 6);
-        assert!(older.page.has_older);
-        assert!(matches!(
-            &older.messages[..],
-            [
-                Message::Assistant {
-                    content: Some(content),
-                    ..
-                },
-                Message::User { content: user_content }
-            ] if content == "two" && user_content == "three"
-        ));
     }
 
     #[test]
@@ -5234,85 +5499,6 @@ extra_headers = { X-Config = "yes" }
         .unwrap();
         assert!(snapshot_query.include_system);
         assert!(messages_query.include_system);
-
-        let mut messages = vec![
-            Message::System {
-                content: "system zero".to_string(),
-            },
-            Message::User {
-                content: "one".to_string(),
-            },
-            Message::Assistant {
-                content: Some("two".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            },
-            Message::System {
-                content: "system one".to_string(),
-            },
-            Message::User {
-                content: "three".to_string(),
-            },
-            Message::Assistant {
-                content: Some("four".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            },
-        ];
-
-        let latest = message_page(messages.clone(), None, 3, true);
-        assert_eq!(latest.page.start, 3);
-        assert_eq!(latest.page.end, 6);
-        assert_eq!(latest.page.total, 6);
-        assert!(latest.page.has_older);
-        assert!(matches!(
-            latest.messages.first(),
-            Some(Message::System { content }) if content == "system one"
-        ));
-
-        messages.push(Message::System {
-            content: "system two".to_string(),
-        });
-        let older = message_page(messages, Some(latest.page.start), 3, true);
-        assert_eq!(older.page.start, 0);
-        assert_eq!(older.page.end, 3);
-        assert_eq!(older.page.total, 7);
-        assert!(!older.page.has_older);
-        assert!(matches!(
-            older.messages.first(),
-            Some(Message::System { content }) if content == "system zero"
-        ));
-    }
-
-    #[test]
-    fn message_cycle_metadata_survives_transcript_pagination() {
-        let messages = vec![
-            Message::User {
-                content: "old cycle".to_string(),
-            },
-            Message::User {
-                content: "current cycle".to_string(),
-            },
-            Message::Assistant {
-                content: None,
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: Some(vec![nac_core::types::ToolCall {
-                    id: "call-1".to_string(),
-                    call_type: "function".to_string(),
-                    function: nac_core::types::FunctionCall {
-                        name: "thread".to_string(),
-                        arguments: r#"{"name":"current/research"}"#.to_string(),
-                    },
-                }]),
-            },
-        ];
-
-        let cycle = current_message_cycle(&messages);
-        assert_eq!(cycle.marker, "history:2:1");
-        assert_eq!(cycle.thread_names, ["current/research"]);
     }
 
     #[tokio::test]
@@ -5326,6 +5512,7 @@ extra_headers = { X-Config = "yes" }
             drop(sender);
 
             Sse::new(session_event_stream(
+                "test-epoch".to_string(),
                 5,
                 Some(SessionReplayGap {
                     missing_from_sequence_id: 2,
@@ -5356,6 +5543,7 @@ extra_headers = { X-Config = "yes" }
         let live_6 = body.find("\"sequence_id\":6").unwrap();
         assert!(boundary < gap && gap < replay_4 && replay_4 < replay_5 && replay_5 < live_6);
         assert!(body.contains("\"replay_boundary_sequence_id\":5"));
+        assert!(body.contains("\"epoch_id\":\"test-epoch\""));
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));

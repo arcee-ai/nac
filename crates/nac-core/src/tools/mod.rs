@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -25,6 +25,98 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
+#[derive(Default)]
+pub struct ActiveThreadRegistry {
+    dispatches: StdMutex<HashMap<String, String>>,
+}
+
+impl ActiveThreadRegistry {
+    pub fn names(&self) -> Vec<String> {
+        self.lock().keys().cloned().collect()
+    }
+
+    pub fn is_active(&self, thread_name: &str) -> bool {
+        self.lock().contains_key(thread_name)
+    }
+
+    pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
+        let mut dispatches = self.lock();
+        if dispatches.contains_key(thread_name) {
+            false
+        } else {
+            dispatches.insert(thread_name.to_string(), dispatch_id.to_string());
+            true
+        }
+    }
+
+    pub fn queue(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        thread_name: &str,
+        instruction: &str,
+    ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
+        let dispatches = self.lock();
+        let Some(dispatch_id) = dispatches.get(thread_name) else {
+            return Ok(None);
+        };
+        crate::store::queue_thread_steering(
+            store_path,
+            session_id,
+            thread_name,
+            dispatch_id,
+            instruction,
+        )
+        .map(Some)
+    }
+
+    pub fn close(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        thread_name: &str,
+        dispatch_id: &str,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut dispatches = self.lock();
+        if dispatches.get(thread_name).map(String::as_str) != Some(dispatch_id) {
+            return Ok(Vec::new());
+        }
+        let expired = crate::store::expire_thread_steering(store_path, session_id, dispatch_id)?;
+        dispatches.remove(thread_name);
+        Ok(expired)
+    }
+
+    pub fn close_all(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut dispatches = self.lock();
+        let targets = dispatches
+            .iter()
+            .map(|(name, dispatch_id)| (name.clone(), dispatch_id.clone()))
+            .collect::<Vec<_>>();
+        let mut expired = Vec::new();
+        for (name, dispatch_id) in targets {
+            expired.extend(crate::store::expire_thread_steering(
+                store_path,
+                session_id,
+                &dispatch_id,
+            )?);
+            if dispatches.get(&name) == Some(&dispatch_id) {
+                dispatches.remove(&name);
+            }
+        }
+        Ok(expired)
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+        self.dispatches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolRuntime {
     pub workspace_cwd: PathBuf,
@@ -32,7 +124,7 @@ pub struct ToolRuntime {
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub worker_executable: Option<PathBuf>,
-    pub active_threads: Arc<Mutex<HashSet<String>>>,
+    pub active_threads: Arc<ActiveThreadRegistry>,
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,
@@ -241,7 +333,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
         worker_executable: None,
-        active_threads: Arc::new(Mutex::new(HashSet::new())),
+        active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
         event_sink: EventSink::none(),
         backend,
         mcp: None,

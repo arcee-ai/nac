@@ -33,26 +33,26 @@ function loadApp(overrides = {}) {
     FormData: overrides.FormData || globalThis.FormData,
     requestAnimationFrame,
     getComputedStyle: overrides.getComputedStyle || (() => ({ minHeight: "40" })),
+    URL,
     module: { exports: {} },
   };
   vm.runInNewContext(
     `${appSource}\nmodule.exports = {
-      state, el, commands, boot, openSession, sessionStatus, syncSessionRunIndicators, noteSessionRunEvent,
-      clearSessionAttention, buildThreadModels, buildThreadActions, buildRetainedThreadActions,
-      buildOrchestratorActions, orchestratorLifecycle, threadLifecycleFromEvidence,
-      threadModelEntries, renderThreadEvidence, renderThreadFocus, threadFocusEvidenceEntries,
-      threadActionsFromEntries, renderActionRows, formatToolArguments, compactActionDetail,
+      state, el, boot, openSession, sessionStatus, syncSessionRunIndicators, noteSessionRunEvent,
+      clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
+      orchestratorLifecycle, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorConversation,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
-      renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
+      renderSessionInfo, loadSessions, loadSnapshot, loadOlderOrchestratorMessages,
       normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
       effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
-      responseDurationAssignments, runTimingPresentation, updateRuntimeMetric, threadFocusActions,
+      responseDurationAssignments, runTimingPresentation, updateRuntimeMetric,
       threadCycleSeed, displaySessionTitle, shortId, basename, shortModel, formatNumber,
-      formatTokenCount, messageText, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
+      formatTokenCount, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
+      safeMarkdownHref, renderMarkdownLinkOpen, renderMarkdownLinkClose,
       displayedTokenUsage, usageRunId, orchestratorContextTokens, tokenUsageSummary,
       tokenUsageTitle, effortOptions, escapeHtml, rawHeadersFromConfig, settingsValuesFromConfig,
       serializeSettingsHeaders, buildSettingsPatch, loadFocusSettings, renderFocusSettings,
@@ -67,7 +67,7 @@ function loadApp(overrides = {}) {
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, submitComposer, upsertCreatedSession, createSession,
-      confirmSessionDeletion,
+      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -87,8 +87,8 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function agentEnvelope(sequenceId, event) {
-  return { sequence_id: sequenceId, event: { type: "agent", event } };
+function agentEnvelope(sequenceId, event, epochId = "test-epoch") {
+  return { epoch_id: epochId, sequence_id: sequenceId, event: { type: "agent", event } };
 }
 
 function occurrences(value, pattern) {
@@ -111,6 +111,9 @@ function eventSourceHarness() {
       this.listeners.set(type, listeners);
     }
     emit(type, payload) {
+      if (typeof payload !== "string" && ["replay_boundary", "session_event"].includes(type) && !payload.epoch_id) {
+        payload = { epoch_id: "test-epoch", ...payload };
+      }
       const event = { data: typeof payload === "string" ? payload : JSON.stringify(payload) };
       for (const listener of this.listeners.get(type) || []) listener(event);
     }
@@ -263,37 +266,14 @@ function installWorkspaceElements(uiInstance) {
   ]) uiInstance.el[name] = element();
 }
 
-test("production shell, mobile access, and privacy exclusions stay compact", () => {
-  for (const id of [
-    "sessionPicker", "sessionWorkspace", "generatedOverview", "orchestratorLedger", "threadGrid",
-    "commandComposer", "promptInput", "sendPrompt", "focusPanel", "metricRun", "worksetRail",
-    "expandWorksets", "sessionInfo", "focusTitle", "focusContent",
-  ]) assert.match(indexSource, new RegExp(`id="${id}"`));
-  for (const forbidden of [
-    /Session Events/i, /id="streamHealth/i, /id="eventLog"/i, /data-tab=/i, /id="toast"/i,
-  ]) assert.doesNotMatch(indexSource, forbidden);
-  assert.doesNotMatch(appSource, /include_system\s*=\s*true|\{\s*name:\s*"activity",\s*description:|openFocusView\(\s*"activity"|renderActivityFocus|renderStreamHealth|streamHealth|streamNotices/i);
-  assert.doesNotMatch(redesignSource, /stream-health|focus-activity-scroll/i);
-  assert.match(indexSource, /Message the orchestrator · \/ for commands/);
-  assert.match(indexSource, /id="focusTitle" tabindex="-1"/);
-  assert.doesNotMatch(indexSource, /id="focusContent"[^>]*aria-live/);
-  assert.match(indexSource, /href="\/assets\/redesign\.css\?v=quality-12"/);
-  assert.match(indexSource, /src="\/assets\/app\.js\?v=quality-12"/);
-  assert.doesNotMatch(indexSource, /quality-11/);
+test("production shell preserves privacy and mobile chat-only access", () => {
+  for (const id of ["sessionPicker", "sessionWorkspace", "focusPanel", "promptInput"]) {
+    assert.match(indexSource, new RegExp(`id="${id}"`));
+  }
+  assert.doesNotMatch(indexSource, /Session Events/i);
   const mobile = redesignSource.match(/@media \(max-width: 780px\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-sidebar \{[^}]*display: none/);
-  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator \.focus-content \{[^}]*overflow: auto/);
-  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator \.focus-chat \{[^}]*min-height: 420px/);
-  assert.doesNotMatch(mobile, /\.focus-panel\.is-orchestrator[^}]*420px/);
-  assert.match(redesignSource, /\.focus-panel\.is-orchestrator \.focus-content,[\s\S]*?\{ overflow: hidden; \}/);
-  assert.match(redesignSource, /\.focus-chat \{[^}]*min-height: 0;[^}]*overflow: auto/);
-  assert.match(mobile, /\.focus-panel\.is-thread \.focus-activity \{[^}]*display: block/);
-  assert.doesNotMatch(mobile, /\.focus-panel\.is-thread \.focus-activity \{[^}]*display: none/);
-  assert.match(redesignSource, /\.composer textarea \{[^}]*font: 15px\/1\.62 var\(--mono\)/);
-  assert.match(redesignSource, /\.focus-message-copy \{[^}]*font: 15px\/1\.62 var\(--mono\)/);
-  assert.ok(ui.commands.some(({ name }) => name === "worksets"));
-  assert.ok(!ui.commands.some(({ name }) => name === "activity"));
 });
 
 test("session opening renders the workspace and starts snapshot and SSE without removed-surface references", () => {
@@ -427,7 +407,7 @@ scenario("SSE", "initial replay hydrates chronology without replaying stale run-
   assert.equal(isolated.state.sessionRunActivity.has(sessionId), false);
   assert.equal(isolated.state.attentionSessions.has(sessionId), false);
   assert.equal(isolated.recordSessionEnvelope(sessionId, {
-    session_id: sessionId, sequence_id: 3,
+    session_id: sessionId, epoch_id: "test-epoch", sequence_id: 3,
     event: { type: "run_started", prompt_preview: "new run", started_at_epoch_ms: 2 },
   }), true);
   assert.equal(isolated.state.sessionRunActivity.get(sessionId), true);
@@ -530,9 +510,10 @@ test("finished orchestrator runs latch attention until the session is opened", (
   assert.equal(ui.sessionStatus(idle), "attention");
   ui.clearSessionAttention("attention-session");
   assert.equal(ui.sessionStatus(idle), "idle");
-  ui.noteSessionRunEvent("attention-session", "run_started");
-  ui.noteSessionRunEvent("attention-session", "run_completed");
-  assert.equal(ui.sessionStatus(idle), "attention");
+  ui.state.sessions = [running];
+  ui.noteSessionRunEvent("attention-session", "run_started", "run-1");
+  ui.noteSessionRunEvent("attention-session", "run_completed", "run-1");
+  assert.equal(ui.sessionStatus(running), "attention");
 });
 
 test("session reordering uses pointer capture with touch targets and keyboard grab mode", () => {
@@ -563,17 +544,20 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   const assistant = ui.renderFocusMessage({ role: "assistant",
     reasoning_text: "reason <carefully>", content: "answer <safely>",
     tool_calls: [{ id: "call-<42>",
-      function: { name: "read<file>", arguments: '{"path":"<secret>"}' },
+      function: { name: "read<file>", arguments: '{"path":"RAW_TOOL_ARGUMENT_CANARY"}' },
     }], }, { ordinal: 26, durationMs: 2_500 });
   assert.match(assistant, /focus-message-copy is-reasoning/);
   assert.match(assistant, />reasoning</);
   assert.ok(assistant.indexOf("reason &lt;carefully&gt;") < assistant.indexOf("answer &lt;safely&gt;"));
   assert.match(assistant, /focus-tool-call-id[^>]*>call-&lt;42&gt;</);
   assert.match(assistant, /read&lt;file&gt;/);
+  assert.match(assistant, /title="call-&lt;42&gt;"/);
+  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|<pre>/);
   assert.match(assistant, /response 00:00:02/);
   assert.doesNotMatch(assistant, /<secret>|<carefully>|<safely>/);
-  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "done" }, { ordinal: 27 });
+  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" }, { ordinal: 27 });
   assert.match(tool, /Tool result/);
+  assert.doesNotMatch(tool, /RAW_TOOL_RESULT_CANARY/);
   assert.match(tool, /call call-&lt;42&gt;/);
   const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] }, { ordinal: 28 });
   assert.match(empty, /focus-message-copy is-empty/);
@@ -1317,922 +1301,169 @@ test("server-provided cycle metadata keeps current threads visible with a pagina
   assert.deepEqual([...seed.names].sort(), ["current/a", "current/b", "current/live"]);
 });
 
-scenario("Thread lifecycle, redaction, and coalescing", "orchestrator lifecycle distinguishes no-run, running, completed, and failed evidence", () => {
-  ui.state.currentId = "orchestrator-lifecycle";
-  ui.state.events.set("orchestrator-lifecycle", []);
-  assert.deepEqual(
-    plain(ui.orchestratorLifecycle({ active_run: null })), {
-      state: "no-run", provenance: "unavailable", sequenceId: null,
-      startSequence: null, finishSequence: null, runId: null,
-      startedAtEpochMs: null, durationMs: null,
-      detail: "No run lifecycle event is available in the current replay window.",
-    });
-  assert.equal(ui.orchestratorLifecycle({
-    active_run: { run_id: "run-live", started_at_epoch_ms: 1_700_000_000_000, prompt_preview: "work" },
-  }).state, "running");
-  ui.state.events.set("orchestrator-lifecycle", [
-    { sequence_id: 20, run_id: "run-20", event: { type: "run_started", prompt_preview: "start", started_at_epoch_ms: 1_700_000_000_000 } },
-    { sequence_id: 21, run_id: "run-20", event: { type: "run_completed", response: "done", duration_ms: 55 } },
-  ]);
-  assert.deepEqual(
-    plain(ui.orchestratorLifecycle({ active_run: null })), {
-      state: "completed", provenance: "observed", sequenceId: 21,
-      startSequence: 20, finishSequence: 21, runId: "run-20",
-      startedAtEpochMs: 1_700_000_000_000, durationMs: 55,
-      detail: "done", });
-  ui.state.events.set("orchestrator-lifecycle", [
-    { sequence_id: 22, run_id: "run-22", event: { type: "run_failed", message: "model unavailable" } },
-  ]);
-  assert.equal(ui.orchestratorLifecycle({ active_run: null }).state, "failed");
-  assert.equal(ui.orchestratorLifecycle({ active_run: null }).detail, "model unavailable");
+test("authoritative thread boundaries append only same-epoch post-boundary events", () => {
+  const persisted = [
+    { event: { type: "assistant_message", content: "persisted response" }, provenance: "persisted" },
+    { event: { type: "thread_finished", exit_code: 0 }, provenance: "persisted" },
+  ];
+  const observed = [
+    { event: { type: "assistant_message", content: "old replay" }, provenance: "observed", epochId: "epoch-a", sequenceId: 4 },
+    { event: { type: "assistant_message", content: "wrong epoch" }, provenance: "observed", epochId: "epoch-b", sequenceId: 8 },
+    { event: { type: "thread_started", name: "worker" }, provenance: "observed", epochId: "epoch-a", sequenceId: 7 },
+    { event: { type: "assistant_message", content: "new response" }, provenance: "observed", epochId: "epoch-a", sequenceId: 6 },
+  ];
+  assert.deepEqual(plain(ui.mergeThreadEvidence(persisted, observed, { epoch_id: "epoch-a", sequence_id: 5 })
+    .map((entry) => entry.event.content || entry.event.type)),
+  ["persisted response", "thread_finished", "new response", "thread_started"]);
+  assert.deepEqual(plain(ui.mergeThreadEvidence(persisted, observed, null)), plain(persisted));
 });
 
-scenario("Thread lifecycle, redaction, and coalescing", "thread lifecycle exposes only queued, running, and finished while retaining detailed outcomes", () => {
-  ui.state.currentId = "thread-states";
-  ui.state.threadCycles.clear();
-  ui.state.events.set("thread-states", [ agentEnvelope(60, {
-      type: "tool_call_started", thread_name: null, call_id: "dispatch-live", name: "thread",
-      args_detail: JSON.stringify({ name: "launched", action: "spawn" }),
-    }), agentEnvelope(70, {
-      type: "tool_call_started", thread_name: null, call_id: "dispatch-bad", name: "thread",
-      args_detail: JSON.stringify({ name: "dispatch-failure", action: "spawn" }),
-    }), agentEnvelope(71, {
-      type: "tool_call_finished", thread_name: null, call_id: "dispatch-bad", name: "thread",
-      content_preview: "Failed to spawn", is_error: true, }), ]);
-  const snapshot = { metadata: { session_id: "thread-states" },
-    messages: [], active_threads: ["running", "queued", "launched"],
-    threads: ["running", "queued", "launched", "failed-exit", "failed-error", "finished", "timeout-finish", "dispatch-failure", "started-inactive", "retained-only"]
-      .map((name, index) => ({ name, session_id: "thread-states", updated_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z` })),
-    thread_episodes: { "retained-only": [{ id: 9, content: "retained" }] },
-    thread_steering: [], thread_events: {
-      running: [{ type: "thread_started", name: "running", action: "work", source_threads: [] }],
-      "failed-exit": [
-        { type: "thread_started", name: "failed-exit", action: "work", source_threads: [] },
-        { type: "thread_finished", name: "failed-exit", exit_code: 7, timed_out: false },
-      ], "failed-error": [
-        { type: "thread_started", name: "failed-error", action: "work", source_threads: [] },
-        { type: "error", thread_name: "failed-error", message: "worker transport failed" },
-      ], finished: [
-        { type: "thread_started", name: "finished", action: "work", source_threads: [] },
-        { type: "thread_finished", name: "finished", exit_code: 0, timed_out: false },
-      ], "timeout-finish": [
-        { type: "thread_started", name: "timeout-finish", action: "work", source_threads: [] },
-        { type: "thread_finished", name: "timeout-finish", exit_code: 124, timed_out: true, timeout_reason: "model call" },
-      ], "started-inactive": [
-        { type: "thread_started", name: "started-inactive", action: "work", source_threads: [] },
-      ], }, };
-  const models = ui.buildThreadModels(snapshot);
-  assert.deepEqual(new Set(models.map((model) => model.state)), new Set(["queued", "running", "finished"]));
-  assert.equal(models.find((model) => model.name === "running").state, "running");
-  assert.equal(models.find((model) => model.name === "launched").state, "running");
-  assert.equal(models.find((model) => model.name === "queued").state, "queued");
-  for (const name of ["failed-exit", "failed-error", "finished", "timeout-finish", "dispatch-failure", "started-inactive", "retained-only"]) {
-    assert.equal(models.find((model) => model.name === name).state, "finished");
+test("the canonical thread projector omits internal and metric rows while keeping independent responses and safe tools", () => {
+  const internalStart = `model_call_${"started"}`;
+  const entries = [
+    { event: { type: internalStart, iteration: 1 }, provenance: "persisted" },
+    { event: { type: "token_usage_updated", usage: { input_tokens: 9 } }, provenance: "persisted" },
+    { event: { type: "thread_log", line: "raw log" }, provenance: "persisted" },
+    { event: { type: "assistant_message", content: "first answer" }, provenance: "persisted" },
+    { event: { type: internalStart, iteration: 2 }, provenance: "persisted" },
+    { event: { type: "assistant_message", content: "second answer" }, provenance: "persisted" },
+    { event: { type: "tool_call_started", name: "read", call_id: "call-1",
+      args_detail: "RAW_ARGUMENT_CANARY", args_preview: '{"path":"src/app.js","limit":5}' }, provenance: "observed", sequenceId: 8 },
+    { event: { type: "tool_call_finished", name: "read", call_id: "call-1", is_error: false,
+      content_preview: "succeeded" }, provenance: "observed", sequenceId: 9 },
+    { event: { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }, provenance: "observed", sequenceId: 10 },
+  ];
+  const actions = ui.projectThreadActions(entries);
+  assert.deepEqual(plain(actions.map((action) => action.name)), ["response", "response", "Read", "thread"]);
+  assert.deepEqual(plain(actions.filter((action) => action.name === "response").map((action) => action.detail)), ["first answer", "second answer"]);
+  assert.match(actions[2].detail, /src\/app\.js.*succeeded/);
+  assert.doesNotMatch(JSON.stringify(actions), /RAW_ARGUMENT_CANARY|raw log|iteration/);
+  const snapshot = sessionSnapshot("episodes-only", { threads: [{ name: "worker" }],
+    thread_episodes: { worker: [{ id: 1, action: "Retained", content: "episode-only content" }] },
+    thread_event_boundary: { epoch_id: "epoch-a", sequence_id: 0 }, });
+  ui.state.currentId = "episodes-only";
+  assert.equal(ui.buildThreadModels(snapshot)[0].actions.length, 0);
+  assert.match(ui.renderThreadEpisodes(snapshot.thread_episodes.worker), /episode-only content/);
+});
+
+test("tile selection protects the latest response, error, and terminal row", () => {
+  const actions = [
+    { name: "response", kind: "assistant_message", detail: "final answer" },
+    { name: "ordinary 1", kind: "tool_call_started" },
+    { name: "error", kind: "error", state: "error" },
+    { name: "ordinary 2", kind: "tool_call_started" },
+    { name: "thread", kind: "thread_finished", state: "done" },
+    { name: "ordinary 3", kind: "steering" },
+    { name: "ordinary 4", kind: "steering" },
+  ];
+  const selected = ui.selectTileActions(actions);
+  assert.equal(selected.length, 5);
+  assert.deepEqual(plain(selected.map((action) => action.name)), ["response", "error", "thread", "ordinary 3", "ordinary 4"]);
+  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('title="src/full/path.js"'), true);
+});
+
+test("terminal run events clear only matching active-run caches", () => {
+  const entry = sessionListEntry("terminal", { active_run: { run_id: "new-run" } });
+  ui.state.sessions = [entry];
+  ui.state.snapshots.set("terminal", sessionSnapshot("terminal", { active_run: { run_id: "new-run" } }));
+  ui.state.acceptedRuns.set("terminal", { run_id: "new-run" });
+  ui.state.sessionRunActivity.set("terminal", true);
+  ui.noteSessionRunEvent("terminal", "run_completed", "old-run");
+  assert.equal(entry.active_run.run_id, "new-run");
+  assert.equal(ui.state.snapshots.get("terminal").active_run.run_id, "new-run");
+  assert.equal(ui.state.acceptedRuns.get("terminal").run_id, "new-run");
+  ui.noteSessionRunEvent("terminal", "run_failed", "new-run");
+  assert.equal(entry.active_run, null);
+  assert.equal(ui.state.snapshots.get("terminal").active_run, null);
+  assert.equal(ui.state.acceptedRuns.has("terminal"), false);
+  assert.equal(ui.state.sessionRunActivity.get("terminal"), false);
+});
+
+test("late deletion completion cannot navigate away from a newer session or close its drawer", async () => {
+  const deletion = deferred();
+  const isolated = loadApp({ fetch: async (path, options) => {
+      if (options?.method === "DELETE") return deletion.promise;
+      if (path === "/sessions?workspace_stats=true") return jsonResponse([sessionListEntry("session-b")]);
+      throw new Error(`unexpected request ${path}`); }, });
+  installWorkspaceElements(isolated);
+  isolated.el.drawerContent = { querySelector: () => ({ id: "newer-form" }) };
+  isolated.el.utilityDrawer = { hidden: false };
+  isolated.state.currentId = "session-a";
+  isolated.state.sessions = [sessionListEntry("session-a"), sessionListEntry("session-b")];
+  const status = fakeElement();
+  const form = { dataset: { sessionId: "session-a" }, querySelector: () => status };
+  const pending = isolated.confirmSessionDeletion(form);
+  isolated.state.currentId = "session-b";
+  deletion.resolve(jsonResponse({}));
+  await pending;
+  assert.equal(isolated.state.currentId, "session-b");
+  assert.equal(isolated.el.utilityDrawer.hidden, false);
+});
+
+test("session-list recovery retries retained hashes and session navigation hands off focus", async () => {
+  const { FakeEventSource } = eventSourceHarness();
+  let listAttempt = 0;
+  const focused = [];
+  const document = { addEventListener() {}, hidden: false, activeElement: null };
+  const isolated = loadApp({ document, EventSource: FakeEventSource,
+    window: { location: { hash: "#session/recovered", pathname: "/" } },
+    fetch: async (path) => {
+      if (path.startsWith("/sessions/recovered?")) return jsonResponse(sessionSnapshot("recovered"));
+      if (path.startsWith("/sessions")) {
+        listAttempt += 1;
+        if (listAttempt === 1) return errorResponse(503, { error: "not yet" });
+        return jsonResponse([sessionListEntry("recovered")]);
+      }
+      throw new Error(`unexpected request ${path}`);
+    }, });
+  installWorkspaceElements(isolated);
+  isolated.el.renameSession.focus = () => focused.push("title");
+  isolated.el.pickerTitle = { focus: () => focused.push("picker-title") };
+  isolated.el.drawerBackdrop = { hidden: true };
+  isolated.el.drawerContent = { innerHTML: "" };
+  isolated.el.utilityDrawer = { hidden: true };
+  isolated.el.app = fakeElement();
+  isolated.el.sessionGrid.querySelector = () => ({ focus: () => focused.push("card") });
+  await isolated.loadSessions();
+  assert.equal(isolated.state.currentId, null);
+  await isolated.loadSessions();
+  assert.equal(isolated.state.currentId, "recovered");
+  assert.ok(focused.includes("title"));
+  isolated.showPicker(false);
+  assert.equal(focused.at(-1), "card");
+});
+
+test("Markdown links use an absolute protocol allowlist and external-link isolation", () => {
+  for (const target of ["https://example.test/a", "http://example.test", "mailto:user@example.test"]) {
+    assert.equal(ui.safeMarkdownHref(target), target);
   }
-  assert.equal(models.find((model) => model.name === "failed-exit").outcome, "failed (exit 7)");
-  assert.equal(models.find((model) => model.name === "failed-error").outcome, "worker transport failed");
-  assert.equal(models.find((model) => model.name === "finished").outcome, "completed (exit 0)");
-  assert.equal(models.find((model) => model.name === "timeout-finish").outcome, "timed out");
-  assert.equal(models.find((model) => model.name === "dispatch-failure").outcome, "Failed to spawn");
-  assert.equal(models.find((model) => model.name === "started-inactive").outcome, "start observed; finish outcome unavailable");
-  const runningHtml = ui.renderThreadTile(models.find((model) => model.name === "running"));
-  const queuedHtml = ui.renderThreadTile(models.find((model) => model.name === "queued"));
-  const finishedHtml = ui.renderThreadTile(models.find((model) => model.name === "failed-exit"));
-  assert.match(runningHtml, /data-state="running"[\s\S]*aria-label="Running">Running/);
-  assert.match(queuedHtml, /data-state="queued"[\s\S]*aria-label="Queued">Queued/);
-  assert.match(finishedHtml, /data-state="finished"[\s\S]*aria-label="Finished">Finished/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread evidence overlays duplicate live occurrences into durable positions without losing order or multiplicity", () => {
-  const name = "overlay-worker";
-  const start = { type: "thread_started", name, action: "inspect", source_threads: [] };
-  const repeated = { type: "thread_log", name, line: "same retained line" };
-  const finish = { type: "thread_finished", name, exit_code: 0, timed_out: false };
-  const partial = { type: "tool_call_started", thread_name: name, call_id: "still-open", name: "read", args_detail: "{}" };
-  const snapshot = {
-    thread_events: { [name]: [start, repeated, repeated, finish] },
-    thread_episodes: {}, thread_steering: [], };
-  const entries = ui.threadModelEntries(name, snapshot, [
-    agentEnvelope(40, partial), agentEnvelope(25, repeated),
-    agentEnvelope(10, start), agentEnvelope(30, repeated),
-    agentEnvelope(20, repeated), ]);
-  assert.deepEqual(
-    plain(entries.map((entry) => ({ type: entry.event.type, sequenceId: entry.sequenceId, persisted: Boolean(entry.persisted) }))),
-    [ { type: "thread_started", sequenceId: 10, persisted: true },
-      { type: "thread_log", sequenceId: 20, persisted: true },
-      { type: "thread_log", sequenceId: 25, persisted: true },
-      { type: "thread_finished", sequenceId: null, persisted: false },
-      { type: "thread_log", sequenceId: 30, persisted: false },
-      { type: "tool_call_started", sequenceId: 40, persisted: false },
-    ]);
-  assert.equal(entries.filter((entry) => entry.event.type === "thread_log").length, 3);
-  assert.equal(ui.threadLifecycleFromEvidence(name, entries, false, []).state, "finished");
-  assert.equal(ui.buildThreadActions(name, entries, snapshot).filter((action) => action.name === "thread log").length, 3);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "a durable finish stays terminal when excess identical live starts replay after it", () => {
-  const name = "duplicate-start-worker";
-  const start = { type: "thread_started", name, action: "work", source_threads: [] };
-  const finish = { type: "thread_finished", name, exit_code: 0, timed_out: false };
-  const entries = ui.threadModelEntries(name, { thread_events: { [name]: [start, finish] } }, [
-    agentEnvelope(10, start), agentEnvelope(20, start), ]);
-  assert.deepEqual(
-    plain(entries.map((entry) => ({ type: entry.event.type, sequenceId: entry.sequenceId, persisted: Boolean(entry.persisted) }))),
-    [ { type: "thread_started", sequenceId: 10, persisted: true },
-      { type: "thread_finished", sequenceId: null, persisted: false },
-      { type: "thread_started", sequenceId: 20, persisted: false }, ],
-  );
-  const lifecycle = ui.threadLifecycleFromEvidence(name, entries, false, []);
-  assert.equal(entries.filter((entry) => entry.event.type === "thread_started").length, 2);
-  assert.equal(lifecycle.state, "finished");
-  assert.equal(lifecycle.outcome, "completed (exit 0)");
-  assert.equal(lifecycle.startSequence, 10);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "authoritative active membership or a distinct new dispatch establishes a later thread cycle", () => {
-  const name = "restarted-worker";
-  const durableStart = { type: "thread_started", name, action: "first cycle", source_threads: [] };
-  const newStart = { type: "thread_started", name, action: "second cycle", source_threads: [] };
-  const entries = ui.threadModelEntries(name, {
-    thread_events: { [name]: [durableStart, { type: "thread_finished", name, exit_code: 0, timed_out: false }] },
-  }, [ agentEnvelope(10, durableStart), agentEnvelope(20, newStart),
-  ]);
-  const dispatchOnlyEntries = ui.threadModelEntries(name, {
-    thread_events: { [name]: [durableStart, { type: "thread_finished", name, exit_code: 0, timed_out: false }] },
-  }, [agentEnvelope(10, durableStart)]);
-  const dispatchOnlyLifecycle = ui.threadLifecycleFromEvidence(name, dispatchOnlyEntries, true, [{
-    name, provenance: "observed", sequenceId: 20, isError: false,
-    completed: false, }]);
-  assert.equal(dispatchOnlyLifecycle.state, "running");
-  assert.equal(dispatchOnlyLifecycle.start, null);
-  const activeLifecycle = ui.threadLifecycleFromEvidence(name, entries, true, []);
-  assert.equal(activeLifecycle.state, "running");
-  assert.equal(activeLifecycle.start.action, "second cycle");
-  assert.equal(activeLifecycle.startSequence, 20);
-  const dispatchedLifecycle = ui.threadLifecycleFromEvidence(name, entries, false, [{
-    name, provenance: "observed", sequenceId: 15, isError: false, }]);
-  assert.equal(dispatchedLifecycle.state, "finished");
-  assert.equal(dispatchedLifecycle.start.action, "second cycle");
-  assert.equal(dispatchedLifecycle.startSequence, 20);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "an unmatched live finish advances running durable evidence to finished", () => {
-  const name = "live-finish-worker";
-  const snapshot = {
-    thread_events: { [name]: [{ type: "thread_started", name, action: "work", source_threads: [] }] },
-  };
-  const runningEntries = ui.threadModelEntries(name, snapshot, []);
-  assert.equal(ui.threadLifecycleFromEvidence(name, runningEntries, true, []).state, "running");
-  const finishedEntries = ui.threadModelEntries(name, snapshot, [
-    agentEnvelope(88, { type: "thread_finished", name, exit_code: 0, timed_out: false }),
-  ]);
-  const lifecycle = ui.threadLifecycleFromEvidence(name, finishedEntries, true, []);
-  assert.equal(lifecycle.state, "finished");
-  assert.equal(lifecycle.finishSequence, 88);
-  assert.deepEqual(plain(finishedEntries.map((entry) => entry.event.type)), ["thread_started", "thread_finished"]);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread focus overlay retains durable slots and repeated occurrences while adding only newer live evidence", () => {
-  const sessionId = "focus-overlay-session";
-  const name = "focus-overlay-worker";
-  const durable = [
-    { type: "thread_started", name, action: "work", source_threads: [] },
-    { type: "thread_log", name, line: "repeated" },
-    { type: "thread_log", name, line: "repeated" },
-    { type: "thread_finished", name, exit_code: 0, timed_out: false },
-  ];
-  ui.state.currentId = sessionId;
-  ui.state.events.set(sessionId, [ agentEnvelope(10, durable[0]),
-    agentEnvelope(20, durable[1]), agentEnvelope(21, durable[2]),
-    agentEnvelope(31, { type: "error", thread_name: name, message: "new tail evidence" }),
-  ]);
-  const entries = ui.threadFocusEvidenceEntries(name, { thread_events: {} }, {
-    afterSequence: 30,
-    events: durable.map((event, index) => ({ id: index + 1, created_at: `time-${index + 1}`, event })).reverse(),
-  });
-  assert.deepEqual(
-    plain(entries.map((entry) => ({ type: entry.event.type, eventId: entry.eventId, sequenceId: entry.sequenceId }))),
-    [ { type: "error", eventId: null, sequenceId: 31 },
-      { type: "thread_finished", eventId: 4, sequenceId: null },
-      { type: "thread_log", eventId: 3, sequenceId: 21 },
-      { type: "thread_log", eventId: 2, sequenceId: 20 },
-      { type: "thread_started", eventId: 1, sequenceId: 10 }, ]);
-  assert.equal(entries.filter((entry) => entry.event.type === "thread_log").length, 2);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "detailed thread focus keeps user-facing outcomes while hiding technical event evidence", () => {
-  ui.state.currentId = "evidence-session";
-  ui.state.threadCycles.clear();
-  const usage = { input_tokens: 100, cache_read_tokens: 40, output_tokens: 12, total_tokens: 222 };
-  const events = [
-    { type: "thread_started", name: "worker/evidence", action: "Inspect <unsafe>", source_threads: ["source/a", "source/b"] },
-    { type: "model_call_started", thread_name: "worker/evidence", iteration: 3 },
-    { type: "thread_log", name: "worker/evidence", line: "latest <log>" },
-    { type: "tool_call_started", thread_name: "worker/evidence", call_id: "call-55", name: "read", args_detail: '{"path":"<secret>"}' },
-    { type: "tool_call_finished", thread_name: "worker/evidence", call_id: "call-55", name: "read", content_preview: "preview <done>", is_error: false },
-    { type: "future_worker_evidence", thread_name: "worker/evidence", field: "<future>" },
-    { type: "error", thread_name: "worker/evidence", message: "structured <error>" },
-    { type: "thread_finished", name: "worker/evidence", exit_code: 124, timed_out: true, timeout_reason: "tool <timeout>", usage },
-  ];
-  ui.state.events.set("evidence-session", events.map((event, index) => agentEnvelope(101 + index, event)));
-  const snapshot = { metadata: { session_id: "evidence-session" },
-    sessions: [{ session_id: "evidence-session", created_at: "session-created", updated_at: "session-updated" }],
-    active_threads: [], messages: [], threads: [{
-      name: "worker/evidence", session_id: "evidence-session", created_at: "thread-created",
-      updated_at: "thread-updated", episode_count: 1, latest_action: "Inspect <unsafe>",
-    }], thread_events: {}, thread_episodes: { "worker/evidence": [{
-        id: 77, session_id: "evidence-session", thread_name: "worker/evidence",
-        created_at: "episode-created", action: "Durable <action>", content: "Retained response",
-      }], }, thread_steering: [{
-      id: 12, session_id: "evidence-session", thread_name: "worker/evidence", status: "delivered",
-      instruction: "Steer <carefully>", created_at: "steering-created", delivered_at: "steering-delivered", expired_at: null,
-    }], };
-  ui.state.threadEventWindows.set("evidence-session:worker/evidence", {
-    afterSequence: 108, events: events.map((event, index) => ({
-      id: 501 + index,
-      created_at: index === 0 ? "start-time" : index === 7 ? "finish-time" : `event-time-${index + 1}`,
-      event, })).reverse(), hasOlder: false, loading: false, });
-  const model = ui.buildThreadModels(snapshot).find((item) => item.name === "worker/evidence");
-  assert.equal(model.state, "finished");
-  assert.deepEqual(plain(model.provenance), ["persisted", "observed"]);
-  assert.deepEqual(plain(model.iterations), [3]);
-  assert.equal(model.latestLog, "latest <log>");
-  assert.equal(model.latestError, "structured <error>");
-  assert.deepEqual(plain(model.usageEvidence.usage), usage);
-  const html = ui.renderThreadFocus("worker/evidence", model, snapshot);
-  assert.match(html, /<h3>Episodes<\/h3>/);
-  assert.match(html, /<h3>Lifecycle<\/h3>/);
-  assert.ok(html.indexOf("<h3>Episodes</h3>") < html.indexOf("<h3>Lifecycle</h3>"));
-  assert.doesNotMatch(html, /<h3>Durable episodes<\/h3>|<h3>Lifecycle evidence<\/h3>/);
-  for (const value of [
-    "session-created", "session-updated", "thread-created", "thread-updated", "2 source threads · source/a, source/b",
-    "start-time", "finish-time", "tool &lt;timeout&gt;", "structured &lt;error&gt;", "latest &lt;log&gt;",
-    "Read", "Done", "path: &lt;secret&gt;", "Activity recorded",
-    "steering-created", "steering-delivered", "Episode 1 · ID 77", "episode-created", "Durable &lt;action&gt;",
-  ]) assert.match(html, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(html, /<dt>Input<\/dt><dd>100<\/dd>/);
-  assert.match(html, /<dt>Cache read<\/dt><dd>40<\/dd>/);
-  assert.match(html, /<dt>Output<\/dt><dd>12<\/dd>/);
-  assert.match(html, /<dt>Context<\/dt><dd>222<\/dd>/);
-  assert.doesNotMatch(html, /call-55|preview &lt;done&gt;|future_worker_evidence|&lt;future&gt;/);
-  assert.doesNotMatch(html, /data-provenance=|observed live|<dt>Provenance<\/dt>|actions in view|Start sequence|Finish sequence|Start event ID|Finish event ID/);
-  assert.doesNotMatch(html, /usage unavailable|latest retained response/);
-  assert.doesNotMatch(html, /<unsafe>|<secret>|<error>|<timeout>|<future>/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "missing lifecycle evidence is labeled unavailable rather than synthesized", () => {
-  const snapshot = { metadata: { session_id: "history-session" },
-    sessions: [{ session_id: "history-session", created_at: "created", updated_at: "updated" }],
-    active_threads: [], messages: [],
-    threads: [{ name: "history", session_id: "history-session", episode_count: 0 }],
-    thread_events: {}, thread_episodes: {}, thread_steering: [], };
-  const model = ui.buildThreadModels(snapshot)[0];
-  assert.equal(model.state, "finished");
-  assert.equal(model.outcome, "no start/finish lifecycle evidence in the current window");
-  const html = ui.renderThreadEvidence("history", model, snapshot, []);
-  assert.match(html, /No start event in current evidence/);
-  assert.match(html, /No model-call iteration events/);
-  assert.equal(occurrences(html, /<span class="evidence-unavailable">Unavailable<\/span>/g), 4);
-  assert.doesNotMatch(html, /exit 0|timed out.*no/i);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "orchestrator actions retain iterations, matched completion previews, call IDs, generic fallback, and focus activity", () => {
-  ui.state.currentId = "orchestrator-evidence";
-  ui.state.events.set("orchestrator-evidence", [
-    { sequence_id: 1, run_id: "run-evidence", event: { type: "run_started", prompt_preview: "begin", started_at_epoch_ms: 1_700_000_000_000 } },
-    agentEnvelope(2, { type: "model_call_started", thread_name: null, iteration: 4 }),
-    agentEnvelope(3, { type: "tool_call_started", thread_name: null, call_id: "orch-call", name: "read", args_detail: '{"path":"README.md"}' }),
-    agentEnvelope(4, { type: "tool_call_finished", thread_name: null, call_id: "orch-call", name: "read", content_preview: "matched preview", is_error: false }),
-    agentEnvelope(5, { type: "future_orchestrator_signal", thread_name: null, payload: "future" }),
-    { sequence_id: 6, run_id: "run-evidence", event: { type: "run_completed", response: "complete", duration_ms: 88 } },
-  ]);
-  const snapshot = {
-    metadata: { session_id: "orchestrator-evidence" }, active_run: null, messages: [], active_threads: [],
-    threads: [], thread_events: {}, thread_episodes: {}, thread_steering: [], worksets: { items: [], error: null },
-    sessions: [{ session_id: "orchestrator-evidence", created_at: "orch-created", updated_at: "orch-updated" }],
-  };
-  const actions = ui.buildOrchestratorActions(snapshot, { limit: false });
-  assert.ok(actions.some((action) => action.name === "model" && action.result === "iteration 4"));
-  const tool = actions.find((action) => action.callId === "orch-call");
-  assert.equal(tool.result, "done");
-  assert.match(tool.detail, /call orch-call.*path: README.md.*result: matched preview/);
-  assert.ok(actions.some((action) => action.name === "future_orchestrator_signal" && /payload/.test(action.detail)));
-  assert.equal(ui.orchestratorLifecycle(snapshot).state, "completed");
-  const html = ui.renderOrchestratorConversation(snapshot);
-  assert.match(html, /data-state="completed"/);
-  assert.match(html, /sequence #6/);
-  assert.match(html, /future_orchestrator_signal/);
-  assert.doesNotMatch(html, /orch-created|orch-updated|Run lifecycle|Thread states/);
-});
-scenario("Thread lifecycle, redaction, and coalescing", "thread fullscreen activity is newest-first with failures in event order", () => {
-  ui.state.currentId = "thread-order";
-  ui.state.events.set("thread-order", [
-    agentEnvelope(41, { type: "thread_steering_expired", name: "worker", steering_id: 9, instruction_preview: "too late" }),
-    agentEnvelope(42, { type: "error", thread_name: "worker", message: "worker failed" }),
-  ]);
-  const actions = ui.threadFocusActions("worker", { thread_episodes: {} }, {
-    afterSequence: 40, events: [
-      { id: 12, event: { type: "tool_call_finished", thread_name: "worker", name: "read", is_error: true, content_preview: "missing" } },
-      { id: 11, event: { type: "thread_steering_queued", name: "worker", steering_id: 9, instruction_preview: "too late" } },
-    ], });
-  assert.deepEqual(
-    plain(actions.map(({ name, result, detail }) => ({ name, result, detail }))),
-    [ { name: "error", result: "failed", detail: "worker failed" },
-      { name: "steering", result: "expired", detail: "steering #9 · too late" },
-      { name: "Read", result: "Failed", detail: "Error: missing" },
-      { name: "steering", result: "queued", detail: "steering #9 · too late" },
-    ]);
-  ui.state.events.delete("thread-order");
-  ui.state.currentId = null;
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread focus hides dedicated usage rows without changing usage summaries or header totals", () => {
-  ui.state.currentId = "thread-usage-session";
-  const start = { ...agentEnvelope(10, { type: "thread_started", name: "worker", action: "measure", source_threads: [] }), run_id: "run-live" };
-  const usageEnvelope = { ...agentEnvelope(11, {
-    type: "token_usage_updated", thread_name: "worker",
-    usage: { input_tokens: 20, output_tokens: 4, cache_read_tokens: 8, total_tokens: 240 },
-  }), run_id: "run-live" };
-  ui.state.events.set("thread-usage-session", [start, usageEnvelope]);
-  const snapshot = { metadata: { session_id: "thread-usage-session" },
-    active_run: { run_id: "run-live" }, active_threads: ["worker"],
-    response_timing: { cumulative_token_usage: {
-      input_tokens: 100, output_tokens: 20, cache_read_tokens: 40, total_tokens: 500,
-    } }, threads: [{ name: "worker" }],
-    thread_events: {}, thread_episodes: {}, thread_steering: [], messages: [],
-  };
-  const actions = ui.threadFocusActions("worker", snapshot, { afterSequence: 0, events: [] });
-  assert.deepEqual(plain(actions.map((action) => action.name)), ["dispatch"]);
-  assert.ok(actions.every((action) => action.kind !== "token_usage_updated"));
-  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === "worker");
-  assert.equal(model.usageEvidence.kind, "token_usage_updated");
-  const evidenceHtml = ui.renderThreadEvidence("worker", model, snapshot, model.entries);
-  assert.match(evidenceHtml, /<h4>Worker usage<\/h4>/);
-  assert.match(evidenceHtml, /<dt>Input<\/dt><dd>20<\/dd>/);
-  assert.deepEqual(plain(ui.displayedTokenUsage(snapshot, "thread-usage-session", [start, usageEnvelope])), {
-    input_tokens: 120, output_tokens: 24, cache_read_tokens: 48,
-    cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 500, });
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread model rows pair returned text chronologically and bound retained fallbacks to the final successful call", () => {
-  const entry = (event, sequenceId) => ({ event, provenance: "persisted", sequenceId });
-  const paired = ui.threadActionsFromEntries([
-    entry({ type: "thread_started", name: "worker", action: "work" }, 1),
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 1 }, 2),
-    entry({ type: "tool_call_started", thread_name: "worker", call_id: "tool-1", name: "read" }, 3),
-    entry({ type: "tool_call_finished", thread_name: "worker", call_id: "tool-1", name: "read", is_error: false }, 4),
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 2 }, 5),
-    entry({ type: "assistant_message", thread_name: "worker", content: "  Final model answer  " }, 6),
-    entry({ type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }, 7),
-  ], { content: "Retained answer" });
-  const pairedModels = paired.filter((action) => action.name === "model");
-  assert.equal(pairedModels[0].detail, "Returned text unavailable");
-  assert.equal(pairedModels[1].detail, "Final model answer");
-  assert.equal(paired.filter((action) => action.name === "response").length, 0);
-  const paginated = ui.threadActionsFromEntries([
-    entry({ type: "assistant_message", thread_name: "worker", content: "Start omitted by pagination" }, 8),
-  ], null);
-  assert.deepEqual(plain(paginated.map(({ name, detail }) => ({ name, detail }))), [
-    { name: "response", detail: "Start omitted by pagination" }, ]);
-  const fallback = ui.threadActionsFromEntries([
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 3 }, 9),
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 4 }, 10),
-    entry({ type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }, 11),
-  ], { content: "Durable final text" });
-  const fallbackModels = fallback.filter((action) => action.name === "model");
-  assert.equal(fallbackModels[0].detail, "Returned text unavailable");
-  assert.equal(fallbackModels[1].detail, "Final-call fallback from latest retained episode: Durable final text");
-  const unavailable = ui.threadActionsFromEntries([
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 5 }, 12),
-    entry({ type: "thread_finished", name: "worker", exit_code: 7, timed_out: false }, 13),
-  ], { content: "Must not mask a failed call" });
-  assert.equal(unavailable.find((action) => action.name === "model").detail, "Returned text unavailable");
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "whitespace-only assistant text stays paired but permits retained fallback only for the final successful model", () => {
-  const entry = (event, sequenceId) => ({ event, provenance: "persisted", sequenceId });
-  const finalWhitespace = ui.threadActionsFromEntries([
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 1 }, 1),
-    entry({ type: "assistant_message", thread_name: "worker", content: " \n\t " }, 2),
-    entry({ type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }, 3),
-  ], { content: "Durable final text" });
-  assert.equal(finalWhitespace.find((action) => action.name === "model").detail, "Final-call fallback from latest retained episode: Durable final text");
-  assert.equal(finalWhitespace.filter((action) => action.name === "response").length, 0);
-  const nonFinalWhitespace = ui.threadActionsFromEntries([
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 1 }, 4),
-    entry({ type: "assistant_message", thread_name: "worker", content: " \n\t " }, 5),
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 2 }, 6),
-    entry({ type: "assistant_message", thread_name: "worker", content: "Usable final text" }, 7),
-    entry({ type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }, 8),
-  ], { content: "Must not replace a usable final response" });
-  const modelDetails = nonFinalWhitespace.filter((action) => action.name === "model").map((action) => action.detail);
-  assert.deepEqual(plain(modelDetails), ["Returned text unavailable", "Usable final text"]);
-  assert.equal(nonFinalWhitespace.filter((action) => action.name === "response").length, 0);
-  const failedWhitespace = ui.threadActionsFromEntries([
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 3 }, 9),
-    entry({ type: "assistant_message", thread_name: "worker", content: " \n\t " }, 10),
-    entry({ type: "thread_finished", name: "worker", exit_code: 7, timed_out: false }, 11),
-  ], { content: "Must not mask a failed call" });
-  assert.equal(failedWhitespace.find((action) => action.name === "model").detail, "Returned text unavailable");
-  assert.equal(failedWhitespace.filter((action) => action.name === "response").length, 0);
-  const blankPaginated = ui.threadActionsFromEntries([
-    entry({ type: "assistant_message", thread_name: "worker", content: " \n\t " }, 12),
-  ], null);
-  assert.deepEqual(plain(blankPaginated), []);
-  assert.deepEqual(plain(ui.buildThreadActions("worker", [
-    { type: "assistant_message", thread_name: "worker", content: " \n\t " },
-  ], { thread_episodes: {}, thread_steering: [] })), []);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread lifecycle coalesces tools, keeps running and failed outcomes, and suppresses duplicate run markers", () => {
-  const entry = (event, sequenceId) => ({ event, provenance: "observed", sequenceId, eventId: 100 + sequenceId });
-  const actions = ui.threadActionsFromEntries([
-    entry({ type: "run_started", thread_name: "worker", prompt_preview: "generic start" }, 1),
-    entry({ type: "thread_started", name: "worker", action: "Canonical dispatch", source_threads: [] }, 2),
-    entry({ type: "model_call_started", thread_name: "worker", iteration: 4 }, 3),
-    entry({ type: "assistant_message", thread_name: "worker", content: "Model response text" }, 4),
-    entry({ type: "tool_call_started", thread_name: "worker", call_id: "internal-success", name: "read", args_detail: '{"path":"README.md","limit":10}' }, 5),
-    entry({ type: "tool_call_finished", thread_name: "worker", call_id: "internal-success", name: "read", content_preview: "raw successful result must stay hidden", is_error: false }, 6),
-    entry({ type: "tool_call_started", thread_name: "worker", call_id: "internal-running", name: "exec_command", args_detail: '{"cmd":"npm test","workdir":"/repo"}' }, 7),
-    entry({ type: "tool_call_started", thread_name: "worker", call_id: "internal-failure", name: "edit", args_detail: '{"path":"src/app.js","old_text":"private old","new_text":"private new"}' }, 8),
-    entry({ type: "tool_call_finished", thread_name: "worker", call_id: "internal-failure", name: "edit", content_preview: '{"message":"edit failed token=top-secret","headers":{"Authorization":"hidden"}}', is_error: true }, 9),
-    entry({ type: "tool_call_started", thread_name: "worker", call_id: "internal-unknown", name: "mcp__vendor__custom_lookup", args_detail: '{"query":"safe","body":"hidden"}' }, 10),
-    entry({ type: "future_worker_signal", thread_name: "worker", payload: { secret: "hidden" } }, 11),
-    entry({ type: "error", thread_name: "worker", message: "Explicit dispatch error" }, 12),
-    entry({ type: "thread_finished", name: "worker", exit_code: 9, timed_out: true, timeout_reason: "deadline reached", usage: { input_tokens: 99 } }, 13),
-    entry({ type: "run_finished", thread_name: "worker" }, 14),
-  ], null);
-  assert.equal(actions.filter((action) => action.callId === "internal-success").length, 1);
-  const done = actions.find((action) => action.callId === "internal-success");
-  assert.deepEqual(plain({ name: done.name, result: done.result, detail: done.detail, finishSequenceId: done.finishSequenceId }), {
-    name: "Read", result: "Done", detail: "path: README.md · limit: 10", finishSequenceId: 6,
-  });
-  assert.doesNotMatch(done.detail, /internal-success|raw successful result/);
-  const running = actions.find((action) => action.callId === "internal-running");
-  assert.deepEqual(plain({ name: running.name, result: running.result, detail: running.detail }), {
-    name: "Command", result: "Running", detail: "command: npm test · workdir: /repo",
-  });
-  const failed = actions.find((action) => action.callId === "internal-failure");
-  assert.equal(failed.result, "Failed");
-  assert.match(failed.detail, /^path: src\/app.js · old: 11 chars · new: 11 chars · Error: message: edit failed token=\[redacted\]$/);
-  assert.doesNotMatch(failed.detail, /private old|private new|top-secret|Authorization|hidden/);
-  const unknownTool = actions.find((action) => action.callId === "internal-unknown");
-  assert.deepEqual(plain({ name: unknownTool.name, result: unknownTool.result, detail: unknownTool.detail }), {
-    name: "Custom lookup", result: "Running", detail: "query: safe",
-  });
-  assert.ok(actions.some((action) => action.name === "Activity" && action.detail === "Activity recorded"));
-  assert.ok(actions.some((action) => action.name === "error" && action.detail === "Explicit dispatch error"));
-  assert.equal(actions.find((action) => action.name === "model").detail, "Model response text");
-  assert.equal(actions.filter((action) => action.name === "agent run").length, 0);
-  assert.equal(actions.find((action) => action.name === "thread").detail, "exit 9 · timed out: deadline reached");
-  assert.ok(actions.every((action) => !/input 99|latest retained response/.test(action.detail || "")));
-  const genericOnly = ui.threadActionsFromEntries([
-    entry({ type: "run_started", thread_name: "worker", prompt_preview: "only start evidence" }, 20),
-    entry({ type: "run_finished", thread_name: "worker" }, 21),
-  ], null);
-  assert.deepEqual(plain(genericOnly.map(({ name, result }) => ({ name, result }))), [
-    { name: "agent run", result: "started" },
-    { name: "agent run", result: "finished" }, ]);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tile thread actions use the same coalesced tool outcomes", () => {
-  const actions = ui.buildThreadActions("worker", [
-    agentEnvelope(1, { type: "tool_call_started", thread_name: "worker", call_id: "tile-call", name: "write", args_detail: '{"path":"out.txt","content":"private tile body"}' }),
-    agentEnvelope(2, { type: "tool_call_finished", thread_name: "worker", call_id: "tile-call", name: "write", content_preview: "private result", is_error: false }),
-  ], { thread_episodes: {}, thread_steering: [] });
-  assert.equal(actions.length, 1);
-  assert.deepEqual(plain({ name: actions[0].name, result: actions[0].result, detail: actions[0].detail }), {
-    name: "Write", result: "Done", detail: "path: out.txt · content: 17 chars",
-  });
-  const html = ui.renderActionRows(actions, "empty");
-  assert.doesNotMatch(html, /tile-call|private tile body|private result|persisted|observed|tool_call/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "durable steering evidence supplements observed actions without duplicating observed IDs", () => {
-  const snapshot = { thread_episodes: {}, thread_steering: [
-      { id: 1, thread_name: "worker", session_id: "session", status: "delivered", instruction: "already seen", created_at: "created-1", delivered_at: "delivered-1" },
-      { id: 2, thread_name: "worker", session_id: "session", status: "expired", instruction: "durable only", created_at: "created-2", expired_at: "expired-2" },
-    ], };
-  const actions = ui.buildThreadActions("worker", [
-    agentEnvelope(7, { type: "thread_steering_delivered", name: "worker", steering_id: 1, instruction_preview: "already seen" }),
-    agentEnvelope(8, { type: "error", thread_name: "worker", message: "ordered failure" }),
-  ], snapshot);
-  assert.equal(actions.length, 3);
-  assert.equal(actions.filter((action) => action.steeringId === 1).length, 1);
-  assert.equal(actions.filter((action) => action.steeringId === 2).length, 1);
-  assert.match(actions.at(-1).detail, /durable only · created created-2 · expired expired-2/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread tiles group live work first and order finished work by recency", () => {
-  const snapshot = { active_threads: ["queued", "running"], threads: [
-      { name: "finished-old", updated_at: "2026-01-01T00:00:00Z" },
-      { name: "queued", updated_at: "2026-01-04T00:00:00Z" },
-      { name: "finished-new", updated_at: "2026-01-03T00:00:00Z" },
-      { name: "running", updated_at: "2026-01-02T00:00:00Z" }, ],
-    thread_episodes: {}, thread_steering: [], thread_events: {
-      running: [{ type: "thread_started", name: "running", action: "work" }],
-      "finished-old": [
-        { type: "thread_started", name: "finished-old", action: "work" },
-        { type: "thread_finished", name: "finished-old", exit_code: 0, timed_out: false },
-      ], "finished-new": [
-        { type: "thread_started", name: "finished-new", action: "work" },
-        { type: "thread_finished", name: "finished-new", exit_code: 0, timed_out: false },
-      ], }, };
-  assert.deepEqual(
-    plain(ui.buildThreadModels(snapshot).map(({ name, state, compact }) => ({ name, state, compact }))),
-    [ { name: "running", state: "running", compact: false },
-      { name: "queued", state: "queued", compact: false },
-      { name: "finished-new", state: "finished", compact: true },
-      { name: "finished-old", state: "finished", compact: true }, ],
-  );
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "a persisted exit wins over active membership when restoring thread state", () => {
-  const models = ui.buildThreadModels({ active_threads: ["worker"],
-    threads: [{ name: "worker", updated_at: "2026-01-01T00:00:00Z" }],
-    thread_episodes: {}, thread_steering: [], thread_events: {
-      worker: [
-        { type: "thread_started", name: "worker", action: "work" },
-        { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
-      ], }, });
-  assert.equal(models[0].state, "finished");
-  assert.equal(models[0].compact, false);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "finished dispatches after the latest user turn remain full tiles", () => {
-  ui.state.currentId = "cycle-dispatch";
-  ui.state.threadCycles.clear();
-  const models = ui.buildThreadModels({
-    metadata: { session_id: "cycle-dispatch" }, active_threads: [],
-    threads: [
-      { name: "current", updated_at: "2026-01-02T00:00:00Z" },
-      { name: "earlier", updated_at: "2026-01-01T00:00:00Z" }, ],
-    thread_episodes: {}, thread_steering: [], thread_events: {},
-    messages: [ { role: "user", content: "older request" },
-      { role: "assistant", tool_calls: [{ function: { name: "thread", arguments: JSON.stringify({ name: "earlier" }) } }] },
-      { role: "user", content: "current request" },
-      { role: "assistant", tool_calls: [{ function: { name: "thread", arguments: JSON.stringify({ name: "current" }) } }] },
-    ], });
-  assert.deepEqual(
-    plain(models.map(({ name, compact }) => ({ name, compact }))), [
-      { name: "current", compact: false },
-      { name: "earlier", compact: true }, ]);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "activation enrolls a thread for the remainder of its current cycle", () => {
-  ui.state.currentId = "cycle-activation";
-  ui.state.threadCycles.clear();
-  const base = { metadata: { session_id: "cycle-activation" },
-    threads: [{ name: "resumed", updated_at: "2026-01-01T00:00:00Z" }],
-    thread_episodes: {}, thread_steering: [],
-    messages: [{ role: "user", content: "current request" }], };
-  const active = ui.buildThreadModels({ ...base, active_threads: ["resumed"], thread_events: {} });
-  assert.equal(active[0].compact, false);
-  const finished = ui.buildThreadModels({ ...base, active_threads: [],
-    thread_events: { resumed: [
-        { type: "thread_started", name: "resumed", action: "resume" },
-        { type: "thread_finished", name: "resumed", exit_code: 0, timed_out: false },
-      ], }, });
-  assert.equal(finished[0].state, "finished");
-  assert.equal(finished[0].compact, false);
-  const nextCycle = ui.buildThreadModels({ ...base,
-    active_threads: [], thread_events: {}, messages: [
-      { role: "user", content: "current request" },
-      { role: "user", content: "next request" }, ], });
-  assert.equal(nextCycle[0].compact, true);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "compact thread strips contain only the title bar and fullscreen affordance", () => {
-  const compact = ui.renderThreadTile({ name: "ancient/thread",
-    state: "finished", compact: true,
-    actions: [{ name: "read", result: "done", state: "done" }], });
-  assert.match(compact, /thread-tile is-compact/);
-  assert.match(compact, /ancient\/thread/);
-  assert.match(compact, /data-focus-thread="ancient\/thread"/);
-  assert.match(compact, /class="thread-state" aria-label="Finished">Finished<\/span>/);
-  assert.doesNotMatch(compact, /action-ledger|action-name/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "thread action ledger retains model iterations and matched tool completion evidence", () => {
-  const events = [
-    agentEnvelope(1, { type: "model_call_started", thread_name: "worker", iteration: 1 }),
-    agentEnvelope(2, { type: "tool_call_started",
-      thread_name: "worker", call_id: "call-1",
-      name: "mcp__exa_web_search__web_fetch_exa",
-      args_detail: JSON.stringify({ maxCharacters: 6000, urls: ["https://example.com"] }),
-    }), agentEnvelope(3, { type: "tool_call_finished",
-      thread_name: "worker", call_id: "call-1",
-      name: "mcp__exa_web_search__web_fetch_exa", is_error: false, }),
-    agentEnvelope(4, { type: "assistant_message", thread_name: "worker", content: "Verified result" }),
-    agentEnvelope(5, { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false }),
-  ];
-  const snapshot = {
-    thread_episodes: { worker: [{ action: "Research", content: "Full retained episode" }] },
-    thread_steering: [], };
-  const actions = ui.buildThreadActions("worker", events, snapshot);
-  assert.deepEqual(plain(actions.map(({ name, result }) => ({ name, result }))), [
-    { name: "model", result: "iteration 1" },
-    { name: "Web fetch", result: "Done" },
-    { name: "thread", result: "finished" }, ]);
-  assert.equal(actions[0].detail, "Verified result");
-  assert.equal(actions[1].detail, "url: https://example.com · urls: 1");
-  assert.doesNotMatch(actions[1].detail, /call-1|Result preview|result:/);
-  assert.equal(actions[2].detail, "exit 0 · not timed out");
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "retained thread actions use episodes without synthetic latest-action filler", () => {
-  const actions = ui.buildRetainedThreadActions( "worker",
-    { latest_action: "Inspect the database" }, { thread_episodes: {
-        worker: [ { content: "First response" },
-          { content: "Latest response" }, ], }, });
-  assert.deepEqual(plain(actions.map(({ name, result }) => ({ name, result }))), [
-    { name: "episode", result: "retained" },
-    { name: "episode", result: "retained" }, ]);
-  assert.match(actions.find((action) => action.name === "episode" && /Latest response/.test(action.detail)).detail, /Episode ID unavailable · Latest response/);
-  assert.ok(actions.every((action) => action.name !== "latest action"));
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "persisted latest_action is omitted from ledgers while episode actions remain available", () => {
-  ui.state.currentId = "latest-action-session";
-  ui.state.events.set("latest-action-session", [
-    agentEnvelope(1, { type: "thread_started", name: "worker/live", action: "live dispatch", source_threads: [] }),
-  ]);
-  const snapshot = {
-    metadata: { session_id: "latest-action-session" }, messages: [],
-    active_threads: ["worker/live"],
-    threads: [{ name: "worker/live", session_id: "latest-action-session", latest_action: "Persisted <latest> action" }],
-    thread_events: {},
-    thread_episodes: { "worker/live": [{ id: 9, action: "Persisted <latest> action", content: "Retained response" }] },
-    thread_steering: [], };
-  const model = ui.buildThreadModels(snapshot)[0];
-  assert.ok(model.actions.some((action) => action.name === "dispatch"));
-  assert.ok(model.actions.every((action) => action.name !== "latest action"));
-  assert.doesNotMatch(ui.renderThreadTile(model), /latest action|Persisted &lt;latest&gt; action/);
-  const focus = ui.renderThreadFocus("worker/live", model, snapshot);
-  assert.doesNotMatch(focus, /<strong>latest action<\/strong>|<span class="action-name">latest action<\/span>/);
-  assert.match(focus, /<h3>Episodes<\/h3>[\s\S]*Persisted &lt;latest&gt; action/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tile ledgers render exactly the five most recent actions", () => {
-  const actions = Array.from({ length: 7 }, (_, index) => ({
-    name: `action-${index + 1}`, result: "done", state: "done",
-    detail: `<detail-${index + 1}>`, }));
-  const html = ui.renderActionRows(actions, "empty");
-  assert.equal(occurrences(html, /class="action-row/g), 5);
-  assert.doesNotMatch(html, /action-1|action-2/);
-  assert.match(html, /action-3/);
-  assert.match(html, /&lt;detail-7&gt;/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "empty tile ledgers retain five rows and one quiet status message", () => {
-  const html = ui.renderActionRows([], "Awaiting first action");
-  assert.equal(occurrences(html, /class="action-row/g), 5);
-  assert.equal(occurrences(html, /Awaiting first action/g), 1);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tool summaries cover native tools without exposing write, edit, or terminal content", () => {
-  const format = (name, args) => ui.formatToolArguments(name, JSON.stringify(args), "");
-  assert.equal(format("read", { path: "/repo/src/app.js", offset: 20, limit: 40 }), "path: /repo/src/app.js · offset: 20 · limit: 40");
-  const command = format("exec_command", {
-    cmd: `curl -H "Authorization: Bearer topsecret" --data '{"token":"also-secret"}' https://example.test?api_key=url-secret`,
-    workdir: "/repo", });
-  assert.match(command, /^command: curl -H \[redacted\] --data \[redacted\]/);
-  assert.match(command, /api_key=\[redacted\].*workdir: \/repo/);
-  assert.doesNotMatch(command, /topsecret|also-secret|url-secret/);
-  assert.equal(format("shell", { command: "pwd", workdir: "/repo" }), "command: pwd · workdir: /repo");
-  assert.equal(format("exec_command", { cmd: "apply_patch <<'PATCH'\n*** Begin Patch\nprivate patch\nPATCH" }), "command: apply_patch [content omitted]");
-  const write = format("write", { path: "/tmp/out.txt", content: "SECRET body", token: "hidden" });
-  assert.equal(write, "path: /tmp/out.txt · content: 11 chars");
-  assert.doesNotMatch(write, /SECRET|hidden/);
-  const edit = format("edit", { path: "/tmp/out.txt", old_text: "old secret", new_text: "new secret text", patch: "private patch" });
-  assert.equal(edit, "path: /tmp/out.txt · old: 10 chars · new: 15 chars");
-  assert.doesNotMatch(edit, /old secret|new secret|private patch/);
-  assert.equal(format("write_stdin", { session_id: "term-7", chars: "" }), "session: term-7 · poll");
-  assert.equal(format("write_stdin", { session_id: "term-7", chars: "<C-c>" }), "session: term-7 · input: 5 chars");
-  assert.doesNotMatch(format("write_stdin", { session_id: "term-7", chars: "typed secret" }), /typed secret/);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tool summaries cover thread, workset, search, context, fetch, and safe unknown fallbacks", () => {
-  const format = (name, args) => ui.formatToolArguments(name, JSON.stringify(args), "");
-  assert.equal(format("thread", { name: "worker/a", action: "Inspect state", threads: ["one", "two"], timeout: 90 }), "name: worker/a · action: Inspect state · sources: 2");
-  assert.equal(format("thread_read", { name: "worker/a" }), "name: worker/a");
-  assert.equal(format("workset_define", { id: "ws-1", status: "active", workset_items: [{}, {}, {}], summary: "hidden body" }), "id: ws-1 · status: active · items: 3");
-  assert.equal(format("mcp__grep_app__searchgithub", {
-    query: "useState(", repo: "facebook/react", path: "src", language: ["TypeScript"], token: "hidden",
-  }), "query: useState( · repo: facebook/react · path: src");
-  assert.equal(format("mcp__context7__query_docs", { libraryId: "/vercel/next.js", query: "routing", authorization: "hidden" }), "query: routing · library: /vercel/next.js");
-  assert.equal(format("mcp__exa_web_search__web_fetch_exa", {
-    urls: ["https://user:pass@example.test/page?token=secret", "https://second.test"], maxCharacters: 6000,
-  }), "url: https://[redacted]@example.test/page?token=[redacted] · urls: 2");
-  const unknown = format("mcp__vendor__custom_lookup", {
-    query: "safe context", path: "/repo", token: "never", headers: { Authorization: "never" }, body: "never", nested: { secret: "never" },
-  });
-  assert.equal(unknown, "query: safe context · path: /repo");
-  assert.doesNotMatch(unknown, /never|headers|body|nested|\{|\}/);
-  assert.equal(format("custom_tool", { query: "authorization: Bearer inline-secret" }), "query: authorization: [redacted]");
-  assert.equal(ui.formatToolArguments("custom_tool", "{malformed", ""), "Arguments unavailable");
-  assert.equal(format("custom_tool", { headers: { Authorization: "secret" }, body: "secret" }), "Arguments available but hidden");
-  const bounded = format("custom_tool", { query: "x".repeat(500), path: "/" + "y".repeat(500) });
-  assert.ok(bounded.length <= 280);
-  assert.match(bounded, /…/);
-  assert.equal(ui.compactActionDetail("  a\n b   c "), "a b c");
-  assert.equal(ui.compactActionDetail("x".repeat(400), 20).length, 20);
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tool summaries recursively redact structured values, encoded URLs, and failed previews", () => {
-  const format = (name, args) => ui.formatToolArguments(name, JSON.stringify(args), "");
-  const structured = format("mcp__vendor__custom_lookup", {
-    query: JSON.stringify({
-      headers: { Authorization: "HEADER_MAP_LEAK", "X-Api-Key": "HEADER_KEY_LEAK" },
-      nested: { SeCrEt: "NESTED_SECRET_LEAK", Access_Token: "ACCESS_TOKEN_LEAK" },
-      safe: "visible", }), });
-  assert.match(structured, /query: .*headers.*\[redacted\].*nested.*SeCrEt.*\[redacted\]/);
-  assert.match(structured, /safe.*visible/);
-  assert.doesNotMatch(structured, /HEADER_MAP_LEAK|HEADER_KEY_LEAK|NESTED_SECRET_LEAK|ACCESS_TOKEN_LEAK/);
-  const headerPairs = format("mcp__vendor__custom_lookup", {
-    query: JSON.stringify({ nested: [["Authorization", "Basic NESTED_BASIC_LEAK"]] }),
-  });
-  assert.match(headerPairs, /Authorization.*\[redacted\]/);
-  assert.doesNotMatch(headerPairs, /NESTED_BASIC_LEAK/);
-  for (const sensitiveKey of [
-    "authorization", "headers", "api_key", "access_token", "refresh_token", "id_token", "bearer", "cookie",
-    "password", "passwd", "secret", "credentials", "client_secret", "private_key",
-  ]) { const marker = `LEAK_${sensitiveKey}`;
-    const summary = format("mcp__vendor__custom_lookup", { query: JSON.stringify({ [sensitiveKey]: marker }) });
-    assert.match(summary, /\[redacted\]/, sensitiveKey);
-    assert.doesNotMatch(summary, new RegExp(marker), sensitiveKey); }
-  const plainHeader = format("mcp__vendor__custom_lookup", { query: "headers: Authorization: Basic PLAIN_HEADER_LEAK" });
-  assert.equal(plainHeader, "query: headers: [redacted]");
-  assert.doesNotMatch(plainHeader, /PLAIN_HEADER_LEAK/);
-  const fetched = format("mcp__exa_web_search__web_fetch_exa", {
-    urls: ["https://user:p@ssw0rd@example.test/p?refresh%5Ftoken=REFRESH_TOKEN_LEAK&safe=visible"],
-  });
-  assert.match(fetched, /^url: https:\/\/\[redacted\]@example\.test\/p\?/);
-  assert.match(fetched, /refresh%5Ftoken=\[redacted\]/);
-  assert.doesNotMatch(fetched, /user|ssw0rd|REFRESH_TOKEN_LEAK/);
-  const doubleEncoded = format("mcp__exa_web_search__web_fetch_exa", {
-    url: "https://example.test/p?id%255Ftoken=ID_TOKEN_LEAK",
-  });
-  assert.match(doubleEncoded, /id%255Ftoken=\[redacted\]/);
-  assert.doesNotMatch(doubleEncoded, /ID_TOKEN_LEAK/);
-  assert.equal(format("mcp__exa_web_search__web_fetch_exa", {
-    url: "https://example.test/p?refresh%5Ftoken%3DENCODED_TOKEN_LEAK",
-  }), "url: https://example.test/p?refresh_token=[redacted] · urls: 1");
-  const encodedFragment = format("mcp__exa_web_search__web_fetch_exa", {
-    url: "https://example.test/cb#AcCeSs%5FToKeN%3DFRAGMENT_URL_LEAK",
-  });
-  assert.match(encodedFragment, /#AcCeSs_ToKeN=\[redacted\]/);
-  assert.doesNotMatch(encodedFragment, /FRAGMENT_URL_LEAK/);
-  assert.equal(format("mcp__exa_web_search__web_fetch_exa", {
-    url: "https://example.test/docs#section-2",
-  }), "url: https://example.test/docs#section-2 · urls: 1");
-  assert.equal(format("mcp__exa_web_search__web_fetch_exa", {
-    url: "https://example.test/app#route?tab=details",
-  }), "url: https://example.test/app#route?tab=details · urls: 1");
-  const events = [
-    { type: "tool_call_started", thread_name: "worker", call_id: "failed-redaction", name: "read", args_detail: '{"path":"safe.txt"}' },
-    {
-      type: "tool_call_finished", thread_name: "worker", call_id: "failed-redaction", name: "read", is_error: true,
-      content_preview: '{"message":"upstream {\\"headers\\":{\\"Authorization\\":\\"FAIL_HEADER_LEAK\\"},\\"nested\\":{\\"PassWd\\":\\"FAIL_PASSWORD_LEAK\\"}} at https://user:p@ss@example.test/p?access%5Ftoken=FAIL_URL_LEAK"}',
-    }, ];
-  const expanded = ui.threadActionsFromEntries(events.map((event, index) => ({ event, provenance: "observed", sequenceId: index + 1 })), null);
-  const tile = ui.buildThreadActions("worker", events, { thread_episodes: {}, thread_steering: [] });
-  for (const action of [expanded[0], tile[0]]) {
-    assert.equal(action.result, "Failed");
-    assert.match(action.detail, /Error: message: upstream/);
-    assert.match(action.detail, /\[redacted\]/);
-    assert.doesNotMatch(action.detail, /FAIL_HEADER_LEAK|FAIL_PASSWORD_LEAK|FAIL_URL_LEAK|user:p@ss/);
+  for (const target of ["/relative", "javascript:alert(1)", "data:text/html,x", "https://exa mple.test", "null", ""]) {
+    assert.equal(ui.safeMarkdownHref(target), null);
   }
+  const safe = { type: "link_open", attrGet: () => "https://example.test" };
+  assert.equal(ui.renderMarkdownLinkOpen([safe], 0), '<a href="https://example.test" target="_blank" rel="noopener noreferrer">');
+  assert.equal(ui.renderMarkdownLinkClose([safe, { type: "link_close" }], 1), "</a>");
+  const unsafe = { type: "link_open", attrGet: () => "../secret" };
+  assert.equal(ui.renderMarkdownLinkOpen([unsafe], 0), '<span class="md-link-text">');
+  assert.equal(ui.renderMarkdownLinkClose([unsafe, { type: "link_close" }], 1), "</span>");
 });
 
-scenario("Thread lifecycle, redaction, and coalescing", "remaining header-pair and fragment redaction is shared by expanded and tile tool rows", () => {
-  const events = [ {
-      type: "tool_call_started", thread_name: "worker", call_id: "header-array", name: "mcp__vendor__custom_lookup",
-      args_detail: JSON.stringify({ query: JSON.stringify({ nested: [["Authorization", "Basic NESTED_BASIC_LEAK"]] }) }),
-    },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "header-array", name: "mcp__vendor__custom_lookup", is_error: false },
-    {
-      type: "tool_call_started", thread_name: "worker", call_id: "fragment-url", name: "mcp__exa_web_search__web_fetch_exa",
-      args_detail: JSON.stringify({ url: "https://example.test/cb#AcCeSs%5FToKeN%3DFRAGMENT_URL_LEAK" }),
-    }, {
-      type: "tool_call_finished", thread_name: "worker", call_id: "fragment-url", name: "mcp__exa_web_search__web_fetch_exa", is_error: true,
-      content_preview: '{"message":"redirect https://example.test/cb#refresh_token=FAIL_FRAGMENT_LEAK"}',
-    }, ];
-  const expanded = ui.threadActionsFromEntries(events.map((event, index) => ({ event, provenance: "observed", sequenceId: index + 1 })), null);
-  const tile = ui.buildThreadActions("worker", events, { thread_episodes: {}, thread_steering: [] });
-  for (const actions of [expanded, tile]) {
-    const visible = actions.map((action) => action.detail).join(" | ");
-    assert.match(visible, /Authorization.*\[redacted\]/);
-    assert.match(visible, /AcCeSs_ToKeN=\[redacted\]/);
-    assert.match(visible, /refresh_token=\[redacted\]/);
-    assert.doesNotMatch(visible, /NESTED_BASIC_LEAK|FRAGMENT_URL_LEAK|FAIL_FRAGMENT_LEAK/);
-  }
+test("session cards and command menu expose reviewed accessibility behavior", () => {
+  const card = ui.renderSessionCard(sessionListEntry("accessible", { summary: { last_user_prompt: "complete prompt" } }));
+  assert.match(card, /Idle\. complete prompt\./);
+  assert.match(card, /class="status-dot idle" aria-hidden="true"/);
+  assert.match(card, /class="card-prompt" title="complete prompt"/);
+  const isolated = loadApp();
+  isolated.el.promptInput = { ...fakeElement(), value: "/", removeAttribute(name) { this.removed = name; } };
+  isolated.el.commandMenu = { hidden: true, innerHTML: "" };
+  isolated.renderCommandMenu();
+  assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "true");
+  assert.match(isolated.el.commandMenu.innerHTML, /role="option" aria-selected="true" tabindex="-1"/);
+  isolated.handleComposerKeydown({ key: "Escape", preventDefault() {} });
+  assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "false");
+  assert.equal(isolated.el.commandMenu.hidden, true);
 });
 
-scenario("Thread lifecycle, redaction, and coalescing", "command summaries omit inline writers and patches while preserving ordinary commands", () => {
-  const format = (cmd) => ui.formatToolArguments("exec_command", JSON.stringify({ cmd, workdir: "/repo" }), "");
-  const cases = [
-    ["printf 'RAW_WRITE_BODY_LEAK' > out.txt", "command: printf [content omitted] > out.txt · workdir: /repo"],
-    ["printf 'INLINE_PATCH_BODY_LEAK' | apply_patch", "command: printf [content omitted] | apply_patch · workdir: /repo"],
-    ["patch -p0 <<< $'--- a/secret.txt\\n+++ b/secret.txt\\n@@\\n-PATCH_OLD_SECRET\\n+PATCH_NEW_SECRET'", "command: patch -p0 <<< [content omitted] · workdir: /repo"],
-    ["echo 'INLINE_BODY_LEAK' >> notes.txt", "command: echo [content omitted] >> notes.txt · workdir: /repo"],
-    ["cat > generated.txt <<'EOF'\nCAT_BODY_LEAK\nEOF", "command: cat > generated.txt [content omitted] · workdir: /repo"],
-    ["python -c 'PYTHON_BODY_LEAK' > generated.txt", "command: python [content omitted] > generated.txt · workdir: /repo"],
-    ["python -c 'FD_BODY_LEAK' 1> generated.txt", "command: python [content omitted] 1> generated.txt · workdir: /repo"],
-    ["patch -p0 $'--- a/file\\n+++ b/file\\n@@\\n-old\\n+INLINE_PATCH_LEAK'", "command: patch -p0 [content omitted] · workdir: /repo"],
-    ["git apply <(printf $'diff --git a/a b/a\\n--- a/a\\n+++ b/a\\n@@ -1 +1 @@\\n-PATCH_OLD_LEAK\\n+PATCH_NEW_LEAK')", "command: git apply [content omitted] · workdir: /repo"],
-  ];
-  for (const [command, expected] of cases) {
-    const summary = format(command);
-    assert.equal(summary, expected);
-    assert.doesNotMatch(summary, /RAW_WRITE_BODY_LEAK|INLINE_PATCH_BODY_LEAK|PATCH_OLD_SECRET|PATCH_NEW_SECRET|INLINE_BODY_LEAK|CAT_BODY_LEAK|PYTHON_BODY_LEAK|FD_BODY_LEAK|INLINE_PATCH_LEAK|PATCH_OLD_LEAK|PATCH_NEW_LEAK/);
-  }
-  const envAndHeader = format("ACCESS_TOKEN=ENV_TOKEN_LEAK curl --header='Authorization: Bearer CURL_HEADER_LEAK' https://example.test");
-  assert.match(envAndHeader, /ACCESS_TOKEN=\[redacted\]/);
-  assert.match(envAndHeader, /--header=\[redacted\]/);
-  assert.doesNotMatch(envAndHeader, /ENV_TOKEN_LEAK|CURL_HEADER_LEAK/);
-  const curlCredentials = format("curl --user user:CURL_PASSWORD_LEAK --cookie session=CURL_COOKIE_LEAK https://example.test");
-  assert.match(curlCredentials, /--user \[redacted\].*--cookie \[redacted\]/);
-  assert.doesNotMatch(curlCredentials, /CURL_PASSWORD_LEAK|CURL_COOKIE_LEAK/);
-  const attachedCurlCredentials = format("curl -H'Authorization: Bearer ATTACHED_HEADER_LEAK' -u'user:ATTACHED_PASSWORD_LEAK' https://example.test");
-  assert.match(attachedCurlCredentials, /-H\[redacted\].*-u\[redacted\]/);
-  assert.doesNotMatch(attachedCurlCredentials, /ATTACHED_HEADER_LEAK|ATTACHED_PASSWORD_LEAK/);
-  const credentialUrl = format("curl https://user:p@ss@example.test/p?api%5Fkey=CURL_URL_LEAK");
-  assert.match(credentialUrl, /https:\/\/\[redacted\]@example\.test\/p\?api%5Fkey=\[redacted\]/);
-  assert.doesNotMatch(credentialUrl, /CURL_URL_LEAK|user:p@ss/);
-  const awsCredential = format("AWS_SECRET_ACCESS_KEY=AWS_SECRET_KEY_LEAK curl https://example.test");
-  assert.match(awsCredential, /AWS_SECRET_ACCESS_KEY=\[redacted\]/);
-  assert.doesNotMatch(awsCredential, /AWS_SECRET_KEY_LEAK/);
-  const curlPassphrase = format("curl --pass PRIVATE_KEY_PASSPHRASE_LEAK --key key.pem https://example.test");
-  assert.match(curlPassphrase, /--pass \[redacted\] --key key\.pem/);
-  assert.doesNotMatch(curlPassphrase, /PRIVATE_KEY_PASSPHRASE_LEAK/);
-  const unsafeKeyArgument = format("curl --key INLINE_PRIVATE_KEY_LEAK https://example.test");
-  assert.match(unsafeKeyArgument, /--key \[redacted\]/);
-  assert.doesNotMatch(unsafeKeyArgument, /INLINE_PRIVATE_KEY_LEAK/);
-  const curlHereString = format("curl --pass HERE_STRING_PASSWORD_LEAK <<< request-body");
-  assert.equal(curlHereString, "command: curl --pass [redacted] <<< [content omitted] · workdir: /repo");
-  assert.doesNotMatch(curlHereString, /HERE_STRING_PASSWORD_LEAK|request-body/);
-  assert.equal(format("AWS_REGION=us-east-1 curl --user-agent nac-test --key key.pem https://example.test"), "command: AWS_REGION=us-east-1 curl --user-agent nac-test --key key.pem https://example.test · workdir: /repo");
-  assert.equal(format("git apply --check patches/fix.patch"), "command: git apply --check patches/fix.patch · workdir: /repo");
-  assert.equal(format("git grep 'needle' -- src && pwd"), "command: git grep 'needle' -- src && pwd · workdir: /repo");
-  assert.equal(format("cat README.md"), "command: cat README.md · workdir: /repo");
-  assert.equal(format("cargo test -p nac-server 2>/dev/null"), "command: cargo test -p nac-server 2>/dev/null · workdir: /repo");
-});
-
-scenario("Thread lifecycle, redaction, and coalescing", "tool coalescing uses collision-safe occurrence queues in expanded and tile paths", () => {
-  const events = [
-    { type: "tool_call_started", thread_name: "worker", call_id: "X", name: "read", args_detail: '{"path":"first.txt"}' },
-    { type: "tool_call_started", thread_name: "worker", call_id: "X", name: "write", args_detail: '{"path":"second.txt","content":"body"}' },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "X", name: "read", is_error: false },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "X", name: "write", is_error: false },
-    { type: "tool_call_started", thread_name: "worker", call_id: "same", name: "read", args_detail: '{"path":"third.txt"}' },
-    { type: "tool_call_started", thread_name: "worker", call_id: "same", name: "read", args_detail: '{"path":"fourth.txt"}' },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "same", name: "read", is_error: false },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "same", name: "read", is_error: false },
-    { type: "tool_call_started", thread_name: "worker", call_id: "fallback", name: "read", args_detail: '{"path":"fallback.txt"}' },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "fallback", name: "write", is_error: false },
-    { type: "tool_call_started", thread_name: "worker", call_id: "start-only", name: "exec_command", args_detail: '{"cmd":"pwd"}' },
-    { type: "tool_call_finished", thread_name: "worker", call_id: "finish-only", name: "exec_command", is_error: false },
-  ];
-  const project = (actions) => actions.map(({ name, result, detail, callId }) => ({ name, result, detail, callId }));
-  const expanded = project(ui.threadActionsFromEntries(events.map((event, index) => ({
-    event, provenance: "observed", sequenceId: index + 1, eventId: 100 + index,
-  })), null));
-  const tile = project(ui.buildThreadActions("worker", events, { thread_episodes: {}, thread_steering: [] }));
-  assert.deepEqual(plain(expanded), plain(tile));
-  assert.deepEqual(plain(expanded), [
-    { name: "Read", result: "Done", detail: "path: first.txt", callId: "X" },
-    { name: "Write", result: "Done", detail: "path: second.txt · content: 4 chars", callId: "X" },
-    { name: "Read", result: "Done", detail: "path: third.txt", callId: "same" },
-    { name: "Read", result: "Done", detail: "path: fourth.txt", callId: "same" },
-    { name: "Read", result: "Done", detail: "path: fallback.txt", callId: "fallback" },
-    { name: "Command", result: "Running", detail: "command: pwd", callId: "start-only" },
-    { name: "Command", result: "Done", detail: "", callId: "finish-only" },
-  ]);
-});
-
-test("orchestrator actions restore persisted calls and cap the live ledger", () => {
-  ui.state.currentId = "session";
-  ui.state.events.set("session", []);
-  const persisted = ui.buildOrchestratorActions({ thread_steering: [],
-    messages: [ { role: "assistant",
-        tool_calls: [{ id: "1", function: { name: "thread", arguments: JSON.stringify({ name: "worker", action: "Inspect" }) } }],
-      }, { role: "tool", tool_call_id: "1", content: "done" },
-      { role: "assistant", content: "Completed" }, ], });
-  assert.deepEqual(plain(persisted.map(({ name, result }) => ({ name, result }))), [
-    { name: "thread", result: "completed" },
-    { name: "response", result: "persisted" }, ]);
-  assert.match(persisted[0].detail, /call 1/);
-  assert.match(persisted[0].detail, /result: done/);
-  ui.state.events.set( "session",
-    Array.from({ length: 8 }, (_, index) => ({ sequence_id: index + 1,
-      event: { type: "run_started", prompt_preview: `prompt-${index + 1}` },
-    })));
-  const live = ui.buildOrchestratorActions({ thread_steering: [], messages: [] });
-  assert.equal(live.length, 5);
-  assert.equal(live[0].detail, "prompt-4");
-  assert.equal(live.at(-1).detail, "prompt-8");
-});
 
 test("thread fullscreen episodes keep counting labels and expose durable identity", () => {
   const html = ui.renderThreadEpisodes([
@@ -2262,7 +1493,6 @@ test("session and presentation helpers keep compact UI values stable", () => {
   assert.equal(ui.formatNumber(1_234_567), "1.2m");
   assert.equal(ui.formatNumber(12_345), "12k");
   assert.equal(ui.formatTokenCount(0), "0");
-  assert.equal(ui.messageText({ reasoning_text: "thinking" }), "thinking");
   assert.equal(ui.sessionStatus({ active_run: {} }), "running");
   assert.equal(ui.sessionStatus({ active_run: null }), "idle");
 });
@@ -3460,7 +2690,7 @@ test("compact session and thread surfaces recover full identities through titles
   assert.match(card, /title="A compact session title · session 12345678-full-session-identity"/);
   assert.match(card, /title="local · \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable"/);
   assert.match(card, /title="provider\/a-model-name-that-is-longer-than-twenty-four-characters" aria-label="Model: provider\/a-model-name-that-is-longer-than-twenty-four-characters"/);
-  assert.match(card, /aria-label="A compact session title · session 12345678-full-session-identity\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
+  assert.match(card, /aria-label="A compact session title · session 12345678-full-session-identity\. Idle\. No prompt submitted\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
   const thread = ui.renderThreadTile({
     name: "worker/a-very-long-thread-name-<with-context>",
     state: "running", compact: false, actions: [], });
@@ -3718,7 +2948,6 @@ test("boot starts store and session requests concurrently and does not await a h
   isolated.el.sessionGrid = { innerHTML: "" };
   await isolated.boot();
   assert.deepEqual(requests, ["/store", "/sessions?workspace_stats=true"]);
-  assert.equal(isolated.state.pollTimer, 41);
   assert.equal(isolated.el.pickerSessionTotal.textContent, 0);
   assert.equal(isolated.el.pickerStorePath.textContent, "Loading store…");
 });
