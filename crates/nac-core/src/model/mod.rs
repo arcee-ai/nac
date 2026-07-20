@@ -882,6 +882,52 @@ mod tests {
             .contains("does not match the stored credential origin"));
     }
 
+    #[tokio::test]
+    async fn existing_arcee_client_rejects_credentials_rotated_to_another_origin() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let initial_token = "initial-token-must-not-leak";
+        let rotated_token = "rotated-token-must-not-leak";
+        let env = IsolatedModelEnv::new("rotated-arcee-origin", None, None, None);
+        let auth_path = env.home.join("arcee_auth.json");
+        write_test_credential(
+            &auth_path,
+            stored_arcee_auth(initial_token, "https://api.arcee.ai"),
+        );
+        let client = ModelClient::from_effective_settings(effective_settings(
+            BackendKind::ArceeAuth,
+            "https://api.arcee.ai/api/v1",
+            None,
+        ))
+        .expect("initial credential origin should match the session");
+
+        write_test_credential(
+            &auth_path,
+            stored_arcee_auth(rotated_token, "https://tenant.arcee.ai"),
+        );
+
+        let fresh_error = client
+            .send_turn(Vec::new(), Vec::new())
+            .await
+            .expect_err("a fresh reload must reject a credential from another origin");
+        let forced_error = arcee::force_refresh_access_token(
+            &arcee::no_redirect_client().unwrap(),
+            client.base_url(),
+            initial_token,
+        )
+        .await
+        .expect_err("a forced refresh must reject a credential from another origin");
+
+        for error in [fresh_error, forced_error] {
+            let diagnostic = format!("{error:#}");
+            assert!(
+                diagnostic.contains("does not match the stored credential origin"),
+                "unexpected origin mismatch: {diagnostic}"
+            );
+            assert!(!diagnostic.contains(initial_token));
+            assert!(!diagnostic.contains(rotated_token));
+        }
+    }
+
     #[test]
     fn both_arcee_modes_validate_endpoints_and_sensitive_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();

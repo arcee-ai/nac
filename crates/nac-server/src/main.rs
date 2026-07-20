@@ -180,6 +180,10 @@ struct WorkerDispatchArgs {
     #[arg(long)]
     thread_name: String,
 
+    /// Exact identity for this managed worker dispatch.
+    #[arg(long, hide = true)]
+    dispatch_id: String,
+
     /// Action for the managed worker dispatch.
     #[arg(long)]
     action: String,
@@ -318,6 +322,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         dispatch: WorkerDispatchOptions {
             session_id: cli.dispatch.session_id,
             thread_name: cli.dispatch.thread_name,
+            dispatch_id: cli.dispatch.dispatch_id,
             action: cli.dispatch.action,
             source_threads: cli.dispatch.source_threads,
             skills: cli.dispatch.skills,
@@ -440,6 +445,8 @@ thread_timeout_secs = 7200
             "session",
             "--thread-name",
             "thread",
+            "--dispatch-id",
+            "dispatch-123",
             "--action",
             "work",
             "--extra-headers",
@@ -458,6 +465,8 @@ thread_timeout_secs = 7200
             "session",
             "--thread-name",
             "thread",
+            "--dispatch-id",
+            "dispatch-123",
             "--action",
             "work",
         ];
@@ -468,6 +477,7 @@ thread_timeout_secs = 7200
             let mut args = vec!["nac-web __worker", "--backend", raw];
             args.extend(required);
             let cli = ManagedWorkerCli::try_parse_from(args).unwrap();
+            assert_eq!(cli.dispatch.dispatch_id, "dispatch-123");
             assert_eq!(cli.model.backend.map(BackendKind::from), Some(expected));
         }
 

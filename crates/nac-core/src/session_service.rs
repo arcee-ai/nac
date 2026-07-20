@@ -12,13 +12,14 @@ use tokio::{
 
 use crate::agent::Agent;
 use crate::commands::{self, PreparedPrompt, PreparedUserInput};
-use crate::events::{AgentEvent, EventSink, SessionEvent, SessionEventBus};
+use crate::events::{AgentEvent, EventSink, SessionEvent, SessionEventBoundary, SessionEventBus};
 pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
+pub use crate::store::SessionOverviewRecord;
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -136,8 +137,114 @@ pub struct SessionFrontendSnapshot {
     pub active_threads: Vec<String>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
+    #[serde(default)]
+    pub thread_events: HashMap<String, Vec<AgentEvent>>,
+    pub thread_event_boundary: SessionEventBoundary,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thread_event_diagnostics: Vec<ThreadEventDecodeDiagnostic>,
+    #[serde(default)]
+    pub thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<SessionOverviewRecord>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
+}
+
+/// A visible-message cursor request. `before` is an index in the filtered
+/// (rather than raw) transcript, matching the web API's existing cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessagePageRequest {
+    pub before: Option<usize>,
+    pub limit: usize,
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendSnapshotMessages {
+    All,
+    Page(MessagePageRequest),
+}
+
+/// Controls expensive, independently projectable portions of a frontend
+/// snapshot. The default exactly preserves the historical snapshot contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrontendSnapshotLoadOptions {
+    pub thread_event_limit: usize,
+    pub include_sessions: bool,
+    pub messages: FrontendSnapshotMessages,
+}
+
+impl Default for FrontendSnapshotLoadOptions {
+    fn default() -> Self {
+        Self {
+            thread_event_limit: 512,
+            include_sessions: true,
+            messages: FrontendSnapshotMessages::All,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessagePageMetadata {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageCycleMetadata {
+    pub marker: String,
+    pub thread_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagesPageSnapshot {
+    pub messages: Vec<Message>,
+    pub page: MessagePageMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFrontendSnapshotLoad {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_page: Option<MessagePageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadEventPageItem {
+    pub id: i64,
+    pub created_at: String,
+    pub event: AgentEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadEventPage {
+    pub events: Vec<ThreadEventPageItem>,
+    pub has_older: bool,
+    pub next_before_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_event_boundary: Option<SessionEventBoundary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<ThreadEventDecodeDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ThreadEventDecodeDiagnostic {
+    pub id: i64,
+    pub thread_name: String,
+    pub created_at: String,
+    pub error: String,
+}
+
+const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
+
+struct DecodedThreadEvents {
+    events: HashMap<String, Vec<AgentEvent>>,
+    diagnostics: Vec<ThreadEventDecodeDiagnostic>,
 }
 
 pub struct SessionServiceParts {
@@ -282,12 +389,14 @@ impl SessionClientHandle {
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
+    overview_client: crate::model::ModelClient,
+    overview_generation: Arc<Mutex<()>>,
     metadata: Arc<SessionMetadata>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     event_bus: SessionEventBus,
     active_run: Arc<StdMutex<Option<ActiveRunState>>>,
-    active_threads: Arc<Mutex<HashSet<String>>>,
+    active_threads: Arc<crate::tools::ActiveThreadRegistry>,
 }
 
 struct ActiveRunState {
@@ -330,7 +439,8 @@ impl SessionService {
             OrchestratorSession::Picker { .. } => None,
         };
 
-        let event_bus = SessionEventBus::new(session_id.clone());
+        let event_bus =
+            SessionEventBus::with_thread_event_store(session_id.clone(), store_path.clone());
         let events = event_bus.subscribe();
         run_config
             .agent
@@ -357,6 +467,8 @@ impl SessionService {
         let active_threads = run_config.agent.active_threads_handle();
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
+            overview_client: run_config.client,
+            overview_generation: Arc::new(Mutex::new(())),
             metadata: Arc::new(metadata.clone()),
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
@@ -472,15 +584,72 @@ impl SessionService {
     }
 
     pub async fn active_thread_names(&self) -> Vec<String> {
-        let mut names = self
-            .active_threads
-            .lock()
-            .await
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut names = self.active_threads.names();
         names.sort();
         names
+    }
+
+    pub async fn queue_thread_steering(
+        &self,
+        thread_name: &str,
+        instruction: &str,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        if self.active_run().is_none() {
+            return Err(anyhow::anyhow!("session has no active run"));
+        }
+        let record = self
+            .active_threads
+            .queue(
+                &self.metadata.store_path,
+                session_id,
+                thread_name,
+                instruction,
+            )?
+            .ok_or_else(|| {
+                anyhow::anyhow!("thread '{thread_name}' is not active in this session")
+            })?;
+        self.event_bus.emit_agent(AgentEvent::ThreadSteeringQueued {
+            name: thread_name.to_string(),
+            steering_id: record.id,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        });
+        Ok(record)
+    }
+
+    pub fn queue_orchestrator_steering(
+        &self,
+        instruction: &str,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let active_run = self.lock_active_run();
+        let dispatch_id = match active_run.as_ref() {
+            Some(run) if !run.finishing => run.snapshot.run_id.as_str(),
+            Some(_) => return Err(anyhow::anyhow!("session active run is finishing")),
+            None => return Err(anyhow::anyhow!("session has no active run")),
+        };
+        let record = crate::store::queue_thread_steering(
+            &self.metadata.store_path,
+            session_id,
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            dispatch_id,
+            instruction,
+        )?;
+        drop(active_run);
+        self.event_bus
+            .emit_agent(AgentEvent::OrchestratorSteeringQueued {
+                steering_id: record.id,
+                instruction_preview: record.instruction.chars().take(160).collect(),
+            });
+        Ok(record)
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
@@ -520,6 +689,87 @@ impl SessionService {
         )
     }
 
+    fn load_all_thread_events_with_limit(
+        &self,
+        per_thread_limit: usize,
+    ) -> Result<DecodedThreadEvents> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(DecodedThreadEvents {
+                events: HashMap::new(),
+                diagnostics: Vec::new(),
+            });
+        };
+        let records = crate::store::load_all_thread_events(
+            &self.metadata.store_path,
+            session_id,
+            per_thread_limit,
+        )?;
+        let mut events = HashMap::new();
+        let mut diagnostics = Vec::new();
+        for (thread_name, records) in records {
+            let decoded = records
+                .into_iter()
+                .filter_map(|record| decode_thread_event(record, &mut diagnostics))
+                .collect::<Vec<_>>();
+            if !decoded.is_empty() {
+                events.insert(thread_name, decoded);
+            }
+        }
+        Ok(DecodedThreadEvents {
+            events,
+            diagnostics,
+        })
+    }
+
+    pub fn thread_events_page(
+        &self,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let load = || {
+            crate::store::load_thread_events_page(
+                &self.metadata.store_path,
+                session_id,
+                thread_name,
+                before_id,
+                limit,
+            )
+        };
+        let (thread_event_boundary, (records, has_older)) = if before_id.is_none() {
+            let (boundary, records) = self.event_bus.thread_event_boundary(load)?;
+            (Some(boundary), records)
+        } else {
+            (None, load()?)
+        };
+        let next_before_id = records.last().map(|record| record.id);
+        let mut diagnostics = Vec::new();
+        let events = records
+            .into_iter()
+            .filter_map(|record| {
+                let id = record.id;
+                let created_at = record.created_at.clone();
+                decode_thread_event(record, &mut diagnostics).map(|event| ThreadEventPageItem {
+                    id,
+                    created_at,
+                    event,
+                })
+            })
+            .collect();
+        Ok(ThreadEventPage {
+            next_before_id,
+            events,
+            has_older,
+            thread_event_boundary,
+            diagnostics,
+        })
+    }
+
     pub fn list_worksets(&self) -> Result<Vec<WorksetSummarySnapshot>> {
         view::list_worksets(
             &self.metadata.store_path,
@@ -550,33 +800,179 @@ impl SessionService {
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
-        let (response_timing, persisted_messages) = {
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions::default())
+            .await?
+            .snapshot)
+    }
+
+    pub async fn frontend_snapshot_with_thread_event_limit(
+        &self,
+        thread_event_limit: usize,
+    ) -> Result<SessionFrontendSnapshot> {
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit,
+                ..FrontendSnapshotLoadOptions::default()
+            })
+            .await?
+            .snapshot)
+    }
+
+    pub async fn frontend_snapshot_with_options(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        let (response_timing, loaded_messages) = {
             let snapshot = self.session_snapshot.lock().await;
-            (
-                ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref()),
-                snapshot
-                    .as_ref()
-                    .map(|snapshot| snapshot.messages.clone())
-                    .unwrap_or_default(),
-            )
-        };
-        let messages = match self.agent.try_lock() {
-            Ok(agent) => agent.messages.clone(),
-            Err(_) => persisted_messages,
+            let response_timing = ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref());
+            let persisted_messages = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            let loaded_messages = match self.agent.try_lock() {
+                Ok(agent) => load_frontend_messages(&agent.messages, options.messages),
+                Err(_) => load_frontend_messages(persisted_messages, options.messages),
+            };
+            (response_timing, loaded_messages)
         };
 
-        Ok(SessionFrontendSnapshot {
-            metadata: self.metadata(),
-            messages,
+        let (thread_event_boundary, decoded_thread_events) =
+            self.event_bus.thread_event_boundary(|| {
+                self.load_all_thread_events_with_limit(options.thread_event_limit)
+            })?;
+        let mut metadata = self.metadata();
+        metadata.extra_headers.clear();
+        let snapshot = SessionFrontendSnapshot {
+            metadata,
+            messages: loaded_messages.messages,
             response_timing,
             active_run: self.active_run(),
-            sessions: self.list_sessions()?,
+            sessions: if options.include_sessions {
+                self.list_sessions()?
+            } else {
+                Vec::new()
+            },
             active_threads: self.active_thread_names().await,
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
+            thread_events: decoded_thread_events.events,
+            thread_event_boundary,
+            thread_event_diagnostics: decoded_thread_events.diagnostics,
+            thread_steering: self
+                .metadata
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::list_thread_steering(&self.metadata.store_path, session_id)
+                })
+                .transpose()?
+                .unwrap_or_default(),
+            overview: self
+                .metadata
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::read_session_overview(&self.metadata.store_path, session_id)
+                })
+                .transpose()?
+                .flatten(),
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
+        };
+        Ok(SessionFrontendSnapshotLoad {
+            snapshot,
+            message_page: loaded_messages.page,
+            message_cycle: loaded_messages.cycle,
         })
+    }
+
+    /// Returns the freshest orchestrator messages available without building
+    /// the considerably larger frontend snapshot. The persisted copy remains
+    /// a safe fallback while an active model turn owns the agent lock.
+    pub async fn messages_snapshot(&self) -> Vec<Message> {
+        let snapshot = self.session_snapshot.lock().await;
+        let persisted_messages = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.messages.as_slice())
+            .unwrap_or_default();
+        match self.agent.try_lock() {
+            Ok(agent) => agent.messages.clone(),
+            Err(_) => persisted_messages.to_vec(),
+        }
+    }
+
+    /// Pages the freshest available transcript without cloning messages outside
+    /// the requested visible window. Callers remain responsible for any
+    /// transport-specific maximum; a zero limit retains the web API's minimum
+    /// page size of one.
+    pub async fn messages_page(&self, request: MessagePageRequest) -> MessagesPageSnapshot {
+        let snapshot = self.session_snapshot.lock().await;
+        let persisted_messages = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.messages.as_slice())
+            .unwrap_or_default();
+        match self.agent.try_lock() {
+            Ok(agent) => page_messages(&agent.messages, request),
+            Err(_) => page_messages(persisted_messages, request),
+        }
+    }
+
+    async fn overview_snapshot(&self) -> Result<SessionFrontendSnapshot> {
+        Ok(self
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit: 0,
+                ..FrontendSnapshotLoadOptions::default()
+            })
+            .await?
+            .snapshot)
+    }
+
+    pub async fn generate_overview(&self) -> Result<SessionOverviewRecord> {
+        let _generation = self.overview_generation.lock().await;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let snapshot = self.overview_snapshot().await?;
+        let source_updated_at = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.updated_at.clone())
+            .unwrap_or_default();
+        let live_events = self.event_bus.recent_events(None, 1_024);
+        let source = overview_source(&snapshot, &live_events);
+        let response = self
+            .overview_client
+            .send_turn(
+                vec![
+                    Message::System {
+                        content: OVERVIEW_SYSTEM_PROMPT.to_string(),
+                    },
+                    Message::User {
+                        content: format!(
+                            "Generate the session overview from this state snapshot:\n{}",
+                            serde_json::to_string(&source)?
+                        ),
+                    },
+                ],
+                Vec::new(),
+            )
+            .await?;
+        let content = response
+            .assistant
+            .content
+            .ok_or_else(|| anyhow::anyhow!("overview model returned no content"))?;
+        let payload = parse_generated_overview(&content)?;
+        crate::store::write_session_overview(
+            &self.metadata.store_path,
+            session_id,
+            &payload.summary,
+            &self.overview_client.model,
+            &source_updated_at,
+        )
     }
 
     pub fn try_submit_prompt(
@@ -618,10 +1014,8 @@ impl SessionService {
             let _ = task.await;
         }
 
-        // Clear stale active_threads — the aborted task could not run
-        // unmark cleanup.  All child processes have been killed by
-        // kill_on_drop, so no threads are actually running anymore.
-        self.active_threads.lock().await.clear();
+        self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
+        self.close_active_thread_dispatches();
 
         // Capture partial token usage from the cancelled run.  Because
         // `send()` now updates `last_usage` mid-loop, this includes all
@@ -700,6 +1094,7 @@ impl SessionService {
                     Some(task_run_id.clone()),
                     run_client_id.clone(),
                 ));
+                agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
                 let result = agent
                     .send(&expanded_prompt)
                     .await
@@ -810,6 +1205,24 @@ impl SessionService {
             }
         }
 
+        if enforce_coordination {
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                let mut expired =
+                    crate::store::expire_session_steering(&self.metadata.store_path, session_id)
+                        .map_err(|error| SessionSubmitError::Coordination {
+                            message: format!("failed to recover stale steering: {error:#}"),
+                        })?;
+                expired.extend(
+                    self.active_threads
+                        .close_all(&self.metadata.store_path, session_id)
+                        .map_err(|error| SessionSubmitError::Coordination {
+                            message: format!("failed to clear stale worker targets: {error:#}"),
+                        })?,
+                );
+                self.emit_steering_expired(expired);
+            }
+        }
+
         let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = SubmittedUserMessageSnapshot {
@@ -852,6 +1265,7 @@ impl SessionService {
         let Some(finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
+        self.expire_orchestrator_steering(run_id);
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -895,6 +1309,55 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        match crate::store::expire_thread_steering(
+            &self.metadata.store_path,
+            session_id,
+            run_id.as_str(),
+        ) {
+            Ok(records) => self.emit_steering_expired(records),
+            Err(error) => {
+                eprintln!("nac: failed to expire orchestrator steering: {error:#}");
+            }
+        }
+    }
+
+    fn close_active_thread_dispatches(&self) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        match self
+            .active_threads
+            .close_all(&self.metadata.store_path, session_id)
+        {
+            Ok(records) => self.emit_steering_expired(records),
+            Err(error) => eprintln!("nac: failed to close active worker steering: {error:#}"),
+        }
+    }
+
+    fn emit_steering_expired(&self, records: Vec<crate::store::ThreadSteeringRecord>) {
+        for record in records {
+            let instruction_preview = record.instruction.chars().take(160).collect();
+            if record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET {
+                self.event_bus
+                    .emit_agent(AgentEvent::OrchestratorSteeringExpired {
+                        steering_id: record.id,
+                        instruction_preview,
+                    });
+            } else {
+                self.event_bus
+                    .emit_agent(AgentEvent::ThreadSteeringExpired {
+                        name: record.thread_name,
+                        steering_id: record.id,
+                        instruction_preview,
+                    });
+            }
+        }
     }
 
     fn mark_run_finishing(&self, run_id: &SessionRunId) -> Option<FinishingRun> {
@@ -1038,6 +1501,440 @@ impl SessionService {
         // token usage from model calls made before the cancel.
         agent.last_usage.clone()
     }
+}
+
+struct LoadedFrontendMessages {
+    messages: Vec<Message>,
+    page: Option<MessagePageMetadata>,
+    cycle: Option<MessageCycleMetadata>,
+}
+
+fn load_frontend_messages(
+    messages: &[Message],
+    selection: FrontendSnapshotMessages,
+) -> LoadedFrontendMessages {
+    match selection {
+        FrontendSnapshotMessages::All => LoadedFrontendMessages {
+            messages: messages.to_vec(),
+            page: None,
+            cycle: None,
+        },
+        FrontendSnapshotMessages::Page(request) => {
+            let cycle = current_message_cycle(messages);
+            let page = page_messages(messages, request);
+            LoadedFrontendMessages {
+                messages: page.messages,
+                page: Some(page.page),
+                cycle: Some(cycle),
+            }
+        }
+    }
+}
+
+fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesPageSnapshot {
+    let is_visible =
+        |message: &&Message| request.include_system || !matches!(message, Message::System { .. });
+    let total = messages.iter().filter(is_visible).count();
+    let end = request.before.unwrap_or(total).min(total);
+    let limit = request.limit.max(1);
+    let start = end.saturating_sub(limit);
+    let messages = messages
+        .iter()
+        .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+        .skip(start)
+        .take(end - start)
+        .cloned()
+        .collect();
+    MessagesPageSnapshot {
+        messages,
+        page: MessagePageMetadata {
+            start,
+            end,
+            total,
+            has_older: start > 0,
+        },
+    }
+}
+
+fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
+    let mut latest_user_index = None;
+    let mut user_count = 0usize;
+    for (index, message) in messages.iter().enumerate() {
+        if matches!(message, Message::User { .. }) {
+            latest_user_index = Some(index);
+            user_count += 1;
+        }
+    }
+
+    let Some(latest_user_index) = latest_user_index else {
+        return MessageCycleMetadata {
+            marker: "none".to_string(),
+            thread_names: Vec::new(),
+        };
+    };
+    let mut thread_names = BTreeMap::<String, ()>::new();
+    for message in &messages[latest_user_index + 1..] {
+        let Message::Assistant {
+            tool_calls: Some(tool_calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            if tool_call.function.name != "thread" {
+                continue;
+            }
+            let Ok(arguments) =
+                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+            else {
+                continue;
+            };
+            let Some(name) = arguments
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            thread_names.insert(name.to_string(), ());
+        }
+    }
+    MessageCycleMetadata {
+        marker: format!("history:{user_count}:{latest_user_index}"),
+        thread_names: thread_names.into_keys().collect(),
+    }
+}
+
+fn decode_thread_event(
+    record: crate::store::ThreadEventRecord,
+    diagnostics: &mut Vec<ThreadEventDecodeDiagnostic>,
+) -> Option<AgentEvent> {
+    let decoded = serde_json::from_str::<AgentEvent>(&record.event_json)
+        .ok()
+        .and_then(crate::events::sanitize_external_agent_event);
+    if decoded.is_none() && diagnostics.len() < MAX_THREAD_EVENT_DIAGNOSTICS {
+        diagnostics.push(ThreadEventDecodeDiagnostic {
+            id: record.id,
+            thread_name: record.thread_name,
+            created_at: record.created_at,
+            error: "malformed, unsupported, or internal event omitted".to_string(),
+        });
+    }
+    decoded
+}
+
+const OVERVIEW_SYSTEM_PROMPT: &str = "You synthesize the current state of a coding orchestration session for an operator dashboard. Use only the supplied snapshot. Give priority to the latest user message, every thread dispatched after that message and its current outcome, and what each active thread is currently assigned to do. Use durable thread records to recover completed work when live dispatch history is unavailable; use worksets and workspace changes only when they clarify the current state. Do not address the user, quote the transcript, narrate your process, invent progress, or use headings or lists. Return exactly one JSON object with this schema: {\"summary\":\"one dense paragraph of two to four sentences\"}. The paragraph must state the current objective, distinguish active work from completed work, and mention a blocker or immediate next step only when supported. Keep it under 700 characters. Output JSON only.";
+
+#[derive(Debug, Deserialize)]
+struct GeneratedOverviewPayload {
+    summary: String,
+}
+
+fn overview_source(
+    snapshot: &SessionFrontendSnapshot,
+    live_events: &[SessionEventEnvelope],
+) -> serde_json::Value {
+    let transcript_user_index = snapshot
+        .messages
+        .iter()
+        .rposition(|message| matches!(message, Message::User { .. }));
+    let submitted_user_message = snapshot
+        .active_run
+        .as_ref()
+        .and_then(|run| run.submitted_user_message.as_ref());
+    let latest_user_message = submitted_user_message
+        .map(|message| compact_overview_text(&message.content, 1_200))
+        .or_else(|| {
+            transcript_user_index.and_then(|index| match &snapshot.messages[index] {
+                Message::User { content } => Some(compact_overview_text(content, 1_200)),
+                _ => None,
+            })
+        });
+    let transcript_dispatch_start = if let Some(submitted) = submitted_user_message {
+        snapshot
+            .messages
+            .iter()
+            .rposition(|message| {
+                matches!(message, Message::User { content } if content == &submitted.content)
+            })
+            .map_or(snapshot.messages.len(), |index| index + 1)
+    } else {
+        transcript_user_index.map_or(0, |index| index + 1)
+    };
+    let latest_run_sequence = live_events
+        .iter()
+        .rev()
+        .find(|envelope| {
+            matches!(
+                &envelope.event,
+                SessionEvent::RunStarted {
+                    submitted_user_message: Some(message),
+                    ..
+                } if latest_user_message.as_deref() == Some(compact_overview_text(&message.content, 1_200).as_str())
+            )
+        })
+        .map(|envelope| envelope.sequence_id);
+    let active_threads = snapshot
+        .active_threads
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let recent_dispatches = thread_dispatches_since_latest_user_message(
+        snapshot,
+        transcript_dispatch_start,
+        &active_threads,
+        live_events,
+        latest_run_sequence,
+    );
+    let active_thread_state = snapshot
+        .active_threads
+        .iter()
+        .map(|name| {
+            let recent_assignment = recent_dispatches
+                .iter()
+                .rev()
+                .find(|dispatch| {
+                    dispatch.get("name").and_then(serde_json::Value::as_str) == Some(name.as_str())
+                })
+                .and_then(|dispatch| dispatch.get("action"))
+                .cloned();
+            let durable_assignment = snapshot
+                .threads
+                .iter()
+                .find(|thread| thread.name == *name)
+                .and_then(|thread| thread.latest_action.as_deref())
+                .map(|action| serde_json::Value::String(compact_overview_text(action, 700)));
+            let latest_steering = snapshot
+                .thread_steering
+                .iter()
+                .rev()
+                .find(|record| record.thread_name == *name)
+                .map(|record| {
+                    serde_json::json!({
+                        "status": record.status,
+                        "instruction": compact_overview_text(&record.instruction, 400),
+                    })
+                });
+            serde_json::json!({
+                "name": name,
+                "current_assignment": recent_assignment.or(durable_assignment),
+                "latest_steering": latest_steering,
+            })
+        })
+        .collect::<Vec<_>>();
+    let durable_threads = snapshot
+        .threads
+        .iter()
+        .map(|thread| {
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(&thread.name)
+                .and_then(|episodes| episodes.last());
+            serde_json::json!({
+                "name": thread.name,
+                "state": if active_threads.contains(thread.name.as_str()) { "active" } else if latest_episode.is_some() { "finished" } else { "known" },
+                "latest_action": thread.latest_action,
+                "latest_result": latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let worksets = snapshot
+        .worksets
+        .items
+        .iter()
+        .take(4)
+        .map(|workset| {
+            serde_json::json!({
+                "id": workset.id,
+                "goal": compact_overview_text(&workset.goal, 500),
+                "status": workset.status,
+                "summary": compact_overview_text(&workset.summary, 600),
+                "items": workset.items.iter().take(12).map(|item| serde_json::json!({
+                    "title": item.title,
+                    "role": item.role,
+                    "acceptance": compact_overview_text(&item.acceptance, 300),
+                    "notes": item.notes.as_deref().map(|notes| compact_overview_text(notes, 300)),
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let steering = snapshot
+        .thread_steering
+        .iter()
+        .rev()
+        .take(20)
+        .map(|record| {
+            serde_json::json!({
+                "thread": if record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET {
+                    "orchestrator"
+                } else {
+                    record.thread_name.as_str()
+                },
+                "status": record.status,
+                "instruction": compact_overview_text(&record.instruction, 400),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "session": {
+            "id": snapshot.metadata.session_id,
+            "model": snapshot.metadata.model,
+            "workspace": snapshot.metadata.cwd,
+            "run_active": snapshot.active_run.is_some(),
+        },
+        "latest_user_message": latest_user_message,
+        "thread_dispatches_since_latest_user_message": recent_dispatches,
+        "active_threads": active_thread_state,
+        "durable_threads": durable_threads,
+        "steering": steering,
+        "worksets": worksets,
+        "workspace": {
+            "branch": snapshot.workspace.branch,
+            "changed_files": snapshot.workspace.changed_files.iter().take(40).map(|file| serde_json::json!({
+                "status": file.status,
+                "path": file.path,
+                "additions": file.additions,
+                "deletions": file.deletions,
+            })).collect::<Vec<_>>(),
+            "total_additions": snapshot.workspace.total_additions,
+            "total_deletions": snapshot.workspace.total_deletions,
+        },
+    })
+}
+
+fn thread_dispatches_since_latest_user_message(
+    snapshot: &SessionFrontendSnapshot,
+    start_index: usize,
+    active_threads: &HashSet<&str>,
+    live_events: &[SessionEventEnvelope],
+    latest_run_sequence: Option<u64>,
+) -> Vec<serde_json::Value> {
+    let messages = snapshot.messages.get(start_index..).unwrap_or_default();
+    let tool_results = messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool {
+                tool_call_id,
+                content,
+            } => Some((tool_call_id.as_str(), content.as_str())),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut dispatches = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages {
+        let Message::Assistant {
+            tool_calls: Some(tool_calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for call in tool_calls {
+            if call.function.name != "thread" {
+                continue;
+            }
+            let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+            else {
+                continue;
+            };
+            let Some(name) = arguments.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let action = arguments
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .map(|value| compact_overview_text(value, 900));
+            seen.insert((name.to_string(), action.clone().unwrap_or_default()));
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(name)
+                .and_then(|episodes| episodes.last());
+            let is_active = active_threads.contains(name);
+            dispatches.push(serde_json::json!({
+                "name": name,
+                "action": action,
+                "source_threads": arguments.get("threads").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "state": if is_active { "active" } else if latest_episode.is_some() { "finished" } else { "dispatched" },
+                "result": if is_active { None } else { latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)) },
+                "dispatch_response": tool_results.get(call.id.as_str()).map(|content| compact_overview_text(content, 500)),
+            }));
+        }
+    }
+    if let Some(run_sequence) = latest_run_sequence {
+        for envelope in live_events
+            .iter()
+            .filter(|envelope| envelope.sequence_id > run_sequence)
+        {
+            let SessionEvent::Agent {
+                event:
+                    AgentEvent::ThreadStarted {
+                        name,
+                        action,
+                        source_threads,
+                    },
+            } = &envelope.event
+            else {
+                continue;
+            };
+            let action = compact_overview_text(action, 900);
+            if !seen.insert((name.clone(), action.clone())) {
+                continue;
+            }
+            let latest_episode = snapshot
+                .thread_episodes
+                .get(name)
+                .and_then(|episodes| episodes.last());
+            let is_active = active_threads.contains(name.as_str());
+            dispatches.push(serde_json::json!({
+                "name": name,
+                "action": action,
+                "source_threads": source_threads,
+                "state": if is_active { "active" } else if latest_episode.is_some() { "finished" } else { "dispatched" },
+                "result": if is_active { None } else { latest_episode.map(|episode| compact_overview_text(&episode.content, 1_000)) },
+            }));
+        }
+    }
+    dispatches
+}
+
+fn parse_generated_overview(content: &str) -> Result<GeneratedOverviewPayload> {
+    let start = content.find('{').ok_or_else(|| {
+        anyhow::anyhow!("overview model returned invalid JSON: object start is missing")
+    })?;
+    let end = content.rfind('}').ok_or_else(|| {
+        anyhow::anyhow!("overview model returned invalid JSON: object end is missing")
+    })?;
+    if end < start {
+        return Err(anyhow::anyhow!(
+            "overview model returned invalid JSON: malformed object"
+        ));
+    }
+    let mut payload: GeneratedOverviewPayload = serde_json::from_str(&content[start..=end])
+        .map_err(|error| anyhow::anyhow!("overview model returned invalid JSON: {error}"))?;
+    payload.summary = compact_overview_text(&payload.summary, 700);
+    if payload.summary.is_empty() {
+        return Err(anyhow::anyhow!("overview model returned an empty summary"));
+    }
+    Ok(payload)
+}
+
+fn compact_overview_text(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= max_chars {
+        return compact;
+    }
+    let mut truncated = compact
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
 }
 
 fn count_user_messages(messages: &[Message]) -> usize {
@@ -1212,7 +2109,353 @@ mod tests {
     use super::*;
     use crate::agent::{AgentConfig, AgentMode};
     use crate::model::ModelClient;
+    use crate::types::{FunctionCall, ToolCall};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn generated_overview_parser_accepts_fenced_json_and_enforces_limit() {
+        let payload = parse_generated_overview(
+            "```json\n{\"summary\":\"  UI   implementation is active. \"}\n```",
+        )
+        .unwrap();
+
+        assert_eq!(payload.summary, "UI implementation is active.");
+    }
+
+    fn thread_call(id: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "thread".to_string(),
+                arguments: arguments.to_string(),
+            },
+        }
+    }
+
+    fn mixed_message_history() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "system-one".to_string(),
+            },
+            Message::User {
+                content: "older request".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("reasoning without visible content".to_string()),
+                reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
+                tool_calls: None,
+            },
+            Message::Tool {
+                tool_call_id: "older-tool".to_string(),
+                content: "older result".to_string(),
+            },
+            Message::System {
+                content: "system-two".to_string(),
+            },
+            Message::User {
+                content: "latest request".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![
+                    thread_call(
+                        "thread-zeta",
+                        r#"{"name":" zeta ","action":"outside the returned tail"}"#,
+                    ),
+                    thread_call("thread-malformed", r#"{"name":"broken"#),
+                    thread_call("thread-empty", r#"{"name":"   "}"#),
+                ]),
+            },
+            Message::Tool {
+                tool_call_id: "thread-zeta".to_string(),
+                content: "zeta started".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("new reasoning".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::System {
+                content: "system-three".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![thread_call(
+                    "thread-alpha",
+                    r#"{"name":"alpha","action":"inside the cycle"}"#,
+                )]),
+            },
+            Message::Tool {
+                tool_call_id: "thread-alpha".to_string(),
+                content: "alpha started".to_string(),
+            },
+            Message::Assistant {
+                content: Some("latest answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ]
+    }
+
+    fn legacy_page_messages(
+        messages: &[Message],
+        request: MessagePageRequest,
+    ) -> MessagesPageSnapshot {
+        let visible = messages
+            .iter()
+            .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = visible.len();
+        let end = request.before.unwrap_or(total).min(total);
+        let start = end.saturating_sub(request.limit.max(1));
+        MessagesPageSnapshot {
+            messages: visible[start..end].to_vec(),
+            page: MessagePageMetadata {
+                start,
+                end,
+                total,
+                has_older: start > 0,
+            },
+        }
+    }
+
+    #[test]
+    fn paged_messages_match_legacy_windows_for_mixed_history_and_cursor_bounds() {
+        let messages = mixed_message_history();
+        for include_system in [false, true] {
+            for before in [None, Some(0), Some(1), Some(3), Some(usize::MAX)] {
+                for limit in [0, 1, 4, 100] {
+                    let request = MessagePageRequest {
+                        before,
+                        limit,
+                        include_system,
+                    };
+                    let expected = legacy_page_messages(&messages, request);
+                    let actual = page_messages(&messages, request);
+                    assert_eq!(actual.page, expected.page, "request: {request:?}");
+                    assert_eq!(
+                        serde_json::to_value(&actual.messages).unwrap(),
+                        serde_json::to_value(&expected.messages).unwrap(),
+                        "request: {request:?}"
+                    );
+                }
+            }
+        }
+
+        let beyond_end = page_messages(
+            &messages,
+            MessagePageRequest {
+                before: Some(usize::MAX),
+                limit: 4,
+                include_system: false,
+            },
+        );
+        assert_eq!(beyond_end.page.end, beyond_end.page.total);
+        assert_eq!(beyond_end.page.total, 10);
+        assert_eq!(beyond_end.messages.len(), 4);
+    }
+
+    #[test]
+    fn message_cycle_uses_complete_raw_history_and_ignores_malformed_thread_calls() {
+        let messages = mixed_message_history();
+        let loaded = load_frontend_messages(
+            &messages,
+            FrontendSnapshotMessages::Page(MessagePageRequest {
+                before: None,
+                limit: 2,
+                include_system: false,
+            }),
+        );
+
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(
+            loaded.cycle,
+            Some(MessageCycleMetadata {
+                marker: "history:2:5".to_string(),
+                thread_names: vec!["alpha".to_string(), "zeta".to_string()],
+            })
+        );
+        assert!(!serde_json::to_string(&loaded.messages)
+            .unwrap()
+            .contains("zeta"));
+        assert_eq!(
+            current_message_cycle(&[Message::System {
+                content: "only system".to_string(),
+            }]),
+            MessageCycleMetadata {
+                marker: "none".to_string(),
+                thread_names: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn overview_source_prioritizes_latest_user_dispatches_and_active_assignments() {
+        let mut snapshot = SessionFrontendSnapshot {
+            metadata: SessionMetadata {
+                cwd: "/repo".to_string(),
+                workspace_host_path: Some(PathBuf::from("/repo")),
+                store_path: PathBuf::from("/tmp/store.db"),
+                model: "test-model".to_string(),
+                backend: "test".to_string(),
+                session_id: Some("session-a".to_string()),
+                sandbox_status: "off".to_string(),
+                agents_md_status: "off".to_string(),
+                base_url: String::new(),
+                reasoning_effort: None,
+                api_key_env: None,
+                extra_headers: BTreeMap::new(),
+            },
+            messages: vec![
+                Message::User {
+                    content: "older request".to_string(),
+                },
+                Message::User {
+                    content: "revamp the thread board".to_string(),
+                },
+                Message::Assistant {
+                    content: None,
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: Some(vec![ToolCall {
+                        id: "call-ui".to_string(),
+                        call_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: "thread".to_string(),
+                            arguments: r#"{"name":"ui","action":"Build the two-column board","threads":[]}"#.to_string(),
+                        },
+                    }]),
+                },
+                Message::Tool {
+                    tool_call_id: "call-ui".to_string(),
+                    content: "worker is still running".to_string(),
+                },
+            ],
+            response_timing: ResponseTimingSnapshot::default(),
+            active_run: None,
+            sessions: Vec::new(),
+            active_threads: vec!["ui".to_string()],
+            threads: vec![ThreadSnapshot {
+                name: "ui".to_string(),
+                session_id: "session-a".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                episode_count: 0,
+                latest_action: None,
+            }],
+            thread_episodes: HashMap::new(),
+            thread_events: HashMap::new(),
+            thread_event_boundary: SessionEventBoundary {
+                epoch_id: "test-epoch".to_string(),
+                sequence_id: 0,
+            },
+            thread_event_diagnostics: Vec::new(),
+            thread_steering: Vec::new(),
+            overview: None,
+            worksets: WorksetsSnapshot::default(),
+            workspace: WorkspaceSnapshot {
+                host_root: Some(PathBuf::from("/repo")),
+                workspace_display: "/repo".to_string(),
+                repo_label: None,
+                branch: Some("ui".to_string()),
+                changed_files: Vec::new(),
+                total_additions: 0,
+                total_deletions: 0,
+                error: None,
+            },
+        };
+
+        let source = overview_source(&snapshot, &[]);
+        assert_eq!(source["latest_user_message"], "revamp the thread board");
+        assert_eq!(
+            source["thread_dispatches_since_latest_user_message"][0]["action"],
+            "Build the two-column board"
+        );
+        assert_eq!(
+            source["thread_dispatches_since_latest_user_message"][0]["state"],
+            "active"
+        );
+        assert_eq!(
+            source["active_threads"][0]["current_assignment"],
+            "Build the two-column board"
+        );
+
+        snapshot.thread_events.insert(
+            "ui".to_string(),
+            vec![AgentEvent::ThreadLog {
+                name: "ui".to_string(),
+                line: "event payload deliberately ignored by overview".to_string(),
+            }],
+        );
+        assert_eq!(
+            serde_json::to_vec(&overview_source(&snapshot, &[])).unwrap(),
+            serde_json::to_vec(&source).unwrap()
+        );
+
+        let run_id = SessionRunId::new();
+        let submitted = SubmittedUserMessageSnapshot {
+            run_id: run_id.clone(),
+            client_id: None,
+            content: "show live thread work".to_string(),
+            baseline_user_message_count: Some(2),
+            submitted_at_epoch_ms: 1,
+        };
+        snapshot.messages.truncate(1);
+        snapshot.active_run = Some(ActiveRunSnapshot {
+            run_id: run_id.clone(),
+            client_id: None,
+            prompt_preview: "show live thread work".to_string(),
+            submitted_user_message: Some(submitted.clone()),
+            started_at_epoch_ms: 1,
+        });
+        let live_events = vec![
+            SessionEventEnvelope {
+                session_id: Some("session-a".to_string()),
+                epoch_id: "test-epoch".to_string(),
+                sequence_id: 1,
+                client_id: None,
+                run_id: Some(run_id.clone()),
+                event: SessionEvent::RunStarted {
+                    prompt_preview: "show live thread work".to_string(),
+                    submitted_user_message: Some(submitted),
+                    started_at_epoch_ms: 1,
+                },
+            },
+            SessionEventEnvelope {
+                session_id: Some("session-a".to_string()),
+                epoch_id: "test-epoch".to_string(),
+                sequence_id: 2,
+                client_id: None,
+                run_id: Some(run_id),
+                event: SessionEvent::Agent {
+                    event: AgentEvent::ThreadStarted {
+                        name: "ui".to_string(),
+                        action: "Inspect the live board".to_string(),
+                        source_threads: Vec::new(),
+                    },
+                },
+            },
+        ];
+        let live_source = overview_source(&snapshot, &live_events);
+        assert_eq!(live_source["latest_user_message"], "show live thread work");
+        assert_eq!(
+            live_source["thread_dispatches_since_latest_user_message"][0]["action"],
+            "Inspect the live board"
+        );
+        assert_eq!(
+            live_source["active_threads"][0]["current_assignment"],
+            "Inspect the live board"
+        );
+    }
 
     fn test_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
@@ -1233,6 +2476,7 @@ mod tests {
                 session_id,
                 initial_messages: Vec::new(),
                 thread_name: None,
+                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: PathBuf::from("/repo"),
                 config_cwd: PathBuf::from("/repo"),
@@ -1305,6 +2549,232 @@ mod tests {
         (parts, store_path)
     }
 
+    #[tokio::test]
+    async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_contract() {
+        let (parts, store_path) = test_active_service("paged_snapshot", "paged-session");
+        let messages = mixed_message_history();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent.messages = messages.clone();
+        }
+        let request = MessagePageRequest {
+            before: None,
+            limit: 2,
+            include_system: false,
+        };
+        let expected_page = page_messages(&messages, request);
+
+        let loaded = parts
+            .service
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit: 0,
+                include_sessions: false,
+                messages: FrontendSnapshotMessages::Page(request),
+            })
+            .await
+            .unwrap();
+        assert!(loaded.snapshot.sessions.is_empty());
+        assert!(loaded.snapshot.thread_events.is_empty());
+        assert_eq!(loaded.message_page, Some(expected_page.page));
+        assert_eq!(
+            loaded.message_cycle,
+            Some(MessageCycleMetadata {
+                marker: "history:2:5".to_string(),
+                thread_names: vec!["alpha".to_string(), "zeta".to_string()],
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&loaded.snapshot.messages).unwrap(),
+            serde_json::to_value(&expected_page.messages).unwrap()
+        );
+
+        let full = parts
+            .service
+            .frontend_snapshot_with_thread_event_limit(0)
+            .await
+            .unwrap();
+        assert_eq!(full.sessions.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&full.messages).unwrap(),
+            serde_json::to_value(&messages).unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn paged_snapshot_and_message_method_use_persisted_history_when_agent_is_busy() {
+        let (parts, store_path) = test_active_service("paged_fallback", "fallback-session");
+        let persisted_messages = mixed_message_history();
+        parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .messages = persisted_messages.clone();
+        let request = MessagePageRequest {
+            before: Some(usize::MAX),
+            limit: 3,
+            include_system: false,
+        };
+        let expected = page_messages(&persisted_messages, request);
+        let agent_guard = parts.service.agent.lock().await;
+
+        let direct = tokio::time::timeout(
+            Duration::from_millis(500),
+            parts.service.messages_page(request),
+        )
+        .await
+        .expect("paged messages should not wait for the held agent mutex");
+        assert_eq!(direct.page, expected.page);
+        assert_eq!(
+            serde_json::to_value(&direct.messages).unwrap(),
+            serde_json::to_value(&expected.messages).unwrap()
+        );
+
+        let loaded = tokio::time::timeout(
+            Duration::from_secs(2),
+            parts
+                .service
+                .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                    thread_event_limit: 0,
+                    include_sessions: false,
+                    messages: FrontendSnapshotMessages::Page(request),
+                }),
+        )
+        .await
+        .expect("paged snapshot should not wait for the held agent mutex")
+        .unwrap();
+        assert_eq!(loaded.message_page, Some(expected.page));
+        assert_eq!(
+            serde_json::to_value(&loaded.snapshot.messages).unwrap(),
+            serde_json::to_value(&expected.messages).unwrap()
+        );
+
+        drop(agent_guard);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_raw_cursor() {
+        let (parts, store_path) = test_active_service("tolerant_events", "events-session");
+        let valid = serde_json::to_string(&AgentEvent::AssistantMessage {
+            thread_name: Some("worker-a".to_string()),
+            content: "safe response".to_string(),
+            usage: None,
+        })
+        .unwrap();
+        for (thread_name, event_json) in [
+            ("worker-a", valid.as_str()),
+            ("worker-a", "{malformed event json"),
+            (
+                "worker-b",
+                r#"{"type":"model_call_started","thread_name":"worker-b","iteration":1}"#,
+            ),
+            (
+                "worker-c",
+                r#"{"type":"future_event","payload":"CANARY_UNKNOWN"}"#,
+            ),
+            (
+                "worker-d",
+                r#"{"type":"tool_call_started","thread_name":"worker-d","call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"CANARY_COMMAND\",\"workdir\":\"/safe/api\"}"}"#,
+            ),
+        ] {
+            crate::store::append_thread_event(
+                &store_path,
+                "events-session",
+                thread_name,
+                event_json,
+            )
+            .unwrap();
+        }
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.thread_events["worker-a"].len(), 1);
+        assert_eq!(snapshot.thread_events["worker-d"].len(), 1);
+        assert_eq!(snapshot.thread_event_diagnostics.len(), 3);
+        assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(!serialized.contains("CANARY"));
+        assert!(serialized.contains("/safe/api"));
+        assert!(!snapshot
+            .thread_event_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.error.contains('{')));
+
+        let first_page = parts
+            .service
+            .thread_events_page("worker-a", None, 1)
+            .unwrap();
+        assert!(first_page.events.is_empty());
+        assert_eq!(first_page.diagnostics.len(), 1);
+        assert!(first_page.has_older);
+        assert!(first_page.thread_event_boundary.is_some());
+        let malformed_id = first_page.next_before_id.unwrap();
+        let older_page = parts
+            .service
+            .thread_events_page("worker-a", Some(malformed_id), 1)
+            .unwrap();
+        assert_eq!(older_page.events.len(), 1);
+        assert!(older_page.thread_event_boundary.is_none());
+        assert!(older_page.next_before_id.unwrap() < malformed_id);
+
+        let overview = parts.service.overview_snapshot().await.unwrap();
+        assert!(overview.thread_events.is_empty());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_restores_persisted_thread_activity() {
+        let (mut parts, store_path) = test_active_service("thread_activity", "activity-session");
+        Arc::make_mut(&mut parts.service.metadata)
+            .extra_headers
+            .insert("Authorization".to_string(), "CANARY_HEADER".to_string());
+        parts
+            .service
+            .event_bus
+            .emit_agent(AgentEvent::ThreadStarted {
+                name: "impl/ui".to_string(),
+                action: "Build the interface".to_string(),
+                source_threads: Vec::new(),
+            });
+        parts
+            .service
+            .event_bus
+            .emit_agent(AgentEvent::ToolCallStarted {
+                thread_name: Some("impl/ui".to_string()),
+                call_id: "call-1".to_string(),
+                name: "read".to_string(),
+                args_preview: r#"{"path":"index.html"}"#.to_string(),
+                args_detail: None,
+            });
+        parts
+            .service
+            .event_bus
+            .emit_agent(AgentEvent::ToolCallFinished {
+                thread_name: Some("impl/ui".to_string()),
+                call_id: "call-1".to_string(),
+                name: "read".to_string(),
+                content_preview: "done".to_string(),
+                is_error: false,
+            });
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.metadata.extra_headers.is_empty());
+        assert_eq!(
+            parts.service.metadata().extra_headers["Authorization"],
+            "CANARY_HEADER"
+        );
+        let events = &snapshot.thread_events["impl/ui"];
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], AgentEvent::ThreadStarted { .. }));
+        assert!(matches!(events[2], AgentEvent::ToolCallFinished { .. }));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
     #[test]
     fn public_submission_rejects_external_process_lease() {
         let (parts, store_path) = test_active_service("external_lease", "leased-session");
@@ -1315,6 +2785,91 @@ mod tests {
         ));
         assert!(parts.service.active_run().is_none());
         drop(_lease);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn steering_requires_an_active_run_and_active_target_thread() {
+        let (parts, store_path) = test_active_service("steering", "session-steering");
+        let service = parts.service;
+        let no_run = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap_err();
+        assert!(no_run.to_string().contains("no active run"));
+
+        *service
+            .active_run
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ActiveRunState {
+            snapshot: ActiveRunSnapshot {
+                run_id: SessionRunId::new(),
+                client_id: None,
+                prompt_preview: "revamp the UI".to_string(),
+                submitted_user_message: None,
+                started_at_epoch_ms: 0,
+            },
+            started_at: Instant::now(),
+            finishing: false,
+            task: None,
+            _run_lease: None,
+        });
+        let inactive = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap_err();
+        assert!(inactive.to_string().contains("not active"));
+
+        service.active_threads.mark("impl/ui", "worker-dispatch");
+        let queued = service
+            .queue_thread_steering("impl/ui", "make the layout denser")
+            .await
+            .unwrap();
+        assert_eq!(queued.status, "queued");
+        assert_eq!(queued.dispatch_id, "worker-dispatch");
+        assert_eq!(
+            crate::store::list_thread_steering(&store_path, "session-steering").unwrap(),
+            vec![queued]
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_steering_requires_an_active_run_and_expires_at_run_end() {
+        let (parts, store_path) =
+            test_active_service("orchestrator_steering", "session-orchestrator-steering");
+        let service = parts.service;
+        let no_run = service
+            .queue_orchestrator_steering("change direction")
+            .unwrap_err();
+        assert!(no_run.to_string().contains("no active run"));
+
+        let active = service.try_begin_run(None, "initial direction").unwrap();
+        let queued = service
+            .queue_orchestrator_steering("change direction")
+            .unwrap();
+        assert_eq!(
+            queued.thread_name,
+            crate::store::ORCHESTRATOR_STEERING_TARGET
+        );
+        assert_eq!(queued.status, "queued");
+        assert_eq!(queued.dispatch_id, active.run_id.as_str());
+
+        assert!(
+            service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
+                .await
+        );
+        let steering =
+            crate::store::list_thread_steering(&store_path, "session-orchestrator-steering")
+                .unwrap();
+        assert_eq!(steering.len(), 1);
+        assert_eq!(steering[0].status, "expired");
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
@@ -1378,8 +2933,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(200);
         snapshot.previous_response_duration_ms = Some(100);
@@ -1431,8 +2986,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -1472,7 +3027,10 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
                 .await
         );
 
@@ -1555,10 +3113,7 @@ mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
-        let active = parts
-            .service
-            .try_begin_run(None, "prompt")
-            .unwrap();
+        let active = parts.service.try_begin_run(None, "prompt").unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
             agent.messages.push(Message::User {
@@ -1664,10 +3219,7 @@ mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
-        let active = parts
-            .service
-            .try_begin_run(None, "prompt")
-            .unwrap();
+        let active = parts.service.try_begin_run(None, "prompt").unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
             agent.messages.push(Message::User {
@@ -1734,8 +3286,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
@@ -1770,7 +3322,10 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
                 .await
         );
         let started = events.recv().await.unwrap();
@@ -1780,13 +3335,12 @@ mod tests {
         assert_eq!(terminal.sequence_id, 2);
         assert_eq!(terminal.run_id.as_ref(), Some(&active.run_id));
         assert_eq!(terminal.client_id.as_ref(), active.client_id.as_ref());
-        match terminal.event {
-            SessionEvent::RunFailed { message } => {
-                assert!(message.contains("run completed, but failed to persist session snapshot"));
-                assert!(message.contains("failed to create store dir"));
+        assert_eq!(
+            terminal.event,
+            SessionEvent::RunFailed {
+                message: "run failed".to_string()
             }
-            other => panic!("expected run failure after persistence error, got {other:?}"),
-        }
+        );
         assert!(matches!(
             events.try_recv(),
             Err(tokio::sync::broadcast::error::TryRecvError::Empty)
@@ -1801,6 +3355,7 @@ mod tests {
         let store_path = test_store_path("agent_event_adapter");
         let client = ModelClient::new_for_test();
         let session_id = "session-agent-events".to_string();
+        crate::store::insert_test_session(&store_path, &session_id);
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
         let snapshot = sessions::new_snapshot(
             session_id.clone(),
@@ -1812,8 +3367,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
@@ -1830,9 +3385,8 @@ mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut agent_events = parts.service.subscribe_agent_events();
-        let agent_event = AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "hello".to_string(),
+        let agent_event = AgentEvent::RunFinished {
+            thread_name: Some("impl".to_string()),
         };
 
         parts.service.event_bus.emit(SessionEvent::SnapshotSaved {
@@ -1857,9 +3411,8 @@ mod tests {
         assert_eq!(&second_events.client_id, second_client.client_id());
         assert_ne!(first_events.subscription_id, second_events.subscription_id);
 
-        let agent_event = AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "hello clients".to_string(),
+        let agent_event = AgentEvent::RunFinished {
+            thread_name: Some("impl".to_string()),
         };
         parts.service.event_bus.emit_agent(agent_event.clone());
 
@@ -1899,7 +3452,10 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Failed("cleanup".to_string(), None))
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Failed("cleanup".to_string(), None)
+                )
                 .await
         );
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
@@ -1921,8 +3477,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -2046,7 +3602,10 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&first.run_id, RunOutcome::Completed("done".to_string(), None))
+                .finish_run_once(
+                    &first.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
                 .await
         );
         let completion = events.recv().await.unwrap();
@@ -2091,7 +3650,7 @@ mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "boom".to_string()
+                message: "run failed".to_string()
             }
         );
         assert!(parts.service.active_run().is_none());
@@ -2122,8 +3681,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         snapshot.last_response_duration_ms = Some(123);
         snapshot.response_durations_ms = Some(vec![Some(123)]);
@@ -2167,7 +3726,7 @@ mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "boom".to_string()
+                message: "run failed".to_string()
             }
         );
 
@@ -2199,8 +3758,8 @@ mod tests {
             None,
             None,
             agent.messages.clone(),
-        None,
-        BTreeMap::new(),
+            None,
+            BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -2219,6 +3778,26 @@ mod tests {
         });
         let mut events = parts.service.subscribe_events();
         let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        assert!(parts
+            .service
+            .active_threads
+            .mark("worker", "worker-dispatch"));
+        crate::store::queue_thread_steering(
+            &store_path,
+            &session_id,
+            "worker",
+            "worker-dispatch",
+            "worker direction",
+        )
+        .unwrap();
+        crate::store::queue_thread_steering(
+            &store_path,
+            &session_id,
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            active.run_id.as_str(),
+            "orchestrator direction",
+        )
+        .unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
             agent.messages.push(Message::User {
@@ -2230,6 +3809,18 @@ mod tests {
 
         let started = events.recv().await.unwrap();
         assert_run_started_event(started, &active, "cancel prompt");
+        assert!(matches!(
+            events.recv().await.unwrap().event,
+            SessionEvent::Agent {
+                event: AgentEvent::OrchestratorSteeringExpired { .. }
+            }
+        ));
+        assert!(matches!(
+            events.recv().await.unwrap().event,
+            SessionEvent::Agent {
+                event: AgentEvent::ThreadSteeringExpired { .. }
+            }
+        ));
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
@@ -2238,10 +3829,15 @@ mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "run cancelled by user".to_string()
+                message: "run failed".to_string()
             }
         );
         assert!(parts.service.active_run().is_none());
+        assert!(parts.service.active_thread_names().await.is_empty());
+        assert!(crate::store::list_thread_steering(&store_path, &session_id)
+            .unwrap()
+            .iter()
+            .all(|record| record.status == "expired"));
 
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
         assert!(matches!(
@@ -2278,7 +3874,10 @@ mod tests {
         assert!(
             parts
                 .service
-                .finish_run_once(&active.run_id, RunOutcome::Completed("done".to_string(), None))
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("done".to_string(), None)
+                )
                 .await
         );
         let started = events.recv().await.unwrap();

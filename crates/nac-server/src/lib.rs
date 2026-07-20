@@ -10,8 +10,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    extract::{rejection::JsonRejection, Path as AxumPath, Query, Request, State},
+    http::{header, uri::Authority, HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -31,10 +32,13 @@ use nac_core::{
         StoreOptions,
     },
     session_service::{
-        ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
-        SessionService, SessionSubmitError,
+        ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
+        MessagePageRequest, MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
+        SessionFrontendSnapshotLoad, SessionOverviewRecord, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    types::Message,
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
@@ -42,9 +46,16 @@ use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::compression::{
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+    CompressionLayer,
+};
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
+const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
+const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
+const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
+const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
@@ -286,9 +297,116 @@ pub struct SubmitPromptResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OrchestratorSteeringResponse {
+    pub steering_id: i64,
+    pub status: String,
+    pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThreadSteeringResponse {
+    pub steering_id: i64,
+    pub thread_name: String,
+    pub status: String,
+    pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct EventsQuery {
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SessionSnapshotQuery {
+    pub message_limit: Option<usize>,
+    pub thread_event_limit: Option<usize>,
+    pub include_sessions: Option<bool>,
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MessagesQuery {
+    pub before: Option<usize>,
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ThreadEventsQuery {
+    pub before_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessagePageMetadata {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesPageResponse {
+    pub messages: Vec<Message>,
+    pub page: MessagePageMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessageCycleMetadata {
+    pub marker: String,
+    pub thread_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSnapshotResponse {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_page: Option<MessagePageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {
+    fn from(page: nac_core::session_service::MessagePageMetadata) -> Self {
+        Self {
+            start: page.start,
+            end: page.end,
+            total: page.total,
+            has_older: page.has_older,
+        }
+    }
+}
+
+impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetadata {
+    fn from(cycle: nac_core::session_service::MessageCycleMetadata) -> Self {
+        Self {
+            marker: cycle.marker,
+            thread_names: cycle.thread_names,
+        }
+    }
+}
+
+impl From<MessagesPageSnapshot> for MessagesPageResponse {
+    fn from(page: MessagesPageSnapshot) -> Self {
+        Self {
+            messages: page.messages,
+            page: page.page.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -305,6 +423,7 @@ pub struct WorkspaceDiffQuery {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayBoundaryEvent {
+    pub epoch_id: String,
     pub replay_boundary_sequence_id: u64,
 }
 
@@ -684,6 +803,48 @@ impl SessionManager {
             .await
     }
 
+    pub async fn snapshot_with_options(
+        &self,
+        session_id: &str,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        self.attach_session(session_id)
+            .await?
+            .frontend_snapshot_with_options(options)
+            .await
+    }
+
+    pub async fn messages_page(
+        &self,
+        session_id: &str,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        Ok(self
+            .attach_session(session_id)
+            .await?
+            .messages_page(request)
+            .await)
+    }
+
+    pub async fn thread_events(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        self.attach_session(session_id)
+            .await?
+            .thread_events_page(thread_name, before_id, limit)
+    }
+
+    pub async fn generate_overview(&self, session_id: &str) -> Result<SessionOverviewRecord> {
+        self.attach_session(session_id)
+            .await?
+            .generate_overview()
+            .await
+    }
+
     pub async fn workspace_file_diff(
         &self,
         session_id: &str,
@@ -741,6 +902,38 @@ impl SessionManager {
         }
     }
 
+    pub async fn queue_thread_steering(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        request: ThreadSteeringRequest,
+    ) -> Result<ThreadSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service
+            .queue_thread_steering(thread_name, &request.instruction)
+            .await?;
+        Ok(ThreadSteeringResponse {
+            steering_id: record.id,
+            thread_name: record.thread_name,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    pub async fn queue_orchestrator_steering(
+        &self,
+        session_id: &str,
+        request: OrchestratorSteeringRequest,
+    ) -> Result<OrchestratorSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service.queue_orchestrator_steering(&request.instruction)?;
+        Ok(OrchestratorSteeringResponse {
+            steering_id: record.id,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
     pub async fn recent_events(
         &self,
         session_id: &str,
@@ -759,6 +952,7 @@ impl SessionManager {
         after_sequence_id: Option<u64>,
         limit: usize,
     ) -> Result<(
+        String,
         u64,
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
@@ -769,6 +963,7 @@ impl SessionManager {
             .connect_client()
             .subscribe_events_with_replay(after_sequence_id, limit);
         Ok((
+            subscription.epoch_id,
             subscription.replay_boundary_sequence_id,
             subscription.replay_gap,
             subscription.replayed_events,
@@ -792,29 +987,44 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Cancel any active run, destroy the sandbox, and remove from the
-        // in-memory map.
-        {
-            let active = self.inner.active_sessions.read().await;
-            if let Some(service) = active.get(session_id) {
-                if let Some(active_run) = service.active_run() {
-                    let _ = service
-                        .connect_client()
-                        .request_cancel(&active_run.run_id)
-                        .await;
+        // Submission, config changes, and deletion share this gate. The run
+        // lease extends the exclusion to independent processes and remains held
+        // through the database delete, so an old run cannot save the row back.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let service = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        if let Some(service) = service.as_ref() {
+            if let Some(active_run) = service.active_run() {
+                if let Err(error) = service
+                    .connect_client()
+                    .request_cancel(&active_run.run_id)
+                    .await
+                {
+                    if service.active_run().is_some() {
+                        return Err(anyhow!(error.to_string()));
+                    }
                 }
-                // Explicitly destroy the sandbox so it is torn down even
-                // if SSE handlers or other clones keep the Arc alive.
-                service.destroy_sandbox().await;
             }
         }
-        self.inner.active_sessions.write().await.remove(session_id);
+        let _run_lease =
+            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        if let Some(service) = service {
+            // Explicitly destroy the sandbox even if SSE handlers retain the service.
+            service.destroy_sandbox().await;
+        }
 
-        // Cascade-delete all DB rows for this session.
+        // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
         }
+        self.inner.active_sessions.write().await.remove(session_id);
         Ok(())
     }
 
@@ -826,11 +1036,28 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // An omitted patch is intentionally independent of persisted settings
-        // and credentials. In particular, it must not evict an attached service.
+        // An empty PATCH stays a cheap no-op for an already attached (and thus
+        // validated) service. Detached rows are inspected so legacy/incomplete
+        // managed tuples can be repaired without requiring a synthetic field.
         if request.is_empty() {
-            return Ok(());
+            if self
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key(session_id)
+            {
+                return Ok(());
+            }
+            let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+            if !managed_config_needs_repair(&current) {
+                return Ok(());
+            }
         }
+
+        let backend_selected = matches!(&request.backend, RequestField::Value(_));
+        let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
+        let api_key_env_omitted = matches!(&request.api_key_env, RequestField::Omitted);
 
         // Submission and update both hold this per-session gate. A submission
         // that wins establishes active-run state synchronously before releasing
@@ -858,8 +1085,12 @@ impl SessionManager {
         let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
-        let (backend, reasoning_effort, extra_headers) =
-            parse_prospective_model_config(&mut prospective)?;
+        let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
+            &mut prospective,
+            backend_selected,
+            base_url_omitted,
+            api_key_env_omitted,
+        )?;
 
         let _settings = EffectiveModelSettings::new(
             backend,
@@ -913,11 +1144,110 @@ impl SessionManager {
     }
 }
 
+fn response_compression_layer() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new()
+        .gzip(true)
+        .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
+}
+
+fn single_header<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> std::result::Result<Option<&'a HeaderValue>, ()> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next();
+    if values.next().is_some() {
+        return Err(());
+    }
+    Ok(value)
+}
+
+fn loopback_authority(value: &HeaderValue) -> Option<(String, Option<u16>)> {
+    let value = value.to_str().ok()?;
+    if value.is_empty() || value.contains('@') {
+        return None;
+    }
+    let authority = value.parse::<Authority>().ok()?;
+    let host = authority.host().trim_matches(['[', ']']);
+    let host = match host.parse::<std::net::IpAddr>() {
+        Ok(address) if address.is_loopback() => address.to_string(),
+        Err(_) if host.eq_ignore_ascii_case("localhost") => "localhost".to_string(),
+        _ => return None,
+    };
+    Some((host, authority.port_u16()))
+}
+
+fn browser_request_is_allowed(headers: &HeaderMap) -> bool {
+    let Ok(Some(host)) = single_header(headers, "host") else {
+        return false;
+    };
+    let Some((host_name, host_port)) = loopback_authority(host) else {
+        return false;
+    };
+
+    let Ok(fetch_site) = single_header(headers, "sec-fetch-site") else {
+        return false;
+    };
+    if let Some(value) = fetch_site {
+        match value.to_str() {
+            Ok(value) if !value.eq_ignore_ascii_case("cross-site") => {}
+            _ => return false,
+        }
+    }
+
+    let Ok(origin) = single_header(headers, "origin") else {
+        return false;
+    };
+    let Some(origin) = origin else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Some((scheme, origin_authority)) = origin.split_once("://") else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("http") {
+        return false;
+    }
+    if origin_authority.is_empty()
+        || origin_authority
+            .chars()
+            .any(|character| matches!(character, '/' | '?' | '#'))
+    {
+        return false;
+    }
+    let Ok(origin_value) = HeaderValue::from_str(origin_authority) else {
+        return false;
+    };
+    let Some((origin_name, origin_port)) = loopback_authority(&origin_value) else {
+        return false;
+    };
+    origin_name == host_name && origin_port.unwrap_or(80) == host_port.unwrap_or(80)
+}
+
+async fn browser_request_boundary(request: Request, next: Next) -> Response {
+    if !browser_request_is_allowed(request.headers()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+fn validate_bind_address(addr: SocketAddr) -> Result<()> {
+    if !addr.ip().is_loopback() {
+        anyhow::bail!(
+            "refusing non-loopback bind address {addr}; nac-web has no remote authentication"
+        );
+    }
+    Ok(())
+}
+
 pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
-        .route("/assets/app.css", get(app_css))
+        .route("/assets/redesign.css", get(redesign_css))
+        .route("/assets/app.css", get(redesign_css))
         .route("/assets/app.js", get(app_js))
         .route(
             "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
@@ -941,6 +1271,11 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/presentation",
             put(update_session_presentation_handler),
         )
+        .route("/sessions/{session_id}/messages", get(session_messages))
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/events",
+            get(thread_events),
+        )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route(
             "/sessions/{session_id}",
@@ -950,18 +1285,32 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/config",
             get(session_config_handler).patch(update_config_handler),
         )
+        .route(
+            "/sessions/{session_id}/overview",
+            post(generate_overview_handler),
+        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route(
+            "/sessions/{session_id}/steering",
+            post(queue_orchestrator_steering_handler),
+        )
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/steering",
+            post(queue_thread_steering_handler),
+        )
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(browser_request_boundary))
+        .layer(response_compression_layer())
         .with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
@@ -978,10 +1327,10 @@ async fn index_html() -> Html<&'static str> {
     Html(include_str!("../assets/index.html"))
 }
 
-async fn app_css() -> impl IntoResponse {
+async fn redesign_css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/app.css"),
+        include_str!("../assets/redesign.css"),
     )
 }
 
@@ -1097,8 +1446,75 @@ async fn create_session(
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<SessionFrontendSnapshot>, ApiError> {
-    Ok(Json(manager.snapshot(&session_id).await?))
+    Query(query): Query<SessionSnapshotQuery>,
+) -> std::result::Result<Json<SessionSnapshotResponse>, ApiError> {
+    let mut options = FrontendSnapshotLoadOptions::default();
+    if let Some(limit) = query.thread_event_limit {
+        options.thread_event_limit = limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT);
+    }
+    options.include_sessions = query.include_sessions.unwrap_or(true);
+    if let Some(limit) = query.message_limit {
+        options.messages = FrontendSnapshotMessages::Page(MessagePageRequest {
+            before: None,
+            limit: limit.clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+            include_system: query.include_system,
+        });
+    }
+
+    let loaded = manager.snapshot_with_options(&session_id, options).await?;
+    Ok(Json(SessionSnapshotResponse {
+        snapshot: loaded.snapshot,
+        message_page: loaded.message_page.map(Into::into),
+        message_cycle: loaded.message_cycle.map(Into::into),
+    }))
+}
+
+async fn session_messages(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<MessagesQuery>,
+) -> std::result::Result<Json<MessagesPageResponse>, ApiError> {
+    let page = manager
+        .messages_page(
+            &session_id,
+            MessagePageRequest {
+                before: query.before,
+                limit: query
+                    .limit
+                    .unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT)
+                    .clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+                include_system: query.include_system,
+            },
+        )
+        .await?;
+    Ok(Json(page.into()))
+}
+
+async fn thread_events(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    Query(query): Query<ThreadEventsQuery>,
+) -> std::result::Result<Json<ThreadEventPage>, ApiError> {
+    Ok(Json(
+        manager
+            .thread_events(
+                &session_id,
+                &thread_name,
+                query.before_id,
+                query
+                    .limit
+                    .unwrap_or(DEFAULT_THREAD_EVENT_PAGE_LIMIT)
+                    .clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
+            )
+            .await?,
+    ))
+}
+
+async fn generate_overview_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<SessionOverviewRecord>, ApiError> {
+    Ok(Json(manager.generate_overview(&session_id).await?))
 }
 
 async fn workspace_diff(
@@ -1117,6 +1533,40 @@ async fn submit_prompt(
     Ok((
         StatusCode::ACCEPTED,
         Json(manager.submit_prompt(&session_id, request).await?),
+    ))
+}
+
+async fn queue_orchestrator_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<OrchestratorSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_orchestrator_steering(&session_id, request)
+                .await?,
+        ),
+    ))
+}
+
+async fn queue_thread_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ThreadSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_thread_steering(&session_id, &thread_name, request)
+                .await?,
+        ),
     ))
 }
 
@@ -1143,7 +1593,7 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
+    let (epoch_id, replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
@@ -1151,6 +1601,7 @@ async fn stream_events(
         )
         .await?;
     let event_stream = session_event_stream(
+        epoch_id,
         replay_boundary_sequence_id,
         replay_gap,
         replayed_events,
@@ -1207,6 +1658,17 @@ impl std::fmt::Display for RequestConfigurationError {
 }
 
 impl std::error::Error for RequestConfigurationError {}
+
+fn validate_steering_instruction(
+    instruction: &str,
+) -> std::result::Result<(), RequestConfigurationError> {
+    if instruction.trim().is_empty() {
+        return Err(RequestConfigurationError(
+            "steering instruction must not be empty or whitespace-only".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(RequestConfigurationError(message.into()))
@@ -1341,8 +1803,23 @@ fn apply_raw_config_patch(
     Ok(())
 }
 
+fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool {
+    let Some(backend) = config
+        .backend
+        .as_deref()
+        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
+    else {
+        return false;
+    };
+    managed_backend_base_url(backend).is_some()
+        && (config.base_url.trim().is_empty() || config.api_key_env.is_some())
+}
+
 fn parse_prospective_model_config(
     config: &mut sessions::RawSessionModelConfig,
+    backend_selected: bool,
+    base_url_omitted: bool,
+    api_key_env_omitted: bool,
 ) -> Result<(
     BackendKind,
     Option<ReasoningEffort>,
@@ -1356,15 +1833,22 @@ fn parse_prospective_model_config(
     })?;
     let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
     let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
-    // A zero-length stored value is how legacy/incomplete rows represent an
-    // absent NOT NULL base_url. Concrete request values are rejected before
-    // reaching this point, so only repair can take the managed default path.
-    let stored_base_url = if config.base_url.is_empty() {
+    let managed_base_url = managed_backend_base_url(backend);
+    // Selecting a managed backend is a tuple-level operation: omitted fields
+    // select its canonical endpoint and stored credential mode rather than
+    // inheriting an unrelated API-key backend's values. Concrete request values
+    // remain authoritative and proceed to normal validation.
+    let use_managed_base_url = managed_base_url.is_some()
+        && ((backend_selected && base_url_omitted) || config.base_url.trim().is_empty());
+    let stored_base_url = if use_managed_base_url {
         None
     } else {
         Some(config.base_url.clone())
     };
     config.base_url = resolve_model_base_url(backend, stored_base_url)?;
+    if managed_base_url.is_some() && api_key_env_omitted {
+        config.api_key_env = None;
+    }
     let reasoning_effort = config
         .reasoning_effort
         .as_deref()
@@ -1464,6 +1948,7 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
 }
 
 fn session_event_stream(
+    epoch_id: String,
     replay_boundary_sequence_id: u64,
     replay_gap: Option<SessionReplayGap>,
     replayed_events: Vec<SessionEventEnvelope>,
@@ -1475,6 +1960,7 @@ fn session_event_stream(
             "replay_boundary",
             None,
             &ReplayBoundaryEvent {
+                epoch_id,
                 replay_boundary_sequence_id,
             },
         ));
@@ -1510,8 +1996,8 @@ fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
 
 fn sse_json_event<T: Serialize>(event: &str, id: Option<String>, payload: &T) -> Event {
     let data = serde_json::to_string(payload).unwrap_or_else(|error| {
-        serde_json::json!({ "error": format!("failed to serialize SSE payload: {error}") })
-            .to_string()
+        let _ = error;
+        serde_json::json!({ "error": "failed to serialize SSE payload" }).to_string()
     });
     let event = Event::default().event(event).data(data);
     match id {
@@ -1580,6 +2066,15 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
     }
 }
 
+impl From<RequestConfigurationError> for ApiError {
+    fn from(error: RequestConfigurationError) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
@@ -1600,7 +2095,11 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unknown host")
         {
             StatusCode::NOT_FOUND
-        } else if message.contains("busy") || message.contains("no active run") {
+        } else if message.contains("busy")
+            || message.contains("no active run")
+            || message.contains("not active")
+            || message.contains("active run is finishing")
+        {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
             || message.contains("cancellation is not supported")
@@ -1633,6 +2132,14 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    use axum::{
+        body::{to_bytes, Body, Bytes},
+        http::Request,
+    };
+    use flate2::read::GzDecoder;
+    use tower::ServiceExt;
 
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
@@ -1769,135 +2276,184 @@ mod tests {
     }
 
     #[test]
-    fn web_configuration_controls_include_together_and_launch_parity_fields() {
-        let html = include_str!("../assets/index.html");
-        for select_id in ["launchBackend", "settingsBackend"] {
-            let select = html
-                .split(&format!("id=\"{select_id}\""))
-                .nth(1)
-                .and_then(|tail| tail.split("</select>").next())
-                .expect("backend select");
-            assert!(select.contains("<option value=\"together-chat\">together-chat</option>"));
-        }
-        assert!(html.contains("id=\"launchApiKeyEnv\""));
-        assert!(html.contains("id=\"launchExtraHeaders\""));
+    fn production_asset_routes_and_privacy_smoke_contract() {
+        const HTML: &str = include_str!("../assets/index.html");
+        const CSS: &str = include_str!("../assets/redesign.css");
+        const APP: &str = include_str!("../assets/app.js");
 
-        let app = include_str!("../assets/app.js");
-        assert!(app.contains("buildLaunchModelPayload"));
-        assert!(app.contains("payload.api_key_env = apiKeyEnv"));
-        assert!(app.contains("payload.extra_headers = headers"));
-        assert!(app.contains("body = buildSettingsPatch"));
+        for asset in ["/assets/redesign.css", "/assets/app.js"] {
+            assert!(HTML.contains(asset), "missing production asset {asset}");
+        }
+        assert!(!HTML.contains("/assets/app.css"));
+        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
+        assert!(!CSS.trim().is_empty());
+        assert!(!APP.trim().is_empty());
+        assert!(
+            !APP.contains("include_system"),
+            "production frontend must not opt into system messages"
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_boundary_accepts_only_local_same_origin_or_originless_requests() {
+        let root = temp_root("browser_boundary");
+        let app = router(test_manager(&root));
+        let cases = [
+            (Some("localhost"), None, None, StatusCode::OK),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:3210"),
+                Some("same-origin"),
+                StatusCode::OK,
+            ),
+            (
+                Some("127.0.0.1:3210"),
+                Some("http://127.0.0.1:3210"),
+                None,
+                StatusCode::OK,
+            ),
+            (
+                Some("[::1]:3210"),
+                Some("http://[::1]:3210"),
+                None,
+                StatusCode::OK,
+            ),
+            (Some("evil.example"), None, None, StatusCode::FORBIDDEN),
+            (
+                Some("localhost:3210"),
+                Some("http://evil.example:3210"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:9999"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("null"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                Some("http://localhost:3210/path"),
+                None,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("localhost:3210"),
+                None,
+                Some("cross-site"),
+                StatusCode::FORBIDDEN,
+            ),
+            (None, None, None, StatusCode::FORBIDDEN),
+        ];
+
+        for (host, origin, fetch_site, expected) in cases {
+            let mut request = Request::builder().uri("/health");
+            if let Some(host) = host {
+                request = request.header(header::HOST, host);
+            }
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            if let Some(fetch_site) = fetch_site {
+                request = request.header("sec-fetch-site", fetch_site);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                expected,
+                "host={host:?} origin={origin:?}"
+            );
+            assert!(response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none());
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn grouped_events_and_tiled_threads_assets_expose_their_contracts() {
-        let html = include_str!("../assets/index.html");
-        for id in ["eventStreamStatus", "eventLog", "threadsView"] {
-            assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
+    fn bind_address_must_be_ipv4_or_ipv6_loopback() {
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            validate_bind_address(address.parse().unwrap()).unwrap();
         }
-        assert!(!html.contains("eventViewThreads"));
-        assert!(!html.contains("eventViewChronology"));
-        assert!(!html.contains("events-view-switch"));
-        assert!(html.contains("role=\"status\" aria-live=\"polite\""));
-        assert!(html.contains("class=\"event-log event-streams\""));
-        assert!(html.contains("class=\"threads-view\" aria-label=\"Thread lifecycle\""));
+        for address in ["0.0.0.0:3210", "[::]:3210", "192.168.1.10:3210"] {
+            assert!(validate_bind_address(address.parse().unwrap()).is_err());
+        }
+    }
 
-        let app = include_str!("../assets/app.js");
-        let event_lifecycle_order = ["Orchestrator", "Running", "Queued", "Finished"];
-        let event_positions: Vec<_> = event_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderEventStreamArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing dense Events {area} area"))
-            })
-            .collect();
-        assert!(event_positions.windows(2).all(|pair| pair[0] < pair[1]));
-        let thread_lifecycle_order = ["Running", "Queued", "Finished"];
-        let thread_positions: Vec<_> = thread_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderThreadTileArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing Threads tile {area} area"))
-            })
-            .collect();
-        assert!(thread_positions.windows(2).all(|pair| pair[0] < pair[1]));
-
-        assert!(app.contains(
-            "const orderedStreams = area === \"orchestrator\" ? [...streams] : orderedThreadsByName(streams);"
-        ));
-        assert!(app.contains("orderedStreams.map((stream) => area === \"orchestrator\""));
-        assert!(app.contains("const orderedTiles = orderedThreadTiles(tiles);"));
-
-        assert!(!app.contains("renderThreadTileArea(\"Orchestrator\""));
-        assert!(!app.contains("renderOrchestratorThreadTile"));
+    #[tokio::test]
+    async fn legacy_css_route_is_an_exact_alias() {
+        let root = temp_root("css_alias");
+        let app = router(test_manager(&root));
+        let canonical = get_response(app.clone(), "/assets/redesign.css", None).await;
+        let alias = get_response(app, "/assets/app.css", None).await;
+        assert_eq!(canonical.status(), StatusCode::OK);
+        assert_eq!(alias.status(), StatusCode::OK);
         assert_eq!(
-            app.matches("const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);")
-                .count(),
-            1,
-            "Events must remain the sole Orchestrator presentation consumer"
+            canonical.headers().get(header::CONTENT_TYPE),
+            alias.headers().get(header::CONTENT_TYPE)
         );
-        assert!(app.contains("class=\"event-stream-tile-grid\""));
-        assert!(app.contains("class=\"event-thread-stream event-tone-${tone}\""));
-        assert!(app.contains("items.map(renderDenseEventRow)"));
-        assert!(app.contains("stream.activity"));
-        assert!(!app.contains("stream.allActivity"));
-        assert!(!app.contains("[...items].reverse()"));
-        assert!(!app.contains("renderEventChronology"));
-        assert!(!app.contains("eventsViewBySession"));
-        assert!(app.contains("data-thread-key=\"${escapeAttr(key)}\""));
-        assert!(app.contains("aria-expanded=\"${expanded ? \"true\" : \"false\"}\""));
-        assert!(app.contains("aria-controls=\"${escapeAttr(controlsId)}\""));
-        assert!(app.contains("label: \"Timed out\""));
-        assert!(app.contains("label: \"Dispatch error\""));
-        assert!(app.contains(
-            "const terminalError = threadError\n      && evidenceIsNewer(threadError, dispatch.start);"
-        ));
-        assert!(!app.contains("&& !snapshotActive"));
-        assert!(app.contains("label: \"Retained history\""));
-        assert!(app.contains("tile.episodes.map(renderThreadEpisode)"));
-        assert!(app.contains("const episodes = snapshot?.thread_episodes?.[name] || [];"));
-        assert!(app.contains("episodes,\n      retained,"));
+        assert_eq!(response_body(canonical).await, response_body(alias).await);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
-        let css = include_str!("../assets/app.css");
-        assert!(css.contains("container-name: events"));
-        for threshold in [600, 900, 1200] {
-            assert!(css.contains(&format!("@container events (min-width: {threshold}px)")));
-            assert!(css.contains(&format!("@container threads (min-width: {threshold}px)")));
-        }
-        assert!(css.contains(".event-stream-area-orchestrator .event-thread-stream"));
-        assert!(css.contains(".event-stream-tile-grid"));
-        for removed_thread_selector in [
-            ".thread-orchestrator-cell",
-            ".thread-orchestrator-summary",
-            ".thread-orchestrator-card",
-        ] {
-            assert!(!css.contains(removed_thread_selector));
-        }
-        for accent_selector in [
-            ".event-tone-running",
-            ".event-tone-queued",
-            ".thread-pulse-card.thread-tone-running",
-            ".thread-pulse-card.thread-tone-queued",
-            ".thread-tone-running .thread-card-status",
-            ".thread-tone-queued .thread-card-status",
-        ] {
-            assert!(
-                !css.contains(accent_selector),
-                "lifecycle tile must remain neutral: {accent_selector}"
-            );
-        }
-        assert!(css.contains(".event-thread-stream.event-tone-danger"));
-        assert!(css.contains(".thread-pulse-card.thread-tone-danger"));
-        assert!(!css.contains("box-shadow: 0 0 12px var(--danger-ring)"));
-        assert!(css.contains(".thread-tile-cell.is-expanded"));
-        assert!(css.contains("grid-column: 1 / -1"));
-        assert!(css.contains(".event-stream-row"));
+    #[tokio::test]
+    async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
+        let root = temp_root("route_compression");
+        let app = router(test_manager(&root));
+
+        let identity = get_response(app.clone(), "/assets/app.js", None).await;
+        assert_eq!(identity.status(), StatusCode::OK);
+        assert!(identity.headers().get(header::CONTENT_ENCODING).is_none());
+        let identity_body = response_body(identity).await;
+        assert_eq!(identity_body.as_ref(), include_bytes!("../assets/app.js"));
+
+        let compressed = get_response(app.clone(), "/assets/app.js", Some("gzip")).await;
+        assert_eq!(compressed.status(), StatusCode::OK);
+        assert_eq!(
+            compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(gunzip(&response_body(compressed).await), identity_body);
+
+        let json_identity = get_response(app.clone(), "/store", None).await;
+        assert_eq!(json_identity.status(), StatusCode::OK);
+        assert!(json_identity
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .is_none());
+        let json_identity_body = response_body(json_identity).await;
+        let _: serde_json::Value = serde_json::from_slice(&json_identity_body).unwrap();
+
+        let json_compressed = get_response(app, "/store", Some("gzip")).await;
+        assert_eq!(json_compressed.status(), StatusCode::OK);
+        assert_eq!(
+            json_compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(
+            gunzip(&response_body(json_compressed).await),
+            json_identity_body
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn session_event_envelope_serializes_for_sse_payloads() {
         let envelope = SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id: 42,
             client_id: None,
             run_id: None,
@@ -2042,6 +2598,28 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
+        let mut request = Request::builder()
+            .uri(uri)
+            .header(header::HOST, "localhost");
+        if let Some(accept_encoding) = accept_encoding {
+            request = request.header(header::ACCEPT_ENCODING, accept_encoding);
+        }
+        app.oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn response_body(response: Response) -> Bytes {
+        to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    fn gunzip(body: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::new();
+        GzDecoder::new(body).read_to_end(&mut decoded).unwrap();
+        decoded
     }
 
     #[test]
@@ -2413,6 +2991,78 @@ mod tests {
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
     }
 
+    fn test_transcript() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "hidden system preface".to_string(),
+            },
+            Message::User {
+                content: "old cycle".to_string(),
+            },
+            Message::Assistant {
+                content: Some("old answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "current cycle".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("thinking".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![nac_core::types::ToolCall {
+                    id: "call-thread".to_string(),
+                    call_type: "function".to_string(),
+                    function: nac_core::types::FunctionCall {
+                        name: "thread".to_string(),
+                        arguments: r#"{"name":"current/research"}"#.to_string(),
+                    },
+                }]),
+            },
+            Message::System {
+                content: "hidden tail".to_string(),
+            },
+            Message::Assistant {
+                content: Some("done".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ]
+    }
+
+    fn seed_session_with_messages(
+        root: &std::path::Path,
+        session_id: &str,
+        created_at: &str,
+        messages: Vec<Message>,
+    ) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            messages,
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        snapshot.created_at = created_at.to_string();
+        snapshot.updated_at = created_at.to_string();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session messages");
+    }
+
     fn seed_editable_session(root: &std::path::Path, session_id: &str) {
         let mut snapshot = sessions::new_snapshot(
             session_id.to_string(),
@@ -2781,6 +3431,139 @@ thread_timeout_secs = 7200
                 std::future::pending::<()>().await;
             }
         })
+    }
+
+    #[tokio::test]
+    async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("steering_validation");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let app = router(test_manager(&root));
+
+        for (uri, instruction, expected) in [
+            (
+                "/sessions/missing/steering",
+                "  \n ",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/missing/threads/worker/steering",
+                "\t",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/session/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+            (
+                "/sessions/session/threads/worker/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "instruction": instruction }).to_string(),
+                ))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), expected, "{uri}: {instruction:?}");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn active_run_accepts_orchestrator_steering() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("orchestrator_steering");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "begin the original task".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let steering = manager
+            .queue_orchestrator_steering(
+                "session",
+                OrchestratorSteeringRequest {
+                    instruction: "change direction".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(steering.status, "queued");
+        let records = manager.snapshot("session").await.unwrap().thread_steering;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].thread_name, "__orchestrator__");
+        assert_eq!(records[0].instruction, "change direction");
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
+        let root = temp_root("delete_before_submit");
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+
+        let (delete_started_tx, delete_started_rx) = tokio::sync::oneshot::channel();
+        let delete_manager = manager.clone();
+        let delete = tokio::spawn(async move {
+            delete_started_tx.send(()).unwrap();
+            delete_manager.delete_session("session").await
+        });
+        delete_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "must not revive deleted state".to_string(),
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!delete.is_finished());
+        assert!(!submit.is_finished());
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), delete)
+            .await
+            .expect("delete should acquire the lifecycle gate")
+            .unwrap()
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should observe the deletion")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("was not found"), "{error:#}");
+        assert!(sessions::load_session(&root.join("store.db"), "session").is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -3198,6 +3981,7 @@ extra_headers = { X-Config = "yes" }
             .create_session(CreateSessionRequest::default())
             .await
             .expect("omitted fields should inherit config");
+        assert!(inherited.metadata.extra_headers.is_empty());
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
@@ -3208,6 +3992,21 @@ extra_headers = { X-Config = "yes" }
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
         );
+        let Json(config) =
+            session_config_handler(State(manager.clone()), AxumPath(inherited_id.clone()))
+                .await
+                .unwrap();
+        assert_eq!(
+            config.extra_headers_json.as_deref(),
+            Some("{\"X-Config\":\"yes\"}")
+        );
+        assert!(manager
+            .snapshot(&inherited_id)
+            .await
+            .unwrap()
+            .metadata
+            .extra_headers
+            .is_empty());
 
         let cleared = manager
             .create_session(CreateSessionRequest {
@@ -3230,6 +4029,52 @@ extra_headers = { X-Config = "yes" }
         assert!(stored.extra_headers.is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("openai_to_arcee_launch");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"[model]
+backend = "openai-responses"
+model = "openai-model"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+"#,
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("arcee-model".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("managed launch must not inherit the OpenAI URL or selector");
+        assert_eq!(
+            created.metadata.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(created.metadata.api_key_env, None);
+
+        let session_id = created.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -3414,24 +4259,65 @@ extra_headers = { X-Config = "yes" }
             let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
             incomplete.backend = backend;
             incomplete.base_url.clear();
-            incomplete.api_key_env = None;
+            incomplete.api_key_env = Some("STALE_API_KEY".to_string());
             sessions::update_session_model_config(&store_path, &incomplete).unwrap();
 
             manager
-                .update_session_config(
-                    session_id,
-                    UpdateConfigRequest {
-                        model: RequestField::Value("repaired-model".to_string()),
-                        ..UpdateConfigRequest::default()
-                    },
-                )
+                .update_session_config(session_id, UpdateConfigRequest::default())
                 .await
-                .expect("repair PATCH should materialize an absent managed base URL");
+                .expect("empty repair PATCH should materialize the managed tuple");
             let repaired = sessions::load_session(&store_path, session_id).unwrap();
             assert_eq!(repaired.base_url, expected_base);
+            assert_eq!(repaired.api_key_env, None);
+            let rehydrated = manager.session_config(session_id).unwrap();
+            assert_eq!(rehydrated.base_url, expected_base);
+            assert_eq!(rehydrated.api_key_env, None);
             let resumed = manager.snapshot(session_id).await.unwrap();
             assert_eq!(resumed.metadata.base_url, expected_base);
         }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("api_key_to_arcee_patch");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
+        api_key_session.reasoning_effort = None;
+        sessions::update_session_model_config(&store_path, &api_key_session).unwrap();
+        let manager = test_manager(&root);
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("backend-only PATCH must select the complete managed tuple");
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+        let rehydrated = manager.session_config("session").unwrap();
+        assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
+        assert_eq!(
+            rehydrated.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(rehydrated.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -4290,6 +5176,7 @@ extra_headers = { X-Config = "yes" }
     fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id,
             client_id: None,
             run_id: None,
@@ -4524,26 +5411,129 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
-    async fn sse_orders_boundary_then_gap_replay_and_live_events() {
-        let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
-        let live = test_event(6, "live-6");
-        let (sender, receiver) = tokio::sync::broadcast::channel(4);
-        sender.send(live).unwrap();
-        drop(sender);
-
-        let stream = session_event_stream(
-            5,
-            Some(SessionReplayGap {
-                missing_from_sequence_id: 2,
-                missing_to_sequence_id: 3,
-            }),
-            replayed,
-            receiver,
+    async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("snapshot_projection");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let transcript = test_transcript();
+        seed_session_with_messages(
+            &root,
+            "target",
+            "2026-01-02 00:00:00.000000000",
+            transcript.clone(),
         );
-        let response = Sse::new(stream).into_response();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        seed_session(&root, "other", "2026-01-01 00:00:00.000000000");
+        let app = router(test_manager(&root));
+        let query = "message_limit=2&thread_event_limit=24";
+
+        let default_response =
+            get_response(app.clone(), &format!("/sessions/target?{query}"), None).await;
+        let default_status = default_response.status();
+        let default_body = response_body(default_response).await;
+        assert_eq!(
+            default_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&default_body)
+        );
+        let default: serde_json::Value = serde_json::from_slice(&default_body).unwrap();
+
+        let true_response = get_response(
+            app.clone(),
+            &format!("/sessions/target?{query}&include_sessions=true"),
+            None,
+        )
+        .await;
+        assert_eq!(true_response.status(), StatusCode::OK);
+        let included: serde_json::Value =
+            serde_json::from_slice(&response_body(true_response).await).unwrap();
+        assert_eq!(included, default);
+        assert_eq!(default["sessions"].as_array().unwrap().len(), 2);
+
+        let false_response = get_response(
+            app,
+            &format!("/sessions/target?{query}&include_sessions=false"),
+            None,
+        )
+        .await;
+        assert_eq!(false_response.status(), StatusCode::OK);
+        let projected: serde_json::Value =
+            serde_json::from_slice(&response_body(false_response).await).unwrap();
+        assert_eq!(projected["sessions"], serde_json::json!([]));
+        let mut expected_projected = default.clone();
+        expected_projected["sessions"] = serde_json::json!([]);
+        assert_eq!(projected, expected_projected);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn paged_message_queries_exclude_system_prompts_by_default() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(!snapshot_query.include_system);
+        assert!(!messages_query.include_system);
+    }
+
+    #[test]
+    fn paged_message_queries_include_system_prompts_when_requested() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(snapshot_query.include_system);
+        assert!(messages_query.include_system);
+    }
+
+    #[tokio::test]
+    async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
+        async fn finite_sse_route(
+        ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
+            let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
+            let live = test_event(6, "live-6");
+            let (sender, receiver) = tokio::sync::broadcast::channel(4);
+            sender.send(live).unwrap();
+            drop(sender);
+
+            Sse::new(session_event_stream(
+                "test-epoch".to_string(),
+                5,
+                Some(SessionReplayGap {
+                    missing_from_sequence_id: 2,
+                    missing_to_sequence_id: 3,
+                }),
+                replayed,
+                receiver,
+            ))
+        }
+
+        let app = Router::new()
+            .route("/events", get(finite_sse_route))
+            .layer(response_compression_layer());
+        let response = get_response(app, "/events", Some("gzip")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = response_body(response).await;
         let body = String::from_utf8(body.to_vec()).unwrap();
 
         let boundary = body.find("event: replay_boundary").unwrap();
@@ -4553,6 +5543,7 @@ extra_headers = { X-Config = "yes" }
         let live_6 = body.find("\"sequence_id\":6").unwrap();
         assert!(boundary < gap && gap < replay_4 && replay_4 < replay_5 && replay_5 < live_6);
         assert!(body.contains("\"replay_boundary_sequence_id\":5"));
+        assert!(body.contains("\"epoch_id\":\"test-epoch\""));
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));

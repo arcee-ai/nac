@@ -1004,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_session_cascades_to_threads_episodes_and_worksets() {
+    fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("delete_cascade");
 
@@ -1056,6 +1056,29 @@ mod tests {
             }],
         };
         crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
+        crate::store::queue_thread_steering(
+            &store_path,
+            "session-del",
+            "auth",
+            "auth-dispatch",
+            "check the failure path",
+        )
+        .unwrap();
+        crate::store::append_thread_event(
+            &store_path,
+            "session-del",
+            "auth",
+            r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
+        )
+        .unwrap();
+        crate::store::write_session_overview(
+            &store_path,
+            "session-del",
+            "Work is active.",
+            "model-a",
+            &snapshot.updated_at,
+        )
+        .unwrap();
 
         // Verify data exists
         assert!(!crate::store::list_threads(&store_path, "session-del")
@@ -1068,6 +1091,22 @@ mod tests {
                 == 1
         );
         assert!(list_sessions(&store_path).unwrap().len() == 1);
+        assert_eq!(
+            crate::store::list_thread_steering(&store_path, "session-del")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            crate::store::read_session_overview(&store_path, "session-del")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"]
+                .len(),
+            1
+        );
 
         // Delete the session
         let deleted = delete_session(&store_path, "session-del").unwrap();
@@ -1084,6 +1123,21 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(list_sessions(&store_path).unwrap().is_empty());
+        assert!(
+            crate::store::list_thread_steering(&store_path, "session-del")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            crate::store::read_session_overview(&store_path, "session-del")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            crate::store::load_all_thread_events(&store_path, "session-del", 20)
+                .unwrap()
+                .is_empty()
+        );
 
         // Deleting a non-existent session returns false
         let deleted_again = delete_session(&store_path, "session-del").unwrap();

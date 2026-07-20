@@ -541,26 +541,31 @@ async fn acquire_refresh_lock() -> Result<FileLock> {
     }
 }
 
-/// Returns a valid access token, refreshing proactively when it is at or near
-/// expiry. The pre-check read is lock-free (credential writes are atomic
-/// renames, so a reader always sees a complete record); the refresh itself is
-/// serialized in- and cross-process.
-pub(super) async fn fresh_access_token(client: &Client) -> Result<String> {
-    let auth = read_stored_auth()?;
+/// Returns a valid access token bound to `expected_base_url`, refreshing
+/// proactively when it is at or near expiry. The pre-check read is lock-free
+/// (credential writes are atomic renames, so a reader always sees a complete
+/// record); the refresh itself is serialized in- and cross-process.
+pub(super) async fn fresh_access_token(client: &Client, expected_base_url: &str) -> Result<String> {
+    let auth = read_stored_auth_for_base_url(expected_base_url)?;
     if !near_expiry(&auth) {
         return Ok(auth.access_token);
     }
-    refresh_locked(client, near_expiry).await
+    refresh_locked(client, expected_base_url, near_expiry).await
 }
 
 /// Refreshes after a 401. Passing the access token that failed lets a queued
 /// caller detect that another holder already rotated past it and reuse the new
-/// token instead of triggering a redundant rotation.
+/// token instead of triggering a redundant rotation. Every re-read remains
+/// bound to the inference origin selected by the existing model client.
 pub(super) async fn force_refresh_access_token(
     client: &Client,
+    expected_base_url: &str,
     stale_access_token: &str,
 ) -> Result<String> {
-    refresh_locked(client, |auth| auth.access_token == stale_access_token).await
+    refresh_locked(client, expected_base_url, |auth| {
+        auth.access_token == stale_access_token
+    })
+    .await
 }
 
 /// Serializes the refresh across this process (async gate) and across processes
@@ -568,11 +573,12 @@ pub(super) async fn force_refresh_access_token(
 /// only performs the network refresh when `should_refresh` still holds.
 async fn refresh_locked(
     client: &Client,
+    expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
 ) -> Result<String> {
     let _gate = refresh_gate().lock().await;
     let _lock = acquire_refresh_lock().await?;
-    let auth = read_stored_auth()?;
+    let auth = read_stored_auth_for_base_url(expected_base_url)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
     }
@@ -599,8 +605,13 @@ async fn refresh_and_store_auth(
     }
 }
 
-fn stored_auth_from_refresh(current: StoredArceeAuth, refreshed: RefreshSuccess) -> StoredArceeAuth {
-    let expires_in = refreshed.expires_in.unwrap_or(DEFAULT_TOKEN_EXPIRES_IN_SECS);
+fn stored_auth_from_refresh(
+    current: StoredArceeAuth,
+    refreshed: RefreshSuccess,
+) -> StoredArceeAuth {
+    let expires_in = refreshed
+        .expires_in
+        .unwrap_or(DEFAULT_TOKEN_EXPIRES_IN_SECS);
     StoredArceeAuth {
         auth_type: AUTH_TYPE.to_string(),
         access_token: refreshed.access_token,
@@ -682,6 +693,20 @@ pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
                 "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
             )
         })
+}
+
+fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<StoredArceeAuth> {
+    let auth = read_stored_auth()?;
+    let expected_url = validate_approved_base_url(expected_base_url)?;
+    let stored_url = validate_stored_base_url(&auth.base_url)?;
+    if expected_url.origin() != stored_url.origin() {
+        return Err(stored_auth_configuration_error(format!(
+            "Arcee endpoint origin '{}' does not match the stored credential origin '{}'; log in for the selected origin or select 'arcee-api' with separate API-key credentials",
+            expected_url.origin().ascii_serialization(),
+            stored_url.origin().ascii_serialization()
+        )));
+    }
+    Ok(auth)
 }
 
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
@@ -1734,7 +1759,10 @@ mod tests {
             RefreshOutcome::Revoked => panic!("unexpected revoked outcome"),
         };
         assert_eq!(refreshed.access_token, "jwt-access-2");
-        assert_eq!(refreshed.refresh_token.as_deref(), Some("rotated-refresh-token"));
+        assert_eq!(
+            refreshed.refresh_token.as_deref(),
+            Some("rotated-refresh-token")
+        );
         assert_eq!(refreshed.expires_in, Some(3600));
 
         // The rotated refresh token replaces the one we sent — persisting the old

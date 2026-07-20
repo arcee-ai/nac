@@ -201,8 +201,8 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
 pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
-    // Delete child tables before parent tables to respect FK constraints:
-    // episodes → threads, workset_items → worksets.
+    // Delete non-cascading child tables before their parents. Session-owned
+    // auxiliary rows are intentionally left to their session foreign keys.
     tx.execute(
         "DELETE FROM episodes WHERE session_id = ?1",
         params![session_id],

@@ -6,17 +6,50 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod render;
 mod schema;
+mod session_overviews;
+mod steering;
+mod thread_events;
 mod threads;
 mod time;
 mod worksets;
 
 pub use render::*;
 pub use schema::{default_store_path, initialize};
+pub use session_overviews::*;
+pub use steering::*;
+pub use thread_events::*;
 pub use threads::*;
 pub use worksets::*;
 
-pub(crate) use schema::open_connection;
+pub(crate) use schema::{open_connection, open_runtime_connection};
 use time::now_utc;
+
+#[cfg(test)]
+pub(crate) fn insert_test_session(path: &Path, session_id: &str) {
+    let conn = open_runtime_connection(path).unwrap();
+    conn.execute(
+        "INSERT INTO sessions
+             (session_id, cwd, store_path, model, base_url, messages_json,
+              created_at, updated_at)
+         VALUES (?1, '/tmp/project', '/tmp/store.db', 'test-model',
+                 'https://example.invalid', '[]', ?2, ?2)",
+        params![session_id, now_utc()],
+    )
+    .unwrap();
+}
+
+pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(code, _))
+                if matches!(
+                    code.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                )
+        )
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpisodeRecord {
@@ -36,6 +69,15 @@ pub struct ThreadRecord {
     pub updated_at: String,
     pub episode_count: i64,
     pub latest_action: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadEventRecord {
+    pub id: i64,
+    pub thread_name: String,
+    pub session_id: String,
+    pub event_json: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,20 +219,62 @@ mod tests {
     }
 
     #[test]
-    fn delete_thread_removes_all_episodes() {
+    fn delete_thread_removes_only_target_owned_rows() {
         let store_path = temp_store_path("delete");
         initialize(&store_path).unwrap();
+        insert_test_session(&store_path, "session-c");
 
-        let session_id = "session-c";
-        append_episode(&store_path, session_id, "impl", "step-1", "first episode").unwrap();
-        append_episode(&store_path, session_id, "impl", "step-2", "second episode").unwrap();
+        for thread_name in ["impl", "keep"] {
+            append_episode(&store_path, "session-c", thread_name, "step", "episode").unwrap();
+            queue_thread_steering(
+                &store_path,
+                "session-c",
+                thread_name,
+                &format!("dispatch-{thread_name}"),
+                "instruction",
+            )
+            .unwrap();
+            append_thread_event(&store_path, "session-c", thread_name, "{}").unwrap();
+        }
 
-        let deleted = delete_thread(&store_path, session_id, "impl").unwrap();
+        let deleted = delete_thread(&store_path, "session-c", "impl").unwrap();
         assert!(deleted);
-        assert!(thread_read(&store_path, session_id, "impl")
-            .unwrap()
-            .is_empty());
 
+        let conn = open_runtime_connection(&store_path).unwrap();
+        for table in ["threads", "episodes", "thread_steering", "thread_events"] {
+            let target_count: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table} WHERE session_id = ?1 AND {} = ?2",
+                        if table == "threads" {
+                            "name"
+                        } else {
+                            "thread_name"
+                        }
+                    ),
+                    params!["session-c", "impl"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let retained_count: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table} WHERE session_id = ?1 AND {} = ?2",
+                        if table == "threads" {
+                            "name"
+                        } else {
+                            "thread_name"
+                        }
+                    ),
+                    params!["session-c", "keep"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(target_count, 0, "target rows remain in {table}");
+            assert_eq!(retained_count, 1, "unrelated rows changed in {table}");
+        }
+
+        drop(conn);
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

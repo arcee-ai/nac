@@ -981,13 +981,8 @@ impl App {
                     Tone::Muted,
                 );
             }
-            AgentEvent::ModelCallStarted {
-                thread_name,
-                iteration,
-            } => {
-                let actor = thread_name.unwrap_or_else(|| "model".to_string());
-                self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
-            }
+            AgentEvent::ModelCallStarted { .. } => {}
+            AgentEvent::TokenUsageUpdated { .. } => {}
             AgentEvent::ToolCallStarted {
                 thread_name,
                 call_id,
@@ -1089,8 +1084,75 @@ impl App {
                 };
                 self.push_timeline(name, detail, Tone::Success);
             }
-            AgentEvent::ThreadLog { name, line } => {
-                self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
+            AgentEvent::ThreadLog { .. } => {}
+            AgentEvent::ThreadSteeringQueued {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::ThreadSteeringDelivered {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::ThreadSteeringExpired {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
+            }
+            AgentEvent::OrchestratorSteeringQueued {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::OrchestratorSteeringDelivered {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::OrchestratorSteeringExpired {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
             }
             AgentEvent::ThreadFinished {
                 name,
