@@ -205,6 +205,7 @@ function persistedConfig(overrides = {}) {
     base_url: "https://api.example.test/v1",
     backend: "openai-responses", reasoning_effort: "medium",
     api_key_env: "CUSTOM_API_KEY",
+    orchestrator_compaction_threshold: null,
     extra_headers_json: '{"X-Trace":"yes"}', config_version: 1,
     diagnostics: [], ...overrides, };
 }
@@ -217,6 +218,7 @@ function settingsFormElement(values = {}) {
       reasoning_effort: "medium", model: "gpt-5",
       base_url: "https://api.example.test/v1",
       api_key_env: "CUSTOM_API_KEY",
+      orchestrator_compaction_threshold: "",
       extra_headers: '{\n  "X-Trace": "yes"\n}', ...values, },
     inert: false, querySelector(selector) {
       if (selector === "#settingsStatus") return status;
@@ -1635,6 +1637,8 @@ scenario("Settings values and safety", "settings renderer shows every diagnostic
   assert.match(html, /<textarea[^>]*>\{broken&lt;&amp;&quot;<\/textarea>/);
   assert.match(html, /Existing headers are unchanged unless this field is edited/);
   assert.match(html, /Blank or <code>\{\}<\/code> removes all extra headers/);
+  assert.match(html, /name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1"/);
+  assert.match(html, /Blank or 0 disables the persisted session threshold/);
 });
 
 scenario("Settings values and safety", "settings selectors preserve unsupported values and expose unset, none, and minimal", () => {
@@ -1670,6 +1674,27 @@ scenario("Settings values and safety", "settings PATCH is sparse, semantic, and 
   }, initial)), { reasoning_effort: "minimal" });
   assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
     extra_headers: "", }, initial)), { extra_headers: {} });
+  assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
+    orchestrator_compaction_threshold: "64000", }, initial)), {
+    orchestrator_compaction_threshold: 64000,
+  });
+  assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
+    orchestrator_compaction_threshold: "0", }, initial)), {});
+
+  const enabled = ui.settingsValuesFromConfig(persistedConfig({
+    orchestrator_compaction_threshold: 64000,
+  }));
+  assert.deepEqual(plain(ui.buildSettingsPatch(settingsFormElement({
+    orchestrator_compaction_threshold: "",
+  }).values, enabled)), { orchestrator_compaction_threshold: null });
+  assert.deepEqual(plain(ui.buildSettingsPatch(settingsFormElement({
+    orchestrator_compaction_threshold: "0",
+  }).values, enabled)), { orchestrator_compaction_threshold: null });
+  for (const value of ["-1", "1.5", "unsafe", "9007199254740992"]) {
+    assert.throws(() => ui.buildSettingsPatch(settingsFormElement({
+      orchestrator_compaction_threshold: value,
+    }).values, initial), /non-negative whole number/);
+  }
 });
 
 scenario("Settings values and safety", "settings PATCH preserves null and unsupported selector values until explicitly replaced", () => {
@@ -2023,20 +2048,23 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
   }))), { cwd: "/repo" });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({
     cwd: "/repo", reasoning_mode: "unset", api_key_mode: "none",
+    orchestrator_compaction_threshold: "0",
     extra_headers: "{}", }))), { cwd: "/repo", reasoning_effort: null,
-    api_key_env: null, extra_headers: null, });
+    api_key_env: null, orchestrator_compaction_threshold: null, extra_headers: null, });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({ mode: "ssh",
     cwd: "~/work", ssh_host: " deploy@example.test ",
     backend: " arcee-api ", model: " coder ",
     base_url: " https://api.example.test/v1 ",
     reasoning_mode: "minimal", api_key_mode: "named",
     api_key_env: " ARCEE_API_KEY ",
+    orchestrator_compaction_threshold: "64000",
     extra_headers: '{"X-Trace":"yes"}',
     sandbox: { image: "must-not-leak" }, }))), { cwd: "~/work",
     ssh_host: "deploy@example.test", backend: "arcee-api",
     model: "coder",
     base_url: "https://api.example.test/v1",
     reasoning_effort: "minimal", api_key_env: "ARCEE_API_KEY",
+    orchestrator_compaction_threshold: 64000,
     extra_headers: { "X-Trace": "yes" }, });
   const sandbox = plain(ui.buildLaunchSessionRequest(launchValues({
     mode: "sandbox", cwd: "/repo", reasoning_mode: "none",
@@ -2061,6 +2089,11 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
   assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
     extra_headers: '{"X":7}',
   })), /must be a string/);
+  for (const value of ["-1", "1.5", "unsafe", "9007199254740992"]) {
+    assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
+      orchestrator_compaction_threshold: value,
+    })), /non-negative whole number/);
+  }
 });
 
 test("session creation serializes every execution mode through the exclusive request builder", async () => {
@@ -2078,6 +2111,7 @@ test("session creation serializes every execution mode through the exclusive req
   isolated.el.launchEffort = { value: "unset" };
   isolated.el.launchModel = { value: "model" };
   isolated.el.launchBaseUrl = { value: "https://api.example.test" };
+  isolated.el.launchCompactionThreshold = { value: "64000" };
   isolated.el.launchApiKeyMode = { value: "none" };
   isolated.el.launchApiKeyEnv = { value: "HIDDEN_KEY" };
   isolated.el.launchExtraHeaders = { value: "" };
@@ -2091,6 +2125,7 @@ test("session creation serializes every execution mode through the exclusive req
   assert.deepEqual(JSON.parse(requests[0].options.body), {
     cwd: "/local/repo", backend: "openai-responses", model: "model",
     base_url: "https://api.example.test",
+    orchestrator_compaction_threshold: 64000,
     reasoning_effort: null, api_key_env: null, });
   isolated.el.launchForm.mode = "sandbox";
   isolated.el.launchEffort.value = "none";

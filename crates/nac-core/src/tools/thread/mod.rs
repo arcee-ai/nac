@@ -186,11 +186,7 @@ pub async fn execute_parsed_dispatch(
     if let Ok(run) = &result {
         if let Some(usage) = &run.usage {
             let mut wu = runtime.worker_usage.lock().await;
-            wu.input_tokens += usage.input_tokens;
-            wu.output_tokens += usage.output_tokens;
-            wu.cache_read_tokens += usage.cache_read_tokens;
-            wu.cache_write_tokens += usage.cache_write_tokens;
-            wu.reasoning_tokens += usage.reasoning_tokens;
+            wu.add_cost_saturating(&usage);
         }
     }
 

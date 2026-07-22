@@ -1,6 +1,6 @@
 use super::*;
 
-const STORE_SCHEMA_VERSION: i64 = 2;
+const STORE_SCHEMA_VERSION: i64 = 3;
 
 /// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
@@ -48,56 +48,65 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match schema_version {
-        0 | 1 => {}
-        STORE_SCHEMA_VERSION => {
-            transaction.commit()?;
-            return Ok(conn);
+        0 | 1 => {
+            create_base_schema(&transaction)?;
+            ensure_workset_items_acceptance_column(&transaction)?;
+            ensure_column(&transaction, "sessions", "backend", "TEXT")?;
+            ensure_column(&transaction, "sessions", "reasoning_effort", "TEXT")?;
+            ensure_column(
+                &transaction,
+                "sessions",
+                "last_response_duration_ms",
+                "INTEGER",
+            )?;
+            ensure_column(
+                &transaction,
+                "sessions",
+                "previous_response_duration_ms",
+                "INTEGER",
+            )?;
+            ensure_column(
+                &transaction,
+                "sessions",
+                "response_durations_ms_json",
+                "TEXT",
+            )?;
+            ensure_column(&transaction, "sessions", "host_id", "TEXT")?;
+            ensure_column(&transaction, "sessions", "api_key_env", "TEXT")?;
+            ensure_column(&transaction, "sessions", "extra_headers_json", "TEXT")?;
+            ensure_column(&transaction, "sessions", "token_usages_json", "TEXT")?;
+            ensure_column(
+                &transaction,
+                "sessions",
+                "config_version",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0)",
+            )?;
+
+            // Both v0 and v1 may contain some or all of the branch's v1
+            // auxiliary tables. Rebuild every table that exists and create the
+            // missing ones before applying the v3 addition.
+            migrate_session_overviews(&transaction)?;
+            migrate_thread_steering(&transaction)?;
+            migrate_thread_events(&transaction)?;
         }
+        2 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
 
-    create_base_schema(&transaction)?;
-    ensure_workset_items_acceptance_column(&transaction)?;
-    ensure_column(&transaction, "sessions", "backend", "TEXT")?;
-    ensure_column(&transaction, "sessions", "reasoning_effort", "TEXT")?;
     ensure_column(
         &transaction,
         "sessions",
-        "last_response_duration_ms",
-        "INTEGER",
+        "orchestrator_compaction_threshold",
+        &format!(
+            "INTEGER CHECK (orchestrator_compaction_threshold IS NULL OR (typeof(orchestrator_compaction_threshold) = 'integer' AND orchestrator_compaction_threshold > 0 AND orchestrator_compaction_threshold <= {}))",
+            crate::MAX_SUPPORTED_TOKEN_COUNT
+        ),
     )?;
-    ensure_column(
-        &transaction,
-        "sessions",
-        "previous_response_duration_ms",
-        "INTEGER",
-    )?;
-    ensure_column(
-        &transaction,
-        "sessions",
-        "response_durations_ms_json",
-        "TEXT",
-    )?;
-    ensure_column(&transaction, "sessions", "host_id", "TEXT")?;
-    ensure_column(&transaction, "sessions", "api_key_env", "TEXT")?;
-    ensure_column(&transaction, "sessions", "extra_headers_json", "TEXT")?;
-    ensure_column(&transaction, "sessions", "token_usages_json", "TEXT")?;
-    ensure_column(
-        &transaction,
-        "sessions",
-        "config_version",
-        "INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0)",
-    )?;
-
-    // Both v0 and v1 may contain some or all of the branch's v1 auxiliary
-    // tables. Rebuild every table that exists and create the missing ones.
-    migrate_session_overviews(&transaction)?;
-    migrate_thread_steering(&transaction)?;
-    migrate_thread_events(&transaction)?;
+    create_orchestrator_compaction_checkpoints_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -106,7 +115,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
 }
 
 fn create_base_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS threads (
              name TEXT NOT NULL,
              session_id TEXT NOT NULL,
@@ -169,6 +178,11 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              extra_headers_json TEXT,
              token_usages_json TEXT,
              config_version INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0),
+             orchestrator_compaction_threshold INTEGER
+                 CHECK (orchestrator_compaction_threshold IS NULL OR
+                        (typeof(orchestrator_compaction_threshold) = 'integer' AND
+                         orchestrator_compaction_threshold > 0 AND
+                         orchestrator_compaction_threshold <= {})),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
@@ -188,7 +202,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              ON workset_items(workset_id, session_id, position);
          CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
              ON sessions(updated_at DESC);",
-    )?;
+        crate::MAX_SUPPORTED_TOKEN_COUNT,
+    ))?;
     Ok(())
 }
 
@@ -440,6 +455,50 @@ fn create_thread_events_index(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn create_orchestrator_compaction_checkpoints_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(&format!(
+        "CREATE TABLE IF NOT EXISTS orchestrator_compaction_checkpoints (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             previous_checkpoint_id INTEGER,
+             summary TEXT NOT NULL CHECK (length(trim(summary)) > 0),
+             tail_start_message_index INTEGER NOT NULL
+                 CHECK (tail_start_message_index >= 0),
+             source_prefix_sha256 BLOB NOT NULL
+                 CHECK (length(source_prefix_sha256) = 32),
+             system_policy_sha256 BLOB NOT NULL
+                 CHECK (length(system_policy_sha256) = 32),
+             prompt_policy_version INTEGER NOT NULL
+                 CHECK (prompt_policy_version > 0
+                        AND prompt_policy_version <= 4294967295),
+             old_context_estimate INTEGER NOT NULL
+                 CHECK (old_context_estimate >= 0
+                        AND old_context_estimate <= {max}),
+             summary_prompt_tokens INTEGER
+                 CHECK (summary_prompt_tokens IS NULL OR
+                        (summary_prompt_tokens >= 0
+                         AND summary_prompt_tokens <= {max})),
+             summary_completion_tokens INTEGER
+                 CHECK (summary_completion_tokens IS NULL OR
+                        (summary_completion_tokens >= 0
+                         AND summary_completion_tokens <= {max})),
+             new_context_estimate INTEGER NOT NULL
+                 CHECK (new_context_estimate >= 0
+                        AND new_context_estimate <= {max}),
+             created_at TEXT NOT NULL,
+             UNIQUE (session_id, id),
+             FOREIGN KEY (session_id, previous_checkpoint_id)
+                 REFERENCES orchestrator_compaction_checkpoints(session_id, id)
+                 ON DELETE CASCADE
+         );
+         CREATE INDEX IF NOT EXISTS idx_orchestrator_compaction_checkpoints_latest
+             ON orchestrator_compaction_checkpoints(session_id, id DESC);",
+        max = crate::MAX_SUPPORTED_TOKEN_COUNT,
+    ))?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(
@@ -535,7 +594,12 @@ fn restore_autoincrement_sequence(
 }
 
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
-    for table in ["session_overviews", "thread_steering", "thread_events"] {
+    for table in [
+        "session_overviews",
+        "thread_steering",
+        "thread_events",
+        "orchestrator_compaction_checkpoints",
+    ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {
             return Err(anyhow!(
@@ -567,482 +631,5 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_schema_{label}_{unique}"))
-            .join("store.db")
-    }
-
-    fn create_legacy_base(conn: &Connection) {
-        conn.execute_batch(
-            "CREATE TABLE sessions (
-                 session_id TEXT PRIMARY KEY,
-                 cwd TEXT NOT NULL,
-                 store_path TEXT NOT NULL,
-                 model TEXT NOT NULL,
-                 base_url TEXT NOT NULL,
-                 sandbox_json TEXT,
-                 messages_json TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 updated_at TEXT NOT NULL
-             );
-             CREATE TABLE threads (
-                 name TEXT NOT NULL,
-                 session_id TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 updated_at TEXT NOT NULL,
-                 PRIMARY KEY (name, session_id)
-             );
-             CREATE TABLE episodes (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 thread_name TEXT NOT NULL,
-                 session_id TEXT NOT NULL,
-                 action TEXT NOT NULL,
-                 content TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id)
-             );",
-        )
-        .unwrap();
-    }
-
-    fn insert_legacy_session(conn: &Connection, session_id: &str) {
-        conn.execute(
-            "INSERT INTO sessions
-                 (session_id, cwd, store_path, model, base_url, messages_json,
-                  created_at, updated_at)
-             VALUES (?1, '/tmp/project', '/tmp/store.db', 'legacy-model',
-                     'https://example.invalid', '[]',
-                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            params![session_id],
-        )
-        .unwrap();
-    }
-
-    fn table_columns(conn: &Connection, table: &str) -> Vec<String> {
-        let mut statement = conn
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .unwrap();
-        statement
-            .query_map([], |row| row.get(1))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-    }
-
-    fn assert_session_cascade(conn: &Connection, table: &str) {
-        let mut statement = conn
-            .prepare(&format!("PRAGMA foreign_key_list({table})"))
-            .unwrap();
-        let foreign_keys = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(
-            foreign_keys,
-            vec![(
-                "sessions".to_string(),
-                "session_id".to_string(),
-                "session_id".to_string(),
-                "CASCADE".to_string(),
-            )],
-            "unexpected foreign key for {table}"
-        );
-    }
-
-    fn assert_v2_auxiliary_schema(conn: &Connection) {
-        assert_eq!(
-            table_columns(conn, "session_overviews"),
-            [
-                "session_id",
-                "summary",
-                "model",
-                "generated_at",
-                "source_updated_at"
-            ]
-        );
-        assert_eq!(
-            table_columns(conn, "thread_steering"),
-            [
-                "id",
-                "session_id",
-                "thread_name",
-                "dispatch_id",
-                "instruction",
-                "status",
-                "created_at",
-                "claimed_at",
-                "delivered_at",
-                "expired_at"
-            ]
-        );
-        assert_eq!(
-            table_columns(conn, "thread_events"),
-            [
-                "id",
-                "session_id",
-                "thread_name",
-                "event_json",
-                "created_at"
-            ]
-        );
-        for table in ["session_overviews", "thread_steering", "thread_events"] {
-            assert_session_cascade(conn, table);
-        }
-        let violation_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(violation_count, 0);
-    }
-
-    #[test]
-    fn main_v0_store_migrates_directly_to_v2() {
-        let path = temp_store_path("main_v0");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let legacy = Connection::open(&path).unwrap();
-        create_legacy_base(&legacy);
-        insert_legacy_session(&legacy, "legacy-session");
-        legacy
-            .execute_batch(
-                "PRAGMA user_version = 0;
-                 INSERT INTO threads
-                     (name, session_id, created_at, updated_at)
-                 VALUES ('legacy-thread', 'legacy-session',
-                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-                 INSERT INTO episodes
-                     (thread_name, session_id, action, content, created_at)
-                 VALUES ('legacy-thread', 'legacy-session', 'inspect', 'preserved',
-                         '2026-01-01T00:00:00Z');",
-            )
-            .unwrap();
-        drop(legacy);
-
-        initialize(&path).unwrap();
-
-        let migrated = Connection::open(&path).unwrap();
-        let version: i64 = migrated
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, STORE_SCHEMA_VERSION);
-        assert_v2_auxiliary_schema(&migrated);
-        let episode: String = migrated
-            .query_row("SELECT content FROM episodes", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(episode, "preserved");
-        drop(migrated);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn partial_v1_tables_at_version_zero_are_rebuilt() {
-        let path = temp_store_path("partial_v1_v0");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let legacy = Connection::open(&path).unwrap();
-        create_legacy_base(&legacy);
-        insert_legacy_session(&legacy, "owned");
-        legacy
-            .execute_batch(
-                "PRAGMA user_version = 0;
-                 CREATE TABLE session_overviews (
-                     session_id TEXT PRIMARY KEY,
-                     status TEXT NOT NULL,
-                     focus_json TEXT NOT NULL,
-                     completed_json TEXT NOT NULL,
-                     blockers_json TEXT NOT NULL,
-                     next_steps_json TEXT NOT NULL,
-                     model TEXT NOT NULL,
-                     generated_at TEXT NOT NULL,
-                     source_updated_at TEXT NOT NULL
-                 );
-                 CREATE TABLE thread_events (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     session_id TEXT NOT NULL,
-                     thread_name TEXT NOT NULL,
-                     event_json TEXT NOT NULL,
-                     created_at TEXT NOT NULL
-                 );
-                 INSERT INTO session_overviews VALUES
-                     ('owned', 'legacy summary', '[]', '[]', '[]', '[]',
-                      'model-a', 'generated', 'source');
-                 INSERT INTO thread_events
-                     (id, session_id, thread_name, event_json, created_at)
-                 VALUES (8, 'owned', 'pre-episode-worker',
-                         '{\"type\":\"thread_started\",\"name\":\"pre-episode-worker\",\"action\":\"legacy action\",\"source_threads\":[]}',
-                         'created');",
-            )
-            .unwrap();
-        drop(legacy);
-
-        initialize(&path).unwrap();
-
-        let migrated = Connection::open(&path).unwrap();
-        assert_v2_auxiliary_schema(&migrated);
-        let summary: String = migrated
-            .query_row("SELECT summary FROM session_overviews", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(summary, "legacy summary");
-        let event: (i64, String) = migrated
-            .query_row("SELECT id, thread_name FROM thread_events", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
-            .unwrap();
-        assert_eq!(event, (8, "pre-episode-worker".to_string()));
-        drop(migrated);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn v1_to_v2_preserves_owned_rows_drops_orphans_and_sequences() {
-        let path = temp_store_path("v1");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let legacy = Connection::open(&path).unwrap();
-        create_legacy_base(&legacy);
-        insert_legacy_session(&legacy, "owned");
-        legacy
-            .execute_batch(
-                "PRAGMA foreign_keys = OFF;
-                 PRAGMA user_version = 1;
-                 CREATE TABLE session_overviews (
-                     session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                     status TEXT NOT NULL,
-                     focus_json TEXT NOT NULL,
-                     completed_json TEXT NOT NULL,
-                     blockers_json TEXT NOT NULL,
-                     next_steps_json TEXT NOT NULL,
-                     model TEXT NOT NULL,
-                     generated_at TEXT NOT NULL,
-                     source_updated_at TEXT NOT NULL
-                 );
-                 CREATE TABLE thread_steering (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     session_id TEXT NOT NULL,
-                     thread_name TEXT NOT NULL,
-                     instruction TEXT NOT NULL,
-                     status TEXT NOT NULL,
-                     created_at TEXT NOT NULL,
-                     delivered_at TEXT,
-                     expired_at TEXT
-                 );
-                 CREATE TABLE thread_events (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     session_id TEXT NOT NULL,
-                     thread_name TEXT NOT NULL,
-                     event_json TEXT NOT NULL,
-                     created_at TEXT NOT NULL
-                 );
-                 INSERT INTO session_overviews VALUES
-                     ('owned', 'owned summary', '[]', '[]', '[]', '[]',
-                      'model-a', 'generated-a', 'source-a');
-                 INSERT INTO session_overviews VALUES
-                     ('orphan', 'secret orphan', '[]', '[]', '[]', '[]',
-                      'model-b', 'generated-b', 'source-b');
-                 INSERT INTO thread_steering VALUES
-                     (7, 'owned', 'worker', 'queued instruction', 'queued',
-                      'created-7', NULL, NULL);
-                 INSERT INTO thread_steering VALUES
-                     (9, 'owned', 'worker', 'delivered instruction', 'delivered',
-                      'created-9', 'delivered-9', NULL);
-                 INSERT INTO thread_steering VALUES
-                     (11, 'owned', 'worker', 'expired instruction', 'expired',
-                      'created-11', NULL, 'expired-11');
-                 INSERT INTO thread_steering VALUES
-                     (13, 'orphan', 'worker', 'orphan instruction', 'queued',
-                      'created-13', NULL, NULL);
-                 INSERT INTO thread_events VALUES
-                     (20, 'owned', 'worker-without-thread-row',
-                      '{\"type\":\"tool_call_started\",\"thread_name\":\"worker-without-thread-row\",\"call_id\":\"call-20\",\"name\":\"exec_command\",\"args_preview\":\"CANARY_COMMAND\",\"args_detail\":\"{\\\"cmd\\\":\\\"CANARY_COMMAND\\\",\\\"workdir\\\":\\\"/safe/work\\\"}\"}',
-                      'created-20');
-                 INSERT INTO thread_events VALUES
-                     (21, 'owned', 'worker-without-thread-row',
-                      '{\"type\":\"model_call_started\",\"thread_name\":\"worker-without-thread-row\",\"iteration\":1}',
-                      'created-21');
-                 INSERT INTO thread_events VALUES
-                     (22, 'owned', 'worker-without-thread-row', '{malformed', 'created-22');
-                 INSERT INTO thread_events VALUES
-                     (25, 'orphan', 'worker', '{\"secret\":true}', 'created-25');",
-            )
-            .unwrap();
-        drop(legacy);
-
-        initialize(&path).unwrap();
-
-        let migrated = open_runtime_connection(&path).unwrap();
-        assert_v2_auxiliary_schema(&migrated);
-        let overview: (String, String, String, String) = migrated
-            .query_row(
-                "SELECT summary, model, generated_at, source_updated_at
-                 FROM session_overviews",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            overview,
-            (
-                "owned summary".to_string(),
-                "model-a".to_string(),
-                "generated-a".to_string(),
-                "source-a".to_string()
-            )
-        );
-
-        let steering = migrated
-            .prepare(
-                "SELECT id, dispatch_id, status, claimed_at, delivered_at, expired_at
-                 FROM thread_steering ORDER BY id",
-            )
-            .unwrap()
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                ))
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(steering.len(), 3);
-        assert_eq!(steering[0].0, 7);
-        assert_eq!(steering[0].1, "legacy-v1:7");
-        assert_eq!(steering[0].2, "expired");
-        assert!(steering[0].3.is_none());
-        assert!(steering[0].4.is_none());
-        assert!(steering[0].5.is_some());
-        assert_eq!(
-            &steering[1],
-            &(
-                9,
-                "legacy-v1:9".to_string(),
-                "delivered".to_string(),
-                Some("delivered-9".to_string()),
-                Some("delivered-9".to_string()),
-                None
-            )
-        );
-        assert_eq!(steering[2].0, 11);
-        assert_eq!(steering[2].2, "expired");
-        assert_eq!(steering[2].5.as_deref(), Some("expired-11"));
-
-        let event: (i64, String, String) = migrated
-            .query_row(
-                "SELECT id, thread_name, event_json FROM thread_events",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(event.0, 20);
-        assert_eq!(event.1, "worker-without-thread-row");
-        assert!(!event.2.contains("CANARY_COMMAND"));
-        let migrated_event: crate::events::AgentEvent = serde_json::from_str(&event.2).unwrap();
-        assert!(matches!(
-            migrated_event,
-            crate::events::AgentEvent::ToolCallStarted {
-                call_id,
-                args_preview,
-                args_detail: None,
-                ..
-            } if call_id == "call-20"
-                && args_preview.contains("/safe/work")
-                && args_preview.contains("execute")
-        ));
-        let migrated_event_count: i64 = migrated
-            .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(migrated_event_count, 1);
-
-        migrated
-            .execute(
-                "INSERT INTO thread_steering
-                     (session_id, thread_name, dispatch_id, instruction, status, created_at)
-                 VALUES ('owned', 'worker', 'next-dispatch', 'next', 'queued', 'next')",
-                [],
-            )
-            .unwrap();
-        assert!(migrated.last_insert_rowid() > 13);
-        migrated
-            .execute(
-                "INSERT INTO thread_events
-                     (session_id, thread_name, event_json, created_at)
-                 VALUES ('owned', 'worker', '{}', 'next')",
-                [],
-            )
-            .unwrap();
-        assert!(migrated.last_insert_rowid() > 25);
-
-        drop(migrated);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn future_schema_version_is_rejected_without_changes() {
-        let path = temp_store_path("future");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let future = Connection::open(&path).unwrap();
-        future.pragma_update(None, "user_version", 3).unwrap();
-        drop(future);
-
-        let error = initialize(&path).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("unsupported store schema version 3"));
-        let unchanged = Connection::open(&path).unwrap();
-        let version: i64 = unchanged
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, 3);
-        assert!(!table_exists(&unchanged, "sessions").unwrap());
-        drop(unchanged);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn opening_v2_store_is_idempotent() {
-        let path = temp_store_path("idempotent");
-        initialize(&path).unwrap();
-        let conn = open_runtime_connection(&path).unwrap();
-        insert_legacy_session(&conn, "owned");
-        conn.execute(
-            "INSERT INTO thread_events
-                 (session_id, thread_name, event_json, created_at)
-             VALUES ('owned', 'worker', '{\"type\":\"thread_started\"}', 'created')",
-            [],
-        )
-        .unwrap();
-        let event_id = conn.last_insert_rowid();
-        drop(conn);
-
-        initialize(&path).unwrap();
-
-        let reopened = open_runtime_connection(&path).unwrap();
-        assert_v2_auxiliary_schema(&reopened);
-        let stored_id: i64 = reopened
-            .query_row("SELECT id FROM thread_events", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(stored_id, event_id);
-        drop(reopened);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-}
+#[path = "schema_tests.rs"]
+mod tests;

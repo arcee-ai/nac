@@ -1,0 +1,8 @@
+This directory applies only to src/agent/prompts/codex_compaction.md.
+
+The prompt was copied verbatim from OpenAI Codex commit
+4f3852107e5eedeb4cb89b57a6d4a35b49f8a59a, file
+codex-rs/prompts/templates/compact/prompt.md.
+
+Copyright 2025 OpenAI
+Licensed under the Apache License, Version 2.0. See LICENSE in this directory.

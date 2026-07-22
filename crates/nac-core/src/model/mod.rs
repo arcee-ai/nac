@@ -18,7 +18,7 @@ mod client;
 mod requests;
 mod responses;
 #[cfg(test)]
-mod test_http;
+pub(crate) mod test_http;
 mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
@@ -1069,6 +1069,50 @@ mod tests {
     }
 
     #[test]
+    fn token_usage_validation_and_accumulation_are_overflow_safe() {
+        let valid = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 2,
+            cache_write_tokens: 3,
+            reasoning_tokens: 4,
+            orchestrator_context_tokens: 20,
+        };
+        assert_eq!(valid.valid_provider_context(), Some(20));
+
+        let mut inconsistent = valid.clone();
+        inconsistent.orchestrator_context_tokens = 19;
+        assert_eq!(inconsistent.valid_provider_context(), None);
+
+        let mut maximum_total = valid.clone();
+        maximum_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT;
+        assert_eq!(
+            maximum_total.valid_provider_context(),
+            Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
+        );
+
+        let mut oversized_total = valid.clone();
+        oversized_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
+        assert_eq!(oversized_total.valid_provider_context(), None);
+
+        let hostile = TokenUsage {
+            input_tokens: u64::MAX,
+            output_tokens: u64::MAX,
+            cache_read_tokens: u64::MAX,
+            cache_write_tokens: u64::MAX,
+            reasoning_tokens: u64::MAX,
+            orchestrator_context_tokens: u64::MAX,
+        };
+        assert_eq!(hostile.valid_provider_context(), None);
+        let mut accumulated = hostile.clone();
+        accumulated.add_cost_saturating(&hostile);
+        accumulated += hostile;
+        assert_eq!(accumulated.input_tokens, u64::MAX);
+        assert_eq!(accumulated.output_tokens, u64::MAX);
+        assert_eq!(accumulated.orchestrator_context_tokens, u64::MAX);
+    }
+
+    #[test]
     fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
         let messages = [Message::User {
             content: "read a file".to_string(),
@@ -1299,6 +1343,7 @@ mod tests {
         let fireworks_absent = fireworks_chat_request("model", None, &messages, &[]);
         assert!(fireworks_absent.get("reasoning_effort").is_none());
         assert!(fireworks_absent.get("reasoning_history").is_none());
+        assert!(fireworks_absent.get("tools").is_none());
         let fireworks_none =
             fireworks_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
         assert_eq!(fireworks_none["reasoning_effort"], "none");
@@ -1317,6 +1362,7 @@ mod tests {
         assert!(together_absent.get("reasoning").is_none());
         assert!(together_absent.get("reasoning_effort").is_none());
         assert!(together_absent.get("chat_template_kwargs").is_none());
+        assert!(together_absent.get("tools").is_none());
         let together_none =
             together_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
         assert_eq!(together_none["reasoning"], json!({"enabled": false}));
@@ -1337,6 +1383,25 @@ mod tests {
 
         let openai_absent = openai_responses_request("model", None, &messages, &[]);
         assert!(openai_absent.get("reasoning").is_none());
+        assert!(openai_absent.get("tools").is_none());
+
+        let tools = [ToolDefinition {
+            def_type: "function".to_string(),
+            function: crate::types::FunctionDef {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+        }];
+        assert!(fireworks_chat_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
+        assert!(together_chat_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
+        assert!(openai_responses_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
         for effort in [
             ReasoningEffort::None,
             ReasoningEffort::Minimal,

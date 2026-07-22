@@ -548,11 +548,11 @@ mod tests {
             );
             sessions::create_session(&metadata.store_path, &snapshot).unwrap();
         }
-        let mut raw = sessions::load_session_model_config(&metadata.store_path, "invalid").unwrap();
+        let mut raw = sessions::load_session_config(&metadata.store_path, "invalid").unwrap();
         raw.backend = Some("auto".to_string());
         raw.reasoning_effort = Some("ultra".to_string());
         raw.extra_headers_json = Some("{broken".to_string());
-        sessions::update_raw_session_model_config(&metadata.store_path, &raw).unwrap();
+        sessions::update_raw_session_config(&metadata.store_path, &raw).unwrap();
 
         let mut app = App::new_without_service(metadata, &[], true);
         app.refresh_session_picker();

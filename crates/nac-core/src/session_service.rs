@@ -1017,30 +1017,10 @@ impl SessionService {
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
         self.close_active_thread_dispatches();
 
-        // Capture partial token usage from the cancelled run.  Because
-        // `send()` now updates `last_usage` mid-loop, this includes all
-        // model-call usage accumulated before the cancel.
-        let mut cancel_usage = self.append_cancellation_message().await;
-
-        // Preserve the previous orchestrator_context_tokens — the cancel
-        // path should not overwrite the context window size from the last
-        // completed response.  Only input/output/cache token counts are
-        // captured from the partial run.
-        if let Some(ref mut u) = cancel_usage {
-            let prev_ctx = {
-                let snapshot = self.session_snapshot.lock().await;
-                snapshot
-                    .as_ref()
-                    .and_then(|s| {
-                        s.token_usages
-                            .iter()
-                            .rev()
-                            .find_map(|tu| tu.as_ref().map(|tu| tu.orchestrator_context_tokens))
-                    })
-                    .unwrap_or(0)
-            };
-            u.orchestrator_context_tokens = prev_ctx;
-        }
+        // Capture partial token usage from the cancelled run, including a
+        // committed compaction projection when cancellation happened before
+        // the following ordinary call completed.
+        let cancel_usage = self.append_cancellation_message().await;
 
         let message = "run cancelled by user".to_string();
         let persistence_error = match self
@@ -1188,7 +1168,7 @@ impl SessionService {
                 (self.metadata.session_id.as_deref(), self.config_version)
             {
                 let persisted_version =
-                    sessions::load_session_model_config(&self.metadata.store_path, session_id)
+                    sessions::load_session_config(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
                             message: format!(
                                 "failed to verify session configuration revision: {error:#}"
@@ -1496,9 +1476,10 @@ impl SessionService {
             reasoning_details: None,
             tool_calls: None,
         });
-        // Return partial usage so the caller can persist it.  Because
-        // `send()` now updates `last_usage` mid-loop, this captures all
-        // token usage from model calls made before the cancel.
+        agent.invalidate_context_sample();
+        // Return partial usage so the caller can persist it. Because `send()`
+        // updates `last_usage` mid-loop, this captures all token usage from
+        // model calls made before the cancel.
         agent.last_usage.clone()
     }
 }
@@ -2474,6 +2455,7 @@ mod tests {
                 mode: AgentMode::Orchestrator,
                 store_path,
                 session_id,
+                orchestrator_compaction_threshold: None,
                 initial_messages: Vec::new(),
                 thread_name: None,
                 dispatch_id: None,
@@ -2878,7 +2860,7 @@ mod tests {
         let (parts, store_path) = test_active_service("stale_revision", "stale-session");
         let mut stored = sessions::load_session(&store_path, "stale-session").unwrap();
         stored.model = "externally-updated-model".to_string();
-        sessions::update_session_model_config(&store_path, &stored).unwrap();
+        sessions::update_session_config(&store_path, &stored).unwrap();
 
         let error = match parts
             .service

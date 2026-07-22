@@ -62,7 +62,7 @@ const commands = [
   { name: "transcript", description: "open the orchestrator transcript" },
   { name: "workspace", description: "inspect changed files and diffs" },
   { name: "info", description: "show complete session and store identity" },
-  { name: "settings", description: "edit this session's model configuration" },
+  { name: "settings", description: "edit this session's configuration" },
   { name: "stop", description: "stop the active orchestrator run" },
   { name: "rename", description: "rename this session" },
   { name: "delete", description: "delete this session" },
@@ -92,7 +92,7 @@ function bindElements() {
     "promptInput", "sendPrompt", "commandMenu", "drawerBackdrop", "utilityDrawer",
     "drawerTitle", "drawerContent", "closeDrawer", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
-    "launchEffort", "launchModel", "launchBaseUrl", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
@@ -2454,7 +2454,7 @@ function renderFocusView(snapshot) {
     el.focusContent.innerHTML = renderSessionInfo(summary, snapshot);
   } else {
     el.focusTitle.textContent = "settings";
-    el.focusState.textContent = "model configuration";
+    el.focusState.textContent = "session configuration";
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderFocusSettings();
   }
@@ -2543,6 +2543,16 @@ function rawHeadersFromConfig(config) {
   };
 }
 
+function parseCompactionThreshold(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const threshold = Number(raw);
+  if (!Number.isSafeInteger(threshold) || threshold < 0) {
+    throw new Error("Orchestrator compaction threshold must be a non-negative whole number");
+  }
+  return threshold === 0 ? null : threshold;
+}
+
 function settingsValuesFromConfig(config) {
   const headers = rawHeadersFromConfig(config);
   return {
@@ -2551,6 +2561,7 @@ function settingsValuesFromConfig(config) {
     backend: config?.backend ?? null,
     reasoning_effort: config?.reasoning_effort ?? null,
     api_key_env: config?.api_key_env ?? null,
+    orchestrator_compaction_threshold: config?.orchestrator_compaction_threshold ?? null,
     extra_headers: headers.value,
     extra_headers_text: headers.text,
     extra_headers_invalid: headers.invalid,
@@ -2619,8 +2630,13 @@ function buildSettingsPatch(values, initial) {
     ? initial.api_key_env
     : (rawApiKeyEnv.trim() || null);
 
+  const rawCompactionThreshold = String(values.orchestrator_compaction_threshold ?? "").trim();
+  current.orchestrator_compaction_threshold = rawCompactionThreshold
+    ? parseCompactionThreshold(rawCompactionThreshold)
+    : null;
+
   const patch = {};
-  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"]) {
+  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env", "orchestrator_compaction_threshold"]) {
     if (current[field] !== initial[field]) patch[field] = current[field];
   }
 
@@ -2666,6 +2682,7 @@ function renderFocusSettings() {
     <label class="field"><span>model</span><input name="model" value="${escapeAttr(config.model ?? "")}"></label>
     <label class="field"><span>base url</span><input name="base_url" value="${escapeAttr(config.base_url ?? "")}"></label>
     <label class="field span-two"><span>api key environment variable</span><input name="api_key_env" value="${escapeAttr(config.api_key_env ?? "")}"><small>Enter the environment-variable name only, never a key value. Blank removes the session-specific selector.</small></label>
+    <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small></label>
     <label class="field span-two"><span>extra headers (JSON object)</span><textarea name="extra_headers" rows="6" spellcheck="false" placeholder="{}">${escapeHtml(headers.text)}</textarea><small>Blank or <code>{}</code> removes all extra headers. Existing headers are unchanged unless this field is edited.</small></label>
     <div class="settings-actions"><span id="settingsStatus" class="form-status" role="status" aria-live="polite">${escapeHtml(saveStatus)}</span><button class="button button-primary" data-settings-submit type="submit"${saveBlocked ? " disabled" : ""}>save settings</button></div>
   </form></div>`;
@@ -4141,6 +4158,7 @@ async function handleDrawerSubmit(event) {
       model: form.get("model"),
       base_url: form.get("base_url"),
       api_key_env: form.get("api_key_env"),
+      orchestrator_compaction_threshold: form.get("orchestrator_compaction_threshold"),
       extra_headers: form.get("extra_headers"),
     }, settingsValuesFromConfig(settings.config));
   } catch (error) {
@@ -4519,6 +4537,11 @@ function buildLaunchSessionRequest(values) {
     if (value) body[key] = value;
   }
 
+  const rawCompactionThreshold = String(values?.orchestrator_compaction_threshold ?? "").trim();
+  if (rawCompactionThreshold) {
+    body.orchestrator_compaction_threshold = parseCompactionThreshold(rawCompactionThreshold);
+  }
+
   const reasoningMode = String(values?.reasoning_mode || "inherit");
   if (reasoningMode === "unset") body.reasoning_effort = null;
   else if (reasoningMode !== "inherit") {
@@ -4599,6 +4622,7 @@ async function createSession(event) {
       reasoning_mode: el.launchEffort.value,
       model: el.launchModel.value,
       base_url: el.launchBaseUrl.value,
+      orchestrator_compaction_threshold: el.launchCompactionThreshold?.value ?? "",
       api_key_mode: el.launchApiKeyMode.value,
       api_key_env: el.launchApiKeyEnv.value,
       extra_headers: el.launchExtraHeaders.value,

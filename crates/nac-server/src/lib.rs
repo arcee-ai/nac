@@ -208,6 +208,9 @@ pub struct CreateSessionRequest {
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -251,6 +254,9 @@ pub struct UpdateConfigRequest {
     /// Prefer a JSON object. Null or an empty object clears the persisted map.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted preserves; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
 }
 
 impl UpdateConfigRequest {
@@ -261,6 +267,10 @@ impl UpdateConfigRequest {
             && matches!(self.reasoning_effort, RequestField::Omitted)
             && matches!(self.api_key_env, RequestField::Omitted)
             && matches!(self.extra_headers, RequestField::Omitted)
+            && matches!(
+                self.orchestrator_compaction_threshold,
+                RequestField::Omitted
+            )
     }
 }
 
@@ -685,6 +695,8 @@ impl SessionManager {
             ));
         }
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let orchestrator_compaction_threshold =
+            create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
         let model = model_options(
             request.model,
             request.base_url,
@@ -702,6 +714,7 @@ impl SessionManager {
                     store_path: Some(self.inner.store_path.clone()),
                 },
                 model,
+                orchestrator_compaction_threshold,
                 sandbox: sandbox_options(request.sandbox),
                 ssh_host: location.ssh_host,
             },
@@ -770,7 +783,7 @@ impl SessionManager {
         session_id: &str,
     ) -> Result<Arc<SessionService>> {
         let persisted_version =
-            sessions::load_session_model_config(&self.inner.store_path, session_id)?.config_version;
+            sessions::load_session_config(&self.inner.store_path, session_id)?.config_version;
         let cached = self
             .inner
             .active_sessions
@@ -792,8 +805,8 @@ impl SessionManager {
         self.attach_session_locked(session_id).await
     }
 
-    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
-        sessions::load_session_model_config(&self.inner.store_path, session_id)
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
+        sessions::load_session_config(&self.inner.store_path, session_id)
     }
 
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
@@ -1049,7 +1062,7 @@ impl SessionManager {
             {
                 return Ok(());
             }
-            let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+            let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
             if !managed_config_needs_repair(&current) {
                 return Ok(());
             }
@@ -1082,7 +1095,7 @@ impl SessionManager {
         let _run_lease =
             sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
 
-        let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+        let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
@@ -1109,11 +1122,11 @@ impl SessionManager {
             &extra_headers,
         )?;
 
-        // Persist only model columns after all caller-controlled configuration
-        // and credential checks succeed. The revision CAS rejects a concurrent
-        // PATCH, while run/history writes remain independent of these columns.
+        // Persist only revisioned session-configuration columns after all
+        // caller-controlled model configuration and credential checks succeed.
+        // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
         // A store failure or conflict leaves the active map untouched.
-        sessions::update_raw_session_model_config(&self.inner.store_path, &prospective)?;
+        sessions::update_raw_session_config(&self.inner.store_path, &prospective)?;
         active.remove(session_id);
         Ok(())
     }
@@ -1634,7 +1647,7 @@ async fn delete_session_handler(
 async fn session_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<sessions::RawSessionModelConfig>, ApiError> {
+) -> std::result::Result<Json<sessions::RawSessionConfig>, ApiError> {
     Ok(Json(manager.session_config(&session_id)?))
 }
 
@@ -1694,6 +1707,24 @@ fn required_create_string(field: RequestField<String>, name: &str) -> Result<Opt
     }
 }
 
+fn validated_compaction_threshold(threshold: u64) -> Result<u64> {
+    if threshold > nac_core::MAX_SUPPORTED_TOKEN_COUNT {
+        return Err(request_configuration_error(format!(
+            "invalid orchestrator compaction threshold: must not exceed {} tokens",
+            nac_core::MAX_SUPPORTED_TOKEN_COUNT
+        )));
+    }
+    Ok(threshold)
+}
+
+fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Option<u64>> {
+    match field {
+        RequestField::Omitted => Ok(None),
+        RequestField::Null => Ok(Some(0)),
+        RequestField::Value(threshold) => validated_compaction_threshold(threshold).map(Some),
+    }
+}
+
 fn model_options(
     model: RequestField<String>,
     base_url: RequestField<String>,
@@ -1738,7 +1769,7 @@ fn model_options(
 }
 
 fn apply_raw_config_patch(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
     request: UpdateConfigRequest,
 ) -> Result<()> {
     match request.model {
@@ -1799,11 +1830,19 @@ fn apply_raw_config_patch(
             };
         }
     }
+    match request.orchestrator_compaction_threshold {
+        RequestField::Omitted => {}
+        RequestField::Null => config.orchestrator_compaction_threshold = None,
+        RequestField::Value(threshold) => {
+            let threshold = validated_compaction_threshold(threshold)?;
+            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+        }
+    }
     config.diagnostics.clear();
     Ok(())
 }
 
-fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool {
+fn managed_config_needs_repair(config: &sessions::RawSessionConfig) -> bool {
     let Some(backend) = config
         .backend
         .as_deref()
@@ -1816,7 +1855,7 @@ fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool
 }
 
 fn parse_prospective_model_config(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
     backend_selected: bool,
     base_url_omitted: bool,
     api_key_env_omitted: bool,
@@ -2150,7 +2189,8 @@ mod tests {
                 "backend":"openai-responses",
                 "reasoning_effort":"xhigh",
                 "api_key_env":null,
-                "extra_headers":{"X-Trace":"launch"}
+                "extra_headers":{"X-Trace":"launch"},
+                "orchestrator_compaction_threshold":0
             }"#,
         )
         .unwrap();
@@ -2172,6 +2212,10 @@ mod tests {
                 "X-Trace".to_string(),
                 "launch".to_string()
             )])))
+        );
+        assert_eq!(
+            request.orchestrator_compaction_threshold,
+            RequestField::Value(0)
         );
         assert_eq!(request.cwd, None);
     }
@@ -2811,6 +2855,7 @@ mod tests {
             reasoning_effort: RequestField::Omitted,
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
+            orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,
@@ -2839,6 +2884,7 @@ mod tests {
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                     ssh_host: None,
                     sandbox: SandboxRequest::default(),
                 })
@@ -2881,6 +2927,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2922,6 +2969,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2956,6 +3004,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -3147,7 +3196,7 @@ thread_timeout_secs = 7200
         let mut missing_value =
             sessions::load_session(&store_path, "missing-environment-value").unwrap();
         missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
-        sessions::update_session_model_config(&store_path, &missing_value).unwrap();
+        sessions::update_session_config(&store_path, &missing_value).unwrap();
 
         seed_session(
             &root,
@@ -3159,7 +3208,7 @@ thread_timeout_secs = 7200
         unavailable_auth.backend = BackendKind::ArceeAuth;
         unavailable_auth.base_url = "https://api.arcee.ai".to_string();
         unavailable_auth.api_key_env = None;
-        sessions::update_session_model_config(&store_path, &unavailable_auth).unwrap();
+        sessions::update_session_config(&store_path, &unavailable_auth).unwrap();
 
         let manager = test_manager(&root);
         let Json(endpoint_config) = session_config_handler(
@@ -3291,7 +3340,7 @@ thread_timeout_secs = 7200
             seed_editable_session(&root, id);
         }
         for id in ["auto", "arcee", "missing", "effort", "headers"] {
-            let mut raw = sessions::load_session_model_config(&store_path, id).unwrap();
+            let mut raw = sessions::load_session_config(&store_path, id).unwrap();
             match id {
                 "auto" => raw.backend = Some("auto".to_string()),
                 "arcee" => raw.backend = Some("arcee".to_string()),
@@ -3300,7 +3349,7 @@ thread_timeout_secs = 7200
                 "headers" => raw.extra_headers_json = Some("{broken".to_string()),
                 _ => unreachable!(),
             }
-            sessions::update_raw_session_model_config(&store_path, &raw).unwrap();
+            sessions::update_raw_session_config(&store_path, &raw).unwrap();
         }
 
         let manager = test_manager(&root);
@@ -3423,7 +3472,7 @@ thread_timeout_secs = 7200
         let address = listener.local_addr().unwrap();
         let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
         snapshot.base_url = format!("http://{address}/v1");
-        sessions::update_session_model_config(&root.join("store.db"), &snapshot).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
 
         tokio::spawn(async move {
             if let Ok((socket, _)) = listener.accept().await {
@@ -3822,6 +3871,7 @@ thread_timeout_secs = 7200
                     reasoning_effort: RequestField::Value("high".to_string()),
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -3970,6 +4020,9 @@ base_url = "https://api.openai.com/v1"
 reasoning_effort = "medium"
 api_key_env = "OPENAI_API_KEY"
 extra_headers = { X-Config = "yes" }
+
+[compaction]
+threshold_tokens = 64000
 "#,
         )
         .unwrap();
@@ -3988,6 +4041,7 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(stored.model, "config-model");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
         assert_eq!(
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
@@ -4000,6 +4054,7 @@ extra_headers = { X-Config = "yes" }
             config.extra_headers_json.as_deref(),
             Some("{\"X-Config\":\"yes\"}")
         );
+        assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
         assert!(manager
             .snapshot(&inherited_id)
             .await
@@ -4016,6 +4071,7 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Null,
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Null,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -4027,6 +4083,28 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(stored.reasoning_effort, None);
         assert_eq!(stored.api_key_env, None);
         assert!(stored.extra_headers.is_empty());
+        assert_eq!(stored.orchestrator_compaction_threshold, None);
+
+        let zero_disabled = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("zero-disabled-model".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Null,
+                api_key_env: RequestField::Null,
+                extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Value(0),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("zero should disable an inherited compaction threshold");
+        let zero_disabled_id = zero_disabled.metadata.session_id.unwrap();
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), &zero_disabled_id)
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            None
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4260,7 +4338,7 @@ api_key_env = "OPENAI_API_KEY"
             incomplete.backend = backend;
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
-            sessions::update_session_model_config(&store_path, &incomplete).unwrap();
+            sessions::update_session_config(&store_path, &incomplete).unwrap();
 
             manager
                 .update_session_config(session_id, UpdateConfigRequest::default())
@@ -4290,7 +4368,7 @@ api_key_env = "OPENAI_API_KEY"
         let store_path = root.join("store.db");
         let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
         api_key_session.reasoning_effort = None;
-        sessions::update_session_model_config(&store_path, &api_key_session).unwrap();
+        sessions::update_session_config(&store_path, &api_key_session).unwrap();
         let manager = test_manager(&root);
 
         manager
@@ -4431,7 +4509,7 @@ api_key_env = "OPENAI_API_KEY"
         stored.backend = BackendKind::ChatGptCodexResponses;
         stored.base_url = "https://chatgpt.com/backend-api".to_string();
         stored.api_key_env = None;
-        sessions::update_session_model_config(&root.join("store.db"), &stored).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &stored).unwrap();
         let manager = test_manager(&root);
 
         let error = manager
@@ -4716,6 +4794,7 @@ api_key_env = "OPENAI_API_KEY"
                         "X-Replaced".to_string(),
                         "true".to_string(),
                     )]))),
+                    orchestrator_compaction_threshold: RequestField::Value(64_000),
                 },
             )
             .await
@@ -4731,6 +4810,14 @@ api_key_env = "OPENAI_API_KEY"
         assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
+        assert_eq!(replaced.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(
+            manager
+                .session_config("session")
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            Some(64_000)
+        );
 
         manager.attach_session("session").await.unwrap();
         manager
@@ -4742,6 +4829,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Null,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Null,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -4752,6 +4840,7 @@ api_key_env = "OPENAI_API_KEY"
         assert_eq!(arcee_auth.reasoning_effort, None);
         assert_eq!(arcee_auth.api_key_env, None);
         assert!(arcee_auth.extra_headers.is_empty());
+        assert_eq!(arcee_auth.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -4759,17 +4848,15 @@ api_key_env = "OPENAI_API_KEY"
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-api".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    orchestrator_compaction_threshold: RequestField::Value(32_000),
                     ..UpdateConfigRequest::default()
                 },
             )
             .await
             .expect("switch to Arcee API key mode");
-        assert_eq!(
-            sessions::load_session(&root.join("store.db"), "session")
-                .unwrap()
-                .backend,
-            BackendKind::ArceeApi
-        );
+        let arcee_api = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(arcee_api.backend, BackendKind::ArceeApi);
+        assert_eq!(arcee_api.orchestrator_compaction_threshold, Some(32_000));
 
         manager
             .update_session_config(
@@ -4778,6 +4865,7 @@ api_key_env = "OPENAI_API_KEY"
                     backend: RequestField::Value("chatgpt-codex-responses".to_string()),
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Value(0),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -4786,6 +4874,7 @@ api_key_env = "OPENAI_API_KEY"
         let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
         assert_eq!(codex.api_key_env, None);
+        assert_eq!(codex.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -4836,6 +4925,12 @@ api_key_env = "OPENAI_API_KEY"
         manager.attach_session("session").await.unwrap();
 
         let invalid = [
+            UpdateConfigRequest {
+                orchestrator_compaction_threshold: RequestField::Value(
+                    nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1,
+                ),
+                ..UpdateConfigRequest::default()
+            },
             UpdateConfigRequest {
                 model: RequestField::Null,
                 ..UpdateConfigRequest::default()
@@ -4972,6 +5067,7 @@ api_key_env = "OPENAI_API_KEY"
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5012,6 +5108,7 @@ api_key_env = "OPENAI_API_KEY"
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -5030,7 +5127,7 @@ api_key_env = "OPENAI_API_KEY"
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
         attach_snapshot.backend = BackendKind::ArceeApi;
         attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
-        sessions::update_session_model_config(&store_path, &attach_snapshot).unwrap();
+        sessions::update_session_config(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
@@ -5055,6 +5152,7 @@ api_key_env = "OPENAI_API_KEY"
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5082,6 +5180,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -5101,6 +5200,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -5118,6 +5218,7 @@ api_key_env = "OPENAI_API_KEY"
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -5161,6 +5262,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await

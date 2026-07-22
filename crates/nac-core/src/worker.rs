@@ -161,6 +161,7 @@ mod tests {
                 mode: AgentMode::Worker,
                 store_path: store::default_store_path(),
                 session_id: None,
+                orchestrator_compaction_threshold: None,
                 initial_messages: messages.clone(),
                 thread_name: Some("impl".to_string()),
                 dispatch_id: None,

@@ -496,8 +496,6 @@ fn codex_responses_request(
         "text": {
             "verbosity": "low",
         },
-        "tool_choice": "auto",
-        "parallel_tool_calls": true,
     });
 
     if let Some(instructions) = instructions {
@@ -505,6 +503,8 @@ fn codex_responses_request(
     }
 
     if !tools.is_empty() {
+        request["tool_choice"] = json!("auto");
+        request["parallel_tool_calls"] = json!(true);
         request["tools"] = Value::Array(
             tools
                 .iter()
@@ -1636,6 +1636,26 @@ mod tests {
         assert_eq!(absent["text"]["verbosity"], "low");
         assert!(absent.get("reasoning").is_none());
         assert!(absent.get("include").is_none());
+        assert!(absent.get("tools").is_none());
+        assert!(absent.get("tool_choice").is_none());
+        assert!(absent.get("parallel_tool_calls").is_none());
+
+        let with_tools = codex_responses_request(
+            "gpt-5.5",
+            None,
+            &messages,
+            &[ToolDefinition {
+                def_type: "function".to_string(),
+                function: crate::types::FunctionDef {
+                    name: "read".to_string(),
+                    description: "Read a file".to_string(),
+                    parameters: json!({"type": "object"}),
+                },
+            }],
+        );
+        assert!(with_tools.get("tools").is_some());
+        assert_eq!(with_tools["tool_choice"], "auto");
+        assert_eq!(with_tools["parallel_tool_calls"], true);
 
         for effort in [
             ReasoningEffort::None,

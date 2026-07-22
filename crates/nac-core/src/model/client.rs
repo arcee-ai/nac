@@ -559,6 +559,13 @@ impl ModelClient {
 
 #[cfg(test)]
 impl ModelClient {
+    pub(crate) fn new_for_test_server(base_url: String) -> Self {
+        let mut client = Self::new_for_test();
+        client.base_url = base_url;
+        client.reasoning_effort = None;
+        client
+    }
+
     pub fn new_for_test() -> Self {
         Self {
             client: no_redirect_model_client().expect("build no-redirect test model client"),

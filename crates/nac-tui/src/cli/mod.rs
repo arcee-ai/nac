@@ -357,6 +357,7 @@ fn run_options(
         worker_executable: Some(worker_executable),
         store: store_options(cli.store),
         model: model_options(cli.model),
+        orchestrator_compaction_threshold: cli.orchestrator_compaction_threshold,
         sandbox: sandbox_options(cli.sandbox),
         ssh_host: None,
     }
@@ -419,6 +420,9 @@ backend = "arcee"
 api_key_env = ["invalid-selector-shape"]
 extra_headers = "invalid-header-shape"
 
+[compaction]
+threshold_tokens = 64000
+
 [storage]
 store_path = "persisted.db"
 "#,
@@ -456,6 +460,7 @@ store_path = "persisted.db"
                 Some(Path::new("persisted.db"))
             );
             assert!(config.model.backend.is_none());
+            assert_eq!(config.compaction.threshold_tokens, None);
         }
 
         let new_session = parse_cli_from(vec![OsString::from("nac")]);
