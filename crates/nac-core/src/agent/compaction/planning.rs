@@ -134,30 +134,35 @@ impl CompactionState {
         messages: &[Message],
         tools: &[ToolDefinition],
         reason: CompactionReason,
-        allow_attempt: bool,
     ) -> CompactionPlan {
+        let prepared = self.prepare(messages, tools);
+        let triggered = reason == CompactionReason::Manual
+            || self
+                .threshold_tokens
+                .is_some_and(|threshold| prepared.context_estimate >= threshold);
+        let decision = if triggered {
+            self.compaction_decision(messages, prepared.context_estimate)
+        } else {
+            CompactionDecision::NotTriggered
+        };
+        CompactionPlan { prepared, decision }
+    }
+
+    pub fn prepare(
+        &mut self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> PreparedProviderView {
         self.clear_invalid_checkpoint(messages);
         let provider_messages = self.provider_view(messages);
-        let prepared = PreparedProviderView {
+        PreparedProviderView {
             context_estimate: self.current_context_estimate(messages, &provider_messages, tools),
             checkpoint_id: self
                 .active_checkpoint
                 .as_ref()
                 .map(|checkpoint| checkpoint.id),
             messages: provider_messages,
-        };
-
-        let auto_threshold_not_triggered = reason == CompactionReason::Auto
-            && self
-                .threshold_tokens
-                .map(|threshold| prepared.context_estimate < threshold)
-                .unwrap_or(true);
-        let decision = if !allow_attempt || auto_threshold_not_triggered {
-            CompactionDecision::NotTriggered
-        } else {
-            self.compaction_decision(messages, prepared.context_estimate)
-        };
-        CompactionPlan { prepared, decision }
+        }
     }
 
     fn compaction_decision(
@@ -165,20 +170,52 @@ impl CompactionState {
         messages: &[Message],
         current_context_estimate: u64,
     ) -> CompactionDecision {
-        let Some(boundary) = second_most_recent_user_index(messages) else {
-            return CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary);
-        };
-        if self
+        let source_start = self
             .active_checkpoint
             .as_ref()
-            .is_some_and(|checkpoint| boundary <= checkpoint.tail_start_message_index)
-        {
-            return CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted);
-        }
-        if !summarized_prefix_has_complete_tools(messages, boundary) {
-            return CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary);
+            .map_or(0, |checkpoint| checkpoint.tail_start_message_index);
+        let mut blocked_by_checkpoint = false;
+
+        if let Some(boundary) = second_most_recent_user_index(messages) {
+            match boundary_eligibility(messages, source_start, boundary) {
+                BoundaryEligibility::Eligible => {
+                    return self.candidate(messages, boundary, current_context_estimate)
+                }
+                BoundaryEligibility::NonAdvancing => blocked_by_checkpoint = true,
+                BoundaryEligibility::NotUsefulOrUnsafe => {}
+            }
         }
 
+        let Ok(cycle_starts) = complete_assistant_cycle_starts(messages) else {
+            return CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary);
+        };
+        let boundary = match cycle_starts.len() {
+            0 => messages.len(),
+            1 => cycle_starts[0],
+            count => cycle_starts[count - 2],
+        };
+        match boundary_eligibility(messages, source_start, boundary) {
+            BoundaryEligibility::Eligible => {
+                self.candidate(messages, boundary, current_context_estimate)
+            }
+            BoundaryEligibility::NonAdvancing => {
+                CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
+            }
+            BoundaryEligibility::NotUsefulOrUnsafe if blocked_by_checkpoint => {
+                CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
+            }
+            BoundaryEligibility::NotUsefulOrUnsafe => {
+                CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary)
+            }
+        }
+    }
+
+    fn candidate(
+        &self,
+        messages: &[Message],
+        boundary: usize,
+        current_context_estimate: u64,
+    ) -> CompactionDecision {
         let mut summary_messages = vec![Message::System {
             content: SUMMARIZER_SYSTEM_INSTRUCTION.to_string(),
         }];
@@ -373,6 +410,35 @@ impl CompactionState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryEligibility {
+    Eligible,
+    NonAdvancing,
+    NotUsefulOrUnsafe,
+}
+
+fn boundary_eligibility(
+    messages: &[Message],
+    source_start: usize,
+    boundary: usize,
+) -> BoundaryEligibility {
+    if !summarized_prefix_has_complete_tools(messages, boundary) {
+        return BoundaryEligibility::NotUsefulOrUnsafe;
+    }
+    if boundary <= source_start {
+        return messages[..boundary]
+            .iter()
+            .any(|message| !matches!(message, Message::System { .. }))
+            .then_some(BoundaryEligibility::NonAdvancing)
+            .unwrap_or(BoundaryEligibility::NotUsefulOrUnsafe);
+    }
+    messages[source_start..boundary]
+        .iter()
+        .any(|message| !matches!(message, Message::System { .. }))
+        .then_some(BoundaryEligibility::Eligible)
+        .unwrap_or(BoundaryEligibility::NotUsefulOrUnsafe)
+}
+
 fn second_most_recent_user_index(messages: &[Message]) -> Option<usize> {
     let mut users = messages
         .iter()
@@ -381,6 +447,40 @@ fn second_most_recent_user_index(messages: &[Message]) -> Option<usize> {
         .filter_map(|(index, message)| matches!(message, Message::User { .. }).then_some(index));
     users.next()?;
     users.next()
+}
+
+pub(super) fn complete_assistant_cycle_starts(messages: &[Message]) -> Result<Vec<usize>, ()> {
+    let mut cycle_starts = Vec::new();
+    let mut index = 0;
+    while index < messages.len() {
+        match &messages[index] {
+            Message::User { .. } | Message::System { .. } => index += 1,
+            Message::Tool { .. } => return Err(()),
+            Message::Assistant { tool_calls, .. } => {
+                cycle_starts.push(index);
+                index += 1;
+                let Some(tool_calls) = tool_calls.as_ref().filter(|calls| !calls.is_empty()) else {
+                    continue;
+                };
+                let mut outstanding = HashSet::with_capacity(tool_calls.len());
+                for call in tool_calls {
+                    if !outstanding.insert(call.id.as_str()) {
+                        return Err(());
+                    }
+                }
+                while !outstanding.is_empty() {
+                    let Some(Message::Tool { tool_call_id, .. }) = messages.get(index) else {
+                        return Err(());
+                    };
+                    if !outstanding.remove(tool_call_id.as_str()) {
+                        return Err(());
+                    }
+                    index += 1;
+                }
+            }
+        }
+    }
+    Ok(cycle_starts)
 }
 
 fn sampled_projection_digest(
@@ -424,32 +524,17 @@ pub(super) fn provider_view_with_summary(
 }
 
 pub(super) fn summarized_prefix_has_complete_tools(messages: &[Message], boundary: usize) -> bool {
-    let mut outstanding = HashSet::new();
-    for message in &messages[..boundary] {
-        match message {
-            Message::Assistant {
-                tool_calls: Some(tool_calls),
-                ..
-            } if !tool_calls.is_empty() => {
-                if !outstanding.is_empty() {
-                    return false;
-                }
-                for tool_call in tool_calls {
-                    if !outstanding.insert(tool_call.id.as_str()) {
-                        return false;
-                    }
-                }
-            }
-            Message::Tool { tool_call_id, .. } => {
-                if !outstanding.remove(tool_call_id.as_str()) {
-                    return false;
-                }
-            }
-            _ if !outstanding.is_empty() => return false,
-            _ => {}
-        }
-    }
-    outstanding.is_empty()
+    messages
+        .get(..boundary)
+        .is_some_and(|prefix| complete_assistant_cycle_starts(prefix).is_ok())
+}
+
+pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize) -> bool {
+    boundary == messages.len()
+        || matches!(
+            messages.get(boundary),
+            Some(Message::User { .. } | Message::Assistant { .. })
+        )
 }
 
 fn checkpoint_is_valid(
@@ -457,11 +542,7 @@ fn checkpoint_is_valid(
     messages: &[Message],
 ) -> bool {
     checkpoint.prompt_policy_version == PROMPT_POLICY_VERSION
-        && checkpoint.tail_start_message_index < messages.len()
-        && matches!(
-            messages.get(checkpoint.tail_start_message_index),
-            Some(Message::User { .. })
-        )
+        && checkpoint_boundary_is_valid(messages, checkpoint.tail_start_message_index)
         && checkpoint
             .summary
             .strip_prefix(HISTORICAL_CONTEXT_PREFIX)

@@ -407,8 +407,9 @@ async fn stale_two_service_checkpoint_is_refreshed_for_direct_and_supplied_admis
 async fn sequential_run_admission_preserves_provider_context_sample_for_threshold() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
+    let large_first_response = "large response ".repeat(10_000);
     let server = ScriptedServer::start(vec![
-        ScriptedResponse::json("200 OK", compaction_response("first response")),
+        ScriptedResponse::json("200 OK", compaction_response(&large_first_response)),
         ScriptedResponse::json("200 OK", compaction_response("second response")),
     ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
@@ -418,10 +419,10 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
-        Some(1_500),
+        Some(50_000),
     );
     agent.messages = vec![Message::System {
-        content: "large policy ".repeat(500),
+        content: "policy".to_string(),
     }];
     let snapshot = sessions::new_snapshot(
         session_id.to_string(),
@@ -488,10 +489,9 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
             .is_some_and(|tools| !tools.is_empty())
     }));
     let published = parts.service.recent_events(None, 100);
-    // The first run's serialized-byte estimate exceeds the threshold but has no
-    // eligible boundary. The second run has an eligible boundary and an even
-    // larger byte estimate, so avoiding a second attempt proves admission kept
-    // the first response's provider total (39) as the threshold sample.
+    // The first request is below threshold, then returns a response large enough
+    // to push a fresh serialized estimate over it. Keeping the provider's sampled
+    // total (39) across admission means the second request also stays below.
     assert_eq!(
         published
             .iter()
@@ -505,7 +505,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
                 }
             ))
             .count(),
-        1
+        0
     );
     assert!(
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(

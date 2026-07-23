@@ -80,14 +80,13 @@ fn boundary_projection_preserves_systems_and_exact_two_user_tail() {
         },
         user("current user"),
     ];
-    let candidate = candidate(state(PathBuf::from("unused"), Some(1)).plan(
+    let preferred = candidate(state(PathBuf::from("unused"), Some(1)).plan(
         &messages,
         &[],
         CompactionReason::Auto,
-        true,
     ));
-    assert_eq!(candidate.boundary, 4);
-    let projected = provider_view_with_summary(&messages, candidate.boundary, "summary");
+    assert_eq!(preferred.boundary, 4);
+    let projected = provider_view_with_summary(&messages, preferred.boundary, "summary");
     assert_eq!(
         serde_json::to_value(&projected).unwrap(),
         serde_json::json!([
@@ -99,27 +98,41 @@ fn boundary_projection_preserves_systems_and_exact_two_user_tail() {
             {"role":"user","content":"current user"}
         ])
     );
-    assert!(matches!(
-        state(PathBuf::from("unused"), Some(1))
-            .plan(&[user("only")], &[], CompactionReason::Auto, true,)
-            .decision,
-        CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary)
+    let one_user = candidate(state(PathBuf::from("unused"), Some(1)).plan(
+        &[user("only")],
+        &[],
+        CompactionReason::Auto,
     ));
+    assert_eq!(one_user.boundary, 1);
 }
 
 #[test]
-fn exhausted_attempt_plan_reuses_prepared_view_without_a_candidate() {
+fn manual_and_automatic_planning_share_the_threshold_gate() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
-    let mut state = state(PathBuf::from("unused"), Some(1));
+    let estimate = state(PathBuf::from("unused"), None)
+        .prepare(&messages, &[])
+        .context_estimate;
 
-    let plan = state.plan(&messages, &[], CompactionReason::Auto, false);
-
-    assert!(matches!(plan.decision, CompactionDecision::NotTriggered));
-    assert_eq!(
-        serde_json::to_value(&plan.prepared.messages).unwrap(),
-        serde_json::to_value(&messages).unwrap()
-    );
-    assert!(plan.prepared.context_estimate > 1);
+    for threshold in [None, Some(estimate.saturating_add(1))] {
+        assert!(matches!(
+            state(PathBuf::from("unused"), threshold)
+                .plan(&messages, &[], CompactionReason::Auto)
+                .decision,
+            CompactionDecision::NotTriggered
+        ));
+        assert!(matches!(
+            state(PathBuf::from("unused"), threshold)
+                .plan(&messages, &[], CompactionReason::Manual)
+                .decision,
+            CompactionDecision::Candidate(_)
+        ));
+    }
+    assert!(matches!(
+        state(PathBuf::from("unused"), Some(estimate))
+            .plan(&messages, &[], CompactionReason::Auto)
+            .decision,
+        CompactionDecision::Candidate(_)
+    ));
 }
 
 #[test]
@@ -160,7 +173,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
 
-    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto, true));
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
     assert_eq!(candidate.boundary, 5);
     let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
     assert!(encoded.contains("prior summary"));
@@ -257,7 +270,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
     let view = state
-        .plan(&messages, &[], CompactionReason::Auto, false)
+        .plan(&messages, &[], CompactionReason::Auto)
         .prepared
         .messages;
     assert!(serde_json::to_string(&view).unwrap().contains("valid"));
@@ -304,7 +317,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(
         state
-            .plan(&messages, &[], CompactionReason::Auto, false)
+            .plan(&messages, &[], CompactionReason::Auto)
             .prepared
             .context_estimate,
         52
@@ -317,7 +330,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         .unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
     let prepared = state
-        .plan(&changed_projection, &[], CompactionReason::Auto, false)
+        .plan(&changed_projection, &[], CompactionReason::Auto)
         .prepared;
     assert_eq!(
         prepared.context_estimate,
@@ -346,9 +359,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     .unwrap();
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, second.id);
-    let prepared = state
-        .plan(&messages, &[], CompactionReason::Auto, false)
-        .prepared;
+    let prepared = state.plan(&messages, &[], CompactionReason::Auto).prepared;
     assert_eq!(
         prepared.context_estimate,
         full_provider_byte_estimate(&prepared.messages, &[])
@@ -409,9 +420,7 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     let mut state = state(path.clone(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
-    let view = state
-        .plan(&messages, &[], CompactionReason::Auto, false)
-        .prepared;
+    let view = state.plan(&messages, &[], CompactionReason::Auto).prepared;
     assert!(serde_json::to_string(&view.messages)
         .unwrap()
         .contains("valid"));
@@ -453,7 +462,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     state.record_ordinary_context(&messages, 50, messages.len(), Some(checkpoint.id));
 
     messages[1] = assistant("repaired answer");
-    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto, true));
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
     assert_eq!(candidate.previous_checkpoint_id, None);
     let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
     assert!(encoded.contains("repaired answer"));
@@ -461,7 +470,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     assert!(state.active_checkpoint_for_test().is_none());
     assert!(
         state
-            .plan(&messages, &[], CompactionReason::Auto, false)
+            .plan(&messages, &[], CompactionReason::Auto)
             .prepared
             .context_estimate
             > 50
@@ -504,6 +513,314 @@ fn summary_acceptance_requires_nonblank_text_without_tools_or_length_finish() {
         None,
     ))
     .is_none());
+}
+
+#[test]
+fn cycle_fallback_retains_zero_one_or_two_newest_complete_cycles() {
+    let cases = [
+        (vec![user("source")], 1),
+        (vec![user("source"), assistant("one")], 1),
+        (vec![user("source"), assistant("one"), assistant("two")], 1),
+        (
+            vec![
+                user("source"),
+                assistant("one"),
+                assistant("two"),
+                assistant("three"),
+            ],
+            2,
+        ),
+    ];
+
+    for (messages, expected_boundary) in cases {
+        let candidate = candidate(state(PathBuf::from("unused"), Some(1)).plan(
+            &messages,
+            &[],
+            CompactionReason::Auto,
+        ));
+        assert_eq!(candidate.boundary, expected_boundary);
+    }
+}
+
+#[test]
+fn nonadvancing_user_boundary_falls_through_to_advancing_cycle_boundary() {
+    let path = temp_store_path("user_fallback");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![
+        user("old"),
+        assistant("old answer"),
+        user("checkpoint tail"),
+        assistant("first new cycle"),
+        assistant("second new cycle"),
+        assistant("newest cycle"),
+    ];
+    let (source, policy) = checkpoint_digests(&messages, 2);
+    let checkpoint = append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("prior"),
+            tail_start_message_index: 2,
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut state = state(path.clone(), Some(1));
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
+    assert_eq!(candidate.previous_checkpoint_id, Some(checkpoint.id));
+    assert_eq!(candidate.boundary, 4);
+    let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
+    assert!(encoded.contains("prior"));
+    assert!(encoded.contains("checkpoint tail"));
+    assert!(encoded.contains("first new cycle"));
+    assert!(!encoded.contains("second new cycle"));
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn cycle_scanner_accepts_exact_parallel_cycles_and_preserves_opaque_assistant_data() {
+    let call = |id: &str| ToolCall {
+        id: id.to_string(),
+        call_type: "function".to_string(),
+        function: FunctionCall {
+            name: "read".to_string(),
+            arguments: format!(r#"{{"id":"{id}"}}"#),
+        },
+    };
+    let messages = vec![
+        user("source"),
+        assistant("old cycle"),
+        Message::Assistant {
+            content: Some("signed content".to_string()),
+            reasoning_text: Some("reasoning text".to_string()),
+            reasoning_details: Some(serde_json::json!([
+                {"type":"reasoning.encrypted","data":"opaque"}
+            ])),
+            tool_calls: Some(vec![call("a"), call("b")]),
+        },
+        Message::Tool {
+            tool_call_id: "b".to_string(),
+            content: "tool error: timed out".to_string(),
+        },
+        Message::Tool {
+            tool_call_id: "a".to_string(),
+            content: "ok".to_string(),
+        },
+        Message::Assistant {
+            content: None,
+            reasoning_text: Some("cancelled".to_string()),
+            reasoning_details: Some(serde_json::json!({"opaque":true})),
+            tool_calls: Some(Vec::new()),
+        },
+    ];
+
+    assert_eq!(
+        complete_assistant_cycle_starts(&messages),
+        Ok(vec![1, 2, 5])
+    );
+    let candidate = candidate(state(PathBuf::from("unused"), Some(1)).plan(
+        &messages,
+        &[],
+        CompactionReason::Auto,
+    ));
+    assert_eq!(candidate.boundary, 2);
+    let projected = provider_view_with_summary(&messages, candidate.boundary, "summary");
+    assert_eq!(
+        serde_json::to_value(&projected[1..]).unwrap(),
+        serde_json::to_value(&messages[2..]).unwrap()
+    );
+}
+
+#[test]
+fn cycle_scanner_rejects_duplicate_unknown_orphan_missing_and_interleaved_tools() {
+    let call = |id: &str| ToolCall {
+        id: id.to_string(),
+        call_type: "function".to_string(),
+        function: FunctionCall {
+            name: "tool".to_string(),
+            arguments: "{}".to_string(),
+        },
+    };
+    let calls = |ids: &[&str]| Message::Assistant {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: Some(ids.iter().map(|id| call(id)).collect()),
+    };
+    let tool = |id: &str| Message::Tool {
+        tool_call_id: id.to_string(),
+        content: "any content, including errors".to_string(),
+    };
+
+    let valid = vec![calls(&["a", "b"]), tool("b"), tool("a")];
+    assert_eq!(complete_assistant_cycle_starts(&valid), Ok(vec![0]));
+    for invalid in [
+        vec![calls(&["a", "a"]), tool("a")],
+        vec![calls(&["a"]), tool("unknown")],
+        vec![tool("orphan")],
+        vec![calls(&["a", "b"]), tool("a")],
+        vec![calls(&["a"]), tool("a"), tool("a")],
+        vec![calls(&["a"]), user("interleaved")],
+        vec![calls(&["a"]), assistant("interleaved")],
+        vec![
+            calls(&["a"]),
+            Message::System {
+                content: "interleaved".to_string(),
+            },
+        ],
+    ] {
+        assert!(
+            complete_assistant_cycle_starts(&invalid).is_err(),
+            "{invalid:?}"
+        );
+    }
+}
+
+#[test]
+fn incremental_candidates_support_assistant_and_end_checkpoint_boundaries() {
+    for (label, mut messages, parent_boundary, expected_boundary, newly_aged) in [
+        (
+            "assistant",
+            vec![
+                user("old"),
+                assistant("retained one"),
+                assistant("retained two"),
+                assistant("retained three"),
+            ],
+            1,
+            2,
+            "retained one",
+        ),
+        ("end", vec![user("old")], 1, 2, "new cycle"),
+    ] {
+        if label == "end" {
+            messages.push(assistant("new cycle"));
+            messages.push(assistant("second cycle"));
+            messages.push(assistant("third cycle"));
+        }
+        let path = temp_store_path(label);
+        store::initialize(&path).unwrap();
+        store::insert_test_session(&path, "session");
+        let (source, policy) = checkpoint_digests(&messages, parent_boundary);
+        let parent = append_orchestrator_compaction_checkpoint(
+            &path,
+            &NewOrchestratorCompactionCheckpoint {
+                session_id: "session".to_string(),
+                previous_checkpoint_id: None,
+                summary: installed_summary("parent summary"),
+                tail_start_message_index: parent_boundary,
+                source_prefix_sha256: source,
+                system_policy_sha256: policy,
+                prompt_policy_version: PROMPT_POLICY_VERSION,
+                old_context_estimate: 100,
+                summary_prompt_tokens: None,
+                summary_completion_tokens: None,
+                new_context_estimate: 50,
+            },
+        )
+        .unwrap();
+        let mut state = state(path.clone(), Some(1));
+        state.restore_newest_valid_checkpoint(&messages).unwrap();
+        let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
+        assert_eq!(candidate.previous_checkpoint_id, Some(parent.id));
+        assert_eq!(candidate.boundary, expected_boundary);
+        let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
+        assert!(encoded.contains("parent summary"));
+        assert!(encoded.contains(newly_aged));
+        assert!(!encoded.contains("old"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[test]
+fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_positions() {
+    let messages = vec![
+        user("old"),
+        assistant("first"),
+        user("middle"),
+        Message::Assistant {
+            content: None,
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: Some(vec![ToolCall {
+                id: "call".to_string(),
+                call_type: "function".to_string(),
+                function: FunctionCall {
+                    name: "tool".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]),
+        },
+        Message::Tool {
+            tool_call_id: "call".to_string(),
+            content: "result".to_string(),
+        },
+    ];
+    for (label, boundary) in [("user", 2), ("assistant", 3), ("end", messages.len())] {
+        let path = temp_store_path(label);
+        store::initialize(&path).unwrap();
+        store::insert_test_session(&path, "session");
+        let (source, policy) = checkpoint_digests(&messages, boundary);
+        let checkpoint = append_orchestrator_compaction_checkpoint(
+            &path,
+            &NewOrchestratorCompactionCheckpoint {
+                session_id: "session".to_string(),
+                previous_checkpoint_id: None,
+                summary: installed_summary(label),
+                tail_start_message_index: boundary,
+                source_prefix_sha256: source,
+                system_policy_sha256: policy,
+                prompt_policy_version: PROMPT_POLICY_VERSION,
+                old_context_estimate: 100,
+                summary_prompt_tokens: None,
+                summary_completion_tokens: None,
+                new_context_estimate: 50,
+            },
+        )
+        .unwrap();
+        let mut state = state(path.clone(), None);
+        state.restore_newest_valid_checkpoint(&messages).unwrap();
+        assert_eq!(
+            state.active_checkpoint_for_test().unwrap().id,
+            checkpoint.id
+        );
+
+        if boundary == messages.len() {
+            let mut appended = messages.clone();
+            appended.push(user("later"));
+            appended.push(assistant("later answer"));
+            state.restore_newest_valid_checkpoint(&appended).unwrap();
+            assert_eq!(
+                state.active_checkpoint_for_test().unwrap().id,
+                checkpoint.id
+            );
+            state.record_ordinary_context(&appended, 20, appended.len(), Some(checkpoint.id));
+            assert_eq!(state.prepare(&appended, &[]).context_estimate, 22);
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    assert!(!checkpoint_boundary_is_valid(&messages, 4));
+    assert!(!checkpoint_boundary_is_valid(&messages, 1_000));
+    let with_system = vec![
+        user("old"),
+        Message::System {
+            content: "policy".to_string(),
+        },
+    ];
+    assert!(!checkpoint_boundary_is_valid(&with_system, 1));
+    assert!(!summarized_prefix_has_complete_tools(&messages, 4));
 }
 
 #[test]

@@ -347,8 +347,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
 }
 
 #[tokio::test]
-async fn automatic_threshold_triggered_planning_skip_emits_lifecycle_and_calls_only_ordinary_model()
-{
+async fn one_user_automatic_compaction_uses_end_boundary() {
     use crate::events::{CompactionReason, CompactionSkipReason};
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
@@ -357,14 +356,17 @@ async fn automatic_threshold_triggered_planning_skip_emits_lifecycle_and_calls_o
         .unwrap()
         .as_nanos();
     let store_path = std::env::temp_dir()
-        .join(format!("nac_agent_auto_skip_{unique}"))
+        .join(format!("nac_agent_auto_end_boundary_{unique}"))
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let server = ScriptedServer::start(vec![ScriptedResponse::json(
-        "200 OK",
-        scripted_responses_text("ordinary only", 10, 0, 2, 12),
-    )]);
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("single prompt summary", 10, 0, 2, 12),
+        ),
+        ScriptedResponse::json("200 OK", scripted_responses_text("ordinary", 10, 0, 2, 12)),
+    ]);
     let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
@@ -375,48 +377,67 @@ async fn automatic_threshold_triggered_planning_skip_emits_lifecycle_and_calls_o
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
 
-    assert_eq!(agent.send("only user").await.unwrap(), "ordinary only");
+    assert_eq!(agent.send("only user").await.unwrap(), "ordinary");
     let requests = server.finish();
-    assert_eq!(requests.len(), 1);
-    let request: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert!(request["tools"]
+    assert_eq!(requests.len(), 2);
+    let summary: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let ordinary: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    assert!(summary.get("tools").is_none());
+    assert!(summary["input"].to_string().contains("only user"));
+    assert!(ordinary["tools"]
         .as_array()
         .is_some_and(|tools| !tools.is_empty()));
+    assert!(ordinary["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["content"]
+            .as_str()
+            .is_some_and(|content| content.starts_with(compaction::HISTORICAL_CONTEXT_PREFIX))));
+
+    let checkpoints =
+        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            &store_path,
+            "session",
+        )
+        .unwrap();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].tail_start_message_index, 2);
 
     let events = drain_events(&mut events_rx);
-    let started = events
-        .iter()
-        .position(|event| {
-            matches!(
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
                 event,
                 AgentEvent::OrchestratorCompactionStarted {
                     reason: CompactionReason::Auto,
                     ..
                 }
-            )
-        })
-        .unwrap();
-    let AgentEvent::OrchestratorCompactionStarted { compaction_id, .. } = events[started] else {
-        unreachable!();
-    };
-    let skipped = events
-        .iter()
-        .position(|event| {
-            matches!(
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionSkipped {
-                    compaction_id: id,
+                AgentEvent::OrchestratorCompactionCompleted {
                     reason: CompactionReason::Auto,
-                    cause: CompactionSkipReason::NoEligibleBoundary,
-                } if *id == compaction_id
-            )
-        })
-        .unwrap();
-    let ordinary_usage = events
-        .iter()
-        .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { .. }))
-        .unwrap();
-    assert!(started < skipped && skipped < ordinary_usage);
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        AgentEvent::OrchestratorCompactionSkipped {
+            cause: CompactionSkipReason::NoEligibleBoundary,
+            ..
+        }
+    )));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -545,6 +566,116 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
         .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { .. }))
         .unwrap();
     assert!(started < failed && failed < ordinary_usage);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
+    use crate::events::{CompactionFailure, CompactionReason};
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let store_path = std::env::temp_dir()
+        .join(format!("nac_agent_compaction_retry_{unique}"))
+        .join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let tool_response = serde_json::json!({
+        "status": "completed",
+        "output": [{
+            "type": "function_call",
+            "call_id": "retry-call",
+            "name": "unknown_retry_tool",
+            "arguments": "{}"
+        }],
+        "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json("200 OK", "{}"),
+        ScriptedResponse::json("200 OK", tool_response),
+        ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("retry summary", 10, 0, 2, 12),
+        ),
+        ScriptedResponse::json("200 OK", scripted_responses_text("done", 10, 0, 2, 12)),
+    ]);
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = compaction_test_agent(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        store_path.clone(),
+        Some("session"),
+        Some(1),
+        EventSink::channel(events_tx),
+    );
+    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.messages = compactable_messages();
+
+    assert_eq!(agent.send("retry after tool").await.unwrap(), "done");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 4);
+    for (index, has_tools) in [(0, false), (1, true), (2, false), (3, true)] {
+        let body: serde_json::Value = serde_json::from_slice(&requests[index].body).unwrap();
+        assert_eq!(body.get("tools").is_some(), has_tools, "request {index}");
+    }
+    let first_summary: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let retry_summary: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+    assert_eq!(first_summary["input"], retry_summary["input"]);
+    assert_eq!(
+        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            &store_path,
+            "session"
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+
+    let events = drain_events(&mut events_rx);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                AgentEvent::OrchestratorCompactionStarted {
+                    reason: CompactionReason::Auto,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                AgentEvent::OrchestratorCompactionFailed {
+                    reason: CompactionReason::Auto,
+                    failure: CompactionFailure::SummaryRequestFailed,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                AgentEvent::OrchestratorCompactionCompleted {
+                    reason: CompactionReason::Auto,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

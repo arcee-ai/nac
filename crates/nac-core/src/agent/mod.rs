@@ -371,7 +371,6 @@ impl Agent {
 
         let mut iteration = 0usize;
         let mut accumulated_usage = TokenUsage::default();
-        let mut compaction_attempted = false;
         loop {
             self.append_pending_steering_checked().await?;
             let needs_compaction_view = self
@@ -379,8 +378,7 @@ impl Agent {
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
             let provider_view = if needs_compaction_view {
-                self.prepare_provider_view(&mut accumulated_usage, &mut compaction_attempted)
-                    .await
+                self.prepare_provider_view(&mut accumulated_usage).await
             } else {
                 PreparedProviderView {
                     messages: self.messages.clone(),
@@ -529,17 +527,7 @@ impl Agent {
     #[cfg(test)]
     pub(crate) fn provider_messages_for_test(&mut self) -> Vec<Message> {
         match &mut self.compaction {
-            Some(compaction) => {
-                compaction
-                    .plan(
-                        &self.messages,
-                        &self.tool_defs,
-                        crate::events::CompactionReason::Auto,
-                        false,
-                    )
-                    .prepared
-                    .messages
-            }
+            Some(compaction) => compaction.prepare(&self.messages, &self.tool_defs).messages,
             None => self.messages.clone(),
         }
     }

@@ -202,12 +202,7 @@ impl super::Agent {
         let Some(compaction) = self.compaction.as_mut() else {
             return Err(CompactionError::Unavailable);
         };
-        let plan = compaction.plan(
-            &self.messages,
-            &self.tool_defs,
-            CompactionReason::Manual,
-            true,
-        );
+        let plan = compaction.plan(&self.messages, &self.tool_defs, CompactionReason::Manual);
         let CompactionPlan { prepared, decision } = plan;
         let (_, result) = self
             .execute_triggered_compaction(compaction_id, prepared, decision, None, event_sink)
@@ -218,27 +213,17 @@ impl super::Agent {
     pub(super) async fn prepare_provider_view(
         &mut self,
         accumulated_usage: &mut TokenUsage,
-        compaction_attempted: &mut bool,
     ) -> PreparedProviderView {
         let plan = self
             .compaction
             .as_mut()
             .expect("compaction state exists")
-            .plan(
-                &self.messages,
-                &self.tool_defs,
-                CompactionReason::Auto,
-                !*compaction_attempted,
-            );
+            .plan(&self.messages, &self.tool_defs, CompactionReason::Auto);
         let CompactionPlan { prepared, decision } = plan;
         if matches!(decision, CompactionDecision::NotTriggered) {
             return prepared;
         }
 
-        // A send may check and project before every ordinary call, but it may
-        // start at most one threshold-triggered attempt, including a planning
-        // skip, even if steering or tools re-enter this hook later.
-        *compaction_attempted = true;
         let compaction_id = Uuid::new_v4();
         let event_sink = self.event_sink.clone();
         let mut lifecycle =
@@ -378,13 +363,7 @@ impl super::Agent {
             .compaction
             .as_mut()
             .expect("compaction state exists after activation")
-            .plan(
-                &self.messages,
-                &self.tool_defs,
-                CompactionReason::Auto,
-                false,
-            )
-            .prepared;
+            .prepare(&self.messages, &self.tool_defs);
         (prepared, Ok(CompactionResult::Compacted { compaction_id }))
     }
 

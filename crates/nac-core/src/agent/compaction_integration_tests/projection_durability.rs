@@ -193,7 +193,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
 }
 
 #[tokio::test]
-async fn steering_reenters_projection_hook_without_second_summary_attempt() {
+async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let unique = std::time::SystemTime::now()
@@ -215,6 +215,10 @@ async fn steering_reenters_projection_hook_without_second_summary_attempt() {
             ScriptedResponse::json(
                 "200 OK",
                 scripted_responses_text("intermediate answer", 20, 0, 4, 24),
+            ),
+            ScriptedResponse::json(
+                "200 OK",
+                scripted_responses_text("second checkpoint", 20, 0, 4, 24),
             ),
             ScriptedResponse::json(
                 "200 OK",
@@ -260,16 +264,27 @@ async fn steering_reenters_projection_hook_without_second_summary_attempt() {
             content: "newly aged turn".to_string(),
         },
     ];
+    let prompt = "current long turn ".repeat(200);
 
-    assert_eq!(agent.send("current turn").await.unwrap(), "final answer");
+    assert_eq!(agent.send(&prompt).await.unwrap(), "final answer");
     let requests = server.finish();
-    assert_eq!(requests.len(), 3);
-    let final_ordinary: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+    assert_eq!(requests.len(), 4);
+    for (index, has_tools) in [(0, false), (1, true), (2, false), (3, true)] {
+        let body: serde_json::Value = serde_json::from_slice(&requests[index].body).unwrap();
+        assert_eq!(body.get("tools").is_some(), has_tools, "request {index}");
+    }
+    let second_summary: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+    let second_summary_input = second_summary["input"].to_string();
+    assert!(second_summary_input.contains("first checkpoint"));
+    assert!(second_summary_input.contains("newly aged turn"));
+    assert!(!second_summary_input.contains("intermediate answer"));
+    assert!(!second_summary_input.contains("raw old answer"));
+    let final_ordinary: serde_json::Value = serde_json::from_slice(&requests[3].body).unwrap();
     let final_input = final_ordinary["input"].to_string();
-    assert!(final_input.contains("first checkpoint"));
-    assert!(final_input.contains("current turn"));
+    assert!(final_input.contains("second checkpoint"));
     assert!(final_input.contains("intermediate answer"));
     assert!(final_input.contains("steer now"));
+    assert!(!final_input.contains("first checkpoint"));
 
     let checkpoints =
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
@@ -277,14 +292,19 @@ async fn steering_reenters_projection_hook_without_second_summary_attempt() {
             "session",
         )
         .unwrap();
-    assert_eq!(checkpoints.len(), 1);
-    assert_eq!(checkpoints[0].previous_checkpoint_id, None);
-    assert_eq!(checkpoints[0].tail_start_message_index, 3);
+    assert_eq!(checkpoints.len(), 2);
+    assert_eq!(
+        checkpoints[0].previous_checkpoint_id,
+        Some(checkpoints[1].id)
+    );
+    assert_eq!(checkpoints[0].tail_start_message_index, 4);
+    assert_eq!(checkpoints[1].tail_start_message_index, 3);
 
     let canonical = serde_json::to_string(&agent.messages).unwrap();
     assert!(canonical.contains("raw oldest"));
     assert!(canonical.contains("raw old answer"));
     assert!(!canonical.contains("first checkpoint"));
+    assert!(!canonical.contains("second checkpoint"));
     let events = drain_events(&mut events_rx);
     assert_eq!(
         events
@@ -297,7 +317,7 @@ async fn steering_reenters_projection_hook_without_second_summary_attempt() {
                 }
             ))
             .count(),
-        1
+        2
     );
     assert_eq!(
         events
@@ -310,7 +330,7 @@ async fn steering_reenters_projection_hook_without_second_summary_attempt() {
                 }
             ))
             .count(),
-        1
+        2
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
@@ -375,7 +395,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
 
     agent.restore_compaction_checkpoint().unwrap();
     let view = agent
-        .prepare_provider_view(&mut TokenUsage::default(), &mut false)
+        .prepare_provider_view(&mut TokenUsage::default())
         .await;
     let encoded = serde_json::to_string(&view.messages).unwrap();
     assert!(encoded.contains("restored summary"));

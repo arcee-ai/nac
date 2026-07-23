@@ -115,7 +115,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
 }
 
 #[tokio::test]
-async fn manual_compaction_skips_no_history_and_unsafe_history_without_model_requests() {
+async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests() {
     use crate::events::{CompactionReason, CompactionSkipReason};
     use crate::model::test_http::ScriptedServer;
 
@@ -129,9 +129,9 @@ async fn manual_compaction_skips_no_history_and_unsafe_history_without_model_req
     };
     let cases = [
         (
-            "no-history",
-            vec![Message::User {
-                content: "only user".to_string(),
+            "system-only",
+            vec![Message::System {
+                content: "policy only".to_string(),
             }],
         ),
         (
