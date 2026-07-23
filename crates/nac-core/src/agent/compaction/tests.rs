@@ -1,7 +1,13 @@
 use super::*;
+use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
+
 use crate::store;
-use crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint;
-use crate::types::{FunctionCall, ToolCall};
+use crate::store::orchestrator_compaction::{
+    append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
+};
+use crate::types::{FunctionCall, Message, ToolCall};
 
 fn user(content: &str) -> Message {
     Message::User {
@@ -30,6 +36,13 @@ fn temp_store_path(label: &str) -> PathBuf {
 
 fn state(path: PathBuf, threshold: Option<u64>) -> CompactionState {
     CompactionState::new(path, "session".to_string(), threshold)
+}
+
+fn candidate(plan: CompactionPlan) -> CompactionCandidate {
+    match plan.decision {
+        CompactionDecision::Candidate(candidate) => candidate,
+        decision => panic!("expected candidate, got {decision:?}"),
+    }
 }
 
 #[test]
@@ -67,10 +80,12 @@ fn boundary_projection_preserves_systems_and_exact_two_user_tail() {
         },
         user("current user"),
     ];
-    let candidate = state(PathBuf::from("unused"), Some(1))
-        .plan(&messages, &[], true)
-        .candidate
-        .unwrap();
+    let candidate = candidate(state(PathBuf::from("unused"), Some(1)).plan(
+        &messages,
+        &[],
+        CompactionReason::Auto,
+        true,
+    ));
     assert_eq!(candidate.boundary, 4);
     let projected = provider_view_with_summary(&messages, candidate.boundary, "summary");
     assert_eq!(
@@ -84,10 +99,12 @@ fn boundary_projection_preserves_systems_and_exact_two_user_tail() {
             {"role":"user","content":"current user"}
         ])
     );
-    assert!(state(PathBuf::from("unused"), Some(1))
-        .plan(&[user("only")], &[], true)
-        .candidate
-        .is_none());
+    assert!(matches!(
+        state(PathBuf::from("unused"), Some(1))
+            .plan(&[user("only")], &[], CompactionReason::Auto, true,)
+            .decision,
+        CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary)
+    ));
 }
 
 #[test]
@@ -95,9 +112,9 @@ fn exhausted_attempt_plan_reuses_prepared_view_without_a_candidate() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let mut state = state(PathBuf::from("unused"), Some(1));
 
-    let plan = state.plan(&messages, &[], false);
+    let plan = state.plan(&messages, &[], CompactionReason::Auto, false);
 
-    assert!(plan.candidate.is_none());
+    assert!(matches!(plan.decision, CompactionDecision::NotTriggered));
     assert_eq!(
         serde_json::to_value(&plan.prepared.messages).unwrap(),
         serde_json::to_value(&messages).unwrap()
@@ -143,7 +160,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
 
-    let candidate = state.plan(&messages, &[], true).candidate.unwrap();
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto, true));
     assert_eq!(candidate.boundary, 5);
     let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
     assert!(encoded.contains("prior summary"));
@@ -239,11 +256,104 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     let mut state = state(path.clone(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
-    let view = state.plan(&messages, &[], false).prepared.messages;
+    let view = state
+        .plan(&messages, &[], CompactionReason::Auto, false)
+        .prepared
+        .messages;
     assert!(serde_json::to_string(&view).unwrap().contains("valid"));
     assert!(!serde_json::to_string(&view)
         .unwrap()
         .contains("invalid newest"));
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_changed_checkpoint() {
+    let path = temp_store_path("sample_refresh");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![
+        user("old"),
+        assistant("answer"),
+        user("recent"),
+        user("current"),
+    ];
+    let (source, policy) = checkpoint_digests(&messages, 2);
+    let first = append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("first summary"),
+            tail_start_message_index: 2,
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 500,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut state = state(path.clone(), Some(1_000));
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+    state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
+
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+    assert_eq!(
+        state
+            .plan(&messages, &[], CompactionReason::Auto, false)
+            .prepared
+            .context_estimate,
+        52
+    );
+
+    let mut changed_projection = messages.clone();
+    changed_projection[3] = user("changed current");
+    state
+        .restore_newest_valid_checkpoint(&changed_projection)
+        .unwrap();
+    assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
+    let prepared = state
+        .plan(&changed_projection, &[], CompactionReason::Auto, false)
+        .prepared;
+    assert_eq!(
+        prepared.context_estimate,
+        full_provider_byte_estimate(&prepared.messages, &[])
+    );
+
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+    state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
+    let (source, policy) = checkpoint_digests(&messages, 3);
+    let second = append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: Some(first.id),
+            summary: installed_summary("changed summary"),
+            tail_start_message_index: 3,
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 500,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 40,
+        },
+    )
+    .unwrap();
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+    assert_eq!(state.active_checkpoint_for_test().unwrap().id, second.id);
+    let prepared = state
+        .plan(&messages, &[], CompactionReason::Auto, false)
+        .prepared;
+    assert_eq!(
+        prepared.context_estimate,
+        full_provider_byte_estimate(&prepared.messages, &[])
+    );
+    assert_ne!(prepared.context_estimate, 50);
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -299,7 +409,9 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     let mut state = state(path.clone(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
-    let view = state.plan(&messages, &[], false).prepared;
+    let view = state
+        .plan(&messages, &[], CompactionReason::Auto, false)
+        .prepared;
     assert!(serde_json::to_string(&view.messages)
         .unwrap()
         .contains("valid"));
@@ -341,13 +453,19 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     state.record_ordinary_context(&messages, 50, messages.len(), Some(checkpoint.id));
 
     messages[1] = assistant("repaired answer");
-    let candidate = state.plan(&messages, &[], true).candidate.unwrap();
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto, true));
     assert_eq!(candidate.previous_checkpoint_id, None);
     let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
     assert!(encoded.contains("repaired answer"));
     assert!(!encoded.contains("stale summary"));
     assert!(state.active_checkpoint_for_test().is_none());
-    assert!(state.plan(&messages, &[], false).prepared.context_estimate > 50);
+    assert!(
+        state
+            .plan(&messages, &[], CompactionReason::Auto, false)
+            .prepared
+            .context_estimate
+            > 50
+    );
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

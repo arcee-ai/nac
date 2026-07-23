@@ -24,12 +24,13 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
             scripted_responses_text("ordinary fallback", 10, 0, 2, 12),
         ),
     ]);
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("missing-session"),
         Some(1),
-        EventSink::none(),
+        EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = vec![
@@ -66,6 +67,47 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         )
         .unwrap()
         .is_empty()
+    );
+    let events = drain_events(&mut events_rx);
+    let started = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                AgentEvent::OrchestratorCompactionStarted {
+                    reason: crate::events::CompactionReason::Auto,
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    let failed = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                AgentEvent::OrchestratorCompactionFailed {
+                    reason: crate::events::CompactionReason::Auto,
+                    failure: crate::events::CompactionFailure::CheckpointPersistenceFailed,
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    assert!(started < failed);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::OrchestratorCompactionStarted { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::OrchestratorCompactionFailed { .. }))
+            .count(),
+        1
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
@@ -155,12 +197,13 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             }
         },
     );
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
         Some(1),
-        EventSink::none(),
+        EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = messages;
@@ -196,6 +239,22 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
         .len(),
         1
     );
+    let events = drain_events(&mut events_rx);
+    let AgentEvent::OrchestratorCompactionStarted {
+        compaction_id,
+        reason: crate::events::CompactionReason::Auto,
+    } = events[1]
+    else {
+        panic!("expected automatic start event: {:?}", events[1]);
+    };
+    assert!(matches!(
+        events[2],
+        AgentEvent::OrchestratorCompactionFailed {
+            compaction_id: id,
+            reason: crate::events::CompactionReason::Auto,
+            failure: crate::events::CompactionFailure::Cancelled,
+        } if id == compaction_id
+    ));
 
     release.store(true, Ordering::SeqCst);
     assert_eq!(server.finish().len(), 1);
@@ -236,12 +295,13 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
             }
         },
     );
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
         Some(1),
-        EventSink::none(),
+        EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = vec![
@@ -290,8 +350,289 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
         .unwrap()
         .contains("committed"));
     drop(guard);
+    let events = drain_events(&mut events_rx);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                AgentEvent::OrchestratorCompactionCompleted {
+                    reason: crate::events::CompactionReason::Auto,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        AgentEvent::OrchestratorCompactionFailed {
+            failure: crate::events::CompactionFailure::Cancelled,
+            ..
+        }
+    )));
 
     release.store(true, Ordering::SeqCst);
     assert_eq!(server.finish().len(), 2);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() {
+    use crate::events::{CompactionFailure, CompactionReason};
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let cases = [
+        (
+            "request",
+            ScriptedResponse::json("200 OK", "{}"),
+            CompactionFailure::SummaryRequestFailed,
+            false,
+        ),
+        (
+            "rejected",
+            ScriptedResponse::json("200 OK", scripted_responses_text("  ", 17, 0, 2, 19)),
+            CompactionFailure::SummaryRejected,
+            true,
+        ),
+    ];
+
+    for (label, response, expected_failure, has_usage) in cases {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let store_path = std::env::temp_dir()
+            .join(format!("nac_agent_manual_{label}_failure_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session");
+        let server = ScriptedServer::start(vec![response]);
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut agent = compaction_test_agent(
+            ModelClient::new_for_test_server(server.base_url.clone()),
+            store_path.clone(),
+            Some("session"),
+            None,
+            EventSink::channel(events_tx),
+        );
+        agent.messages = compactable_messages();
+        agent.last_usage = Some(TokenUsage {
+            input_tokens: 44,
+            output_tokens: 5,
+            orchestrator_context_tokens: 99,
+            ..TokenUsage::default()
+        });
+        let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
+        let usage_before = agent.last_usage.clone();
+
+        let error = agent.compact().await.unwrap_err();
+        assert_eq!(error.failure(), Some(expected_failure));
+        let compaction_id = error.compaction_id().unwrap();
+        assert_eq!(server.finish().len(), 1);
+        assert_eq!(
+            serde_json::to_vec(&agent.messages).unwrap(),
+            canonical_before
+        );
+        assert_eq!(agent.last_usage, usage_before);
+        assert!(
+            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+                &store_path,
+                "session"
+            )
+            .unwrap()
+            .is_empty()
+        );
+
+        let events = drain_events(&mut events_rx);
+        assert_eq!(events.len(), if has_usage { 3 } else { 2 });
+        assert!(matches!(
+            events[0],
+            AgentEvent::OrchestratorCompactionStarted {
+                compaction_id: id,
+                reason: CompactionReason::Manual,
+            } if id == compaction_id
+        ));
+        if has_usage {
+            assert!(matches!(events[1], AgentEvent::TokenUsageUpdated { .. }));
+        }
+        assert!(matches!(
+            events[events.len() - 1],
+            AgentEvent::OrchestratorCompactionFailed {
+                compaction_id: id,
+                reason: CompactionReason::Manual,
+                failure,
+            } if id == compaction_id && failure == expected_failure
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+}
+
+#[tokio::test]
+async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
+    use crate::events::{CompactionFailure, CompactionReason};
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let store_path = std::env::temp_dir()
+        .join(format!("nac_agent_manual_store_failure_{unique}"))
+        .join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        scripted_responses_text("cannot persist", 12, 0, 3, 15),
+    )]);
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = compaction_test_agent(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        store_path.clone(),
+        Some("missing-session"),
+        Some(1),
+        EventSink::channel(events_tx),
+    );
+    agent.messages = compactable_messages();
+    let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
+
+    let error = agent.compact().await.unwrap_err();
+    assert_eq!(
+        error.failure(),
+        Some(CompactionFailure::CheckpointPersistenceFailed)
+    );
+    let compaction_id = error.compaction_id().unwrap();
+    assert_eq!(server.finish().len(), 1);
+    assert_eq!(
+        serde_json::to_vec(&agent.messages).unwrap(),
+        canonical_before
+    );
+    assert!(agent
+        .compaction
+        .as_ref()
+        .unwrap()
+        .active_checkpoint_for_test()
+        .is_none());
+
+    let events = drain_events(&mut events_rx);
+    assert_eq!(events.len(), 3);
+    assert!(matches!(
+        events[0],
+        AgentEvent::OrchestratorCompactionStarted {
+            compaction_id: id,
+            reason: CompactionReason::Manual,
+        } if id == compaction_id
+    ));
+    assert!(matches!(events[1], AgentEvent::TokenUsageUpdated { .. }));
+    assert!(matches!(
+        events[2],
+        AgentEvent::OrchestratorCompactionFailed {
+            compaction_id: id,
+            reason: CompactionReason::Manual,
+            failure: CompactionFailure::CheckpointPersistenceFailed,
+        } if id == compaction_id
+    ));
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn manual_cancellation_emits_cancelled_and_preserves_state() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::events::{CompactionFailure, CompactionReason};
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let store_path = std::env::temp_dir()
+        .join(format!("nac_agent_manual_cancel_{unique}"))
+        .join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+
+    let observed = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let observed_server = observed.clone();
+    let release_server = release.clone();
+    let server = ScriptedServer::start_observed(
+        vec![ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("too late", 10, 0, 2, 12),
+        )],
+        move |_index, _request| {
+            observed_server.store(true, Ordering::SeqCst);
+            while !release_server.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        },
+    );
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = compaction_test_agent(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        store_path.clone(),
+        Some("session"),
+        None,
+        EventSink::channel(events_tx),
+    );
+    agent.messages = compactable_messages();
+    agent.last_usage = Some(TokenUsage {
+        input_tokens: 8,
+        ..TokenUsage::default()
+    });
+    let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
+    let usage_before = agent.last_usage.clone();
+    let agent = Arc::new(tokio::sync::Mutex::new(agent));
+    let task_agent = agent.clone();
+    let task = tokio::spawn(async move { task_agent.lock().await.compact().await });
+
+    wait_until_observed(&observed).await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let guard = agent.lock().await;
+    assert_eq!(
+        serde_json::to_vec(&guard.messages).unwrap(),
+        canonical_before
+    );
+    assert_eq!(guard.last_usage, usage_before);
+    assert!(guard
+        .compaction
+        .as_ref()
+        .unwrap()
+        .active_checkpoint_for_test()
+        .is_none());
+    drop(guard);
+    assert!(
+        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            &store_path,
+            "session"
+        )
+        .unwrap()
+        .is_empty()
+    );
+
+    let events = drain_events(&mut events_rx);
+    assert_eq!(events.len(), 2);
+    let AgentEvent::OrchestratorCompactionStarted {
+        compaction_id,
+        reason: CompactionReason::Manual,
+    } = events[0]
+    else {
+        panic!("expected manual start event: {:?}", events[0]);
+    };
+    assert!(matches!(
+        events[1],
+        AgentEvent::OrchestratorCompactionFailed {
+            compaction_id: id,
+            reason: CompactionReason::Manual,
+            failure: CompactionFailure::Cancelled,
+        } if id == compaction_id
+    ));
+
+    release.store(true, Ordering::SeqCst);
+    assert_eq!(server.finish().len(), 1);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

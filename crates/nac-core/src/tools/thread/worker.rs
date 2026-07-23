@@ -94,7 +94,11 @@ impl WorkerTimeoutTrace {
             | AgentEvent::ThreadSteeringExpired { .. }
             | AgentEvent::OrchestratorSteeringQueued { .. }
             | AgentEvent::OrchestratorSteeringDelivered { .. }
-            | AgentEvent::OrchestratorSteeringExpired { .. } => {}
+            | AgentEvent::OrchestratorSteeringExpired { .. }
+            | AgentEvent::OrchestratorCompactionStarted { .. }
+            | AgentEvent::OrchestratorCompactionCompleted { .. }
+            | AgentEvent::OrchestratorCompactionSkipped { .. }
+            | AgentEvent::OrchestratorCompactionFailed { .. } => {}
             AgentEvent::ThreadStarted { .. } | AgentEvent::ThreadFinished { .. } => {}
         }
     }

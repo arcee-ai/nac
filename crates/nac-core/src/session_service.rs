@@ -9,10 +9,14 @@ use tokio::{
     sync::{mpsc, Mutex},
     task::JoinHandle,
 };
+use uuid::Uuid;
 
 use crate::agent::Agent;
 use crate::commands::{self, PreparedPrompt, PreparedUserInput};
-use crate::events::{AgentEvent, EventSink, SessionEvent, SessionEventBoundary, SessionEventBus};
+use crate::events::{
+    AgentEvent, CompactionFailure, CompactionReason, EventSink, SessionEvent, SessionEventBoundary,
+    SessionEventBus,
+};
 pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
@@ -24,6 +28,14 @@ use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
     WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
+};
+
+mod manual_compaction;
+
+use manual_compaction::ActiveCompactionState;
+pub use manual_compaction::{
+    SessionCompactionAdmissionError, SessionCompactionError, SessionCompactionHandle,
+    SessionCompactionResult, SessionCoordinationError, SessionOperationBusy,
 };
 
 pub type AgentEventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
@@ -118,6 +130,25 @@ pub struct ActiveRunSnapshot {
     pub started_at_epoch_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveCompactionSnapshot {
+    pub compaction_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<SessionClientId>,
+    pub started_at_epoch_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ActiveSessionOperationSnapshot {
+    Run {
+        run: ActiveRunSnapshot,
+    },
+    ManualCompaction {
+        compaction: ActiveCompactionSnapshot,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionServiceInit {
     pub metadata: SessionMetadata,
@@ -132,6 +163,8 @@ pub struct SessionFrontendSnapshot {
     pub response_timing: ResponseTimingSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_compaction: Option<ActiveCompactionSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
     pub active_threads: Vec<String>,
@@ -267,8 +300,8 @@ pub struct SessionRunHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSubmitError {
     Busy { active_run: ActiveRunSnapshot },
-    ExternalBusy { session_id: String },
-    Coordination { message: String },
+    ExternalBusy { session_id: SessionOperationBusy },
+    Coordination { message: SessionCoordinationError },
 }
 
 impl std::fmt::Display for SessionSubmitError {
@@ -279,11 +312,16 @@ impl std::fmt::Display for SessionSubmitError {
                 "session is busy with run {} ({})",
                 active_run.run_id, active_run.prompt_preview
             ),
-            Self::ExternalBusy { session_id } => write!(
+            Self::ExternalBusy {
+                session_id: SessionOperationBusy::Local { .. },
+            } => formatter.write_str("session is busy with a local compaction"),
+            Self::ExternalBusy {
+                session_id: SessionOperationBusy::External { session_id },
+            } => write!(
                 formatter,
-                "session '{session_id}' is busy with an active run in another process"
+                "session '{session_id}' is busy with an active operation in another process"
             ),
-            Self::Coordination { message } => formatter.write_str(message),
+            Self::Coordination { message } => message.fmt(formatter),
         }
     }
 }
@@ -361,7 +399,7 @@ impl SessionClientHandle {
     pub fn try_submit_prepared_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
-        lease: sessions::SessionRunLease,
+        lease: sessions::SessionOperationLease,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         self.service.try_submit_prompt_for_client_with_lease(
             self.client_id.clone(),
@@ -395,8 +433,28 @@ pub struct SessionService {
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     event_bus: SessionEventBus,
-    active_run: Arc<StdMutex<Option<ActiveRunState>>>,
+    active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+}
+
+enum ActiveSessionOperation {
+    Run(ActiveRunState),
+    ManualCompaction(ActiveCompactionState),
+}
+
+impl ActiveSessionOperation {
+    fn snapshot(&self) -> ActiveSessionOperationSnapshot {
+        match self {
+            Self::Run(run) => ActiveSessionOperationSnapshot::Run {
+                run: run.snapshot.clone(),
+            },
+            Self::ManualCompaction(compaction) => {
+                ActiveSessionOperationSnapshot::ManualCompaction {
+                    compaction: compaction.snapshot.clone(),
+                }
+            }
+        }
+    }
 }
 
 struct ActiveRunState {
@@ -404,7 +462,7 @@ struct ActiveRunState {
     started_at: Instant,
     finishing: bool,
     task: Option<JoinHandle<()>>,
-    _run_lease: Option<sessions::SessionRunLease>,
+    _operation_lease: Option<sessions::SessionOperationLease>,
 }
 
 struct FinishingRun {
@@ -420,6 +478,11 @@ struct CancellingRun {
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
     Failed(String, Option<crate::model::TokenUsage>),
+}
+
+enum OperationAdmissionPreparationError {
+    ExternalBusy { session_id: String },
+    Coordination { message: SessionCoordinationError },
 }
 
 impl SessionService {
@@ -473,7 +536,7 @@ impl SessionService {
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             event_bus,
-            active_run: Arc::new(StdMutex::new(None)),
+            active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
         };
         let init = SessionServiceInit {
@@ -556,10 +619,30 @@ impl SessionService {
         (*self.metadata).clone()
     }
 
-    pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
-        self.lock_active_run()
+    pub fn active_operation(&self) -> Option<ActiveSessionOperationSnapshot> {
+        self.lock_active_operation()
             .as_ref()
-            .map(|active_run| active_run.snapshot.clone())
+            .map(ActiveSessionOperation::snapshot)
+    }
+
+    pub fn has_active_operation(&self) -> bool {
+        self.lock_active_operation().is_some()
+    }
+
+    pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
+        match self.lock_active_operation().as_ref() {
+            Some(ActiveSessionOperation::Run(active_run)) => Some(active_run.snapshot.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn active_compaction(&self) -> Option<ActiveCompactionSnapshot> {
+        match self.lock_active_operation().as_ref() {
+            Some(ActiveSessionOperation::ManualCompaction(active_compaction)) => {
+                Some(active_compaction.snapshot.clone())
+            }
+            _ => None,
+        }
     }
 
     pub fn config_version(&self) -> Option<i64> {
@@ -630,11 +713,15 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let active_run = self.lock_active_run();
-        let dispatch_id = match active_run.as_ref() {
-            Some(run) if !run.finishing => run.snapshot.run_id.as_str(),
-            Some(_) => return Err(anyhow::anyhow!("session active run is finishing")),
-            None => return Err(anyhow::anyhow!("session has no active run")),
+        let active_operation = self.lock_active_operation();
+        let dispatch_id = match active_operation.as_ref() {
+            Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
+                run.snapshot.run_id.as_str()
+            }
+            Some(ActiveSessionOperation::Run(_)) => {
+                return Err(anyhow::anyhow!("session active run is finishing"));
+            }
+            _ => return Err(anyhow::anyhow!("session has no active run")),
         };
         let record = crate::store::queue_thread_steering(
             &self.metadata.store_path,
@@ -643,7 +730,7 @@ impl SessionService {
             dispatch_id,
             instruction,
         )?;
-        drop(active_run);
+        drop(active_operation);
         self.event_bus
             .emit_agent(AgentEvent::OrchestratorSteeringQueued {
                 steering_id: record.id,
@@ -848,6 +935,7 @@ impl SessionService {
             messages: loaded_messages.messages,
             response_timing,
             active_run: self.active_run(),
+            active_compaction: self.active_compaction(),
             sessions: if options.include_sessions {
                 self.list_sessions()?
             } else {
@@ -975,6 +1063,98 @@ impl SessionService {
         )
     }
 
+    fn prepare_operation_admission(
+        &self,
+        supplied_lease: Option<sessions::SessionOperationLease>,
+    ) -> std::result::Result<
+        Option<sessions::SessionOperationLease>,
+        OperationAdmissionPreparationError,
+    > {
+        let operation_lease = match (supplied_lease, self.metadata.session_id.as_deref()) {
+            (Some(lease), Some(session_id)) => {
+                lease
+                    .validate(&self.metadata.store_path, session_id)
+                    .map_err(|error| match error {
+                        sessions::SessionOperationLeaseValidationError::IdentityMismatch => {
+                            OperationAdmissionPreparationError::Coordination {
+                                message: SessionCoordinationError::invalid_lease(),
+                            }
+                        }
+                        sessions::SessionOperationLeaseValidationError::Store(error) => {
+                            OperationAdmissionPreparationError::Coordination {
+                                message: SessionCoordinationError::store(format!(
+                                    "failed to validate session operation lease: {error:#}"
+                                )),
+                            }
+                        }
+                    })?;
+                Some(lease)
+            }
+            (Some(_), None) => {
+                return Err(OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::invalid_lease(),
+                });
+            }
+            (None, Some(session_id)) => Some(
+                sessions::SessionOperationLease::try_acquire(&self.metadata.store_path, session_id)
+                    .map_err(|error| match error {
+                        sessions::SessionOperationLeaseError::Busy(session_id) => {
+                            OperationAdmissionPreparationError::ExternalBusy { session_id }
+                        }
+                        sessions::SessionOperationLeaseError::Store(error) => {
+                            OperationAdmissionPreparationError::Coordination {
+                                message: SessionCoordinationError::store(format!(
+                                    "session operation coordination failed: {error:#}"
+                                )),
+                            }
+                        }
+                    })?,
+            ),
+            // Picker services have no runnable persisted session. Keeping this
+            // path lease-free supports read-only picker construction.
+            (None, None) => None,
+        };
+
+        if let (Some(session_id), Some(service_version)) =
+            (self.metadata.session_id.as_deref(), self.config_version)
+        {
+            let persisted_version =
+                sessions::load_session_config(&self.metadata.store_path, session_id)
+                    .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to verify session configuration revision: {error:#}"
+                        )),
+                    })?
+                    .config_version;
+            if persisted_version != service_version {
+                return Err(OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::stale_configuration(session_id),
+                });
+            }
+        }
+
+        // The caller holds the local operation-state lock and the lease above
+        // excludes other processes. Refresh before publishing active state so
+        // every run and manual compaction starts from the newest valid durable
+        // checkpoint, including direct/TUI callers.
+        if operation_lease.is_some() {
+            let mut agent = self.agent.try_lock().map_err(|_| {
+                OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::local_agent_busy(),
+                }
+            })?;
+            agent.restore_compaction_checkpoint().map_err(|error| {
+                OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to reload compaction checkpoint: {error:#}"
+                    )),
+                }
+            })?;
+        }
+
+        Ok(operation_lease)
+    }
+
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -994,7 +1174,7 @@ impl SessionService {
         &self,
         client_id: SessionClientId,
         expanded_prompt: String,
-        lease: sessions::SessionRunLease,
+        lease: sessions::SessionOperationLease,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease))
     }
@@ -1058,9 +1238,10 @@ impl SessionService {
         &self,
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
-        run_lease: Option<sessions::SessionRunLease>,
+        operation_lease: Option<sessions::SessionOperationLease>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run = self.try_begin_run_with_lease(client_id, &expanded_prompt, run_lease)?;
+        let active_run =
+            self.try_begin_run_with_lease(client_id, &expanded_prompt, operation_lease)?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
@@ -1120,7 +1301,7 @@ impl SessionService {
         &self,
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
-        supplied_lease: Option<sessions::SessionRunLease>,
+        supplied_lease: Option<sessions::SessionOperationLease>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true)
     }
@@ -1129,74 +1310,65 @@ impl SessionService {
         &self,
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
-        supplied_lease: Option<sessions::SessionRunLease>,
+        supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        let mut guard = self.lock_active_run();
-        if let Some(active_run) = guard.as_ref() {
-            return Err(SessionSubmitError::Busy {
-                active_run: active_run.snapshot.clone(),
-            });
+        let mut guard = self.lock_active_operation();
+        match guard.as_ref() {
+            Some(ActiveSessionOperation::Run(active_run)) => {
+                return Err(SessionSubmitError::Busy {
+                    active_run: active_run.snapshot.clone(),
+                });
+            }
+            Some(ActiveSessionOperation::ManualCompaction(active)) => {
+                return Err(SessionSubmitError::ExternalBusy {
+                    session_id: SessionOperationBusy::Local {
+                        session_id: self
+                            .metadata
+                            .session_id
+                            .clone()
+                            .unwrap_or_else(|| "unavailable".to_string()),
+                        active_operation: ActiveSessionOperationSnapshot::ManualCompaction {
+                            compaction: active.snapshot.clone(),
+                        },
+                    },
+                });
+            }
+            None => {}
         }
 
-        let run_lease = if enforce_coordination {
-            match (supplied_lease, self.metadata.session_id.as_deref()) {
-                (Some(lease), _) => Some(lease),
-                (None, Some(session_id)) => Some(
-                    sessions::SessionRunLease::try_acquire(&self.metadata.store_path, session_id)
-                        .map_err(|error| match error {
-                        sessions::SessionRunLeaseError::Busy(session_id) => {
-                            SessionSubmitError::ExternalBusy { session_id }
+        let operation_lease = if enforce_coordination {
+            self.prepare_operation_admission(supplied_lease)
+                .map_err(|error| match error {
+                    OperationAdmissionPreparationError::ExternalBusy { session_id } => {
+                        SessionSubmitError::ExternalBusy {
+                            session_id: SessionOperationBusy::External { session_id },
                         }
-                        sessions::SessionRunLeaseError::Store(error) => {
-                            SessionSubmitError::Coordination {
-                                message: format!("session run coordination failed: {error:#}"),
-                            }
-                        }
-                    })?,
-                ),
-                // Picker services have no runnable persisted session. Keeping this
-                // path lease-free supports read-only picker construction.
-                (None, None) => None,
-            }
+                    }
+                    OperationAdmissionPreparationError::Coordination { message } => {
+                        SessionSubmitError::Coordination { message }
+                    }
+                })?
         } else {
             None
         };
-
-        if enforce_coordination {
-            if let (Some(session_id), Some(service_version)) =
-                (self.metadata.session_id.as_deref(), self.config_version)
-            {
-                let persisted_version =
-                    sessions::load_session_config(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: format!(
-                                "failed to verify session configuration revision: {error:#}"
-                            ),
-                        })?
-                        .config_version;
-                if persisted_version != service_version {
-                    return Err(SessionSubmitError::Coordination {
-                        message: format!(
-                            "session '{session_id}' configuration changed externally; reload it before submitting"
-                        ),
-                    });
-                }
-            }
-        }
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
                 let mut expired =
                     crate::store::expire_session_steering(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
-                            message: format!("failed to recover stale steering: {error:#}"),
+                            message: SessionCoordinationError::store(format!(
+                                "failed to recover stale steering: {error:#}"
+                            )),
                         })?;
                 expired.extend(
                     self.active_threads
                         .close_all(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
-                            message: format!("failed to clear stale worker targets: {error:#}"),
+                            message: SessionCoordinationError::store(format!(
+                                "failed to clear stale worker targets: {error:#}"
+                            )),
                         })?,
                 );
                 self.emit_steering_expired(expired);
@@ -1219,13 +1391,13 @@ impl SessionService {
             submitted_user_message: Some(submitted_user_message),
             started_at_epoch_ms: submitted_at_epoch_ms,
         };
-        *guard = Some(ActiveRunState {
+        *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
             snapshot: active_run.clone(),
             started_at: Instant::now(),
             finishing: false,
             task: None,
-            _run_lease: run_lease,
-        });
+            _operation_lease: operation_lease,
+        }));
         drop(guard);
 
         self.event_bus.emit_with_context(
@@ -1341,8 +1513,10 @@ impl SessionService {
     }
 
     fn mark_run_finishing(&self, run_id: &SessionRunId) -> Option<FinishingRun> {
-        let mut guard = self.lock_active_run();
-        let active_run = guard.as_mut()?;
+        let mut guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
+            return None;
+        };
         if &active_run.snapshot.run_id != run_id || active_run.finishing {
             return None;
         }
@@ -1355,8 +1529,10 @@ impl SessionService {
     }
 
     fn mark_run_cancelling(&self, run_id: &SessionRunId) -> Option<CancellingRun> {
-        let mut guard = self.lock_active_run();
-        let active_run = guard.as_mut()?;
+        let mut guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
+            return None;
+        };
         if &active_run.snapshot.run_id != run_id || active_run.finishing {
             return None;
         }
@@ -1369,8 +1545,8 @@ impl SessionService {
     }
 
     fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {
-        let mut guard = self.lock_active_run();
-        let Some(active_run) = guard.as_mut() else {
+        let mut guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
             task.abort();
             return;
         };
@@ -1382,11 +1558,14 @@ impl SessionService {
     }
 
     fn clear_finished_run(&self, run_id: &SessionRunId) {
-        let mut guard = self.lock_active_run();
-        if guard
-            .as_ref()
-            .is_some_and(|active_run| &active_run.snapshot.run_id == run_id && active_run.finishing)
-        {
+        let mut guard = self.lock_active_operation();
+        if guard.as_ref().is_some_and(|operation| {
+            matches!(
+                operation,
+                ActiveSessionOperation::Run(active_run)
+                    if &active_run.snapshot.run_id == run_id && active_run.finishing
+            )
+        }) {
             *guard = None;
         }
     }
@@ -1406,8 +1585,8 @@ impl SessionService {
         None
     }
 
-    fn lock_active_run(&self) -> std::sync::MutexGuard<'_, Option<ActiveRunState>> {
-        self.active_run
+    fn lock_active_operation(&self) -> std::sync::MutexGuard<'_, Option<ActiveSessionOperation>> {
+        self.active_operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -2086,7 +2265,7 @@ fn token_usages_after_run(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::agent::{AgentConfig, AgentMode};
     use crate::model::ModelClient;
@@ -2323,6 +2502,7 @@ mod tests {
             ],
             response_timing: ResponseTimingSnapshot::default(),
             active_run: None,
+            active_compaction: None,
             sessions: Vec::new(),
             active_threads: vec!["ui".to_string()],
             threads: vec![ThreadSnapshot {
@@ -2438,7 +2618,7 @@ mod tests {
         );
     }
 
-    fn test_store_path(label: &str) -> PathBuf {
+    pub(super) fn test_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time went backwards")
@@ -2448,14 +2628,27 @@ mod tests {
             .join("store.db")
     }
 
-    fn test_agent(client: ModelClient, store_path: PathBuf, session_id: Option<String>) -> Agent {
+    pub(super) fn test_agent(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+    ) -> Agent {
+        test_agent_with_compaction_threshold(client, store_path, session_id, None)
+    }
+
+    pub(super) fn test_agent_with_compaction_threshold(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+        orchestrator_compaction_threshold: Option<u64>,
+    ) -> Agent {
         Agent::with_config(
             client,
             AgentConfig {
                 mode: AgentMode::Orchestrator,
                 store_path,
                 session_id,
-                orchestrator_compaction_threshold: None,
+                orchestrator_compaction_threshold,
                 initial_messages: Vec::new(),
                 thread_name: None,
                 dispatch_id: None,
@@ -2476,7 +2669,7 @@ mod tests {
         .expect("agent config must be valid")
     }
 
-    fn test_picker_service(label: &str) -> SessionServiceParts {
+    pub(super) fn test_picker_service(label: &str) -> SessionServiceParts {
         let store_path = test_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(client.clone(), store_path.clone(), None);
@@ -2492,7 +2685,10 @@ mod tests {
         })
     }
 
-    fn test_active_service(label: &str, session_id: &str) -> (SessionServiceParts, PathBuf) {
+    pub(super) fn test_active_service(
+        label: &str,
+        session_id: &str,
+    ) -> (SessionServiceParts, PathBuf) {
         let store_path = test_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(
@@ -2513,6 +2709,104 @@ mod tests {
             None,
             BTreeMap::new(),
         );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.to_string(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        (parts, store_path)
+    }
+
+    pub(super) fn compaction_messages() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "system policy".to_string(),
+            },
+            Message::User {
+                content: "old request".to_string(),
+            },
+            Message::Assistant {
+                content: Some("old answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "recent request".to_string(),
+            },
+            Message::User {
+                content: "current request".to_string(),
+            },
+        ]
+    }
+
+    pub(super) fn compaction_response(text: &str) -> String {
+        serde_json::json!({
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": text}]
+            }],
+            "usage": {
+                "input_tokens": 30,
+                "input_tokens_details": {"cached_tokens": 4},
+                "output_tokens": 5,
+                "total_tokens": 39
+            }
+        })
+        .to_string()
+    }
+
+    pub(super) fn test_compaction_service(
+        label: &str,
+        session_id: &str,
+        client: ModelClient,
+    ) -> (SessionServiceParts, PathBuf) {
+        let store_path = test_store_path(label);
+        let mut agent = test_agent(
+            client.clone(),
+            store_path.clone(),
+            Some(session_id.to_string()),
+        );
+        agent.messages = compaction_messages();
+        agent.last_usage = Some(crate::model::TokenUsage {
+            input_tokens: 91,
+            output_tokens: 7,
+            orchestrator_context_tokens: 123,
+            ..crate::model::TokenUsage::default()
+        });
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.last_response_duration_ms = Some(123);
+        snapshot.previous_response_duration_ms = Some(45);
+        snapshot.response_durations_ms = Some(vec![Some(123)]);
+        snapshot.token_usages = vec![Some(crate::model::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 2,
+            orchestrator_context_tokens: 13,
+            ..crate::model::TokenUsage::default()
+        })];
         sessions::create_session(&store_path, &snapshot).unwrap();
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
@@ -2760,7 +3054,8 @@ mod tests {
     #[test]
     fn public_submission_rejects_external_process_lease() {
         let (parts, store_path) = test_active_service("external_lease", "leased-session");
-        let _lease = sessions::SessionRunLease::try_acquire(&store_path, "leased-session").unwrap();
+        let _lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, "leased-session").unwrap();
         assert!(matches!(
             parts.service.try_submit_prompt("must not run".to_string()),
             Err(SessionSubmitError::ExternalBusy { session_id }) if session_id == "leased-session"
@@ -2781,21 +3076,22 @@ mod tests {
         assert!(no_run.to_string().contains("no active run"));
 
         *service
-            .active_run
+            .active_operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ActiveRunState {
-            snapshot: ActiveRunSnapshot {
-                run_id: SessionRunId::new(),
-                client_id: None,
-                prompt_preview: "revamp the UI".to_string(),
-                submitted_user_message: None,
-                started_at_epoch_ms: 0,
-            },
-            started_at: Instant::now(),
-            finishing: false,
-            task: None,
-            _run_lease: None,
-        });
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(ActiveSessionOperation::Run(ActiveRunState {
+                snapshot: ActiveRunSnapshot {
+                    run_id: SessionRunId::new(),
+                    client_id: None,
+                    prompt_preview: "revamp the UI".to_string(),
+                    submitted_user_message: None,
+                    started_at_epoch_ms: 0,
+                },
+                started_at: Instant::now(),
+                finishing: false,
+                task: None,
+                _operation_lease: None,
+            }));
         let inactive = service
             .queue_thread_steering("impl/ui", "make the layout denser")
             .await
@@ -2871,8 +3167,9 @@ mod tests {
         };
         assert!(matches!(
             error,
-            SessionSubmitError::Coordination { ref message }
-                if message.contains("configuration changed externally")
+            SessionSubmitError::Coordination {
+                message: SessionCoordinationError::StaleConfiguration { .. },
+            }
         ));
         assert!(parts.service.active_run().is_none());
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

@@ -12,16 +12,21 @@ use crate::types::Message;
 
 mod codec;
 mod db;
-mod run_lease;
+mod operation_lease;
 mod snapshot;
 mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_config, reorder_sessions, save_session, update_raw_session_config,
+    load_session_config, reorder_sessions, save_session, session_exists, update_raw_session_config,
     update_session_config, update_session_presentation,
 };
-pub use run_lease::{SessionRunLease, SessionRunLeaseError};
+pub use operation_lease::{
+    SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
+};
+// Compatibility aliases for callers that have not yet adopted operation-wide naming.
+pub type SessionRunLease = SessionOperationLease;
+pub type SessionRunLeaseError = SessionOperationLeaseError;
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;

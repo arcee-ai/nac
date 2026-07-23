@@ -26,6 +26,9 @@ mod live_tests;
 
 #[cfg(test)]
 pub(crate) use compaction::checkpoint_digests as compaction_checkpoint_digests_for_test;
+pub(crate) use compaction::{
+    CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
+};
 use compaction::{CompactionState, PreparedProviderView};
 use preview::*;
 use tool_exec::execute_tools_parallel;
@@ -528,7 +531,12 @@ impl Agent {
         match &mut self.compaction {
             Some(compaction) => {
                 compaction
-                    .plan(&self.messages, &self.tool_defs, false)
+                    .plan(
+                        &self.messages,
+                        &self.tool_defs,
+                        crate::events::CompactionReason::Auto,
+                        false,
+                    )
                     .prepared
                     .messages
             }

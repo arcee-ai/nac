@@ -11,6 +11,7 @@ const state = {
   targetedThread: null,
   eventSource: null,
   submittingSessions: new Set(),
+  compactionOperations: new Map(),
   composerDrafts: new Map(),
   sessionReorder: null,
   snapshotTimers: new Map(),
@@ -63,6 +64,7 @@ const commands = [
   { name: "workspace", description: "inspect changed files and diffs" },
   { name: "info", description: "show complete session and store identity" },
   { name: "settings", description: "edit this session's configuration" },
+  { name: "compact", description: "compact older orchestrator context" },
   { name: "stop", description: "stop the active orchestrator run" },
   { name: "rename", description: "rename this session" },
   { name: "delete", description: "delete this session" },
@@ -390,6 +392,127 @@ function noteSessionRunEvent(sessionId, type, runId = null) {
   const stillActive = Boolean(state.acceptedRuns.get(sessionId) || entry?.active_run || state.snapshots.get(sessionId)?.active_run);
   state.sessionRunActivity.set(sessionId, stillActive);
   if (cleared && !stillActive) state.attentionSessions.add(sessionId);
+}
+
+const COMPACTION_TERMINAL_TOMBSTONE_LIMIT = 32;
+const COMPACTION_STARTED_EVENT_TYPE = "orchestrator_compaction_started";
+const COMPACTION_TERMINAL_EVENT_TYPES = new Set([
+  "orchestrator_compaction_completed",
+  "orchestrator_compaction_skipped",
+  "orchestrator_compaction_failed",
+]);
+
+function emptyCompactionOperation() {
+  return {
+    revision: 0,
+    request: null,
+    activeCompactionId: null,
+    terminalCompactionIds: [],
+  };
+}
+
+function compactionOperationBusy(operation) {
+  return Boolean(operation?.request || operation?.activeCompactionId);
+}
+
+function withTerminalCompactionId(operation, compactionId) {
+  if (!compactionId) return operation.terminalCompactionIds;
+  return [...operation.terminalCompactionIds.filter((id) => id !== compactionId), compactionId]
+    .slice(-COMPACTION_TERMINAL_TOMBSTONE_LIMIT);
+}
+
+function reduceCompactionOperation(operation = emptyCompactionOperation(), transition = {}) {
+  const current = operation || emptyCompactionOperation();
+  const bump = (changes) => ({ ...current, ...changes, revision: current.revision + 1 });
+  if (transition.type === "request_started") {
+    if (!transition.request || compactionOperationBusy(current)) return current;
+    return bump({ request: { token: transition.request, draft: String(transition.draft ?? "") } });
+  }
+  if (["request_succeeded", "request_failed"].includes(transition.type)) {
+    if (!current.request || current.request.token !== transition.request) return current;
+    if (transition.type === "request_failed") return bump({ request: null });
+    const compactionId = String(transition.compactionId || "");
+    return bump({
+      request: null,
+      activeCompactionId: current.activeCompactionId === compactionId ? null : current.activeCompactionId,
+      terminalCompactionIds: withTerminalCompactionId(current, compactionId),
+    });
+  }
+  if (["lifecycle_started", "lifecycle_terminal"].includes(transition.type)) {
+    if (transition.reason !== "manual") return current;
+    const compactionId = String(transition.compactionId || "");
+    if (!compactionId) return current;
+    if (transition.type === "lifecycle_started") {
+      if (current.terminalCompactionIds.includes(compactionId)) return current;
+      return bump({ activeCompactionId: compactionId });
+    }
+    return bump({
+      activeCompactionId: current.activeCompactionId === compactionId ? null : current.activeCompactionId,
+      terminalCompactionIds: withTerminalCompactionId(current, compactionId),
+    });
+  }
+  if (transition.type === "snapshot") {
+    if (transition.fence !== null && transition.fence !== undefined
+        && transition.fence !== current.revision) return current;
+    const compactionId = String(transition.activeCompaction?.compaction_id || "");
+    const activeCompactionId = compactionId && !current.terminalCompactionIds.includes(compactionId)
+      ? compactionId
+      : null;
+    if (activeCompactionId === current.activeCompactionId) return current;
+    return bump({ activeCompactionId });
+  }
+  if (transition.type === "epoch_reset") {
+    return bump({ activeCompactionId: null, terminalCompactionIds: [] });
+  }
+  if (["replay_gap", "navigation"].includes(transition.type)) return bump({});
+  return current;
+}
+
+function sessionCompactionOperation(sessionId) {
+  return state.compactionOperations.get(sessionId) || emptyCompactionOperation();
+}
+
+function transitionSessionCompaction(sessionId, transition) {
+  if (!sessionId) return emptyCompactionOperation();
+  const current = sessionCompactionOperation(sessionId);
+  const next = reduceCompactionOperation(current, transition);
+  if (next !== current) state.compactionOperations.set(sessionId, next);
+  return next;
+}
+
+function sessionCompactionBusy(sessionId) {
+  return Boolean(sessionId && compactionOperationBusy(sessionCompactionOperation(sessionId)));
+}
+
+function reconcileSessionCompactionSnapshot(sessionId, snapshot, fence = null) {
+  const operation = transitionSessionCompaction(sessionId, {
+    type: "snapshot",
+    activeCompaction: snapshot?.active_compaction || null,
+    fence,
+  });
+  const snapshotId = String(snapshot?.active_compaction?.compaction_id || "");
+  if (snapshotId && snapshotId !== operation.activeCompactionId) {
+    return { ...snapshot, active_compaction: null };
+  }
+  return snapshot;
+}
+
+function noteSessionCompactionEvent(sessionId, event) {
+  const compactionId = String(event?.compaction_id || "");
+  if (!sessionId || !compactionId) return false;
+  if (event.type === COMPACTION_STARTED_EVENT_TYPE) {
+    const before = sessionCompactionOperation(sessionId);
+    const after = transitionSessionCompaction(sessionId, {
+      type: "lifecycle_started", compactionId, reason: event.reason,
+    });
+    return after !== before;
+  }
+  if (!COMPACTION_TERMINAL_EVENT_TYPES.has(event.type)) return false;
+  const before = sessionCompactionOperation(sessionId);
+  const after = transitionSessionCompaction(sessionId, {
+    type: "lifecycle_terminal", compactionId, reason: event.reason,
+  });
+  return after !== before;
 }
 
 function clearSessionAttention(sessionId) {
@@ -892,7 +1015,12 @@ function syncRouteFromHash() {
 
 function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}) {
   if (!sessionEntry(sessionId)) return;
-  persistComposerDraft(state.currentId);
+  const previousSessionId = state.currentId;
+  persistComposerDraft(previousSessionId);
+  if (previousSessionId && previousSessionId !== sessionId) {
+    transitionSessionCompaction(previousSessionId, { type: "navigation" });
+  }
+  transitionSessionCompaction(sessionId, { type: "navigation" });
   clearSessionAttention(sessionId);
   state.currentId = sessionId;
   state.targetedThread = null;
@@ -912,6 +1040,7 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
 function showPicker(updateHash = true) {
   const returningSessionId = state.currentId;
   persistComposerDraft(returningSessionId);
+  if (returningSessionId) transitionSessionCompaction(returningSessionId, { type: "navigation" });
   state.currentId = null;
   state.targetedThread = null;
   state.focusView = null;
@@ -961,10 +1090,15 @@ async function drainSnapshotRefreshes(sessionId, coordinator) {
       coordinator.dirty = false;
       const requestInvalidation = coordinator.invalidation;
       const currentIdAtRequest = state.currentId;
+      const compactionFence = sessionCompactionOperation(sessionId).revision;
       try {
         const snapshot = await apiGet(`/sessions/${encodeURIComponent(sessionId)}?message_limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}&thread_event_limit=${THREAD_EVENT_PAGE_LIMIT}&include_sessions=false`);
         if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
-        accepted = acceptSnapshot(sessionId, snapshot, { announce: coordinator.announce });
+        const compactionSnapshotInvalidated = sessionCompactionOperation(sessionId).revision !== compactionFence;
+        accepted = acceptSnapshot(sessionId, snapshot, { announce: coordinator.announce, compactionFence });
+        // Lifecycle events can advance the fence without requesting their own refresh during replay.
+        // Retry from the new revision so an authoritative post-gap snapshot still converges.
+        if (compactionSnapshotInvalidated) coordinator.dirty = true;
       } catch (error) {
         if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
         if (state.currentId === sessionId) showToast(error.message, true);
@@ -979,7 +1113,7 @@ async function drainSnapshotRefreshes(sessionId, coordinator) {
   }
 }
 
-function acceptSnapshot(sessionId, snapshot, { announce = false } = {}) {
+function acceptSnapshot(sessionId, snapshot, { announce = false, compactionFence = null } = {}) {
   const responseSessionId = snapshot?.metadata?.session_id;
   if (responseSessionId != null && String(responseSessionId) !== String(sessionId)) {
     throw new Error(`Snapshot identity mismatch: requested ${sessionId}, received ${responseSessionId}`);
@@ -987,6 +1121,7 @@ function acceptSnapshot(sessionId, snapshot, { announce = false } = {}) {
   mergeSnapshotMessageWindow(sessionId, snapshot);
   reconcileAcceptedRun(sessionId, snapshot);
   invalidateWorkspaceDiffs(sessionId);
+  snapshot = reconcileSessionCompactionSnapshot(sessionId, snapshot, compactionFence);
   state.snapshots.set(sessionId, snapshot);
   if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
   if (announce && state.currentId === sessionId) showToast("Session refreshed");
@@ -1395,10 +1530,13 @@ function resetSessionSequenceEpoch(sessionId, boundary = 0, epochId = null) {
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
   state.acceptedRuns.delete(sessionId);
+  transitionSessionCompaction(sessionId, { type: "epoch_reset" });
   const entry = sessionEntry(sessionId);
   if (entry?.active_run) entry.active_run = null;
   const snapshot = state.snapshots.get(sessionId);
-  if (snapshot?.active_run) state.snapshots.set(sessionId, { ...snapshot, active_run: null });
+  if (snapshot?.active_run || snapshot?.active_compaction) {
+    state.snapshots.set(sessionId, { ...snapshot, active_run: null, active_compaction: null });
+  }
   const prefix = `${sessionId}:`;
   for (const key of [...state.threadEventWindows.keys()]) {
     if (key.startsWith(prefix)) state.threadEventWindows.delete(key);
@@ -1439,6 +1577,8 @@ function recordSessionEnvelope(sessionId, envelope, { historical = false } = {})
   list.push(envelope);
   if (list.length > 768) list.splice(0, list.length - 768);
   state.events.set(sessionId, list);
+  const observedAgentEvent = agentEvent(envelope);
+  noteSessionCompactionEvent(sessionId, observedAgentEvent);
   if (!historical) {
     const type = envelope.event?.type;
     if (type === "run_started") captureStartedRun(sessionId, envelope);
@@ -1488,6 +1628,7 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
     if (!result.valid) {
       boundaryState = "invalid";
       observationFloor = Number.isSafeInteger(priorAtBoundary) ? priorAtBoundary : Number.POSITIVE_INFINITY;
+      transitionSessionCompaction(sessionId, { type: "replay_gap" });
       loadSnapshot(sessionId, false);
       return;
     }
@@ -1499,12 +1640,14 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
     if (boundaryState !== "valid") {
       if (boundaryState === "pending") {
         boundaryState = "invalid";
+        transitionSessionCompaction(sessionId, { type: "replay_gap" });
         loadSnapshot(sessionId, false);
       }
       return;
     }
     const envelope = parseStreamPayload(event);
     if (!envelope || !Number.isSafeInteger(envelope.sequence_id) || envelope.sequence_id < 1) {
+      transitionSessionCompaction(sessionId, { type: "replay_gap" });
       loadSnapshot(sessionId, false);
       return;
     }
@@ -1519,10 +1662,12 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
   });
   source.addEventListener("replay_gap", () => {
     if (state.eventSource !== source) return;
+    transitionSessionCompaction(sessionId, { type: "replay_gap" });
     loadSnapshot(sessionId, false);
   });
   source.addEventListener("lagged", () => {
     if (state.eventSource !== source) return;
+    transitionSessionCompaction(sessionId, { type: "replay_gap" });
     loadSnapshot(sessionId, false);
     connectEventStream(sessionId);
   });
@@ -1540,6 +1685,8 @@ function eventNeedsSnapshot(envelope) {
   const type = envelope.event?.type;
   if (["run_started", "run_completed", "run_failed", "snapshot_saved"].includes(type)) return true;
   const agent = agentEvent(envelope);
+  if (agent?.reason === "manual"
+      && (agent.type === COMPACTION_STARTED_EVENT_TYPE || COMPACTION_TERMINAL_EVENT_TYPES.has(agent.type))) return true;
   return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(agent?.type);
 }
 
@@ -2136,10 +2283,42 @@ function combineActionDetail(...values) {
   return compactActionDetail(values.filter((value) => String(value ?? "").trim()).join(" · "), 800);
 }
 
+function compactionReasonLabel(reason) {
+  if (reason === "manual") return "manual";
+  if (reason === "auto") return "automatic";
+  return "trigger unavailable";
+}
+
+function compactionSkipLabel(cause) {
+  if (cause === "no_eligible_boundary") return "no eligible boundary";
+  if (cause === "already_compacted") return "already compacted";
+  return "skip cause unavailable";
+}
+
+function compactionFailureLabel(failure) {
+  if (failure === "summary_request_failed") return "summary request failed";
+  if (failure === "summary_rejected") return "summary rejected";
+  if (failure === "checkpoint_persistence_failed") return "checkpoint persistence failed";
+  if (failure === "cancelled") return "cancelled";
+  return "failure type unavailable";
+}
+
+function compactionTerminalPresentation(event) {
+  const reason = compactionReasonLabel(event?.reason);
+  if (event?.type === "orchestrator_compaction_completed") {
+    return { result: "completed", state: "done", detail: reason };
+  }
+  if (event?.type === "orchestrator_compaction_skipped") {
+    return { result: "unchanged", state: "recorded", detail: combineActionDetail(reason, compactionSkipLabel(event.cause)) };
+  }
+  return { result: "failed", state: "error", detail: combineActionDetail(reason, compactionFailureLabel(event?.failure)) };
+}
+
 function buildOrchestratorActions(snapshot, { limit = true } = {}) {
   const persisted = buildPersistedOrchestratorActions(snapshot?.messages || [], { limit: false });
   const actions = [];
   const calls = new Map();
+  const compactions = new Map();
   const observedCallIds = new Set();
   const observedSteering = new Set();
   const events = state.events.get(state.currentId) || [];
@@ -2170,7 +2349,40 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
     const event = agentEvent(envelope);
     if (!event || eventThreadName(event)) continue;
     const evidence = actionEvidence({ ...entry, event });
-    if (event.type.startsWith("model_call_")) {
+    if (event.type === COMPACTION_STARTED_EVENT_TYPE) {
+      const compactionId = String(event.compaction_id || "");
+      const existing = compactionId ? compactions.get(compactionId) : null;
+      if (existing) continue;
+      const action = {
+        name: "context compaction",
+        result: "running",
+        state: "live",
+        detail: compactionReasonLabel(event.reason),
+        compactionId: compactionId || null,
+        ...evidence,
+      };
+      actions.push(action);
+      if (compactionId) compactions.set(compactionId, action);
+    } else if (COMPACTION_TERMINAL_EVENT_TYPES.has(event.type)) {
+      const compactionId = String(event.compaction_id || "");
+      const presentation = compactionTerminalPresentation(event);
+      const existing = compactionId ? compactions.get(compactionId) : null;
+      if (existing) {
+        existing.result = presentation.result;
+        existing.state = presentation.state;
+        existing.detail = presentation.detail;
+        existing.finishSequenceId = evidence.sequenceId;
+      } else {
+        const action = {
+          name: "context compaction",
+          ...presentation,
+          compactionId: compactionId || null,
+          ...evidence,
+        };
+        actions.push(action);
+        if (compactionId) compactions.set(compactionId, action);
+      }
+    } else if (event.type.startsWith("model_call_")) {
       continue;
     } else if (event.type === "token_usage_updated") {
       actions.push({ name: "usage", result: "updated", state: "done", detail: usageDetail(event.usage), ...evidence });
@@ -3836,11 +4048,13 @@ function restoreComposerDraft(sessionId = state.currentId) {
   return draft;
 }
 
-function clearComposerDraftIfUnchanged(sessionId, submittedInput) {
+function clearComposerDraftIfUnchanged(sessionId, submittedDraft) {
   const stored = String(state.composerDrafts.get(sessionId) || "");
-  if (stored.trim() !== submittedInput) return false;
+  const isCurrent = state.currentId === sessionId;
+  if (stored !== submittedDraft
+      || (isCurrent && String(el.promptInput?.value || "") !== submittedDraft)) return false;
   state.composerDrafts.set(sessionId, "");
-  if (state.currentId === sessionId && String(el.promptInput?.value || "").trim() === submittedInput) {
+  if (isCurrent) {
     el.promptInput.value = "";
     resizeComposer();
     renderCommandMenu();
@@ -3851,19 +4065,83 @@ function clearComposerDraftIfUnchanged(sessionId, submittedInput) {
 function renderComposerTarget() {
   const targeted = Boolean(state.targetedThread);
   const orchestratorActive = Boolean(effectiveActiveRun(currentSnapshot(), state.currentId));
+  const compacting = sessionCompactionBusy(state.currentId);
   el.composerTarget.hidden = !targeted;
   el.composerTargetName.textContent = state.targetedThread || "";
-  el.sendPrompt.disabled = Boolean(state.currentId && state.submittingSessions.has(state.currentId));
-  el.promptInput.placeholder = targeted
-    ? `Steer ${state.targetedThread} after its current action`
-    : orchestratorActive ? "Steer the orchestrator · / for commands" : "Message the orchestrator · / for commands";
-  el.promptInput.setAttribute("aria-label", targeted ? `Steer thread ${state.targetedThread}` : orchestratorActive ? "Steer the orchestrator" : "Message the orchestrator");
+  el.sendPrompt.disabled = Boolean(state.currentId
+    && (state.submittingSessions.has(state.currentId) || compacting));
+  el.promptInput.placeholder = compacting
+    ? "Compacting orchestrator context…"
+    : targeted
+      ? `Steer ${state.targetedThread} after its current action`
+      : orchestratorActive ? "Steer the orchestrator · / for commands" : "Message the orchestrator · / for commands";
+  el.promptInput.setAttribute("aria-label", compacting
+    ? "Orchestrator context compaction in progress"
+    : targeted ? `Steer thread ${state.targetedThread}` : orchestratorActive ? "Steer the orchestrator" : "Message the orchestrator");
 }
 
 function clearThreadTarget() {
   state.targetedThread = null;
   renderThreads(currentSnapshot());
   el.promptInput.focus();
+}
+
+function manualCompactionErrorNotice(error) {
+  if (error?.status === 404) return "session not found";
+  if (error?.status === 409) return "session is busy";
+  return "compaction failed";
+}
+
+function validatedManualCompactionResult(result) {
+  if (!result || !["compacted", "unchanged"].includes(result.status)) return null;
+  if (typeof result.compaction_id !== "string" || !result.compaction_id.trim()) return null;
+  if (result.status === "unchanged"
+      && !["no_eligible_boundary", "already_compacted"].includes(result.reason)) return null;
+  return { status: result.status, compactionId: result.compaction_id };
+}
+
+async function compactSession(sessionId, submittedDraft = "/compact") {
+  if (!sessionId) return false;
+  if (sessionCompactionBusy(sessionId)) {
+    if (state.currentId === sessionId) showToast("Session is busy", true);
+    return false;
+  }
+
+  const request = {};
+  const draft = String(submittedDraft);
+  const started = transitionSessionCompaction(sessionId, { type: "request_started", request, draft });
+  if (started.request?.token !== request) return false;
+  if (state.currentId === sessionId) renderComposerTarget();
+  let succeeded = false;
+
+  try {
+    const result = validatedManualCompactionResult(
+      await apiPost(`/sessions/${encodeURIComponent(sessionId)}/compact`),
+    );
+    if (!result) {
+      if (state.currentId === sessionId) showToast("compaction failed", true);
+      return false;
+    }
+    transitionSessionCompaction(sessionId, {
+      type: "request_succeeded", request, compactionId: result.compactionId,
+    });
+    succeeded = true;
+    clearComposerDraftIfUnchanged(sessionId, draft);
+    if (state.currentId === sessionId) {
+      showToast(result.status === "compacted" ? "Context compacted" : "Nothing new to compact");
+    }
+    return true;
+  } catch (error) {
+    if (state.currentId === sessionId) showToast(manualCompactionErrorNotice(error), true);
+    return false;
+  } finally {
+    if (!succeeded) transitionSessionCompaction(sessionId, { type: "request_failed", request });
+    if (state.currentId === sessionId) {
+      renderComposerTarget();
+      resizeComposer();
+      el.promptInput.focus();
+    }
+  }
 }
 
 async function submitComposer(event) {
@@ -3875,6 +4153,14 @@ async function submitComposer(event) {
   state.composerDrafts.set(sessionId, rawInput);
   if (input.startsWith("/")) {
     const [name, ...rest] = input.slice(1).split(/\s+/);
+    if (name === "compact") {
+      if (rest.length) {
+        showToast("usage: /compact", true);
+        return;
+      }
+      await compactSession(sessionId, rawInput);
+      return;
+    }
     if (commands.some((command) => command.name === name)) {
       state.composerDrafts.set(sessionId, rest.join(" "));
       el.promptInput.value = rest.join(" ");
@@ -3882,6 +4168,11 @@ async function submitComposer(event) {
       runCommand(name);
       return;
     }
+  }
+  if (sessionCompactionBusy(sessionId)) {
+    showToast("Session is busy", true);
+    renderComposerTarget();
+    return;
   }
 
   const target = state.targetedThread;
@@ -3893,7 +4184,7 @@ async function submitComposer(event) {
     state.orchestratorViewport = { sessionId, pinnedToBottom: true, scrollTop: 0 };
   }
   const contextIsCurrent = () => state.currentId === sessionId;
-  const clearSubmittedInput = () => clearComposerDraftIfUnchanged(sessionId, input);
+  const clearSubmittedInput = () => clearComposerDraftIfUnchanged(sessionId, rawInput);
   const notify = (message, error = false) => {
     if (contextIsCurrent()) showToast(message, error);
   };
@@ -4013,6 +4304,14 @@ function handleComposerKeydown(event) {
 
 function runCommand(name) {
   closeCommandMenu();
+  if (name === "compact") {
+    const sessionId = state.currentId;
+    if (!sessionId) return false;
+    el.promptInput.value = "/compact";
+    state.composerDrafts.set(sessionId, "/compact");
+    resizeComposer();
+    return compactSession(sessionId, "/compact");
+  }
   el.promptInput.value = "";
   if (state.currentId) state.composerDrafts.set(state.currentId, "");
   resizeComposer();

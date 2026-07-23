@@ -91,6 +91,29 @@ impl std::fmt::Display for SessionRunId {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionReason {
+    Auto,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionSkipReason {
+    NoEligibleBoundary,
+    AlreadyCompacted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionFailure {
+    SummaryRequestFailed,
+    SummaryRejected,
+    CheckpointPersistenceFailed,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -156,6 +179,24 @@ pub enum AgentEvent {
     OrchestratorSteeringExpired {
         steering_id: i64,
         instruction_preview: String,
+    },
+    OrchestratorCompactionStarted {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    },
+    OrchestratorCompactionCompleted {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    },
+    OrchestratorCompactionSkipped {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+        cause: CompactionSkipReason,
+    },
+    OrchestratorCompactionFailed {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+        failure: CompactionFailure,
     },
     ThreadFinished {
         name: String,
@@ -563,7 +604,11 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         | AgentEvent::ThreadLog { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
-        | AgentEvent::OrchestratorSteeringExpired { .. } => None,
+        | AgentEvent::OrchestratorSteeringExpired { .. }
+        | AgentEvent::OrchestratorCompactionStarted { .. }
+        | AgentEvent::OrchestratorCompactionCompleted { .. }
+        | AgentEvent::OrchestratorCompactionSkipped { .. }
+        | AgentEvent::OrchestratorCompactionFailed { .. } => None,
     }
 }
 
@@ -667,7 +712,11 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         },
         event @ (AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
-        | AgentEvent::RunFinished { .. }) => event,
+        | AgentEvent::RunFinished { .. }
+        | AgentEvent::OrchestratorCompactionStarted { .. }
+        | AgentEvent::OrchestratorCompactionCompleted { .. }
+        | AgentEvent::OrchestratorCompactionSkipped { .. }
+        | AgentEvent::OrchestratorCompactionFailed { .. }) => event,
     })
 }
 
@@ -1061,6 +1110,271 @@ mod tests {
     #[test]
     fn decode_prefixed_event_ignores_plain_lines() {
         assert!(decode_stderr_event("plain stderr line").is_none());
+    }
+
+    const TEST_COMPACTION_ID: &str = "018f0f4e-7b31-7d2a-aaf1-27e9d4c87911";
+
+    fn test_compaction_id() -> Uuid {
+        Uuid::parse_str(TEST_COMPACTION_ID).unwrap()
+    }
+
+    fn test_compaction_events() -> Vec<AgentEvent> {
+        let compaction_id = test_compaction_id();
+        vec![
+            AgentEvent::OrchestratorCompactionStarted {
+                compaction_id,
+                reason: CompactionReason::Auto,
+            },
+            AgentEvent::OrchestratorCompactionCompleted {
+                compaction_id,
+                reason: CompactionReason::Manual,
+            },
+            AgentEvent::OrchestratorCompactionSkipped {
+                compaction_id,
+                reason: CompactionReason::Auto,
+                cause: CompactionSkipReason::NoEligibleBoundary,
+            },
+            AgentEvent::OrchestratorCompactionFailed {
+                compaction_id,
+                reason: CompactionReason::Manual,
+                failure: CompactionFailure::CheckpointPersistenceFailed,
+            },
+        ]
+    }
+
+    #[test]
+    fn compaction_enum_json_values_are_exact_and_round_trip() {
+        for (reason, expected) in [
+            (CompactionReason::Auto, r#""auto""#),
+            (CompactionReason::Manual, r#""manual""#),
+        ] {
+            assert_eq!(serde_json::to_string(&reason).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionReason>(expected).unwrap(),
+                reason
+            );
+        }
+        for (reason, expected) in [
+            (
+                CompactionSkipReason::NoEligibleBoundary,
+                r#""no_eligible_boundary""#,
+            ),
+            (
+                CompactionSkipReason::AlreadyCompacted,
+                r#""already_compacted""#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&reason).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionSkipReason>(expected).unwrap(),
+                reason
+            );
+        }
+        for (failure, expected) in [
+            (
+                CompactionFailure::SummaryRequestFailed,
+                r#""summary_request_failed""#,
+            ),
+            (CompactionFailure::SummaryRejected, r#""summary_rejected""#),
+            (
+                CompactionFailure::CheckpointPersistenceFailed,
+                r#""checkpoint_persistence_failed""#,
+            ),
+            (CompactionFailure::Cancelled, r#""cancelled""#),
+        ] {
+            assert_eq!(serde_json::to_string(&failure).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionFailure>(expected).unwrap(),
+                failure
+            );
+        }
+    }
+
+    #[test]
+    fn compaction_agent_event_json_is_exact_and_nested_under_agent() {
+        let expected = [
+            format!(
+                r#"{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_completed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_skipped","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto","cause":"no_eligible_boundary"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"checkpoint_persistence_failed"}}"#
+            ),
+        ];
+
+        for (event, expected) in test_compaction_events().into_iter().zip(expected) {
+            assert_eq!(serde_json::to_string(&event).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<AgentEvent>(&expected).unwrap(),
+                event
+            );
+        }
+
+        let event = AgentEvent::OrchestratorCompactionStarted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Manual,
+        };
+        assert_eq!(
+            serde_json::to_string(&SessionEvent::Agent { event }).unwrap(),
+            format!(
+                r#"{{"type":"agent","event":{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn compaction_event_sanitization_preserves_only_typed_safe_fields() {
+        for event in test_compaction_events() {
+            assert_eq!(sanitize_external_agent_event(event.clone()), Some(event));
+        }
+
+        let encoded = format!(
+            r#"{{
+                "type":"orchestrator_compaction_failed",
+                "compaction_id":"{TEST_COMPACTION_ID}",
+                "reason":"manual",
+                "failure":"summary_request_failed",
+                "summary":"CANARY_SUMMARY",
+                "prompt":"CANARY_PROMPT",
+                "transcript":"CANARY_TRANSCRIPT",
+                "provider_response":"CANARY_RESPONSE",
+                "path":"CANARY_PATH",
+                "digest":"CANARY_DIGEST",
+                "checkpoint_id":"CANARY_CHECKPOINT",
+                "estimates":"CANARY_ESTIMATES",
+                "error":"CANARY_ERROR"
+            }}"#
+        );
+        let decoded = serde_json::from_str::<AgentEvent>(&encoded).unwrap();
+        let sanitized = sanitize_external_agent_event(decoded).unwrap();
+        let serialized = serde_json::to_string(&sanitized).unwrap();
+
+        assert_eq!(
+            serialized,
+            format!(
+                r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"summary_request_failed"}}"#
+            )
+        );
+        assert!(!serialized.contains("CANARY"));
+    }
+
+    #[tokio::test]
+    async fn compaction_event_sink_supports_manual_and_automatic_context() {
+        let bus = SessionEventBus::new(Some("session-compaction-context".to_string()));
+        let mut receiver = bus.subscribe();
+        let manual_client_id = SessionClientId::new();
+        let automatic_client_id = SessionClientId::new();
+        let automatic_run_id = SessionRunId::new();
+        let manual_sink =
+            EventSink::bus_with_context(bus.clone(), None, Some(manual_client_id.clone()));
+        let automatic_sink = EventSink::bus_with_context(
+            bus,
+            Some(automatic_run_id.clone()),
+            Some(automatic_client_id.clone()),
+        );
+
+        manual_sink.emit(AgentEvent::OrchestratorCompactionStarted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Manual,
+        });
+        automatic_sink.emit(AgentEvent::OrchestratorCompactionCompleted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Auto,
+        });
+
+        let manual = receiver.recv().await.unwrap();
+        assert_eq!(manual.run_id, None);
+        assert_eq!(manual.client_id, Some(manual_client_id));
+        assert!(matches!(
+            manual.event,
+            SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionStarted {
+                    reason: CompactionReason::Manual,
+                    ..
+                }
+            }
+        ));
+
+        let automatic = receiver.recv().await.unwrap();
+        assert_eq!(automatic.run_id, Some(automatic_run_id));
+        assert_eq!(automatic.client_id, Some(automatic_client_id));
+        assert!(matches!(
+            automatic.event,
+            SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionCompleted {
+                    reason: CompactionReason::Auto,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn compaction_events_are_bounded_and_participate_in_replay() {
+        let bus = SessionEventBus::new(Some("session-compaction-replay".to_string()));
+        let events = test_compaction_events();
+        let envelopes = events
+            .iter()
+            .cloned()
+            .map(|event| bus.emit_agent(event).unwrap())
+            .collect::<Vec<_>>();
+
+        for event in &events {
+            assert!(serde_json::to_vec(event).unwrap().len() < 256);
+        }
+        for envelope in &envelopes {
+            assert!(serialized_envelope_len(envelope, SESSION_EVENT_BUS_REPLAY_BYTE_CAP).is_some());
+        }
+        assert_eq!(bus.recent_events(None, events.len()), envelopes);
+
+        let subscription =
+            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(0), events.len());
+        assert_eq!(subscription.replay_gap, None);
+        assert_eq!(subscription.replayed_events, envelopes);
+    }
+
+    #[test]
+    fn compaction_events_are_replayed_but_never_persisted_as_thread_events() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_compaction_events_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-compaction-events");
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-compaction-events".to_string()),
+            path.clone(),
+        );
+        let events = test_compaction_events();
+
+        for event in &events {
+            assert_eq!(persisted_thread_event_name(event), None);
+            bus.emit_agent(event.clone()).unwrap();
+        }
+
+        assert!(crate::store::load_all_thread_events(
+            &path,
+            "session-compaction-events",
+            events.len()
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            bus.recent_events(None, events.len())
+                .into_iter()
+                .map(|envelope| match envelope.event {
+                    SessionEvent::Agent { event } => event,
+                    event => panic!("expected agent event, got {event:?}"),
+                })
+                .collect::<Vec<_>>(),
+            events
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[tokio::test]

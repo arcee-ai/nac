@@ -1,3 +1,7 @@
+mod compaction;
+
+pub use compaction::{CompactSessionError, CompactSessionResponse};
+
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
@@ -33,9 +37,9 @@ use nac_core::{
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
-        MessagePageRequest, MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
-        SessionFrontendSnapshotLoad, SessionOverviewRecord, SessionRunHandle, SessionService,
-        SessionSubmitError, ThreadEventPage,
+        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionOverviewRecord,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -775,13 +779,18 @@ impl SessionManager {
         Ok(service)
     }
 
-    /// Returns a service whose model configuration revision matches the store.
-    /// The caller must hold both the local lifecycle gate and the shared run
-    /// lease, preventing a PATCH between the revision read and run start.
-    async fn attach_current_submission_service_locked(
+    /// Returns a service whose model configuration matches the store. The
+    /// caller must hold both the local lifecycle gate and the supplied
+    /// operation lease. Durable compaction checkpoints are refreshed by the
+    /// core admission path after this returns.
+    async fn attach_current_operation_service_locked(
         &self,
         session_id: &str,
+        operation_lease: &sessions::SessionOperationLease,
     ) -> Result<Arc<SessionService>> {
+        operation_lease
+            .validate(&self.inner.store_path, session_id)
+            .map_err(anyhow::Error::new)?;
         let persisted_version =
             sessions::load_session_config(&self.inner.store_path, session_id)?.config_version;
         let cached = self
@@ -791,18 +800,41 @@ impl SessionManager {
             .await
             .get(session_id)
             .cloned();
-        if let Some(service) = cached {
+        let service = if let Some(service) = cached {
             if service.config_version() == Some(persisted_version) {
-                return Ok(service);
+                service
+            } else {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation while its persisted configuration changed"
+                    ));
+                }
+                self.inner.active_sessions.write().await.remove(session_id);
+                self.attach_session_locked(session_id).await?
             }
-            if service.active_run().is_some() {
-                return Err(anyhow!(
-                    "session is busy with an active run while its persisted configuration changed"
-                ));
-            }
-            self.inner.active_sessions.write().await.remove(session_id);
+        } else {
+            self.attach_session_locked(session_id).await?
+        };
+        Ok(service)
+    }
+
+    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+        // Lease filenames hex-encode IDs; 120 bytes plus the suffix fits within
+        // the common 255-byte component limit.
+        const MAX_SESSION_ID_BYTES: usize = 120;
+
+        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+            return Ok(false);
         }
-        self.attach_session_locked(session_id).await
+        sessions::session_exists(&self.inner.store_path, session_id)
+    }
+
+    fn require_persisted_operation_session(&self, session_id: &str) -> Result<()> {
+        if self.persisted_operation_session_exists(session_id)? {
+            Ok(())
+        } else {
+            Err(anyhow!("session '{}' was not found", session_id))
+        }
     }
 
     pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
@@ -889,13 +921,16 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
+        self.require_persisted_operation_session(session_id)?;
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        // The OS lease closes the cross-process gap between checking the
-        // persisted revision and synchronously establishing active-run state.
-        let run_lease = sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        // The OS lease closes the cross-process gap between checking durable
+        // state and synchronously establishing active-run state.
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
         let service = self
-            .attach_current_submission_service_locked(session_id)
+            .attach_current_operation_service_locked(session_id, &operation_lease)
             .await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
@@ -908,8 +943,8 @@ impl SessionManager {
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
-                    .try_submit_prepared_prompt_with_lease(prompt, run_lease)
-                    .map_err(submit_error_to_anyhow)?;
+                    .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
+                    .map_err(anyhow::Error::new)?;
                 Ok(submit_response(handle, display_prompt))
             }
         }
@@ -1000,9 +1035,10 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Submission, config changes, and deletion share this gate. The run
-        // lease extends the exclusion to independent processes and remains held
-        // through the database delete, so an old run cannot save the row back.
+        self.require_persisted_operation_session(session_id)?;
+        // Submission, config changes, and deletion share this gate. The
+        // operation lease extends the exclusion to independent processes and
+        // remains held through deletion so an old run cannot save the row back.
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         let service = self
@@ -1013,6 +1049,9 @@ impl SessionManager {
             .get(session_id)
             .cloned();
         if let Some(service) = service.as_ref() {
+            if service.active_compaction().is_some() {
+                return Err(anyhow!("session is busy with an active manual compaction"));
+            }
             if let Some(active_run) = service.active_run() {
                 if let Err(error) = service
                     .connect_client()
@@ -1024,9 +1063,13 @@ impl SessionManager {
                     }
                 }
             }
+            if service.has_active_operation() {
+                return Err(anyhow!("session is busy with an active operation"));
+            }
         }
-        let _run_lease =
-            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
         if let Some(service) = service {
             // Explicitly destroy the sandbox even if SSE handlers retain the service.
             service.destroy_sandbox().await;
@@ -1049,24 +1092,25 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // An empty PATCH stays a cheap no-op for an already attached (and thus
-        // validated) service. Detached rows are inspected so legacy/incomplete
-        // managed tuples can be repaired without requiring a synthetic field.
-        if request.is_empty() {
-            if self
+        let request_empty = request.is_empty();
+        if request_empty {
+            if let Some(service) = self
                 .inner
                 .active_sessions
                 .read()
                 .await
-                .contains_key(session_id)
+                .get(session_id)
+                .cloned()
             {
-                return Ok(());
-            }
-            let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
-            if !managed_config_needs_repair(&current) {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation; wait for it before updating config"
+                    ));
+                }
                 return Ok(());
             }
         }
+        self.require_persisted_operation_session(session_id)?;
 
         let backend_selected = matches!(&request.backend, RequestField::Value(_));
         let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
@@ -1082,9 +1126,9 @@ impl SessionManager {
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.inner.active_sessions.write().await;
         if let Some(service) = active.get(session_id) {
-            if service.active_run().is_some() {
+            if service.has_active_operation() {
                 return Err(anyhow!(
-                    "session is busy with an active run; cancel it before updating config"
+                    "session is busy with an active operation; wait for it before updating config"
                 ));
             }
         }
@@ -1092,10 +1136,14 @@ impl SessionManager {
         // Independent server/TUI processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
-        let _run_lease =
-            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
 
         let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
+        if request_empty && !managed_config_needs_repair(&current) {
+            return Ok(());
+        }
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
@@ -1303,6 +1351,7 @@ pub fn router(manager: SessionManager) -> Router {
             post(generate_overview_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route("/sessions/{session_id}/compact", post(compaction::handler))
         .route(
             "/sessions/{session_id}/steering",
             post(queue_orchestrator_steering_handler),
@@ -1952,21 +2001,6 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
         || request.workdir.is_some()
 }
 
-fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
-    match error {
-        SessionSubmitError::Busy { active_run } => anyhow!(
-            "session is busy with run {} ({})",
-            active_run.run_id,
-            active_run.prompt_preview
-        ),
-        SessionSubmitError::ExternalBusy { session_id } => anyhow!(
-            "session '{}' is busy with an active run in another process",
-            session_id
-        ),
-        SessionSubmitError::Coordination { message } => anyhow!(message),
-    }
-}
-
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {
     SubmitPromptResponse {
         run_id: handle.run_id.to_string(),
@@ -1983,6 +2017,7 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
         FrontendCommand::Exit => "exit",
         FrontendCommand::Sessions => "sessions",
         FrontendCommand::Help => "help",
+        FrontendCommand::Compact => "compact",
     }
 }
 
@@ -2124,6 +2159,23 @@ impl From<anyhow::Error> for ApiError {
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
+            match error {
+                SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
+                    StatusCode::CONFLICT
+                }
+                SessionSubmitError::Coordination {
+                    message:
+                        SessionCoordinationError::StaleConfiguration { .. }
+                        | SessionCoordinationError::LocalAgentBusy,
+                } => StatusCode::CONFLICT,
+                SessionSubmitError::Coordination { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<sessions::SessionOperationLeaseError>() {
+            match error {
+                sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,
+                sessions::SessionOperationLeaseError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")
@@ -2179,6 +2231,9 @@ mod tests {
     };
     use flate2::read::GzDecoder;
     use tower::ServiceExt;
+
+    #[path = "compaction.rs"]
+    mod compaction;
 
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
@@ -2644,6 +2699,12 @@ mod tests {
         .expect("session manager")
     }
 
+    fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {
+        let lock_dir = root.join("store.db.run-locks");
+        std::fs::write(&lock_dir, b"not a directory").expect("poison operation lease directory");
+        lock_dir
+    }
+
     async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
         let mut request = Request::builder()
             .uri(uri)
@@ -2658,6 +2719,10 @@ mod tests {
 
     async fn response_body(response: Response) -> Bytes {
         to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        serde_json::from_slice(&response_body(response).await).unwrap()
     }
 
     fn gunzip(body: &[u8]) -> Vec<u8> {
@@ -3129,6 +3194,67 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn operation_lease_store_failures_are_path_safe_for_submit_patch_and_delete_apis() {
+        const CANARY: &str = "operation_lease_private_path_canary";
+        let root = temp_root(CANARY);
+        seed_editable_session(&root, "session");
+        let lock_dir = poison_operation_lease_directory(&root);
+        let app = router(test_manager(&root));
+
+        for (method, uri, body) in [
+            (
+                "POST",
+                "/sessions/session/runs",
+                Some(r#"{"prompt":"must not run"}"#),
+            ),
+            (
+                "PATCH",
+                "/sessions/session/config",
+                Some(r#"{"model":"must-not-change"}"#),
+            ),
+            ("DELETE", "/sessions/session", None),
+        ] {
+            let mut request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost");
+            if body.is_some() {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+            }
+            let response = app
+                .clone()
+                .oneshot(
+                    request
+                        .body(body.map_or_else(Body::empty, Body::from))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{uri}"
+            );
+            let response = response_json(response).await;
+            assert_eq!(
+                response,
+                serde_json::json!({"error": "session operation lease failed"}),
+                "{uri}"
+            );
+            assert!(!response.to_string().contains(CANARY), "{uri}");
+            assert!(
+                !response.to_string().contains(&root.display().to_string()),
+                "{uri}"
+            );
+        }
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "model-a");
+        assert!(lock_dir.is_file());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -3674,7 +3800,9 @@ thread_timeout_secs = 7200
             .expect("patch should run after submission")
             .unwrap()
             .unwrap_err();
-        assert!(patch_error.to_string().contains("busy with an active run"));
+        assert!(patch_error
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -3788,7 +3916,7 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
-    async fn external_active_run_lease_rejects_patch_from_independent_manager() {
+    async fn external_active_operation_lease_rejects_patch_from_independent_manager() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("external_active_patch");
         let nac_home = root.join("nac-home");
@@ -3819,7 +3947,7 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("PATCH cannot commit beneath another process run");
-        assert!(error.to_string().contains("busy with an active run"));
+        assert!(error.to_string().contains("busy with an active operation"));
         assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
         let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(after.model, before.model);
@@ -3924,7 +4052,7 @@ thread_timeout_secs = 7200
         seed_editable_session(&root, "session");
         let first_manager = test_manager(&root);
         let second_manager = test_manager(&root);
-        let held = sessions::SessionRunLease::try_acquire(&root.join("store.db"), "session")
+        let held = sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "session")
             .expect("first process lease");
 
         let conflict = second_manager
@@ -3937,7 +4065,9 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("a concurrent shared lease must reject PATCH without waiting");
-        assert!(conflict.to_string().contains("busy with an active run"));
+        assert!(conflict
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")

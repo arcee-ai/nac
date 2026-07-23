@@ -7,6 +7,7 @@ pub enum SlashCommand {
     Exit,
     Sessions,
     Help,
+    Compact,
     Plan { instruction: String },
     Run { workset_id: String },
 }
@@ -18,6 +19,7 @@ pub enum FrontendCommand {
     Exit,
     Sessions,
     Help,
+    Compact,
 }
 
 /// A prompt ready to send to the agent while preserving frontend display text.
@@ -52,8 +54,9 @@ pub fn prepare_user_input(input: &str) -> PreparedUserInput {
         Some(Ok(SlashCommand::Sessions)) => {
             PreparedUserInput::FrontendCommand(FrontendCommand::Sessions)
         }
-        Some(Ok(SlashCommand::Help)) => {
-            PreparedUserInput::FrontendCommand(FrontendCommand::Help)
+        Some(Ok(SlashCommand::Help)) => PreparedUserInput::FrontendCommand(FrontendCommand::Help),
+        Some(Ok(SlashCommand::Compact)) => {
+            PreparedUserInput::FrontendCommand(FrontendCommand::Compact)
         }
         Some(Ok(SlashCommand::Plan { instruction })) => {
             PreparedUserInput::SubmitPrompt(PreparedPrompt {
@@ -94,6 +97,8 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
         "sessions" if args.is_empty() => Ok(SlashCommand::Sessions),
         "help" if args.is_empty() => Ok(SlashCommand::Help),
         "help" => Err("usage: /help".to_string()),
+        "compact" if args.is_empty() => Ok(SlashCommand::Compact),
+        "compact" => Err("usage: /compact".to_string()),
         "plan" => parse_required_arg_command("plan", "instruction", args, |instruction| {
             SlashCommand::Plan { instruction }
         }),
@@ -200,6 +205,29 @@ mod tests {
             parse_slash_command("/sessions"),
             Some(Ok(SlashCommand::Sessions))
         );
+        assert_eq!(
+            parse_slash_command("/compact"),
+            Some(Ok(SlashCommand::Compact))
+        );
+    }
+
+    #[test]
+    fn compact_is_exact_and_frontend_handled() {
+        assert_eq!(
+            parse_slash_command("/compact now"),
+            Some(Err("usage: /compact".to_string()))
+        );
+        assert_eq!(
+            prepare_user_input("/compact"),
+            PreparedUserInput::FrontendCommand(FrontendCommand::Compact)
+        );
+        assert_eq!(
+            prepare_user_input("/compact now"),
+            PreparedUserInput::InvalidSlashCommand {
+                message: "usage: /compact".to_string(),
+            }
+        );
+        assert_eq!(expand_user_prompt("/compact"), "/compact");
     }
 
     #[test]

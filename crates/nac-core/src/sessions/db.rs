@@ -128,6 +128,19 @@ pub fn update_raw_session_config(
     Ok(next_version)
 }
 
+pub fn session_exists(path: &Path, session_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let conn = crate::store::open_connection(path)?;
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?1)",
+        params![session_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
 pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn

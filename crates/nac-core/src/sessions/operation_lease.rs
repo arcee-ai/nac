@@ -5,40 +5,45 @@ use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 
-/// A process-wide, crash-safe exclusive lease for one persisted session run.
+/// A process-wide, crash-safe exclusive lease for one persisted session operation.
 ///
 /// The lease is an advisory OS file lock. It is released when this value is
 /// dropped or when the owning process exits, including abnormal termination.
 #[derive(Debug)]
-pub struct SessionRunLease {
+pub struct SessionOperationLease {
     _file: File,
+    canonical_store: PathBuf,
+    session_id: String,
 }
 
-impl Drop for SessionRunLease {
+impl Drop for SessionOperationLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
     }
 }
 
 #[derive(Debug)]
-pub enum SessionRunLeaseError {
+pub enum SessionOperationLeaseError {
     Busy(String),
     Store(anyhow::Error),
 }
 
-impl fmt::Display for SessionRunLeaseError {
+impl fmt::Display for SessionOperationLeaseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Busy(session_id) => write!(
                 formatter,
-                "session '{session_id}' is busy with an active run in another process"
+                "session '{session_id}' is busy with an active operation in another process"
             ),
-            Self::Store(error) => write!(formatter, "session run lease failed: {error}"),
+            // Store errors can contain canonical paths. Keep them in `source()`
+            // for internal diagnostics, but never include them in Display text
+            // consumed by API and interactive clients.
+            Self::Store(_) => formatter.write_str("session operation lease failed"),
         }
     }
 }
 
-impl std::error::Error for SessionRunLeaseError {
+impl std::error::Error for SessionOperationLeaseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Busy(_) => None,
@@ -47,15 +52,51 @@ impl std::error::Error for SessionRunLeaseError {
     }
 }
 
-impl SessionRunLease {
+#[derive(Debug)]
+pub enum SessionOperationLeaseValidationError {
+    Store(anyhow::Error),
+    IdentityMismatch,
+}
+
+impl fmt::Display for SessionOperationLeaseValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // As with acquisition failures, the source is retained for logs and
+            // error chains while client-visible text remains path-free.
+            Self::Store(_) => formatter.write_str("failed to validate session operation lease"),
+            Self::IdentityMismatch => formatter.write_str(
+                "supplied session operation lease belongs to a different store or session",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SessionOperationLeaseValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error.as_ref()),
+            Self::IdentityMismatch => None,
+        }
+    }
+}
+
+impl SessionOperationLease {
     /// Attempts to acquire a per-session lease without waiting.
-    pub fn try_acquire(store_path: &Path, session_id: &str) -> Result<Self, SessionRunLeaseError> {
-        let lock_path = secure_lock_path(store_path, session_id).map_err(store_error)?;
+    pub fn try_acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        let lock_path = secure_lock_path(&canonical_store, session_id).map_err(store_error)?;
         let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
         match file.try_lock_exclusive() {
-            Ok(()) => Ok(Self { _file: file }),
+            Ok(()) => Ok(Self {
+                _file: file,
+                canonical_store,
+                session_id: session_id.to_string(),
+            }),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                Err(SessionRunLeaseError::Busy(session_id.to_string()))
+                Err(SessionOperationLeaseError::Busy(session_id.to_string()))
             }
             Err(error) => Err(store_error(
                 anyhow::Error::new(error)
@@ -63,20 +104,37 @@ impl SessionRunLease {
             )),
         }
     }
+
+    pub fn validate(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<(), SessionOperationLeaseValidationError> {
+        let canonical_store =
+            canonical_store(store_path).map_err(SessionOperationLeaseValidationError::Store)?;
+        if self.canonical_store == canonical_store && self.session_id == session_id {
+            Ok(())
+        } else {
+            Err(SessionOperationLeaseValidationError::IdentityMismatch)
+        }
+    }
 }
 
-fn store_error(error: anyhow::Error) -> SessionRunLeaseError {
-    SessionRunLeaseError::Store(error)
+fn canonical_store(store_path: &Path) -> anyhow::Result<PathBuf> {
+    fs::canonicalize(store_path).map_err(anyhow::Error::new)
 }
 
-fn secure_lock_path(store_path: &Path, session_id: &str) -> anyhow::Result<PathBuf> {
-    // Canonicalizing the existing database ensures aliases and symlinks to the
-    // same store coordinate through one lock directory.
-    let canonical_store = fs::canonicalize(store_path).map_err(anyhow::Error::new)?;
-    let file_name = canonical_store
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("store path has no file name: {}", store_path.display()))?;
+fn store_error(error: anyhow::Error) -> SessionOperationLeaseError {
+    SessionOperationLeaseError::Store(error)
+}
+
+fn secure_lock_path(canonical_store: &Path, session_id: &str) -> anyhow::Result<PathBuf> {
+    let file_name = canonical_store.file_name().ok_or_else(|| {
+        anyhow::anyhow!("store path has no file name: {}", canonical_store.display())
+    })?;
     let mut lock_dir_name = file_name.to_os_string();
+    // Keep the historical directory name so rolling upgrades still contend on
+    // the same lock files even though the lease now covers every operation.
     lock_dir_name.push(".run-locks");
     let lock_dir = canonical_store.with_file_name(lock_dir_name);
     secure_create_lock_dir(&lock_dir)?;
@@ -186,21 +244,56 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir()
-            .join(format!("nac_run_lease_{label}_{unique}"))
+            .join(format!("nac_operation_lease_{label}_{unique}"))
             .join("store.db")
+    }
+
+    #[test]
+    fn store_failure_display_is_path_safe_while_error_chains_retain_the_source() {
+        const CANARY: &str = "/private/operation-lease-path-canary/store.db";
+
+        let acquire = SessionOperationLeaseError::Store(anyhow::anyhow!(
+            "failed to create lock directory beside {CANARY}"
+        ));
+        assert_eq!(acquire.to_string(), "session operation lease failed");
+        assert!(!acquire.to_string().contains(CANARY));
+        assert!(std::error::Error::source(&acquire)
+            .unwrap()
+            .to_string()
+            .contains(CANARY));
+        let chained = anyhow::Error::new(acquire);
+        assert_eq!(chained.to_string(), "session operation lease failed");
+        assert!(format!("{chained:#}").contains(CANARY));
+
+        let validate = SessionOperationLeaseValidationError::Store(anyhow::anyhow!(
+            "failed to canonicalize {CANARY}"
+        ));
+        assert_eq!(
+            validate.to_string(),
+            "failed to validate session operation lease"
+        );
+        assert!(!validate.to_string().contains(CANARY));
+        assert!(std::error::Error::source(&validate)
+            .unwrap()
+            .to_string()
+            .contains(CANARY));
+
+        let legacy_alias: sessions::SessionRunLeaseError =
+            SessionOperationLeaseError::Store(anyhow::anyhow!("legacy source: {CANARY}"));
+        assert_eq!(legacy_alias.to_string(), "session operation lease failed");
     }
 
     #[test]
     fn lease_is_exclusive_and_drop_releases_it() {
         let store_path = test_store("drop");
         store::initialize(&store_path).unwrap();
-        let lease = SessionRunLease::try_acquire(&store_path, "../unsafe/session").unwrap();
+        let lease = SessionOperationLease::try_acquire(&store_path, "../unsafe/session").unwrap();
         assert!(matches!(
-            SessionRunLease::try_acquire(&store_path, "../unsafe/session"),
-            Err(SessionRunLeaseError::Busy(_))
+            SessionOperationLease::try_acquire(&store_path, "../unsafe/session"),
+            Err(SessionOperationLeaseError::Busy(_))
         ));
         drop(lease);
-        SessionRunLease::try_acquire(&store_path, "../unsafe/session").unwrap();
+        SessionOperationLease::try_acquire(&store_path, "../unsafe/session").unwrap();
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 
@@ -211,7 +304,8 @@ mod tests {
 
         let store_path = test_store("secure_path");
         store::initialize(&store_path).unwrap();
-        let lock_path = secure_lock_path(&store_path, "../../session").unwrap();
+        let canonical_store = fs::canonicalize(&store_path).unwrap();
+        let lock_path = secure_lock_path(&canonical_store, "../../session").unwrap();
         assert_eq!(
             fs::metadata(lock_path.parent().unwrap())
                 .unwrap()
@@ -220,7 +314,6 @@ mod tests {
                 & 0o777,
             0o700
         );
-        let canonical_store = fs::canonicalize(&store_path).unwrap();
         let expected_lock_dir = canonical_store.with_file_name("store.db.run-locks");
         assert_eq!(lock_path.parent(), Some(expected_lock_dir.as_path()));
 
@@ -228,8 +321,8 @@ mod tests {
         fs::write(&target, b"unchanged").unwrap();
         symlink(&target, &lock_path).unwrap();
         assert!(matches!(
-            SessionRunLease::try_acquire(&store_path, "../../session"),
-            Err(SessionRunLeaseError::Store(_))
+            SessionOperationLease::try_acquire(&store_path, "../../session"),
+            Err(SessionOperationLeaseError::Store(_))
         ));
         assert_eq!(fs::read(&target).unwrap(), b"unchanged");
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
@@ -237,11 +330,12 @@ mod tests {
 
     #[test]
     fn lease_process_helper() {
-        let Some(store_path) = std::env::var_os("NAC_TEST_RUN_LEASE_STORE") else {
+        let Some(store_path) = std::env::var_os("NAC_TEST_OPERATION_LEASE_STORE") else {
             return;
         };
-        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_RUN_LEASE_READY").unwrap());
-        let _lease = SessionRunLease::try_acquire(Path::new(&store_path), "crash-session").unwrap();
+        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_OPERATION_LEASE_READY").unwrap());
+        let _lease =
+            SessionOperationLease::try_acquire(Path::new(&store_path), "crash-session").unwrap();
         fs::write(ready_path, b"ready").unwrap();
         thread::sleep(Duration::from_secs(30));
     }
@@ -254,11 +348,11 @@ mod tests {
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "sessions::run_lease::tests::lease_process_helper",
+                "sessions::operation_lease::tests::lease_process_helper",
                 "--nocapture",
             ])
-            .env("NAC_TEST_RUN_LEASE_STORE", &store_path)
-            .env("NAC_TEST_RUN_LEASE_READY", &ready_path)
+            .env("NAC_TEST_OPERATION_LEASE_STORE", &store_path)
+            .env("NAC_TEST_OPERATION_LEASE_READY", &ready_path)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -277,13 +371,13 @@ mod tests {
         }
         assert!(ready_path.exists(), "lease helper never became ready");
         assert!(matches!(
-            SessionRunLease::try_acquire(&store_path, "crash-session"),
-            Err(SessionRunLeaseError::Busy(_))
+            SessionOperationLease::try_acquire(&store_path, "crash-session"),
+            Err(SessionOperationLeaseError::Busy(_))
         ));
 
         child.kill().unwrap();
         child.wait().unwrap();
-        SessionRunLease::try_acquire(&store_path, "crash-session").unwrap();
+        SessionOperationLease::try_acquire(&store_path, "crash-session").unwrap();
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 
@@ -297,13 +391,41 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_file(&store_path, &alias).unwrap();
 
-        let lease = SessionRunLease::try_acquire(&store_path, "session").unwrap();
+        let lease = SessionOperationLease::try_acquire(&store_path, "session").unwrap();
         assert!(matches!(
-            SessionRunLease::try_acquire(&alias, "session"),
-            Err(SessionRunLeaseError::Busy(_))
+            SessionOperationLease::try_acquire(&alias, "session"),
+            Err(SessionOperationLeaseError::Busy(_))
         ));
         drop(lease);
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn lease_validation_binds_canonical_store_and_session() {
+        let store_path = test_store("identity");
+        let other_store = test_store("other_identity");
+        store::initialize(&store_path).unwrap();
+        store::initialize(&other_store).unwrap();
+        let alias = store_path.parent().unwrap().join("store-alias.db");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&store_path, &alias).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&store_path, &alias).unwrap();
+
+        let lease = SessionOperationLease::try_acquire(&store_path, "session-a").unwrap();
+        lease.validate(&alias, "session-a").unwrap();
+        assert!(matches!(
+            lease.validate(&store_path, "session-b"),
+            Err(SessionOperationLeaseValidationError::IdentityMismatch)
+        ));
+        assert!(matches!(
+            lease.validate(&other_store, "session-a"),
+            Err(SessionOperationLeaseValidationError::IdentityMismatch)
+        ));
+
+        drop(lease);
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+        let _ = fs::remove_dir_all(other_store.parent().unwrap());
     }
 
     #[test]
@@ -311,7 +433,7 @@ mod tests {
         let store_path = test_store("data");
         store::initialize(&store_path).unwrap();
         assert!(sessions::list_sessions(&store_path).unwrap().is_empty());
-        let lease = SessionRunLease::try_acquire(&store_path, "session").unwrap();
+        let lease = SessionOperationLease::try_acquire(&store_path, "session").unwrap();
         assert!(sessions::list_sessions(&store_path).unwrap().is_empty());
         drop(lease);
         let _ = fs::remove_dir_all(store_path.parent().unwrap());

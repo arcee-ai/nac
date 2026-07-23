@@ -57,5 +57,36 @@ fn compaction_test_agent(
     .unwrap()
 }
 
-mod flow;
+fn compactable_messages() -> Vec<Message> {
+    vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        Message::User {
+            content: "old user".to_string(),
+        },
+        Message::Assistant {
+            content: Some("old answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        },
+        Message::User {
+            content: "recent user".to_string(),
+        },
+        Message::User {
+            content: "current user".to_string(),
+        },
+    ]
+}
+
+fn drain_events(
+    events_rx: &mut tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
+) -> Vec<AgentEvent> {
+    std::iter::from_fn(|| events_rx.try_recv().ok()).collect()
+}
+
+mod automatic_flow;
 mod lifecycle;
+mod manual_flow;
+mod projection_durability;
