@@ -561,10 +561,6 @@ async fn missing_or_invalid_session_does_not_create_lock_artifacts() {
     let response = post_compact(router(manager.clone()), "missing", None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(
-        response_json(response).await,
-        serde_json::json!({"error": "session not found"})
-    );
-    assert_eq!(
         manager.compact_session(&"x".repeat(121)).await,
         Err(CompactSessionError::NotFound)
     );

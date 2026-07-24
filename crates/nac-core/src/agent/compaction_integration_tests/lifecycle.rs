@@ -124,11 +124,44 @@ async fn wait_until_observed(observed: &std::sync::atomic::AtomicBool) {
     }
 }
 
+fn blocking_observed_server(
+    responses: Vec<crate::model::test_http::ScriptedResponse>,
+) -> (
+    crate::model::test_http::ScriptedServer,
+    Arc<std::sync::atomic::AtomicBool>,
+    Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering;
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_cb = observed.clone();
+    let release_cb = release.clone();
+    let server = crate::model::test_http::ScriptedServer::start_observed(
+        responses,
+        move |_index, _request| {
+            observed_cb.store(true, Ordering::SeqCst);
+            while !release_cb.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        },
+    );
+    (server, observed, release)
+}
+
+async fn abort_and_assert_cancelled<T: std::fmt::Debug>(
+    task: tokio::task::JoinHandle<T>,
+    observed: &std::sync::atomic::AtomicBool,
+) {
+    wait_until_observed(observed).await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+}
+
 #[tokio::test]
 async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::Ordering;
 
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use crate::model::test_http::ScriptedResponse;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -181,22 +214,10 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     )
     .unwrap();
 
-    let observed = Arc::new(AtomicBool::new(false));
-    let release = Arc::new(AtomicBool::new(false));
-    let observed_server = observed.clone();
-    let release_server = release.clone();
-    let server = ScriptedServer::start_observed(
-        vec![ScriptedResponse::json(
-            "200 OK",
-            scripted_responses_text("replacement", 10, 0, 2, 12),
-        )],
-        move |_index, _request| {
-            observed_server.store(true, Ordering::SeqCst);
-            while !release_server.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-        },
-    );
+    let (server, observed, release) = blocking_observed_server(vec![ScriptedResponse::json(
+        "200 OK",
+        scripted_responses_text("replacement", 10, 0, 2, 12),
+    )]);
     let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
@@ -212,9 +233,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     let task_agent = agent.clone();
     let task = tokio::spawn(async move { task_agent.lock().await.send("current").await });
 
-    wait_until_observed(&observed).await;
-    task.abort();
-    assert!(task.await.unwrap_err().is_cancelled());
+    abort_and_assert_cancelled(task, &observed).await;
     let guard = agent.lock().await;
     assert_eq!(
         guard
@@ -539,10 +558,10 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
 
 #[tokio::test]
 async fn manual_cancellation_emits_cancelled_and_preserves_state() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::Ordering;
 
     use crate::events::{CompactionFailure, CompactionReason};
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use crate::model::test_http::ScriptedResponse;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -554,22 +573,10 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
-    let observed = Arc::new(AtomicBool::new(false));
-    let release = Arc::new(AtomicBool::new(false));
-    let observed_server = observed.clone();
-    let release_server = release.clone();
-    let server = ScriptedServer::start_observed(
-        vec![ScriptedResponse::json(
-            "200 OK",
-            scripted_responses_text("too late", 10, 0, 2, 12),
-        )],
-        move |_index, _request| {
-            observed_server.store(true, Ordering::SeqCst);
-            while !release_server.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-        },
-    );
+    let (server, observed, release) = blocking_observed_server(vec![ScriptedResponse::json(
+        "200 OK",
+        scripted_responses_text("too late", 10, 0, 2, 12),
+    )]);
     let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
@@ -589,9 +596,7 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
     let task_agent = agent.clone();
     let task = tokio::spawn(async move { task_agent.lock().await.compact().await });
 
-    wait_until_observed(&observed).await;
-    task.abort();
-    assert!(task.await.unwrap_err().is_cancelled());
+    abort_and_assert_cancelled(task, &observed).await;
     let guard = agent.lock().await;
     assert_eq!(
         serde_json::to_vec(&guard.messages).unwrap(),

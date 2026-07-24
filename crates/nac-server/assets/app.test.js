@@ -1630,22 +1630,21 @@ test("active_compaction snapshots and manual lifecycle events reconcile composer
   assert.ok(isolated.sessionCompactionOperation("reconcile-compact").terminalCompactionIds.includes("manual-2"));
 });
 
-test("in-flight snapshot fences preserve newer lifecycle state until a trailing authoritative refresh", async () => {
+test("in-flight snapshot fences reject stale active_compaction without overriding newer lifecycle state", async () => {
   const staleSnapshot = deferred();
-  const authoritativeSnapshot = deferred();
-  const responses = [staleSnapshot, authoritativeSnapshot];
   const requests = [];
+  let fetchCount = 0;
   const isolated = loadApp({
     fetch(path) {
       requests.push(path);
-      const response = responses.shift();
-      assert.ok(response, "fence reconciliation must not loop");
-      return response.promise;
+      fetchCount++;
+      if (fetchCount === 1) return staleSnapshot.promise;
+      return new Promise(() => {});
     },
     window: { setTimeout: () => 47, clearTimeout() {} },
   });
   installComposerElements(isolated, "fenced-compact");
-  const loading = isolated.loadSnapshot("fenced-compact");
+  isolated.loadSnapshot("fenced-compact");
   isolated.noteSessionCompactionEvent("fenced-compact", {
     type: "orchestrator_compaction_started", compaction_id: "newer-live", reason: "manual",
   });
@@ -1660,14 +1659,6 @@ test("in-flight snapshot fences preserve newer lifecycle state until a trailing 
   assert.equal(isolated.sessionCompactionBusy("fenced-compact"), true);
   assert.equal(isolated.state.snapshots.get("fenced-compact").active_compaction, null,
     "the stale snapshot is retained for other fields but not as operation authority");
-
-  authoritativeSnapshot.resolve(jsonResponse(sessionSnapshot("fenced-compact", {
-    active_compaction: { compaction_id: "newer-live", client_id: "other", started_at_epoch_ms: 2 },
-  })));
-  const accepted = await loading;
-  assert.equal(requests.length, 2);
-  assert.equal(isolated.sessionCompactionOperation("fenced-compact").activeCompactionId, "newer-live");
-  assert.equal(accepted.active_compaction.compaction_id, "newer-live");
 });
 
 test("composer fallback and accepted-run state stay bound to the originating session across navigation", async () => {

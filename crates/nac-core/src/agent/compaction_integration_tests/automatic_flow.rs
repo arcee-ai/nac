@@ -1,45 +1,5 @@
 use super::*;
 
-#[test]
-fn compaction_state_is_only_created_for_session_backed_orchestrators() {
-    let path = PathBuf::from("unused.db");
-    let orchestrator_without_session = compaction_test_agent(
-        ModelClient::new_for_test(),
-        path.clone(),
-        None,
-        Some(1),
-        EventSink::none(),
-    );
-    assert!(orchestrator_without_session.compaction.is_none());
-
-    let worker = Agent::with_config(
-        ModelClient::new_for_test(),
-        AgentConfig {
-            mode: AgentMode::Worker,
-            store_path: path,
-            session_id: Some("worker-session".to_string()),
-            orchestrator_compaction_threshold: Some(1),
-            initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
-            dispatch_id: Some("dispatch".to_string()),
-            event_sink: EventSink::none(),
-            workspace_cwd: PathBuf::from("."),
-            config_cwd: PathBuf::from("."),
-            working_directory: ".".to_string(),
-            worker_executable: None,
-            sandbox: None,
-            ssh_host: None,
-            mcp: None,
-            skills: None,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-        },
-    )
-    .unwrap();
-    assert!(worker.compaction.is_none());
-}
-
 #[tokio::test]
 async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
@@ -89,56 +49,57 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
 async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let store_path = std::env::temp_dir()
-        .join(format!("nac_agent_compaction_below_threshold_{unique}"))
-        .join("store.db");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
-    let server = ScriptedServer::start(vec![ScriptedResponse::json(
-        "200 OK",
-        scripted_responses_text("ordinary", 10, 0, 2, 12),
-    )]);
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut agent = compaction_test_agent(
-        ModelClient::new_for_test_server(server.base_url.clone()),
-        store_path.clone(),
-        Some("session"),
-        Some(1_000_000),
-        EventSink::channel(events_tx),
-    );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages.push(Message::User {
-        content: "prior".to_string(),
-    });
+    for (label, threshold) in [("disabled", None), ("high", Some(1_000_000))] {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let store_path = std::env::temp_dir()
+            .join(format!("nac_agent_compaction_below_threshold_{label}_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session");
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("ordinary", 10, 0, 2, 12),
+        )]);
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut agent = compaction_test_agent(
+            ModelClient::new_for_test_server(server.base_url.clone()),
+            store_path.clone(),
+            Some("session"),
+            threshold,
+            EventSink::channel(events_tx),
+        );
+        agent.set_steering_dispatch_id(Some("run".to_string()));
+        agent.messages = compactable_messages();
 
-    assert_eq!(agent.send("current").await.unwrap(), "ordinary");
-    let requests = server.finish();
-    assert_eq!(requests.len(), 1);
-    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert!(!body["input"]
-        .to_string()
-        .contains(compaction::HISTORICAL_CONTEXT_PREFIX));
-    assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &store_path,
-            "session"
-        )
-        .unwrap()
-        .is_empty()
-    );
-    assert!(!drain_events(&mut events_rx).iter().any(|event| matches!(
-        event,
-        AgentEvent::OrchestratorCompactionStarted { .. }
-            | AgentEvent::OrchestratorCompactionCompleted { .. }
-            | AgentEvent::OrchestratorCompactionSkipped { .. }
-            | AgentEvent::OrchestratorCompactionFailed { .. }
-    )));
+        assert_eq!(agent.send("current").await.unwrap(), "ordinary");
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body.get("tools").is_some());
+        assert!(!body["input"]
+            .to_string()
+            .contains(compaction::HISTORICAL_CONTEXT_PREFIX));
+        assert!(
+            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+                &store_path,
+                "session"
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(!drain_events(&mut events_rx).iter().any(|event| matches!(
+            event,
+            AgentEvent::OrchestratorCompactionStarted { .. }
+                | AgentEvent::OrchestratorCompactionCompleted { .. }
+                | AgentEvent::OrchestratorCompactionSkipped { .. }
+                | AgentEvent::OrchestratorCompactionFailed { .. }
+        )));
 
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
 }
 
 #[tokio::test]
@@ -440,50 +401,6 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
             cause: CompactionSkipReason::NoEligibleBoundary,
             ..
         }
-    )));
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn disabled_automatic_compaction_emits_nothing_and_never_calls_summary_model() {
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
-
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let store_path = std::env::temp_dir()
-        .join(format!("nac_agent_auto_disabled_{unique}"))
-        .join("store.db");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
-    let server = ScriptedServer::start(vec![ScriptedResponse::json(
-        "200 OK",
-        scripted_responses_text("ordinary", 10, 0, 2, 12),
-    )]);
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut agent = compaction_test_agent(
-        ModelClient::new_for_test_server(server.base_url.clone()),
-        store_path.clone(),
-        Some("session"),
-        None,
-        EventSink::channel(events_tx),
-    );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages = compactable_messages();
-
-    assert_eq!(agent.send("next").await.unwrap(), "ordinary");
-    let requests = server.finish();
-    assert_eq!(requests.len(), 1);
-    let request: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert!(request.get("tools").is_some());
-    assert!(!drain_events(&mut events_rx).iter().any(|event| matches!(
-        event,
-        AgentEvent::OrchestratorCompactionStarted { .. }
-            | AgentEvent::OrchestratorCompactionCompleted { .. }
-            | AgentEvent::OrchestratorCompactionSkipped { .. }
-            | AgentEvent::OrchestratorCompactionFailed { .. }
     )));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

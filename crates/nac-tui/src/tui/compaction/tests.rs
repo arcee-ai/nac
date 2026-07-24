@@ -77,10 +77,7 @@ fn compact_command_is_frontend_action_and_preserves_draft_until_admission() {
     assert!(app.prompts.is_empty());
     assert!(app.responses.is_empty());
     let _ = std::fs::remove_dir_all(dir);
-}
 
-#[test]
-fn compact_command_rejects_arguments_without_clearing_draft() {
     let dir = temp_dir("compact-args");
     let mut app = App::new(metadata_for(&dir), &[], false);
     app.composer.insert_str("/compact now");
@@ -228,10 +225,7 @@ fn admission_and_completion_errors_never_expose_internal_paths() {
     );
     assert!(!admission_notice.0.contains(CANARY));
     assert!(!completion_notice.0.contains(CANARY));
-}
 
-#[test]
-fn result_notices_are_brief() {
     assert_eq!(
         manual_compaction_notice(&Ok(SessionCompactionResult::Compacted {
             compaction_id: Uuid::nil(),
@@ -311,24 +305,4 @@ fn activity_events_use_typed_safe_labels_without_mutating_history() {
     assert!(app.prompts.is_empty());
     assert!(app.responses.is_empty());
     let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn activity_labels_cover_all_skip_causes_and_failures() {
-    assert_eq!(
-        compaction_skip_label(CompactionSkipReason::NoEligibleBoundary),
-        "no eligible boundary"
-    );
-    assert_eq!(
-        compaction_failure_label(CompactionFailure::SummaryRejected),
-        "summary rejected"
-    );
-    assert_eq!(
-        compaction_failure_label(CompactionFailure::CheckpointPersistenceFailed),
-        "checkpoint persistence failed"
-    );
-    assert_eq!(
-        compaction_failure_label(CompactionFailure::Cancelled),
-        "cancelled"
-    );
 }

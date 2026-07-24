@@ -92,39 +92,6 @@ fn manual_and_automatic_planning_share_the_threshold_gate() {
     ));
 }
 #[test]
-fn tool_integrity_accepts_complete_parallel_results_and_rejects_missing_results() {
-    let call = |id: &str| ToolCall {
-        id: id.to_string(),
-        call_type: "function".to_string(),
-        function: FunctionCall {
-            name: "read".to_string(),
-            arguments: "{}".to_string(),
-        },
-    };
-    let mut messages = vec![
-        user("old"),
-        Message::Assistant {
-            content: None,
-            reasoning_text: None,
-            reasoning_details: None,
-            tool_calls: Some(vec![call("a"), call("b")]),
-        },
-        Message::Tool {
-            tool_call_id: "b".to_string(),
-            content: "b result".to_string(),
-        },
-        Message::Tool {
-            tool_call_id: "a".to_string(),
-            content: "a result".to_string(),
-        },
-        user("recent"),
-        user("current"),
-    ];
-    assert!(summarized_prefix_has_complete_tools(&messages, 4));
-    messages.remove(3);
-    assert!(!summarized_prefix_has_complete_tools(&messages, 3));
-}
-#[test]
 fn weighted_boundary_uses_exact_half_and_first_safe_ceiling_snap() {
     let equal = vec![user("same"), user("same"), user("same"), user("same")];
     let message_weight = serialized_byte_len(&equal[0]);
@@ -283,6 +250,7 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
     };
 
     let valid = vec![calls(&["a", "b"]), tool("b"), tool("a")];
+    assert!(summarized_prefix_has_complete_tools(&valid, 3));
     assert_eq!(weighted_safe_boundary(&valid, 0, None), Ok(Some(3)));
     for invalid in [
         vec![calls(&["a", "a"]), tool("a")],
@@ -303,61 +271,6 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
             weighted_safe_boundary(&invalid, 0, None).is_err(),
             "{invalid:?}"
         );
-    }
-}
-#[test]
-fn incremental_candidates_support_assistant_and_end_checkpoint_boundaries() {
-    for (label, mut messages, parent_boundary, expected_boundary, newly_aged) in [
-        (
-            "assistant",
-            vec![
-                user("old"),
-                assistant("retained one"),
-                assistant("retained two"),
-                assistant("retained three"),
-            ],
-            1,
-            2,
-            "retained one",
-        ),
-        ("end", vec![user("old")], 1, 2, "new answer"),
-    ] {
-        if label == "end" {
-            messages.push(assistant("new answer"));
-            messages.push(assistant("second answer"));
-            messages.push(assistant("third answer"));
-        }
-        let path = temp_store_path(label);
-        store::initialize(&path).unwrap();
-        store::insert_test_session(&path, "session");
-        let (source, policy) = checkpoint_digests(&messages, parent_boundary);
-        let parent = append_orchestrator_compaction_checkpoint(
-            &path,
-            &NewOrchestratorCompactionCheckpoint {
-                session_id: "session".to_string(),
-                previous_checkpoint_id: None,
-                summary: installed_summary("parent summary"),
-                tail_start_message_index: parent_boundary,
-                source_prefix_sha256: source,
-                system_policy_sha256: policy,
-                prompt_policy_version: PROMPT_POLICY_VERSION,
-                old_context_estimate: 100,
-                summary_prompt_tokens: None,
-                summary_completion_tokens: None,
-                new_context_estimate: 50,
-            },
-        )
-        .unwrap();
-        let mut state = state(path.clone(), Some(1));
-        state.restore_newest_valid_checkpoint(&messages).unwrap();
-        let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
-        assert_eq!(candidate.previous_checkpoint_id, Some(parent.id));
-        assert_eq!(candidate.boundary, expected_boundary);
-        let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
-        assert!(encoded.contains("parent summary"));
-        assert!(encoded.contains(newly_aged));
-        assert!(!encoded.contains("old"));
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
 #[test]

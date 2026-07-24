@@ -77,14 +77,15 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         },
     )
     .unwrap();
-    let mut state = state(path.clone(), Some(1));
-    state.restore_newest_valid_checkpoint(&messages).unwrap();
-    assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
+    let mut cs = state(path.clone(), Some(1));
+    cs.restore_newest_valid_checkpoint(&messages).unwrap();
+    assert_eq!(cs.active_checkpoint_for_test().unwrap().id, first.id);
 
-    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
-    assert_eq!(candidate.boundary, 4);
+    let cand = candidate(cs.plan(&messages, &[], CompactionReason::Auto));
+    assert_eq!(cand.previous_checkpoint_id, Some(first.id));
+    assert_eq!(cand.boundary, 4);
     assert_eq!(
-        serde_json::to_value(&candidate.summary_messages).unwrap(),
+        serde_json::to_value(&cand.summary_messages).unwrap(),
         serde_json::json!([
             {"role":"system","content":"system"},
             {"role":"user","content":installed_summary("prior summary")},
@@ -92,6 +93,45 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
             {"role":"user","content":NAC_COMPACTION_PROMPT}
         ])
     );
+
+    // End-boundary checkpoint: parent covered all messages, then new ones added.
+    let end_messages = vec![
+        user("old"),
+        assistant("new answer"),
+        assistant("second answer"),
+        assistant("third answer"),
+    ];
+    let end_path = temp_store_path("incremental_end");
+    store::initialize(&end_path).unwrap();
+    store::insert_test_session(&end_path, "session");
+    let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
+    let end_parent = append_orchestrator_compaction_checkpoint(
+        &end_path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("parent summary"),
+            tail_start_message_index: 1,
+            source_prefix_sha256: end_source,
+            system_policy_sha256: end_policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut end_state = state(end_path.clone(), Some(1));
+    end_state.restore_newest_valid_checkpoint(&end_messages).unwrap();
+    let end_candidate = candidate(end_state.plan(&end_messages, &[], CompactionReason::Auto));
+    assert_eq!(end_candidate.previous_checkpoint_id, Some(end_parent.id));
+    assert_eq!(end_candidate.boundary, 2);
+    let end_encoded = serde_json::to_string(&end_candidate.summary_messages).unwrap();
+    assert!(end_encoded.contains("parent summary"));
+    assert!(end_encoded.contains("new answer"));
+    assert!(!end_encoded.contains("old"));
+    let _ = std::fs::remove_dir_all(end_path.parent().unwrap());
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
