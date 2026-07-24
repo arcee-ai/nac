@@ -1136,7 +1136,7 @@ impl SessionService {
         // The caller holds the local operation-state lock and the lease above
         // excludes other processes. Refresh before publishing active state so
         // every run and manual compaction starts from the newest valid durable
-        // checkpoint, including direct/TUI callers.
+        // checkpoint, including direct callers.
         if operation_lease.is_some() {
             let mut agent = self.agent.try_lock().map_err(|_| {
                 OperationAdmissionPreparationError::Coordination {

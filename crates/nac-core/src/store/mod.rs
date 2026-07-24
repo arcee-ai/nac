@@ -303,7 +303,7 @@ mod tests {
                 },
                 WorksetItemDefinition {
                     title: "Implement auth state update".to_string(),
-                    scope: "crates/nac-tui/src/tui/mod.rs".to_string(),
+                    scope: "crates/nac-core/src/store/mod.rs".to_string(),
                     description: "Apply the focused code change.".to_string(),
                     role: "implement".to_string(),
                     depends_on: vec!["Inspect auth state handling".to_string()],

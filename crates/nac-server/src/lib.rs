@@ -1132,7 +1132,7 @@ impl SessionManager {
             }
         }
 
-        // Independent server/TUI processes coordinate through the same
+        // Independent server processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
         let _operation_lease =
