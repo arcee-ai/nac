@@ -39,14 +39,17 @@ function loadApp(overrides = {}) {
   vm.runInNewContext(
     `${appSource}\nmodule.exports = {
       state, el, boot, openSession, sessionStatus, syncSessionRunIndicators, noteSessionRunEvent,
+      emptyCompactionOperation, compactionOperationBusy, reduceCompactionOperation,
+      sessionCompactionOperation, transitionSessionCompaction, sessionCompactionBusy,
+      reconcileSessionCompactionSnapshot, noteSessionCompactionEvent,
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
-      orchestratorLifecycle, renderActionRows, selectTileActions,
+      orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorConversation,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
-      renderSessionInfo, loadSessions, loadSnapshot, loadOlderOrchestratorMessages,
+      renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
       normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
       effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
@@ -57,7 +60,8 @@ function loadApp(overrides = {}) {
       displayedTokenUsage, usageRunId, orchestratorContextTokens, tokenUsageSummary,
       tokenUsageTitle, effortOptions, escapeHtml, rawHeadersFromConfig, settingsValuesFromConfig,
       serializeSettingsHeaders, buildSettingsPatch, loadFocusSettings, renderFocusSettings,
-      handleDrawerSubmit, scheduleWorkspaceRender, captureFocusTarget, restoreFocusTarget,
+      handleDrawerSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
+      captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
       restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, openDrawer,
       closeDrawer, handleDrawerKeydown, renderConfigRepairGuidance, recordSessionEnvelope,
@@ -67,8 +71,8 @@ function loadApp(overrides = {}) {
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
-      clearComposerDraftIfUnchanged, submitComposer, upsertCreatedSession, createSession,
-      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
+      clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
+      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown, showHelpDrawer,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -205,6 +209,7 @@ function persistedConfig(overrides = {}) {
     base_url: "https://api.example.test/v1",
     backend: "openai-responses", reasoning_effort: "medium",
     api_key_env: "CUSTOM_API_KEY",
+    orchestrator_compaction_threshold: null,
     extra_headers_json: '{"X-Trace":"yes"}', config_version: 1,
     diagnostics: [], ...overrides, };
 }
@@ -217,6 +222,7 @@ function settingsFormElement(values = {}) {
       reasoning_effort: "medium", model: "gpt-5",
       base_url: "https://api.example.test/v1",
       api_key_env: "CUSTOM_API_KEY",
+      orchestrator_compaction_threshold: "",
       extra_headers: '{\n  "X-Trace": "yes"\n}', ...values, },
     inert: false, querySelector(selector) {
       if (selector === "#settingsStatus") return status;
@@ -267,6 +273,19 @@ function installWorkspaceElements(uiInstance) {
   ]) uiInstance.el[name] = element();
 }
 
+function installComposerElements(uiInstance, sessionId, draft = "") {
+  installWorkspaceElements(uiInstance);
+  uiInstance.state.currentId = sessionId;
+  uiInstance.state.sessions = [sessionListEntry(sessionId)];
+  uiInstance.state.snapshots.set(sessionId, sessionSnapshot(sessionId));
+  uiInstance.state.composerDrafts.set(sessionId, draft);
+  uiInstance.el.sessionWorkspace.hidden = false;
+  uiInstance.el.sessionPicker.hidden = true;
+  uiInstance.el.promptInput.value = draft;
+  uiInstance.el.promptInput.focus = function focus() { this.focused = true; };
+  return uiInstance;
+}
+
 test("production shell preserves privacy and mobile chat-only access", () => {
   for (const id of ["sessionPicker", "sessionWorkspace", "focusPanel", "promptInput"]) {
     assert.match(indexSource, new RegExp(`id="${id}"`));
@@ -310,7 +329,16 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   isolated.state.threadCycles.set(sessionId, { marker: "old", names: new Set(["old-thread"]) });
   isolated.state.threadEventWindows.set(`${sessionId}:old-thread`, { afterSequence: 900, events: [{}] });
   isolated.state.acceptedRuns.set(sessionId, { run_id: "accepted-old" });
-  isolated.state.snapshots.set(sessionId, { metadata: { session_id: sessionId }, messages: [], active_run: { run_id: "old" } });
+  isolated.noteSessionCompactionEvent(sessionId, {
+    type: "orchestrator_compaction_failed", compaction_id: "old-terminal", reason: "manual", failure: "cancelled",
+  });
+  isolated.noteSessionCompactionEvent(sessionId, {
+    type: "orchestrator_compaction_started", compaction_id: "old-active", reason: "manual",
+  });
+  isolated.state.snapshots.set(sessionId, {
+    metadata: { session_id: sessionId }, messages: [], active_run: { run_id: "old" },
+    active_compaction: { compaction_id: "old-active" },
+  });
   isolated.state.sessions = [{ summary: { session_id: sessionId }, active_run: { run_id: "old" } }];
   isolated.connectEventStream(sessionId);
   const stale = instances[0];
@@ -324,6 +352,9 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   assert.equal(isolated.state.threadEventWindows.has(`${sessionId}:old-thread`), false);
   assert.equal(isolated.state.sessions[0].active_run, null);
   assert.equal(isolated.state.snapshots.get(sessionId).active_run, null);
+  assert.equal(isolated.state.snapshots.get(sessionId).active_compaction, null);
+  assert.equal(isolated.sessionCompactionBusy(sessionId), false);
+  assert.deepEqual(plain(isolated.sessionCompactionOperation(sessionId).terminalCompactionIds), []);
   stale.emit("replay_boundary", { replay_boundary_sequence_id: 901 });
   stale.emit("session_event", { session_id: sessionId, sequence_id: 901, event: { type: "future", value: "stale" } });
   stale.emit("lagged", { missed: 10 });
@@ -350,11 +381,16 @@ scenario("SSE", "SSE reconciles gaps and lag, rejects malformed boundaries, and 
       clearTimeout() {}, }, });
   const sessionId = "stream-session";
   isolated.state.currentId = sessionId;
+  isolated.noteSessionCompactionEvent(sessionId, {
+    type: "orchestrator_compaction_started", compaction_id: "gap-active", reason: "manual",
+  });
   isolated.connectEventStream(sessionId);
   const first = instances[0];
   first.emit("replay_boundary", { replay_boundary_sequence_id: 10 });
   first.emit("session_event", { session_id: sessionId, sequence_id: 11, event: { type: "future", value: "before lag" } });
   first.emit("replay_gap", { replay_gap: { missing_from_sequence_id: 2, missing_to_sequence_id: 9 } });
+  assert.equal(isolated.sessionCompactionBusy(sessionId), true,
+    "a replay gap fences snapshots but keeps known busy state until reconciliation");
   first.emit("lagged", { missed: 4 });
   assert.equal(first.closed, true);
   assert.equal(instances.length, 2);
@@ -393,8 +429,58 @@ scenario("SSE", "SSE reconciles gaps and lag, rejects malformed boundaries, and 
   const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
   assert.ok(refreshDrain);
   await refreshDrain;
+  assert.equal(isolated.sessionCompactionBusy(sessionId), false,
+    "the authoritative post-gap snapshot clears the active compaction");
   assert.equal(requests.filter((path) => path.startsWith(`/sessions/${sessionId}?`)).length, 2,
     "gap, lag, and malformed-stream invalidations coalesce into one sequential trailing refresh");
+});
+
+scenario("SSE", "replay-gap compaction reconciliation retries a snapshot invalidated by historical lifecycle events", async () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const firstSnapshot = deferred();
+  const trailingSnapshot = deferred();
+  const responses = [firstSnapshot, trailingSnapshot];
+  const requests = [];
+  const isolated = loadApp({
+    EventSource: FakeEventSource,
+    fetch(path) {
+      requests.push(path);
+      const response = responses.shift();
+      assert.ok(response, "snapshot reconciliation must not loop");
+      return response.promise;
+    },
+  });
+  const sessionId = "gap-compaction-fence";
+  isolated.state.currentId = sessionId;
+  isolated.connectEventStream(sessionId);
+  const source = instances[0];
+  source.emit("replay_boundary", { replay_boundary_sequence_id: 1 });
+  source.emit("replay_gap", { replay_gap: { missing_from_sequence_id: 1, missing_to_sequence_id: 1 } });
+  const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
+  assert.ok(refreshDrain);
+  assert.equal(requests.length, 1, "the replay gap starts the fenced authoritative snapshot");
+
+  source.emit("session_event", agentEnvelope(1, {
+    type: "orchestrator_compaction_started", compaction_id: "terminal-missed-in-gap", reason: "manual",
+  }));
+  assert.equal(isolated.sessionCompactionBusy(sessionId), true);
+
+  firstSnapshot.resolve(jsonResponse(sessionSnapshot(sessionId, { active_compaction: null })));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(requests.length, 2,
+    "discarding the snapshot at the old lifecycle revision starts a trailing authoritative refresh");
+  assert.equal(isolated.sessionCompactionBusy(sessionId), true,
+    "the invalidated first snapshot cannot clear newer lifecycle state");
+
+  trailingSnapshot.resolve(jsonResponse(sessionSnapshot(sessionId, { active_compaction: null })));
+  await refreshDrain;
+  assert.equal(requests.length, 2, "the accepted trailing snapshot does not create a refresh loop");
+  assert.equal(isolated.sessionCompactionOperation(sessionId).activeCompactionId, null);
+  assert.equal(isolated.sessionCompactionBusy(sessionId), false,
+    "the trailing null snapshot reconciles a terminal missed by replay");
+  assert.equal(isolated.state.snapshots.get(sessionId).active_compaction, null);
 });
 
 scenario("SSE", "initial replay hydrates chronology without replaying stale run-attention side effects", () => {
@@ -567,6 +653,90 @@ test("orchestrator fullscreen activity renders newest actions first", () => {
   ]);
   const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
   assert.ok(html.indexOf("newer activity") < html.indexOf("older activity"));
+});
+
+test("compaction activity correlates lifecycle IDs and safely renders every terminal state", () => {
+  ui.state.currentId = "compaction-activity";
+  ui.state.events.set("compaction-activity", [
+    agentEnvelope(1, {
+      type: "orchestrator_compaction_started", compaction_id: "completed-id", reason: "manual",
+      summary: "SECRET START SUMMARY", checkpoint: "/private/start-checkpoint",
+    }),
+    agentEnvelope(2, {
+      type: "orchestrator_compaction_completed", compaction_id: "completed-id", reason: "manual",
+      summary: "SECRET COMPLETED SUMMARY", raw_error: "RAW COMPLETION ERROR",
+    }),
+    agentEnvelope(3, {
+      type: "orchestrator_compaction_skipped", compaction_id: "skipped-without-start", reason: "auto",
+      cause: "no_eligible_boundary", summary: "SECRET SKIP SUMMARY",
+    }),
+    agentEnvelope(4, {
+      type: "orchestrator_compaction_failed", compaction_id: "failed-without-start", reason: "manual",
+      failure: "checkpoint_persistence_failed", error: "database at /private/path failed",
+    }),
+    agentEnvelope(5, {
+      type: "orchestrator_compaction_started", compaction_id: "running-id", reason: "auto",
+      prompt: "SECRET PROMPT",
+    }),
+    agentEnvelope(6, {
+      type: "orchestrator_compaction_failed", compaction_id: "unknown-safe", reason: "unexpected reason",
+      failure: "raw failure <script>alert(1)</script>", raw_error: "RAW UNKNOWN FAILURE",
+    }),
+  ]);
+
+  const actions = plain(ui.buildOrchestratorActions({ messages: [] }, { limit: false }));
+  assert.equal(actions.filter(({ name }) => name === "context compaction").length, 5,
+    "a correlated start and terminal occupy one logical row");
+  assert.deepEqual(actions.filter(({ name }) => name === "context compaction").map((action) => ({
+    id: action.compactionId, result: action.result, state: action.state, detail: action.detail,
+    finishSequenceId: action.finishSequenceId ?? null,
+  })), [
+    { id: "completed-id", result: "completed", state: "done", detail: "manual", finishSequenceId: 2 },
+    { id: "skipped-without-start", result: "unchanged", state: "recorded", detail: "automatic · no eligible boundary", finishSequenceId: null },
+    { id: "failed-without-start", result: "failed", state: "error", detail: "manual · checkpoint persistence failed", finishSequenceId: null },
+    { id: "running-id", result: "running", state: "live", detail: "automatic", finishSequenceId: null },
+    { id: "unknown-safe", result: "failed", state: "error", detail: "trigger unavailable · failure type unavailable", finishSequenceId: null },
+  ]);
+  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
+  assert.equal(occurrences(html, />context compaction</g), 5);
+  assert.match(html, />completed</);
+  assert.match(html, />unchanged</);
+  assert.match(html, />failed</);
+  assert.match(html, />running</);
+  assert.match(html, /manual|automatic/);
+  assert.doesNotMatch(html, /SECRET|RAW|private|checkpoint-id|<script>|raw failure/i);
+});
+
+scenario("SSE", "compaction replay retains correlated activity and reconciles manual busy state", () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const isolated = loadApp({ EventSource: FakeEventSource });
+  const sessionId = "compaction-replay";
+  isolated.state.currentId = sessionId;
+  isolated.connectEventStream(sessionId);
+  const source = instances[0];
+  source.emit("replay_boundary", { replay_boundary_sequence_id: 4 });
+  source.emit("session_event", agentEnvelope(1, {
+    type: "orchestrator_compaction_started", compaction_id: "replayed-manual", reason: "manual",
+  }));
+  assert.equal(isolated.sessionCompactionBusy(sessionId), true);
+  source.emit("session_event", agentEnvelope(2, {
+    type: "orchestrator_compaction_completed", compaction_id: "replayed-manual", reason: "manual",
+  }));
+  source.emit("session_event", agentEnvelope(3, {
+    type: "orchestrator_compaction_started", compaction_id: "replayed-auto", reason: "auto",
+  }));
+  source.emit("session_event", agentEnvelope(4, {
+    type: "orchestrator_compaction_skipped", compaction_id: "replayed-auto", reason: "auto",
+    cause: "already_compacted",
+  }));
+  assert.equal(isolated.sessionCompactionBusy(sessionId), false);
+  assert.ok(isolated.sessionCompactionOperation(sessionId).terminalCompactionIds.includes("replayed-manual"));
+  assert.equal(isolated.state.lastSequence.get(sessionId), 4);
+  const actions = isolated.buildOrchestratorActions({ messages: [] }, { limit: false });
+  assert.deepEqual(plain(actions.map(({ result, detail }) => ({ result, detail }))), [
+    { result: "completed", detail: "manual" },
+    { result: "unchanged", detail: "automatic · already compacted" },
+  ]);
 });
 
 scenario("Transcript privacy", "shared transcript message rendering excludes system rows without dropping supported message fields", () => {
@@ -1173,8 +1343,322 @@ test("composer drafts are isolated and intentionally restored per session", () =
   assert.equal(isolated.restoreComposerDraft(), "draft A");
   assert.equal(isolated.el.promptInput.value, "draft A");
   assert.equal(isolated.state.composerDrafts.get("session-B"), "draft B");
+  isolated.el.promptInput.value = "draft A ";
+  assert.equal(isolated.clearComposerDraftIfUnchanged("session-A", "draft A"), false);
+  assert.equal(isolated.state.composerDrafts.get("session-A"), "draft A",
+    "a byte-different visible draft prevents clearing the stored origin");
+  isolated.el.promptInput.value = "draft A";
   assert.equal(isolated.clearComposerDraftIfUnchanged("session-A", "different submission"), false);
   assert.equal(isolated.state.composerDrafts.get("session-A"), "draft A");
+});
+
+test("compaction operation reducer has pure, table-driven transitions and bounded terminal tombstones", () => {
+  const request = {};
+  const secondRequest = {};
+  let operation = ui.emptyCompactionOperation();
+  const transitions = [
+    [{ type: "request_started", request, draft: " \t/compact\n" }, { busy: true, active: null, draft: " \t/compact\n", terminals: [] }],
+    [{ type: "navigation" }, { busy: true, active: null, draft: " \t/compact\n", terminals: [] }],
+    [{ type: "replay_gap" }, { busy: true, active: null, draft: " \t/compact\n", terminals: [] }],
+    [{ type: "epoch_reset" }, { busy: true, active: null, draft: " \t/compact\n", terminals: [] }],
+    [{ type: "request_failed", request }, { busy: false, active: null, draft: null, terminals: [] }],
+    [{ type: "snapshot", activeCompaction: { compaction_id: "snapshot-active" } }, { busy: true, active: "snapshot-active", draft: null, terminals: [] }],
+    [{ type: "lifecycle_terminal", reason: "manual", compactionId: "unrelated" }, { busy: true, active: "snapshot-active", draft: null, terminals: ["unrelated"] }],
+    [{ type: "lifecycle_terminal", reason: "manual", compactionId: "snapshot-active" }, { busy: false, active: null, draft: null, terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "snapshot", activeCompaction: { compaction_id: "snapshot-active" } }, { busy: false, active: null, draft: null, terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "lifecycle_started", reason: "manual", compactionId: "snapshot-active" }, { busy: false, active: null, draft: null, terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "lifecycle_started", reason: "auto", compactionId: "automatic" }, { busy: false, active: null, draft: null, terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "request_started", request: secondRequest, draft: "/compact" }, { busy: true, active: null, draft: "/compact", terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "lifecycle_started", reason: "manual", compactionId: "request-result" }, { busy: true, active: "request-result", draft: "/compact", terminals: ["unrelated", "snapshot-active"] }],
+    [{ type: "request_succeeded", request: secondRequest, compactionId: "request-result" }, { busy: false, active: null, draft: null, terminals: ["unrelated", "snapshot-active", "request-result"] }],
+  ];
+
+  for (const [transition, expected] of transitions) {
+    const before = operation;
+    const beforeProjection = {
+      revision: before.revision,
+      request: before.request,
+      active: before.activeCompactionId,
+      terminals: [...before.terminalCompactionIds],
+    };
+    operation = ui.reduceCompactionOperation(operation, transition);
+    assert.deepEqual(plain({
+      busy: ui.compactionOperationBusy(operation),
+      active: operation.activeCompactionId,
+      draft: operation.request?.draft ?? null,
+      terminals: operation.terminalCompactionIds,
+    }), expected, transition.type);
+    assert.equal(before.revision, beforeProjection.revision, `${transition.type} preserves the input revision`);
+    assert.equal(before.request, beforeProjection.request, `${transition.type} preserves the input request`);
+    assert.equal(before.activeCompactionId, beforeProjection.active, `${transition.type} preserves the input active ID`);
+    assert.deepEqual(plain(before.terminalCompactionIds), beforeProjection.terminals,
+      `${transition.type} preserves the input tombstones`);
+  }
+
+  operation = ui.reduceCompactionOperation(operation, { type: "epoch_reset" });
+  for (let index = 0; index < 40; index += 1) {
+    operation = ui.reduceCompactionOperation(operation, {
+      type: "lifecycle_terminal", reason: "manual", compactionId: `terminal-${index}`,
+    });
+  }
+  assert.equal(operation.terminalCompactionIds.length, 32);
+  assert.deepEqual(plain(operation.terminalCompactionIds), Array.from({ length: 32 }, (_, index) => `terminal-${index + 8}`));
+});
+
+test("exact /compact posts once without run, steering, transcript, or snapshot side effects", async () => {
+  const completion = deferred();
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path, options = {}) {
+      requests.push({ path, method: options.method, body: options.body });
+      return completion.promise;
+    },
+    window: { setTimeout: () => 41, clearTimeout() {} },
+  });
+  const rawDraft = " \t/compact \n";
+  installComposerElements(isolated, "compact/session", rawDraft);
+  const snapshot = isolated.state.snapshots.get("compact/session");
+  snapshot.messages.push({ role: "user", content: "keep transcript byte-for-byte" });
+  const transcriptBefore = JSON.stringify(snapshot.messages);
+  const submission = isolated.submitComposer({ preventDefault() {} });
+
+  assert.deepEqual(requests, [{
+    path: "/sessions/compact%2Fsession/compact", method: "POST", body: "{}",
+  }]);
+  assert.equal(isolated.sessionCompactionBusy("compact/session"), true);
+  assert.equal(isolated.el.sendPrompt.disabled, true);
+  assert.equal(isolated.el.promptInput.value, rawDraft, "the exact raw command remains editable while admission is pending");
+  assert.equal(isolated.state.composerDrafts.get("compact/session"), rawDraft);
+  assert.equal(isolated.sessionCompactionOperation("compact/session").request.draft, rawDraft);
+  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.submittingSessions.size, 0);
+  assert.equal(isolated.state.snapshotTimers.size, 0);
+  assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
+
+  completion.resolve(jsonResponse({ status: "compacted", compaction_id: "compaction-1" }));
+  assert.equal(await submission, undefined);
+  assert.equal(isolated.el.sessionNavStatus.textContent, "Context compacted");
+  assert.equal(isolated.sessionCompactionBusy("compact/session"), false);
+  assert.equal(isolated.el.promptInput.value, "");
+  assert.equal(isolated.state.composerDrafts.get("compact/session"), "");
+  assert.equal(isolated.el.sendPrompt.disabled, false);
+  assert.equal(isolated.state.snapshotTimers.size, 0);
+  assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
+  assert.ok(requests.every(({ path }) => !/\/runs|\/steering|cancel-active-run|\/overview/.test(path)));
+});
+
+test("/compact rejects arguments, prevents duplicates and ordinary submissions, and uses safe result notices", async () => {
+  const completion = deferred();
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path) { requests.push(path); return completion.promise; },
+    window: { setTimeout: () => 42, clearTimeout() {} },
+  });
+  installComposerElements(isolated, "compact-busy", "/compact now");
+
+  await isolated.submitComposer({ preventDefault() {} });
+  assert.deepEqual(requests, []);
+  assert.equal(isolated.el.sessionNavStatus.textContent, "usage: /compact");
+  assert.equal(isolated.el.promptInput.value, "/compact now");
+  assert.equal(isolated.state.composerDrafts.get("compact-busy"), "/compact now");
+
+  isolated.el.promptInput.value = "/compact";
+  isolated.state.composerDrafts.set("compact-busy", "/compact");
+  const first = isolated.submitComposer({ preventDefault() {} });
+  assert.deepEqual(requests, ["/sessions/compact-busy/compact"]);
+  isolated.el.promptInput.value = "/compact";
+  isolated.state.composerDrafts.set("compact-busy", "/compact");
+  await isolated.submitComposer({ preventDefault() {} });
+  assert.deepEqual(requests, ["/sessions/compact-busy/compact"]);
+  assert.equal(isolated.el.promptInput.value, "/compact", "a rejected duplicate keeps its exact draft");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "Session is busy");
+
+  isolated.el.promptInput.value = "ordinary prompt must wait";
+  await isolated.submitComposer({ preventDefault() {} });
+  assert.deepEqual(requests, ["/sessions/compact-busy/compact"]);
+  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.snapshotTimers.size, 0);
+  completion.resolve(jsonResponse({
+    status: "unchanged", compaction_id: "compaction-2", reason: "already_compacted",
+    summary: "SECRET SUMMARY MUST NOT RENDER",
+  }));
+  await first;
+  assert.equal(isolated.el.sessionNavStatus.textContent, "Nothing new to compact");
+  assert.equal(isolated.el.promptInput.value, "ordinary prompt must wait",
+    "success cannot clear a draft edited after the originating request");
+  assert.equal(isolated.state.composerDrafts.get("compact-busy"), "ordinary prompt must wait");
+  assert.equal(isolated.sessionCompactionBusy("compact-busy"), false);
+  assert.doesNotMatch(isolated.el.sessionNavStatus.textContent, /SECRET|already_compacted/);
+});
+
+test("manual compaction preserves the exact draft across 404, 409, 500, network, and invalid-response failures", async () => {
+  const cases = [
+    { name: "not-found", response: errorResponse(404, { error: "session not found", detail: "SECRET 404" }), notice: "session not found" },
+    { name: "busy", response: errorResponse(409, { error: "session is busy", detail: "SECRET 409" }), notice: "session is busy" },
+    { name: "server", response: errorResponse(500, {
+      error: "compaction failed", summary: "SECRET SUMMARY", checkpoint: "/private/checkpoint", detail: "RAW PROVIDER FAILURE",
+    }), notice: "compaction failed" },
+    { name: "network", error: new Error("network exposed /private/transport"), notice: "compaction failed" },
+    { name: "invalid", response: jsonResponse({ status: "compacted", compaction_id: "", summary: "SECRET INVALID" }), notice: "compaction failed" },
+    { name: "invalid-unchanged", response: jsonResponse({ status: "unchanged", compaction_id: "invalid-unchanged" }), notice: "compaction failed" },
+  ];
+  for (const failure of cases) {
+    const requests = [];
+    const isolated = loadApp({
+      fetch(path) {
+        requests.push(path);
+        if (failure.error) throw failure.error;
+        return failure.response;
+      },
+      window: { setTimeout: () => 45, clearTimeout() {} },
+    });
+    const sessionId = `compact-error-${failure.name}`;
+    const rawDraft = "\t/compact\n";
+    installComposerElements(isolated, sessionId, rawDraft);
+    await isolated.submitComposer({ preventDefault() {} });
+    assert.deepEqual(requests, [`/sessions/${sessionId}/compact`]);
+    assert.equal(isolated.el.promptInput.value, rawDraft, `${failure.name} preserves the DOM draft byte-for-byte`);
+    assert.equal(isolated.state.composerDrafts.get(sessionId), rawDraft, `${failure.name} preserves stored draft bytes`);
+    assert.equal(isolated.el.sessionNavStatus.textContent, failure.notice);
+    assert.doesNotMatch(isolated.el.sessionNavStatus.textContent, /SECRET|checkpoint|provider|private|transport/i);
+    assert.equal(isolated.sessionCompactionBusy(sessionId), false);
+    assert.equal(isolated.state.acceptedRuns.size, 0);
+    assert.equal(isolated.state.snapshotTimers.size, 0);
+  }
+});
+
+test("manual compaction failure is navigation-safe and preserves both originating and destination composers", async () => {
+  const completion = deferred();
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path) { requests.push(path); return completion.promise; },
+    window: { setTimeout: () => 43, clearTimeout() {} },
+  });
+  installComposerElements(isolated, "session-A", "/compact");
+  const compact = isolated.submitComposer({ preventDefault() {} });
+  isolated.state.currentId = "session-B";
+  isolated.state.sessions.push(sessionListEntry("session-B"));
+  isolated.state.snapshots.set("session-B", sessionSnapshot("session-B"));
+  isolated.state.composerDrafts.set("session-B", "destination draft");
+  isolated.el.promptInput.value = "destination draft";
+  isolated.el.promptInput.focused = false;
+  isolated.el.sessionNavStatus.textContent = "destination notice";
+
+  completion.resolve(errorResponse(500, {
+    error: "compaction failed", detail: "RAW INTERNAL ERROR MUST STAY HIDDEN",
+  }));
+  await compact;
+  assert.deepEqual(requests, ["/sessions/session-A/compact"]);
+  assert.equal(isolated.el.promptInput.value, "destination draft");
+  assert.equal(isolated.state.composerDrafts.get("session-A"), "/compact");
+  assert.equal(isolated.state.composerDrafts.get("session-B"), "destination draft");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "destination notice");
+  assert.equal(isolated.el.promptInput.focused, false);
+  assert.equal(isolated.sessionCompactionBusy("session-A"), false);
+  assert.doesNotMatch(isolated.el.sessionNavStatus.textContent, /RAW INTERNAL/);
+});
+
+test("manual compaction success clears only an unchanged originating draft after navigation", async () => {
+  const completion = deferred();
+  const isolated = loadApp({
+    fetch: () => completion.promise,
+    window: { setTimeout: () => 46, clearTimeout() {} },
+  });
+  const rawDraft = " \n/compact\t";
+  installComposerElements(isolated, "success-A", rawDraft);
+  const compact = isolated.submitComposer({ preventDefault() {} });
+  isolated.state.currentId = "success-B";
+  isolated.state.sessions.push(sessionListEntry("success-B"));
+  isolated.state.snapshots.set("success-B", sessionSnapshot("success-B"));
+  isolated.state.composerDrafts.set("success-B", "destination draft");
+  isolated.el.promptInput.value = "destination draft";
+  isolated.el.promptInput.focused = false;
+  isolated.el.sessionNavStatus.textContent = "destination notice";
+
+  completion.resolve(jsonResponse({ status: "compacted", compaction_id: "navigation-success" }));
+  await compact;
+  assert.equal(isolated.state.composerDrafts.get("success-A"), "");
+  assert.equal(isolated.state.composerDrafts.get("success-B"), "destination draft");
+  assert.equal(isolated.el.promptInput.value, "destination draft");
+  assert.equal(isolated.el.sessionNavStatus.textContent, "destination notice");
+  assert.equal(isolated.el.promptInput.focused, false);
+  assert.equal(isolated.sessionCompactionBusy("success-A"), false);
+});
+
+test("active_compaction snapshots and manual lifecycle events reconcile composer busy state without creating a run", () => {
+  const isolated = loadApp({ window: { setTimeout: () => 44, clearTimeout() {} } });
+  installComposerElements(isolated, "reconcile-compact");
+  const active = sessionSnapshot("reconcile-compact", {
+    active_compaction: {
+      compaction_id: "manual-1", client_id: "web", started_at_epoch_ms: 1,
+    },
+  });
+  isolated.acceptSnapshot("reconcile-compact", active);
+  isolated.renderComposerTarget();
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true);
+  assert.equal(isolated.el.sendPrompt.disabled, true);
+  assert.match(isolated.el.promptInput.placeholder, /Compacting orchestrator context/);
+  assert.equal(Boolean(isolated.effectiveActiveRun(active, "reconcile-compact")), false);
+  assert.equal(isolated.orchestratorLifecycle(active, "reconcile-compact").state, "no-run");
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.stopRun.hidden, true, "manual compaction never exposes the run-only stop control");
+
+  isolated.acceptSnapshot("reconcile-compact", sessionSnapshot("reconcile-compact"));
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), false);
+  assert.equal(isolated.noteSessionCompactionEvent("reconcile-compact", {
+    type: "orchestrator_compaction_started", compaction_id: "manual-2", reason: "manual",
+  }), true);
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true);
+  isolated.noteSessionCompactionEvent("reconcile-compact", {
+    type: "orchestrator_compaction_failed", compaction_id: "other", reason: "manual", failure: "cancelled",
+  });
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true, "an unrelated terminal cannot clear the active ID");
+  assert.equal(isolated.noteSessionCompactionEvent("reconcile-compact", {
+    type: "orchestrator_compaction_completed", compaction_id: "auto-1", reason: "auto",
+  }), false);
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true);
+  isolated.noteSessionCompactionEvent("reconcile-compact", {
+    type: "orchestrator_compaction_skipped", compaction_id: "manual-2", reason: "manual", cause: "already_compacted",
+  });
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), false);
+  const delayedActive = isolated.acceptSnapshot("reconcile-compact", sessionSnapshot("reconcile-compact", {
+    active_compaction: { compaction_id: "manual-2", client_id: "web", started_at_epoch_ms: 1 },
+  }));
+  assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), false,
+    "a terminal tombstone rejects a delayed active snapshot for the same compaction");
+  assert.equal(delayedActive.active_compaction, null);
+  assert.ok(isolated.sessionCompactionOperation("reconcile-compact").terminalCompactionIds.includes("manual-2"));
+});
+
+test("in-flight snapshot fences reject stale active_compaction without overriding newer lifecycle state", async () => {
+  const staleSnapshot = deferred();
+  const requests = [];
+  let fetchCount = 0;
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      fetchCount++;
+      if (fetchCount === 1) return staleSnapshot.promise;
+      return new Promise(() => {});
+    },
+    window: { setTimeout: () => 47, clearTimeout() {} },
+  });
+  installComposerElements(isolated, "fenced-compact");
+  isolated.loadSnapshot("fenced-compact");
+  isolated.noteSessionCompactionEvent("fenced-compact", {
+    type: "orchestrator_compaction_started", compaction_id: "newer-live", reason: "manual",
+  });
+  staleSnapshot.resolve(jsonResponse(sessionSnapshot("fenced-compact", {
+    active_compaction: { compaction_id: "stale-active", client_id: "other", started_at_epoch_ms: 1 },
+  })));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(requests.length, 2);
+  assert.equal(isolated.sessionCompactionOperation("fenced-compact").activeCompactionId, "newer-live");
+  assert.equal(isolated.sessionCompactionBusy("fenced-compact"), true);
+  assert.equal(isolated.state.snapshots.get("fenced-compact").active_compaction, null,
+    "the stale snapshot is retained for other fields but not as operation authority");
 });
 
 test("composer fallback and accepted-run state stay bound to the originating session across navigation", async () => {
@@ -1513,9 +1997,19 @@ test("session cards and command menu expose reviewed accessibility behavior", ()
   isolated.renderCommandMenu();
   assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "true");
   assert.match(isolated.el.commandMenu.innerHTML, /role="option" aria-selected="true" tabindex="-1"/);
+  assert.match(isolated.el.commandMenu.innerHTML, /data-command-option="compact"[\s\S]*compact older orchestrator context/);
   isolated.handleComposerKeydown({ key: "Escape", preventDefault() {} });
   assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "false");
   assert.equal(isolated.el.commandMenu.hidden, true);
+
+  isolated.el.utilityDrawer = { hidden: true, dataset: {} };
+  isolated.el.drawerTitle = fakeElement();
+  isolated.el.drawerContent = { innerHTML: "" };
+  isolated.el.drawerBackdrop = { hidden: true };
+  isolated.el.closeDrawer = { focus() {} };
+  isolated.el.app = fakeElement();
+  isolated.showHelpDrawer();
+  assert.match(isolated.el.drawerContent.innerHTML, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
 });
 
 
@@ -1635,6 +2129,8 @@ scenario("Settings values and safety", "settings renderer shows every diagnostic
   assert.match(html, /<textarea[^>]*>\{broken&lt;&amp;&quot;<\/textarea>/);
   assert.match(html, /Existing headers are unchanged unless this field is edited/);
   assert.match(html, /Blank or <code>\{\}<\/code> removes all extra headers/);
+  assert.match(html, /name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1"/);
+  assert.match(html, /Blank or 0 disables the persisted session threshold/);
 });
 
 scenario("Settings values and safety", "settings selectors preserve unsupported values and expose unset, none, and minimal", () => {
@@ -1670,6 +2166,27 @@ scenario("Settings values and safety", "settings PATCH is sparse, semantic, and 
   }, initial)), { reasoning_effort: "minimal" });
   assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
     extra_headers: "", }, initial)), { extra_headers: {} });
+  assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
+    orchestrator_compaction_threshold: "64000", }, initial)), {
+    orchestrator_compaction_threshold: 64000,
+  });
+  assert.deepEqual(plain(ui.buildSettingsPatch({ ...unchanged,
+    orchestrator_compaction_threshold: "0", }, initial)), {});
+
+  const enabled = ui.settingsValuesFromConfig(persistedConfig({
+    orchestrator_compaction_threshold: 64000,
+  }));
+  assert.deepEqual(plain(ui.buildSettingsPatch(settingsFormElement({
+    orchestrator_compaction_threshold: "",
+  }).values, enabled)), { orchestrator_compaction_threshold: null });
+  assert.deepEqual(plain(ui.buildSettingsPatch(settingsFormElement({
+    orchestrator_compaction_threshold: "0",
+  }).values, enabled)), { orchestrator_compaction_threshold: null });
+  for (const value of ["-1", "1.5", "unsafe", "9007199254740992"]) {
+    assert.throws(() => ui.buildSettingsPatch(settingsFormElement({
+      orchestrator_compaction_threshold: value,
+    }).values, initial), /non-negative whole number/);
+  }
 });
 
 scenario("Settings values and safety", "settings PATCH preserves null and unsupported selector values until explicitly replaced", () => {
@@ -2023,20 +2540,23 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
   }))), { cwd: "/repo" });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({
     cwd: "/repo", reasoning_mode: "unset", api_key_mode: "none",
+    orchestrator_compaction_threshold: "0",
     extra_headers: "{}", }))), { cwd: "/repo", reasoning_effort: null,
-    api_key_env: null, extra_headers: null, });
+    api_key_env: null, orchestrator_compaction_threshold: null, extra_headers: null, });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({ mode: "ssh",
     cwd: "~/work", ssh_host: " deploy@example.test ",
     backend: " arcee-api ", model: " coder ",
     base_url: " https://api.example.test/v1 ",
     reasoning_mode: "minimal", api_key_mode: "named",
     api_key_env: " ARCEE_API_KEY ",
+    orchestrator_compaction_threshold: "64000",
     extra_headers: '{"X-Trace":"yes"}',
     sandbox: { image: "must-not-leak" }, }))), { cwd: "~/work",
     ssh_host: "deploy@example.test", backend: "arcee-api",
     model: "coder",
     base_url: "https://api.example.test/v1",
     reasoning_effort: "minimal", api_key_env: "ARCEE_API_KEY",
+    orchestrator_compaction_threshold: 64000,
     extra_headers: { "X-Trace": "yes" }, });
   const sandbox = plain(ui.buildLaunchSessionRequest(launchValues({
     mode: "sandbox", cwd: "/repo", reasoning_mode: "none",
@@ -2061,6 +2581,11 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
   assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
     extra_headers: '{"X":7}',
   })), /must be a string/);
+  for (const value of ["-1", "1.5", "unsafe", "9007199254740992"]) {
+    assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
+      orchestrator_compaction_threshold: value,
+    })), /non-negative whole number/);
+  }
 });
 
 test("session creation serializes every execution mode through the exclusive request builder", async () => {
@@ -2078,6 +2603,7 @@ test("session creation serializes every execution mode through the exclusive req
   isolated.el.launchEffort = { value: "unset" };
   isolated.el.launchModel = { value: "model" };
   isolated.el.launchBaseUrl = { value: "https://api.example.test" };
+  isolated.el.launchCompactionThreshold = { value: "64000" };
   isolated.el.launchApiKeyMode = { value: "none" };
   isolated.el.launchApiKeyEnv = { value: "HIDDEN_KEY" };
   isolated.el.launchExtraHeaders = { value: "" };
@@ -2091,6 +2617,7 @@ test("session creation serializes every execution mode through the exclusive req
   assert.deepEqual(JSON.parse(requests[0].options.body), {
     cwd: "/local/repo", backend: "openai-responses", model: "model",
     base_url: "https://api.example.test",
+    orchestrator_compaction_threshold: 64000,
     reasoning_effort: null, api_key_env: null, });
   isolated.el.launchForm.mode = "sandbox";
   isolated.el.launchEffort.value = "none";

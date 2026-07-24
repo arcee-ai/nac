@@ -35,7 +35,7 @@ pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     Ok(())
 }
 
-pub fn update_session_model_config(
+pub fn update_session_config(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> std::result::Result<i64, SessionConfigUpdateError> {
@@ -47,9 +47,9 @@ pub fn update_session_model_config(
                 .context("failed to serialize session extra_headers")?,
         )
     };
-    update_raw_session_model_config(
+    update_raw_session_config(
         path,
-        &RawSessionModelConfig {
+        &RawSessionConfig {
             session_id: snapshot.session_id.clone(),
             model: snapshot.model.clone(),
             base_url: snapshot.base_url.clone(),
@@ -59,18 +59,20 @@ pub fn update_session_model_config(
                 .map(|effort| effort.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
+            orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
             config_version: snapshot.config_version,
             diagnostics: Vec::new(),
         },
     )
 }
 
-/// Writes only model columns using the raw row revision as an optimistic CAS.
+/// Writes only revisioned session-configuration columns using the raw row
+/// revision as an optimistic CAS.
 /// Callers are responsible for strictly validating the complete prospective
 /// raw configuration before invoking this low-level persistence operation.
-pub fn update_raw_session_model_config(
+pub fn update_raw_session_config(
     path: &Path,
-    config: &RawSessionModelConfig,
+    config: &RawSessionConfig,
 ) -> std::result::Result<i64, SessionConfigUpdateError> {
     let expected_version = config.config_version;
     let next_version = expected_version.checked_add(1).ok_or_else(|| {
@@ -87,8 +89,9 @@ pub fn update_raw_session_model_config(
              reasoning_effort = ?4,
              api_key_env = ?5,
              extra_headers_json = ?6,
-             config_version = ?7
-         WHERE session_id = ?8 AND config_version = ?9",
+             orchestrator_compaction_threshold = ?7,
+             config_version = ?8
+         WHERE session_id = ?9 AND config_version = ?10",
         params![
             config.model,
             config.base_url,
@@ -96,6 +99,7 @@ pub fn update_raw_session_model_config(
             config.reasoning_effort,
             config.api_key_env,
             config.extra_headers_json,
+            config.orchestrator_compaction_threshold,
             next_version,
             config.session_id,
             expected_version,
@@ -124,11 +128,24 @@ pub fn update_raw_session_model_config(
     Ok(next_version)
 }
 
+pub fn session_exists(path: &Path, session_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let conn = crate::store::open_connection(path)?;
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?1)",
+        params![session_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
 pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -143,16 +160,16 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
-pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<RawSessionModelConfig> {
+pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionConfig> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json, config_version
+            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
             |row| {
-                Ok(RawSessionModelConfig {
+                Ok(RawSessionConfig {
                     session_id: row.get(0)?,
                     model: row.get(1)?,
                     base_url: row.get(2)?,
@@ -161,6 +178,7 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<RawSes
                     api_key_env: row.get(5)?,
                     extra_headers_json: row.get(6)?,
                     config_version: row.get(7)?,
+                    orchestrator_compaction_threshold: row.get(8)?,
                     diagnostics: Vec::new(),
                 })
             },
@@ -170,6 +188,8 @@ pub fn load_session_model_config(path: &Path, session_id: &str) -> Result<RawSes
     let Some(mut config) = row else {
         return Err(anyhow!("session '{}' was not found", session_id));
     };
+    config.orchestrator_compaction_threshold =
+        validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
     config.diagnostics = model_config_diagnostics(
         config.backend.as_deref(),
         config.reasoning_effort.as_deref(),
@@ -182,7 +202,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -247,6 +267,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         extra_headers_json: row.get(15)?,
         token_usages_json: row.get(16)?,
         config_version: row.get(17)?,
+        orchestrator_compaction_threshold: row.get(18)?,
     })
 }
 
@@ -661,8 +682,8 @@ fn insert_or_replace_session(
     // actually opened for this write and is never read back.
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
@@ -694,6 +715,7 @@ fn insert_or_replace_session(
             extra_headers_json,
             token_usages_json,
             snapshot.config_version,
+            snapshot.orchestrator_compaction_threshold,
         ],
     )?;
     Ok(())
@@ -718,6 +740,7 @@ struct SessionRow {
     extra_headers_json: Option<String>,
     token_usages_json: Option<String>,
     config_version: i64,
+    orchestrator_compaction_threshold: Option<u64>,
 }
 
 impl SessionRow {
@@ -755,6 +778,9 @@ impl SessionRow {
             ssh_host: self.ssh_host,
             api_key_env: self.api_key_env,
             extra_headers,
+            orchestrator_compaction_threshold: validate_stored_compaction_threshold(
+                self.orchestrator_compaction_threshold,
+            )?,
             config_version: self.config_version,
             messages,
             last_response_duration_ms: self.last_response_duration_ms,
@@ -765,6 +791,16 @@ impl SessionRow {
             updated_at: self.updated_at,
         })
     }
+}
+
+fn validate_stored_compaction_threshold(threshold: Option<u64>) -> Result<Option<u64>> {
+    if threshold.is_some_and(|value| value > crate::MAX_SUPPORTED_TOKEN_COUNT) {
+        return Err(anyhow!(
+            "stored orchestrator compaction threshold exceeds supported maximum {}",
+            crate::MAX_SUPPORTED_TOKEN_COUNT
+        ));
+    }
+    Ok(threshold)
 }
 
 fn model_config_diagnostics(

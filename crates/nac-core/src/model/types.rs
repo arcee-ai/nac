@@ -231,22 +231,54 @@ pub struct TokenUsage {
     pub cache_write_tokens: u64,
     #[serde(default)]
     pub reasoning_tokens: u64,
-    /// Current context window size (last model call's total token count).
-    /// Despite the `AddAssign` impl summing this field, the agent loop
-    /// overwrites it with the most recent call's value so it reflects the
-    /// live context length rather than a cumulative total.
+    /// Current context window size from the last ordinary orchestrator call.
     #[serde(rename = "total_tokens")]
     pub orchestrator_context_tokens: u64,
 }
 
+impl TokenUsage {
+    /// Add billable/cumulative fields without changing the current-context gauge.
+    pub(crate) fn add_cost_saturating(&mut self, other: &Self) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(other.cache_read_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(other.cache_write_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+    }
+
+    pub(crate) fn replace_context(&mut self, context_tokens: u64) {
+        self.orchestrator_context_tokens = context_tokens;
+    }
+
+    /// Accept a provider context total only when all represented usage fields
+    /// fit in the supported range and the total covers their full sum. Zero
+    /// means unavailable.
+    pub(crate) fn valid_provider_context(&self) -> Option<u64> {
+        if self.orchestrator_context_tokens == 0
+            || self.orchestrator_context_tokens > crate::MAX_SUPPORTED_TOKEN_COUNT
+        {
+            return None;
+        }
+        let represented = self
+            .input_tokens
+            .checked_add(self.cache_read_tokens)?
+            .checked_add(self.cache_write_tokens)?
+            .checked_add(self.output_tokens)?;
+        (self.orchestrator_context_tokens >= represented)
+            .then_some(self.orchestrator_context_tokens)
+    }
+}
+
 impl std::ops::AddAssign for TokenUsage {
     fn add_assign(&mut self, other: Self) {
-        self.input_tokens += other.input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.cache_read_tokens += other.cache_read_tokens;
-        self.cache_write_tokens += other.cache_write_tokens;
-        self.reasoning_tokens += other.reasoning_tokens;
-        self.orchestrator_context_tokens += other.orchestrator_context_tokens;
+        self.add_cost_saturating(&other);
+        self.orchestrator_context_tokens = self
+            .orchestrator_context_tokens
+            .saturating_add(other.orchestrator_context_tokens);
     }
 }
 

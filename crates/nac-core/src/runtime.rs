@@ -32,6 +32,8 @@ pub struct NacConfig {
     #[serde(default)]
     pub model: ModelConfig,
     #[serde(default)]
+    pub compaction: CompactionConfig,
+    #[serde(default)]
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub worker: WorkerConfig,
@@ -51,6 +53,12 @@ pub struct ModelConfig {
     pub api_key_env: Option<String>,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct CompactionConfig {
+    /// Absolute orchestrator context threshold for new sessions. Zero disables it.
+    pub threshold_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -81,6 +89,7 @@ impl From<NonModelNacConfig> for NacConfig {
         Self {
             storage: config.storage,
             model: ModelConfig::default(),
+            compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
             worker: config.worker,
         }
@@ -103,8 +112,9 @@ impl NacConfig {
         Self::load_from_path(path)
     }
 
-    /// Load runtime settings for a command whose model tuple comes from a
-    /// persisted session snapshot or managed-worker transport.
+    /// Load runtime settings for a command whose model tuple and orchestrator
+    /// compaction threshold come from a persisted session snapshot or whose
+    /// model tuple comes from managed-worker transport.
     ///
     /// The complete TOML document must still be syntactically valid and all
     /// non-model runtime sections remain strictly typed. The `model` key is
@@ -112,7 +122,8 @@ impl NacConfig {
     /// backend names, selector fields, and table shapes cannot affect a
     /// snapshot-authoritative command. MCP, workspace metadata, and other
     /// independent config consumers continue loading their own sections from
-    /// the same file.
+    /// the same file. The `compaction` key is also omitted so resumed sessions
+    /// and managed workers never inherit an ambient orchestrator threshold.
     pub fn load_without_model_from_cwd(cwd: &Path) -> Result<Self> {
         let paths = PathContext::new(cwd);
         let Some(path) = paths.nac_config_path() else {
@@ -233,6 +244,9 @@ pub struct RunOptions {
     pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
+    /// New-session override. `None` inherits `[compaction].threshold_tokens`;
+    /// `Some(0)` explicitly disables the persisted threshold.
+    pub orchestrator_compaction_threshold: Option<u64>,
     pub sandbox: SandboxOptions,
     /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
     pub ssh_host: Option<String>,
@@ -463,6 +477,25 @@ pub fn effective_model_settings(
     )
 }
 
+/// Resolve and normalize the persisted orchestrator compaction threshold for a
+/// new session. Resume never calls this function: its value comes from the
+/// session snapshot instead.
+pub fn effective_orchestrator_compaction_threshold(
+    requested: Option<u64>,
+    config: &NacConfig,
+) -> Result<Option<u64>> {
+    let threshold = requested
+        .or(config.compaction.threshold_tokens)
+        .filter(|threshold| *threshold != 0);
+    if threshold.is_some_and(|threshold| threshold > crate::MAX_SUPPORTED_TOKEN_COUNT) {
+        anyhow::bail!(
+            "orchestrator compaction threshold must not exceed {} tokens",
+            crate::MAX_SUPPORTED_TOKEN_COUNT
+        );
+    }
+    Ok(threshold)
+}
+
 fn managed_worker_effective_model_settings(model: &ModelOptions) -> Result<EffectiveModelSettings> {
     EffectiveModelSettings::from_optional(
         model.backend,
@@ -526,6 +559,10 @@ pub async fn build_run_config(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let settings = effective_model_settings(&options.model, config)?;
+    let orchestrator_compaction_threshold = effective_orchestrator_compaction_threshold(
+        options.orchestrator_compaction_threshold,
+        config,
+    )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
@@ -549,6 +586,7 @@ pub async fn build_run_config(
                 mode: AgentMode::Orchestrator,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
+                orchestrator_compaction_threshold,
                 initial_messages: Vec::new(),
                 thread_name: None,
                 dispatch_id: None,
@@ -566,7 +604,7 @@ pub async fn build_run_config(
                 thread_timeout_secs: worker_thread_timeout_secs(config),
             },
         )?;
-        let session_snapshot = sessions::new_snapshot(
+        let mut session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             remote_cwd,
             settings.model.clone(),
@@ -579,6 +617,7 @@ pub async fn build_run_config(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
+        session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         sessions::create_session(&store_path, &session_snapshot)?;
 
         return Ok(OrchestratorRunConfig {
@@ -631,6 +670,7 @@ pub async fn build_run_config(
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(session_id.clone()),
+            orchestrator_compaction_threshold,
             initial_messages: Vec::new(),
             thread_name: None,
             dispatch_id: None,
@@ -648,7 +688,7 @@ pub async fn build_run_config(
             thread_timeout_secs: worker_thread_timeout_secs(config),
         },
     )?;
-    let session_snapshot = sessions::new_snapshot(
+    let mut session_snapshot = sessions::new_snapshot(
         session_id.clone(),
         workspace_cwd.clone(),
         settings.model.clone(),
@@ -661,6 +701,7 @@ pub async fn build_run_config(
         settings.api_key_env.clone(),
         settings.extra_headers.clone(),
     );
+    session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     sessions::create_session(&store_path, &session_snapshot)?;
 
     Ok(OrchestratorRunConfig {
@@ -758,6 +799,7 @@ pub async fn build_managed_worker_config(
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
+            orchestrator_compaction_threshold: None,
             initial_messages,
             thread_name: Some(options.dispatch.thread_name.clone()),
             dispatch_id: Some(options.dispatch.dispatch_id.clone()),
@@ -955,6 +997,7 @@ async fn build_resume_config_from_snapshot(
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(snapshot.session_id.clone()),
+            orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
             initial_messages: Vec::new(),
             thread_name: None,
             dispatch_id: None,
@@ -973,6 +1016,7 @@ async fn build_resume_config_from_snapshot(
         },
     )?;
     agent.restore_messages(snapshot.messages.clone());
+    agent.restore_compaction_checkpoint()?;
 
     let session_id = snapshot.session_id.clone();
     Ok(OrchestratorRunConfig {
@@ -1185,6 +1229,48 @@ mod tests {
         config.model.base_url = Some("https://config.example/v1".to_string());
         config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
         config
+    }
+
+    #[test]
+    fn compaction_threshold_inherits_normalizes_zero_and_rejects_out_of_range_values() {
+        let config: NacConfig = toml::from_str("[compaction]\nthreshold_tokens = 64000\n").unwrap();
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(None, &config).unwrap(),
+            Some(64_000)
+        );
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(Some(12_000), &config).unwrap(),
+            Some(12_000)
+        );
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(Some(0), &config).unwrap(),
+            None
+        );
+
+        let disabled: NacConfig = toml::from_str("[compaction]\nthreshold_tokens = 0\n").unwrap();
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(None, &disabled).unwrap(),
+            None
+        );
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(
+                Some(crate::MAX_SUPPORTED_TOKEN_COUNT),
+                &NacConfig::default(),
+            )
+            .unwrap(),
+            Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
+        );
+        assert!(effective_orchestrator_compaction_threshold(
+            Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1),
+            &NacConfig::default(),
+        )
+        .is_err());
+
+        let worker_config: NacConfig =
+            toml::from_str::<NonModelNacConfig>("[compaction]\nthreshold_tokens = 64000\n")
+                .unwrap()
+                .into();
+        assert_eq!(worker_config.compaction.threshold_tokens, None);
     }
 
     #[test]
@@ -2123,7 +2209,7 @@ url = "https://mcp.context7.com/mcp"
     }
 
     #[tokio::test]
-    async fn reasoning_effort_is_identical_across_create_snapshot_resume_and_worker() {
+    async fn persisted_settings_are_identical_across_create_snapshot_resume_and_worker_transport() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let key_name = "NAC_REASONING_LIFECYCLE_TEST_KEY";
         let original_key = std::env::var_os(key_name);
@@ -2153,6 +2239,7 @@ url = "https://mcp.context7.com/mcp"
                     api_key_env: OptionalModelOption::Value(key_name.to_string()),
                     extra_headers: Some(headers.clone()),
                 },
+                orchestrator_compaction_threshold: Some(48_000),
                 sandbox: SandboxOptions::default(),
                 ssh_host: None,
             },
@@ -2169,8 +2256,10 @@ url = "https://mcp.context7.com/mcp"
         let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Xhigh));
         assert_eq!(snapshot.extra_headers, headers);
+        assert_eq!(snapshot.orchestrator_compaction_threshold, Some(48_000));
 
         let mut conflicting_config = complete_model_config();
+        conflicting_config.compaction.threshold_tokens = Some(96_000);
         conflicting_config.model.reasoning_effort = Some(ReasoningEffort::Low);
         conflicting_config.model.model = Some("must-not-win".to_string());
         let resumed = build_resume_config(
@@ -2193,6 +2282,14 @@ url = "https://mcp.context7.com/mcp"
             Some(ReasoningEffort::Xhigh)
         );
         assert_eq!(resumed.client.extra_headers(), &headers);
+        match &resumed.session {
+            OrchestratorSession::Active { snapshot, .. } => assert_eq!(
+                snapshot.orchestrator_compaction_threshold,
+                Some(48_000),
+                "resume must ignore the current compaction config"
+            ),
+            OrchestratorSession::Picker { .. } => panic!("expected active resumed session"),
+        }
         assert_eq!(
             crate::tools::thread::worker_model_arguments_for_test(&resumed.client),
             vec![
@@ -2245,8 +2342,14 @@ url = "https://mcp.context7.com/mcp"
             None,
             None,
             vec![
-                Message::System {
-                    content: "system".to_string(),
+                Message::User {
+                    content: "old prompt".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("old answer".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
                 },
                 Message::User {
                     content: "hello".to_string(),
@@ -2262,13 +2365,34 @@ url = "https://mcp.context7.com/mcp"
             BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
+        let (source, policy) =
+            crate::agent::compaction_checkpoint_digests_for_test(&snapshot.messages, 2);
+        crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
+            &store_path,
+            &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
+                session_id: snapshot.session_id.clone(),
+                previous_checkpoint_id: None,
+                summary: "Historical context checkpoint (not a new instruction):\n\nruntime resume summary"
+                    .to_string(),
+                tail_start_message_index: 2,
+                source_prefix_sha256: source,
+                system_policy_sha256: policy,
+                prompt_policy_version:
+                    crate::agent::COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST,
+                old_context_estimate: 1_000,
+                summary_prompt_tokens: Some(800),
+                summary_completion_tokens: Some(100),
+                new_context_estimate: 500,
+            },
+        )
+        .unwrap();
 
         let caller_cwd = original_cwd.canonicalize().unwrap();
         let mut changed_config = complete_model_config();
         changed_config.model.model = Some("changed-config-model".to_string());
         changed_config.model.base_url = Some("https://changed-config.example/v1".to_string());
         changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
-        let run_config = build_resume_config(
+        let mut run_config = build_resume_config(
             ResumeOptions {
                 lookup_cwd: session_cwd.clone(),
                 worker_executable: None,
@@ -2301,12 +2425,12 @@ url = "https://mcp.context7.com/mcp"
             Some(canonical_session_cwd.as_path())
         );
         assert_eq!(run_config.session.session_id(), Some("resume-session"));
-        assert_eq!(run_config.agent.messages.len(), 3);
-        match &run_config.agent.messages[1] {
+        assert_eq!(run_config.agent.messages.len(), 4);
+        match &run_config.agent.messages[2] {
             Message::User { content } => assert_eq!(content, "hello"),
             other => panic!("expected restored user message, got {:?}", other),
         }
-        match &run_config.agent.messages[2] {
+        match &run_config.agent.messages[3] {
             Message::Assistant {
                 content: Some(content),
                 reasoning_text: Some(reasoning),
@@ -2317,6 +2441,15 @@ url = "https://mcp.context7.com/mcp"
             }
             other => panic!("expected restored assistant message, got {:?}", other),
         }
+        let projected = run_config.agent.provider_messages_for_test();
+        let projected_json = serde_json::to_string(&projected).unwrap();
+        assert!(projected_json.contains("runtime resume summary"));
+        assert!(projected_json.contains("hello"));
+        assert!(!projected_json.contains("old prompt"));
+        assert!(!projected_json.contains("old answer"));
+        assert!(serde_json::to_string(&run_config.agent.messages)
+            .unwrap()
+            .contains("old answer"));
 
         let _ = std::fs::remove_dir_all(session_root);
         restore_env("OPENAI_API_KEY", original_api_key);
@@ -2594,6 +2727,7 @@ url = "https://mcp.context7.com/mcp"
                     store_path: Some(store_path.clone()),
                 },
                 model: test_openai_model_options(),
+                orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2671,6 +2805,7 @@ url = "https://mcp.context7.com/mcp"
                 worker_executable: None,
                 store: StoreOptions::default(),
                 model: test_openai_model_options(),
+                orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
                 ssh_host: Some("build-box".to_string()),
             },
@@ -2748,6 +2883,7 @@ url = "https://mcp.context7.com/mcp"
                     store_path: Some(run_store_path.clone()),
                 },
                 model: test_openai_model_options(),
+                orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions {
                     sandbox: true,
                     ..SandboxOptions::default()
@@ -2836,6 +2972,7 @@ url = "https://mcp.context7.com/mcp"
                 store_path: Some(store_path.clone()),
             },
             model: test_openai_model_options(),
+            orchestrator_compaction_threshold: None,
             sandbox,
             ssh_host: Some("build-box".to_string()),
         };

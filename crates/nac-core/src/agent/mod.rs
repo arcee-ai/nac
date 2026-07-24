@@ -14,13 +14,24 @@ use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
+mod compaction;
 mod dag;
 mod preview;
 mod tool_exec;
 
 #[cfg(test)]
+mod compaction_integration_tests;
+#[cfg(test)]
 mod live_tests;
 
+#[cfg(test)]
+pub(crate) use compaction::checkpoint_digests as compaction_checkpoint_digests_for_test;
+#[cfg(test)]
+pub(crate) const COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 = compaction::PROMPT_POLICY_VERSION;
+pub(crate) use compaction::{
+    CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
+};
+use compaction::{CompactionState, PreparedProviderView};
 use preview::*;
 use tool_exec::execute_tools_parallel;
 
@@ -36,6 +47,7 @@ pub struct AgentConfig {
     pub mode: AgentMode,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
+    pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_messages: Vec<Message>,
     pub thread_name: Option<String>,
     pub dispatch_id: Option<String>,
@@ -59,6 +71,7 @@ pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
@@ -83,6 +96,18 @@ impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
+        let mode = config.mode;
+        let compaction = if mode == AgentMode::Orchestrator {
+            config.session_id.clone().map(|session_id| {
+                CompactionState::new(
+                    config.store_path.clone(),
+                    session_id,
+                    config.orchestrator_compaction_threshold,
+                )
+            })
+        } else {
+            None
+        };
 
         let (system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
@@ -254,6 +279,7 @@ impl Agent {
             client,
             messages,
             tool_defs,
+            compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
                 config_cwd: config.config_cwd,
@@ -288,6 +314,7 @@ impl Agent {
                 mode: AgentMode::Worker,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
+                orchestrator_compaction_threshold: None,
                 initial_messages: Vec::new(),
                 thread_name: None,
                 dispatch_id: None,
@@ -331,6 +358,9 @@ impl Agent {
         self.messages.push(Message::User {
             content: prompt.to_string(),
         });
+        // `last_usage` is per-send. Clearing it prevents a cancellation before
+        // the first current model response from persisting a previous run's usage.
+        self.last_usage = None;
 
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
@@ -345,6 +375,19 @@ impl Agent {
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_steering_checked().await?;
+            let needs_compaction_view = self
+                .compaction
+                .as_mut()
+                .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
+            let provider_view = if needs_compaction_view {
+                self.prepare_provider_view(&mut accumulated_usage).await
+            } else {
+                PreparedProviderView {
+                    messages: self.messages.clone(),
+                    context_estimate: 0,
+                    checkpoint_id: None,
+                }
+            };
             iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),
@@ -353,14 +396,13 @@ impl Agent {
 
             let response = match self
                 .client
-                .send_turn(self.messages.clone(), self.tool_defs.clone())
+                .send_turn(provider_view.messages, self.tool_defs.clone())
                 .await
             {
                 Ok(response) => response,
                 Err(error) => {
-                    // Preserve accumulated usage (including worker thread tokens
-                    // from prior tool rounds) so it survives the error return
-                    // and can be persisted by the session service.
+                    // Preserve accumulated usage (including summary and worker
+                    // costs from prior rounds) so it survives the error return.
                     self.last_usage = Some(accumulated_usage.clone());
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
@@ -370,32 +412,36 @@ impl Agent {
                     return Err(error);
                 }
             };
-            if let Some(usage) = response.usage.clone() {
-                accumulated_usage += usage.clone();
-                // orchestrator_context_tokens is the current context length, not a sum.
-                // Overwrite with the last call's total so it reflects the
-                // live context window size after the most recent model call.
-                accumulated_usage.orchestrator_context_tokens = usage.orchestrator_context_tokens;
-                // Update last_usage mid-loop so partial usage survives if the
-                // task is aborted (e.g. user cancels mid-run).  Without this,
-                // last_usage retains the previous run's value and all token
-                // usage from the current run is lost on cancel.
+            let ordinary_context_tokens = response
+                .usage
+                .as_ref()
+                .and_then(TokenUsage::valid_provider_context);
+            if let Some(mut usage) = response.usage.clone() {
+                accumulated_usage.add_cost_saturating(&usage);
+                // Missing, inconsistent, or overflowing provider totals are
+                // not context samples. Compaction uses its deterministic
+                // pre-call estimate instead.
+                let context = ordinary_context_tokens.unwrap_or(provider_view.context_estimate);
+                usage.replace_context(context);
+                accumulated_usage.replace_context(context);
                 self.last_usage = Some(accumulated_usage.clone());
-                // Emit the per-call delta rather than accumulated usage. The
-                // frontend can add orchestrator and worker calls exactly once,
-                // while using only orchestrator calls for current context.
                 self.emit(AgentEvent::TokenUsageUpdated {
                     thread_name: self.thread_name.clone(),
                     usage,
                 });
             }
             if response.finish_reason.as_deref() == Some("length") {
+                if let Some(compaction) = &mut self.compaction {
+                    compaction.record_ordinary_context(
+                        &self.messages,
+                        ordinary_context_tokens.unwrap_or(0),
+                        self.messages.len(),
+                        provider_view.checkpoint_id,
+                    );
+                }
                 let error = anyhow!(
-                    "Context window full (finish_reason=length). nac does not auto-compact thread history right now; retry with a narrower prompt, a fresh thread, or less carried context."
+                    "Context window full (finish_reason=length). The model call remains terminal; retry with a narrower prompt, a fresh thread, or less carried context."
                 );
-                // Preserve accumulated usage (including worker thread tokens
-                // from prior tool rounds) so it survives the error return
-                // and can be persisted by the session service.
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
@@ -418,6 +464,14 @@ impl Agent {
                 reasoning_details: response.assistant.reasoning_details.clone(),
                 tool_calls: response.assistant.tool_calls.clone(),
             });
+            if let Some(compaction) = &mut self.compaction {
+                compaction.record_ordinary_context(
+                    &self.messages,
+                    ordinary_context_tokens.unwrap_or(0),
+                    self.messages.len(),
+                    provider_view.checkpoint_id,
+                );
+            }
 
             if !has_tool_calls {
                 if self.append_pending_steering_checked().await? > 0 {
@@ -451,20 +505,14 @@ impl Agent {
             .await;
 
             // Fold worker token usage (from thread dispatches) into the
-            // orchestrator's accumulated usage.  Only cost fields are summed;
-            // orchestrator_context_tokens (context length) stays orchestrator-only.
+            // orchestrator's accumulated usage. Only cost fields are summed;
+            // orchestrator context stays ordinary-orchestrator-only.
             {
                 let mut wu = self.tool_runtime.worker_usage.lock().await;
-                accumulated_usage.input_tokens += wu.input_tokens;
-                accumulated_usage.output_tokens += wu.output_tokens;
-                accumulated_usage.cache_read_tokens += wu.cache_read_tokens;
-                accumulated_usage.cache_write_tokens += wu.cache_write_tokens;
-                accumulated_usage.reasoning_tokens += wu.reasoning_tokens;
+                accumulated_usage.add_cost_saturating(&wu);
                 *wu = TokenUsage::default();
             }
 
-            // Update last_usage after folding in worker tokens so the
-            // partial usage reflects all token consumption up to this point.
             self.last_usage = Some(accumulated_usage.clone());
 
             for (tool_call_id, _tool_name, result) in results {
@@ -473,6 +521,16 @@ impl Agent {
                     content: result.content,
                 });
             }
+            // The loop re-enters provider-view preparation only after the
+            // complete parallel tool-result batch has been appended.
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn provider_messages_for_test(&mut self) -> Vec<Message> {
+        match &mut self.compaction {
+            Some(compaction) => compaction.prepare(&self.messages, &self.tool_defs).messages,
+            None => self.messages.clone(),
         }
     }
 
@@ -511,6 +569,24 @@ impl Agent {
             }
         }
         self.messages = messages;
+        if let Some(compaction) = &mut self.compaction {
+            compaction.reset_for_transcript_replacement();
+        }
+    }
+
+    /// Restore the newest checkpoint that still validates against the complete
+    /// canonical transcript, falling back through older append-only rows.
+    pub(crate) fn restore_compaction_checkpoint(&mut self) -> Result<()> {
+        if let Some(compaction) = &mut self.compaction {
+            compaction.restore_newest_valid_checkpoint(&self.messages)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_context_sample(&mut self) {
+        if let Some(compaction) = &mut self.compaction {
+            compaction.invalidate_context_sample();
+        }
     }
 
     async fn append_pending_steering(&mut self) -> Result<usize> {
@@ -607,386 +683,4 @@ impl Agent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_agent_creation() {
-        let client = ModelClient::new_for_test();
-        let agent = Agent::default(client);
-        assert!(!agent.messages.is_empty());
-        assert!(!agent.tool_defs.is_empty());
-    }
-
-    #[test]
-    fn restore_messages_refreshes_leading_system_prompt() {
-        let client = ModelClient::new_for_test();
-        let mut agent = Agent::with_config(
-            client,
-            AgentConfig {
-                mode: AgentMode::Orchestrator,
-                store_path: crate::store::default_store_path(),
-                session_id: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
-                event_sink: EventSink::none(),
-                workspace_cwd: PathBuf::from("/resolved/workspace"),
-                config_cwd: PathBuf::from("/resolved/workspace"),
-                working_directory: "/resolved/workspace".to_string(),
-                worker_executable: None,
-                sandbox: None,
-                ssh_host: None,
-                mcp: None,
-                skills: None,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            },
-        )
-        .expect("agent config must be valid");
-
-        agent.restore_messages(vec![
-            Message::System {
-                content: "You are nac. Working directory: /old/stale/path.".to_string(),
-            },
-            Message::User {
-                content: "hello".to_string(),
-            },
-        ]);
-
-        assert_eq!(agent.messages.len(), 2);
-        match &agent.messages[0] {
-            Message::System { content } => {
-                assert!(content.contains("Working directory: /resolved/workspace"));
-                assert!(!content.contains("/old/stale/path"));
-            }
-            other => panic!("expected refreshed system prompt, got {:?}", other),
-        }
-        match &agent.messages[1] {
-            Message::User { content } => assert_eq!(content, "hello"),
-            other => panic!("expected restored user message, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn exec_command_result_preview_uses_output_field() {
-        let result = ToolResult {
-            content: serde_json::json!({
-                "output": "line one\nline two\n",
-                "exit_code": 0,
-                "session_name": null,
-                "wall_time_ms": 1,
-                "output_truncated": false,
-            })
-            .to_string(),
-            is_error: false,
-        };
-
-        assert_eq!(preview_tool_result("exec_command", &result), "line two");
-    }
-
-    #[test]
-    fn exec_command_result_preview_includes_nonzero_exit() {
-        let result = ToolResult {
-            content: serde_json::json!({
-                "output": "failure\n",
-                "exit_code": 7,
-                "session_name": null,
-                "wall_time_ms": 1,
-                "output_truncated": false,
-            })
-            .to_string(),
-            is_error: false,
-        };
-
-        assert_eq!(
-            preview_tool_result("exec_command", &result),
-            "exit 7: failure"
-        );
-    }
-
-    #[test]
-    fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
-        let client = ModelClient::new_for_test();
-        let registry = Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
-            crate::skills::SkillRecord {
-                name: "lint".to_string(),
-                description: "Run linting workflows.".to_string(),
-                compatibility: None,
-                skill_root_visible: PathBuf::from("/tmp/lint"),
-                body: "lint body".to_string(),
-                resources: Vec::new(),
-            },
-        ]));
-        let build_agent = |mode, skills| {
-            Agent::with_config(
-                client.clone(),
-                AgentConfig {
-                    mode,
-                    store_path: crate::store::default_store_path(),
-                    session_id: None,
-                    initial_messages: Vec::new(),
-                    thread_name: None,
-                    dispatch_id: None,
-                    event_sink: EventSink::none(),
-                    workspace_cwd: PathBuf::from("."),
-                    config_cwd: PathBuf::from("."),
-                    working_directory: ".".to_string(),
-                    worker_executable: None,
-                    sandbox: None,
-                    ssh_host: None,
-                    mcp: None,
-                    skills,
-                    extra_tool_defs: Vec::new(),
-                    agents_md_message: None,
-                    thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                },
-            )
-            .expect("agent config must be valid")
-        };
-
-        let worker = build_agent(AgentMode::Worker, Some(registry.clone()));
-        assert!(!worker
-            .tool_defs
-            .iter()
-            .any(|definition| definition.function.name == "activate_skill"));
-        assert!(!worker.messages.iter().any(|message| match message {
-            Message::System { content } => content.contains("<available_skills>"),
-            _ => false,
-        }));
-
-        let orchestrator = build_agent(AgentMode::Orchestrator, Some(registry));
-        assert!(!orchestrator
-            .tool_defs
-            .iter()
-            .any(|definition| definition.function.name == "activate_skill"));
-        let thread_tool = orchestrator
-            .tool_defs
-            .iter()
-            .find(|definition| definition.function.name == "thread")
-            .unwrap();
-        let skills = &thread_tool.function.parameters["properties"]["skills"];
-        assert_eq!(skills["items"]["enum"], serde_json::json!(["lint"]));
-        assert!(skills["description"]
-            .as_str()
-            .unwrap()
-            .contains("workers cannot activate skills themselves"));
-    }
-
-    #[test]
-    fn tool_args_detail_is_larger_than_preview_but_bounded() {
-        let args = "x".repeat(TOOL_ARGS_DETAIL_LIMIT + 10);
-        let detail = tool_args_detail(&args);
-
-        assert!(detail.starts_with(&"x".repeat(TOOL_ARGS_DETAIL_LIMIT)));
-        assert!(detail.ends_with("..."));
-        assert_eq!(detail.len(), TOOL_ARGS_DETAIL_LIMIT + 3);
-    }
-
-    #[test]
-    fn preview_truncates_on_utf8_boundary() {
-        assert_eq!(preview("a┌b", 2), "a...");
-        assert_eq!(preview("a┌b", 4), "a┌...");
-    }
-
-    #[test]
-    fn preview_handles_box_table_prompt() {
-        let prompt = "hey can you see why markdown rendering is bugged in this way?\n\
-Here's the quick summary of what was discovered:\n\n\
-┌──────────────────┬─────────────────────────────┬─────────────────────────┐\n\
-│ Property         │ Mistral (Tekken)            │ Llama 3                 │\n\
-├──────────────────┼─────────────────────────────┼─────────────────────────┤\n\
-│ Vocab size       │ 131,072                     │ 128,000                 │\n\
-│ Tokenizer engine │ Tekken (custom,             │ BPE (tiktoken/GPT-4     │\n\
-│                  │ tiktoken-based)             │ style)                  │\n\
-└──────────────────┴─────────────────────────────┴─────────────────────────┘\n\
-| Special tokens | <unk>, <s>, </s>, <pad> (IDs 0-999) | <|begin_of_text|>, <|end_of_text|> (IDs 128000+) |\n\
-| Byte fallback | Yes (first 256 tokens = raw bytes) | No |\n\
-| Pre-tokenizer | Unicode multi-script, case-sensitive | GPT-4 style with English contractions |\n\
-| Merges | 269,443 | 280,147 |\n";
-
-        let rendered = preview(prompt, 160);
-
-        assert!(rendered.ends_with("..."));
-        assert!(rendered.len() <= 163);
-    }
-
-    #[tokio::test]
-    async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let store_path = std::env::temp_dir()
-            .join(format!("nac_agent_steering_{unique}"))
-            .join("store.db");
-        crate::store::initialize(&store_path).unwrap();
-        crate::store::insert_test_session(&store_path, "session");
-        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut agent = Agent::with_config(
-            ModelClient::new_for_test(),
-            AgentConfig {
-                mode: AgentMode::Worker,
-                store_path: store_path.clone(),
-                session_id: Some("session".to_string()),
-                initial_messages: Vec::new(),
-                thread_name: Some("impl/ui".to_string()),
-                dispatch_id: Some("worker-dispatch".to_string()),
-                event_sink: EventSink::channel(events_tx),
-                workspace_cwd: PathBuf::from("."),
-                config_cwd: PathBuf::from("."),
-                working_directory: ".".to_string(),
-                worker_executable: None,
-                sandbox: None,
-                ssh_host: None,
-                mcp: None,
-                skills: None,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            },
-        )
-        .unwrap();
-        let message_checkpoint = agent.messages.len();
-        let first = crate::store::queue_thread_steering(
-            &store_path,
-            "session",
-            "impl/ui",
-            "worker-dispatch",
-            "Keep the picker keyboard accessible.",
-        )
-        .unwrap();
-        let second = crate::store::queue_thread_steering(
-            &store_path,
-            "session",
-            "impl/ui",
-            "worker-dispatch",
-            "Preserve visible focus states.",
-        )
-        .unwrap();
-        let connection = rusqlite::Connection::open(&store_path).unwrap();
-        connection
-            .execute_batch(&format!(
-                "CREATE TRIGGER fail_second_steering_ack
-                 BEFORE UPDATE OF status ON thread_steering
-                 WHEN OLD.id = {} AND NEW.status = 'delivered'
-                 BEGIN
-                     SELECT RAISE(FAIL, 'forced batch acknowledgement failure');
-                 END;",
-                second.id
-            ))
-            .unwrap();
-
-        assert!(agent.append_pending_steering().await.is_err());
-        assert_eq!(agent.messages.len(), message_checkpoint);
-        assert!(agent.appended_steering_ids.is_empty());
-        assert!(events_rx.try_recv().is_err());
-        let claimed = crate::store::list_thread_steering(&store_path, "session").unwrap();
-        assert_eq!(claimed.len(), 2);
-        assert!(claimed.iter().all(|record| record.status == "claimed"));
-
-        connection
-            .execute_batch("DROP TRIGGER fail_second_steering_ack")
-            .unwrap();
-        assert_eq!(agent.append_pending_steering().await.unwrap(), 2);
-        assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
-        let appended = agent.messages[message_checkpoint..]
-            .iter()
-            .filter_map(|message| match message {
-                Message::User { content } => Some(content.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(appended.len(), 2);
-        assert_eq!(
-            appended
-                .iter()
-                .filter(|content| content.contains("Keep the picker keyboard accessible."))
-                .count(),
-            1
-        );
-        assert_eq!(
-            appended
-                .iter()
-                .filter(|content| content.contains("Preserve visible focus states."))
-                .count(),
-            1
-        );
-        assert!(crate::store::list_thread_steering(&store_path, "session")
-            .unwrap()
-            .iter()
-            .all(|record| record.status == "delivered"));
-        let delivered_ids = [events_rx.try_recv().unwrap(), events_rx.try_recv().unwrap()].map(
-            |event| match event {
-                AgentEvent::ThreadSteeringDelivered { steering_id, .. } => steering_id,
-                event => panic!("expected delivered event, got {event:?}"),
-            },
-        );
-        assert_eq!(delivered_ids, [first.id, second.id]);
-        assert!(events_rx.try_recv().is_err());
-
-        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    }
-
-    #[tokio::test]
-    async fn orchestrator_claims_steering_as_an_exact_user_message() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let store_path = std::env::temp_dir()
-            .join(format!("nac_orchestrator_steering_{unique}"))
-            .join("store.db");
-        crate::store::initialize(&store_path).unwrap();
-        crate::store::insert_test_session(&store_path, "session");
-        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut agent = Agent::with_config(
-            ModelClient::new_for_test(),
-            AgentConfig {
-                mode: AgentMode::Orchestrator,
-                store_path: store_path.clone(),
-                session_id: Some("session".to_string()),
-                initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: Some("run-dispatch".to_string()),
-                event_sink: EventSink::channel(events_tx),
-                workspace_cwd: PathBuf::from("."),
-                config_cwd: PathBuf::from("."),
-                working_directory: ".".to_string(),
-                worker_executable: None,
-                sandbox: None,
-                ssh_host: None,
-                mcp: None,
-                skills: None,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            },
-        )
-        .unwrap();
-        let instruction = "Drop the fun facts and recommend a niche OSS repository.";
-        let queued = crate::store::queue_thread_steering(
-            &store_path,
-            "session",
-            crate::store::ORCHESTRATOR_STEERING_TARGET,
-            "run-dispatch",
-            instruction,
-        )
-        .unwrap();
-
-        assert_eq!(agent.append_pending_steering().await.unwrap(), 1);
-        assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
-        assert!(matches!(
-            agent.messages.last(),
-            Some(Message::User { content }) if content == instruction
-        ));
-        assert!(matches!(
-            events_rx.try_recv().unwrap(),
-            AgentEvent::OrchestratorSteeringDelivered { steering_id, .. }
-                if steering_id == queued.id
-        ));
-
-        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    }
-}
+mod tests;

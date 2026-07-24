@@ -1,3 +1,7 @@
+mod compaction;
+
+pub use compaction::{CompactSessionError, CompactSessionResponse};
+
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
@@ -10,9 +14,8 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, Request, State},
-    http::{header, uri::Authority, HeaderMap, HeaderValue, StatusCode},
-    middleware::{self, Next},
+    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
+    http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -33,9 +36,9 @@ use nac_core::{
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
-        MessagePageRequest, MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
-        SessionFrontendSnapshotLoad, SessionOverviewRecord, SessionRunHandle, SessionService,
-        SessionSubmitError, ThreadEventPage,
+        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionOverviewRecord,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -208,6 +211,9 @@ pub struct CreateSessionRequest {
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -251,6 +257,9 @@ pub struct UpdateConfigRequest {
     /// Prefer a JSON object. Null or an empty object clears the persisted map.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted preserves; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
 }
 
 impl UpdateConfigRequest {
@@ -261,6 +270,10 @@ impl UpdateConfigRequest {
             && matches!(self.reasoning_effort, RequestField::Omitted)
             && matches!(self.api_key_env, RequestField::Omitted)
             && matches!(self.extra_headers, RequestField::Omitted)
+            && matches!(
+                self.orchestrator_compaction_threshold,
+                RequestField::Omitted
+            )
     }
 }
 
@@ -685,6 +698,8 @@ impl SessionManager {
             ));
         }
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let orchestrator_compaction_threshold =
+            create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
         let model = model_options(
             request.model,
             request.base_url,
@@ -702,6 +717,7 @@ impl SessionManager {
                     store_path: Some(self.inner.store_path.clone()),
                 },
                 model,
+                orchestrator_compaction_threshold,
                 sandbox: sandbox_options(request.sandbox),
                 ssh_host: location.ssh_host,
             },
@@ -762,15 +778,20 @@ impl SessionManager {
         Ok(service)
     }
 
-    /// Returns a service whose model configuration revision matches the store.
-    /// The caller must hold both the local lifecycle gate and the shared run
-    /// lease, preventing a PATCH between the revision read and run start.
-    async fn attach_current_submission_service_locked(
+    /// Returns a service whose model configuration matches the store. The
+    /// caller must hold both the local lifecycle gate and the supplied
+    /// operation lease. Durable compaction checkpoints are refreshed by the
+    /// core admission path after this returns.
+    async fn attach_current_operation_service_locked(
         &self,
         session_id: &str,
+        operation_lease: &sessions::SessionOperationLease,
     ) -> Result<Arc<SessionService>> {
+        operation_lease
+            .validate(&self.inner.store_path, session_id)
+            .map_err(anyhow::Error::new)?;
         let persisted_version =
-            sessions::load_session_model_config(&self.inner.store_path, session_id)?.config_version;
+            sessions::load_session_config(&self.inner.store_path, session_id)?.config_version;
         let cached = self
             .inner
             .active_sessions
@@ -778,22 +799,45 @@ impl SessionManager {
             .await
             .get(session_id)
             .cloned();
-        if let Some(service) = cached {
+        let service = if let Some(service) = cached {
             if service.config_version() == Some(persisted_version) {
-                return Ok(service);
+                service
+            } else {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation while its persisted configuration changed"
+                    ));
+                }
+                self.inner.active_sessions.write().await.remove(session_id);
+                self.attach_session_locked(session_id).await?
             }
-            if service.active_run().is_some() {
-                return Err(anyhow!(
-                    "session is busy with an active run while its persisted configuration changed"
-                ));
-            }
-            self.inner.active_sessions.write().await.remove(session_id);
-        }
-        self.attach_session_locked(session_id).await
+        } else {
+            self.attach_session_locked(session_id).await?
+        };
+        Ok(service)
     }
 
-    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
-        sessions::load_session_model_config(&self.inner.store_path, session_id)
+    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+        // Lease filenames hex-encode IDs; 120 bytes plus the suffix fits within
+        // the common 255-byte component limit.
+        const MAX_SESSION_ID_BYTES: usize = 120;
+
+        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+            return Ok(false);
+        }
+        sessions::session_exists(&self.inner.store_path, session_id)
+    }
+
+    fn require_persisted_operation_session(&self, session_id: &str) -> Result<()> {
+        if self.persisted_operation_session_exists(session_id)? {
+            Ok(())
+        } else {
+            Err(anyhow!("session '{}' was not found", session_id))
+        }
+    }
+
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
+        sessions::load_session_config(&self.inner.store_path, session_id)
     }
 
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
@@ -876,13 +920,16 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
+        self.require_persisted_operation_session(session_id)?;
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        // The OS lease closes the cross-process gap between checking the
-        // persisted revision and synchronously establishing active-run state.
-        let run_lease = sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        // The OS lease closes the cross-process gap between checking durable
+        // state and synchronously establishing active-run state.
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
         let service = self
-            .attach_current_submission_service_locked(session_id)
+            .attach_current_operation_service_locked(session_id, &operation_lease)
             .await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
@@ -895,8 +942,8 @@ impl SessionManager {
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
-                    .try_submit_prepared_prompt_with_lease(prompt, run_lease)
-                    .map_err(submit_error_to_anyhow)?;
+                    .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
+                    .map_err(anyhow::Error::new)?;
                 Ok(submit_response(handle, display_prompt))
             }
         }
@@ -987,9 +1034,10 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Submission, config changes, and deletion share this gate. The run
-        // lease extends the exclusion to independent processes and remains held
-        // through the database delete, so an old run cannot save the row back.
+        self.require_persisted_operation_session(session_id)?;
+        // Submission, config changes, and deletion share this gate. The
+        // operation lease extends the exclusion to independent processes and
+        // remains held through deletion so an old run cannot save the row back.
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         let service = self
@@ -1000,6 +1048,9 @@ impl SessionManager {
             .get(session_id)
             .cloned();
         if let Some(service) = service.as_ref() {
+            if service.active_compaction().is_some() {
+                return Err(anyhow!("session is busy with an active manual compaction"));
+            }
             if let Some(active_run) = service.active_run() {
                 if let Err(error) = service
                     .connect_client()
@@ -1011,9 +1062,13 @@ impl SessionManager {
                     }
                 }
             }
+            if service.has_active_operation() {
+                return Err(anyhow!("session is busy with an active operation"));
+            }
         }
-        let _run_lease =
-            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
         if let Some(service) = service {
             // Explicitly destroy the sandbox even if SSE handlers retain the service.
             service.destroy_sandbox().await;
@@ -1036,24 +1091,25 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // An empty PATCH stays a cheap no-op for an already attached (and thus
-        // validated) service. Detached rows are inspected so legacy/incomplete
-        // managed tuples can be repaired without requiring a synthetic field.
-        if request.is_empty() {
-            if self
+        let request_empty = request.is_empty();
+        if request_empty {
+            if let Some(service) = self
                 .inner
                 .active_sessions
                 .read()
                 .await
-                .contains_key(session_id)
+                .get(session_id)
+                .cloned()
             {
-                return Ok(());
-            }
-            let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
-            if !managed_config_needs_repair(&current) {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation; wait for it before updating config"
+                    ));
+                }
                 return Ok(());
             }
         }
+        self.require_persisted_operation_session(session_id)?;
 
         let backend_selected = matches!(&request.backend, RequestField::Value(_));
         let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
@@ -1069,9 +1125,9 @@ impl SessionManager {
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.inner.active_sessions.write().await;
         if let Some(service) = active.get(session_id) {
-            if service.active_run().is_some() {
+            if service.has_active_operation() {
                 return Err(anyhow!(
-                    "session is busy with an active run; cancel it before updating config"
+                    "session is busy with an active operation; wait for it before updating config"
                 ));
             }
         }
@@ -1079,10 +1135,14 @@ impl SessionManager {
         // Independent server/TUI processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
-        let _run_lease =
-            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
 
-        let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+        let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
+        if request_empty && !managed_config_needs_repair(&current) {
+            return Ok(());
+        }
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
@@ -1109,11 +1169,11 @@ impl SessionManager {
             &extra_headers,
         )?;
 
-        // Persist only model columns after all caller-controlled configuration
-        // and credential checks succeed. The revision CAS rejects a concurrent
-        // PATCH, while run/history writes remain independent of these columns.
+        // Persist only revisioned session-configuration columns after all
+        // caller-controlled model configuration and credential checks succeed.
+        // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
         // A store failure or conflict leaves the active map untouched.
-        sessions::update_raw_session_model_config(&self.inner.store_path, &prospective)?;
+        sessions::update_raw_session_config(&self.inner.store_path, &prospective)?;
         active.remove(session_id);
         Ok(())
     }
@@ -1148,89 +1208,6 @@ fn response_compression_layer() -> CompressionLayer<impl Predicate> {
     CompressionLayer::new()
         .gzip(true)
         .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
-}
-
-fn single_header<'a>(
-    headers: &'a HeaderMap,
-    name: &str,
-) -> std::result::Result<Option<&'a HeaderValue>, ()> {
-    let mut values = headers.get_all(name).iter();
-    let value = values.next();
-    if values.next().is_some() {
-        return Err(());
-    }
-    Ok(value)
-}
-
-fn loopback_authority(value: &HeaderValue) -> Option<(String, Option<u16>)> {
-    let value = value.to_str().ok()?;
-    if value.is_empty() || value.contains('@') {
-        return None;
-    }
-    let authority = value.parse::<Authority>().ok()?;
-    let host = authority.host().trim_matches(['[', ']']);
-    let host = match host.parse::<std::net::IpAddr>() {
-        Ok(address) if address.is_loopback() => address.to_string(),
-        Err(_) if host.eq_ignore_ascii_case("localhost") => "localhost".to_string(),
-        _ => return None,
-    };
-    Some((host, authority.port_u16()))
-}
-
-fn browser_request_is_allowed(headers: &HeaderMap) -> bool {
-    let Ok(Some(host)) = single_header(headers, "host") else {
-        return false;
-    };
-    let Some((host_name, host_port)) = loopback_authority(host) else {
-        return false;
-    };
-
-    let Ok(fetch_site) = single_header(headers, "sec-fetch-site") else {
-        return false;
-    };
-    if let Some(value) = fetch_site {
-        match value.to_str() {
-            Ok(value) if !value.eq_ignore_ascii_case("cross-site") => {}
-            _ => return false,
-        }
-    }
-
-    let Ok(origin) = single_header(headers, "origin") else {
-        return false;
-    };
-    let Some(origin) = origin else {
-        return true;
-    };
-    let Ok(origin) = origin.to_str() else {
-        return false;
-    };
-    let Some((scheme, origin_authority)) = origin.split_once("://") else {
-        return false;
-    };
-    if !scheme.eq_ignore_ascii_case("http") {
-        return false;
-    }
-    if origin_authority.is_empty()
-        || origin_authority
-            .chars()
-            .any(|character| matches!(character, '/' | '?' | '#'))
-    {
-        return false;
-    }
-    let Ok(origin_value) = HeaderValue::from_str(origin_authority) else {
-        return false;
-    };
-    let Some((origin_name, origin_port)) = loopback_authority(&origin_value) else {
-        return false;
-    };
-    origin_name == host_name && origin_port.unwrap_or(80) == host_port.unwrap_or(80)
-}
-
-async fn browser_request_boundary(request: Request, next: Next) -> Response {
-    if !browser_request_is_allowed(request.headers()) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    next.run(request).await
 }
 
 fn validate_bind_address(addr: SocketAddr) -> Result<()> {
@@ -1290,6 +1267,7 @@ pub fn router(manager: SessionManager) -> Router {
             post(generate_overview_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route("/sessions/{session_id}/compact", post(compaction::handler))
         .route(
             "/sessions/{session_id}/steering",
             post(queue_orchestrator_steering_handler),
@@ -1304,7 +1282,6 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(middleware::from_fn(browser_request_boundary))
         .layer(response_compression_layer())
         .with_state(manager)
 }
@@ -1634,7 +1611,7 @@ async fn delete_session_handler(
 async fn session_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<sessions::RawSessionModelConfig>, ApiError> {
+) -> std::result::Result<Json<sessions::RawSessionConfig>, ApiError> {
     Ok(Json(manager.session_config(&session_id)?))
 }
 
@@ -1694,6 +1671,24 @@ fn required_create_string(field: RequestField<String>, name: &str) -> Result<Opt
     }
 }
 
+fn validated_compaction_threshold(threshold: u64) -> Result<u64> {
+    if threshold > nac_core::MAX_SUPPORTED_TOKEN_COUNT {
+        return Err(request_configuration_error(format!(
+            "invalid orchestrator compaction threshold: must not exceed {} tokens",
+            nac_core::MAX_SUPPORTED_TOKEN_COUNT
+        )));
+    }
+    Ok(threshold)
+}
+
+fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Option<u64>> {
+    match field {
+        RequestField::Omitted => Ok(None),
+        RequestField::Null => Ok(Some(0)),
+        RequestField::Value(threshold) => validated_compaction_threshold(threshold).map(Some),
+    }
+}
+
 fn model_options(
     model: RequestField<String>,
     base_url: RequestField<String>,
@@ -1738,7 +1733,7 @@ fn model_options(
 }
 
 fn apply_raw_config_patch(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
     request: UpdateConfigRequest,
 ) -> Result<()> {
     match request.model {
@@ -1799,11 +1794,19 @@ fn apply_raw_config_patch(
             };
         }
     }
+    match request.orchestrator_compaction_threshold {
+        RequestField::Omitted => {}
+        RequestField::Null => config.orchestrator_compaction_threshold = None,
+        RequestField::Value(threshold) => {
+            let threshold = validated_compaction_threshold(threshold)?;
+            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+        }
+    }
     config.diagnostics.clear();
     Ok(())
 }
 
-fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool {
+fn managed_config_needs_repair(config: &sessions::RawSessionConfig) -> bool {
     let Some(backend) = config
         .backend
         .as_deref()
@@ -1816,7 +1819,7 @@ fn managed_config_needs_repair(config: &sessions::RawSessionModelConfig) -> bool
 }
 
 fn parse_prospective_model_config(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
     backend_selected: bool,
     base_url_omitted: bool,
     api_key_env_omitted: bool,
@@ -1913,21 +1916,6 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
         || request.workdir.is_some()
 }
 
-fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
-    match error {
-        SessionSubmitError::Busy { active_run } => anyhow!(
-            "session is busy with run {} ({})",
-            active_run.run_id,
-            active_run.prompt_preview
-        ),
-        SessionSubmitError::ExternalBusy { session_id } => anyhow!(
-            "session '{}' is busy with an active run in another process",
-            session_id
-        ),
-        SessionSubmitError::Coordination { message } => anyhow!(message),
-    }
-}
-
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {
     SubmitPromptResponse {
         run_id: handle.run_id.to_string(),
@@ -1944,6 +1932,7 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
         FrontendCommand::Exit => "exit",
         FrontendCommand::Sessions => "sessions",
         FrontendCommand::Help => "help",
+        FrontendCommand::Compact => "compact",
     }
 }
 
@@ -2085,6 +2074,23 @@ impl From<anyhow::Error> for ApiError {
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
+            match error {
+                SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
+                    StatusCode::CONFLICT
+                }
+                SessionSubmitError::Coordination {
+                    message:
+                        SessionCoordinationError::StaleConfiguration { .. }
+                        | SessionCoordinationError::LocalAgentBusy,
+                } => StatusCode::CONFLICT,
+                SessionSubmitError::Coordination { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<sessions::SessionOperationLeaseError>() {
+            match error {
+                sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,
+                sessions::SessionOperationLeaseError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")
@@ -2141,6 +2147,9 @@ mod tests {
     use flate2::read::GzDecoder;
     use tower::ServiceExt;
 
+    #[path = "compaction.rs"]
+    mod compaction;
+
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
         let request: CreateSessionRequest = serde_json::from_str(
@@ -2150,7 +2159,8 @@ mod tests {
                 "backend":"openai-responses",
                 "reasoning_effort":"xhigh",
                 "api_key_env":null,
-                "extra_headers":{"X-Trace":"launch"}
+                "extra_headers":{"X-Trace":"launch"},
+                "orchestrator_compaction_threshold":0
             }"#,
         )
         .unwrap();
@@ -2172,6 +2182,10 @@ mod tests {
                 "X-Trace".to_string(),
                 "launch".to_string()
             )])))
+        );
+        assert_eq!(
+            request.orchestrator_compaction_threshold,
+            RequestField::Value(0)
         );
         assert_eq!(request.cwd, None);
     }
@@ -2295,89 +2309,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn browser_boundary_accepts_only_local_same_origin_or_originless_requests() {
-        let root = temp_root("browser_boundary");
+    async fn public_proxy_headers_reach_get_json_and_sse_routes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("public_proxy_headers");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
         let app = router(test_manager(&root));
-        let cases = [
-            (Some("localhost"), None, None, StatusCode::OK),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:3210"),
-                Some("same-origin"),
-                StatusCode::OK,
-            ),
-            (
-                Some("127.0.0.1:3210"),
-                Some("http://127.0.0.1:3210"),
-                None,
-                StatusCode::OK,
-            ),
-            (
-                Some("[::1]:3210"),
-                Some("http://[::1]:3210"),
-                None,
-                StatusCode::OK,
-            ),
-            (Some("evil.example"), None, None, StatusCode::FORBIDDEN),
-            (
-                Some("localhost:3210"),
-                Some("http://evil.example:3210"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:9999"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("null"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:3210/path"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                None,
-                Some("cross-site"),
-                StatusCode::FORBIDDEN,
-            ),
-            (None, None, None, StatusCode::FORBIDDEN),
-        ];
 
-        for (host, origin, fetch_site, expected) in cases {
-            let mut request = Request::builder().uri("/health");
-            if let Some(host) = host {
-                request = request.header(header::HOST, host);
-            }
+        for (origin, fetch_site) in [
+            (Some("https://preview-1234.ngrok-free.app"), "same-origin"),
+            (None, "none"),
+            (Some("https://operator.example"), "cross-site"),
+        ] {
+            let mut request = Request::builder()
+                .uri("/health")
+                .header(header::HOST, "preview-1234.ngrok-free.app")
+                .header("sec-fetch-site", fetch_site);
             if let Some(origin) = origin {
                 request = request.header(header::ORIGIN, origin);
-            }
-            if let Some(fetch_site) = fetch_site {
-                request = request.header("sec-fetch-site", fetch_site);
             }
             let response = app
                 .clone()
                 .oneshot(request.body(Body::empty()).unwrap())
                 .await
                 .unwrap();
-            assert_eq!(
-                response.status(),
-                expected,
-                "host={host:?} origin={origin:?}"
-            );
+            assert_eq!(response.status(), StatusCode::OK, "{fetch_site}");
             assert!(response
                 .headers()
                 .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
                 .is_none());
         }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/missing/steering")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://operator.example")
+                    .header("sec-fetch-site", "cross-site")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"instruction":"do nothing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/session/events/stream")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://preview-1234.ngrok-free.app")
+                    .header("sec-fetch-site", "same-origin")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+
+        drop(response);
+        drop(app);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2600,10 +2603,14 @@ mod tests {
         .expect("session manager")
     }
 
+    fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {
+        let lock_dir = root.join("store.db.run-locks");
+        std::fs::write(&lock_dir, b"not a directory").expect("poison operation lease directory");
+        lock_dir
+    }
+
     async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
-        let mut request = Request::builder()
-            .uri(uri)
-            .header(header::HOST, "localhost");
+        let mut request = Request::builder().uri(uri);
         if let Some(accept_encoding) = accept_encoding {
             request = request.header(header::ACCEPT_ENCODING, accept_encoding);
         }
@@ -2614,6 +2621,10 @@ mod tests {
 
     async fn response_body(response: Response) -> Bytes {
         to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        serde_json::from_slice(&response_body(response).await).unwrap()
     }
 
     fn gunzip(body: &[u8]) -> Vec<u8> {
@@ -2811,6 +2822,7 @@ mod tests {
             reasoning_effort: RequestField::Omitted,
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
+            orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,
@@ -2839,6 +2851,7 @@ mod tests {
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                     ssh_host: None,
                     sandbox: SandboxRequest::default(),
                 })
@@ -2881,6 +2894,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2922,6 +2936,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2956,6 +2971,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -3083,6 +3099,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn operation_lease_store_failures_are_path_safe_for_submit_patch_and_delete_apis() {
+        const CANARY: &str = "operation_lease_private_path_canary";
+        let root = temp_root(CANARY);
+        seed_editable_session(&root, "session");
+        let lock_dir = poison_operation_lease_directory(&root);
+        let app = router(test_manager(&root));
+
+        for (method, uri, body) in [
+            (
+                "POST",
+                "/sessions/session/runs",
+                Some(r#"{"prompt":"must not run"}"#),
+            ),
+            (
+                "PATCH",
+                "/sessions/session/config",
+                Some(r#"{"model":"must-not-change"}"#),
+            ),
+            ("DELETE", "/sessions/session", None),
+        ] {
+            let mut request = Request::builder().method(method).uri(uri);
+            if body.is_some() {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+            }
+            let response = app
+                .clone()
+                .oneshot(
+                    request
+                        .body(body.map_or_else(Body::empty, Body::from))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{uri}"
+            );
+            let response = response_json(response).await;
+            assert_eq!(
+                response,
+                serde_json::json!({"error": "session operation lease failed"}),
+                "{uri}"
+            );
+            assert!(!response.to_string().contains(CANARY), "{uri}");
+            assert!(
+                !response.to_string().contains(&root.display().to_string()),
+                "{uri}"
+            );
+        }
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "model-a");
+        assert!(lock_dir.is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn server_attach_ignores_invalid_ambient_model_but_create_remains_strict() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("persisted_attach_invalid_ambient_model");
@@ -3147,7 +3221,7 @@ thread_timeout_secs = 7200
         let mut missing_value =
             sessions::load_session(&store_path, "missing-environment-value").unwrap();
         missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
-        sessions::update_session_model_config(&store_path, &missing_value).unwrap();
+        sessions::update_session_config(&store_path, &missing_value).unwrap();
 
         seed_session(
             &root,
@@ -3159,7 +3233,7 @@ thread_timeout_secs = 7200
         unavailable_auth.backend = BackendKind::ArceeAuth;
         unavailable_auth.base_url = "https://api.arcee.ai".to_string();
         unavailable_auth.api_key_env = None;
-        sessions::update_session_model_config(&store_path, &unavailable_auth).unwrap();
+        sessions::update_session_config(&store_path, &unavailable_auth).unwrap();
 
         let manager = test_manager(&root);
         let Json(endpoint_config) = session_config_handler(
@@ -3291,7 +3365,7 @@ thread_timeout_secs = 7200
             seed_editable_session(&root, id);
         }
         for id in ["auto", "arcee", "missing", "effort", "headers"] {
-            let mut raw = sessions::load_session_model_config(&store_path, id).unwrap();
+            let mut raw = sessions::load_session_config(&store_path, id).unwrap();
             match id {
                 "auto" => raw.backend = Some("auto".to_string()),
                 "arcee" => raw.backend = Some("arcee".to_string()),
@@ -3300,7 +3374,7 @@ thread_timeout_secs = 7200
                 "headers" => raw.extra_headers_json = Some("{broken".to_string()),
                 _ => unreachable!(),
             }
-            sessions::update_raw_session_model_config(&store_path, &raw).unwrap();
+            sessions::update_raw_session_config(&store_path, &raw).unwrap();
         }
 
         let manager = test_manager(&root);
@@ -3423,7 +3497,7 @@ thread_timeout_secs = 7200
         let address = listener.local_addr().unwrap();
         let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
         snapshot.base_url = format!("http://{address}/v1");
-        sessions::update_session_model_config(&root.join("store.db"), &snapshot).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
 
         tokio::spawn(async move {
             if let Ok((socket, _)) = listener.accept().await {
@@ -3467,7 +3541,6 @@ thread_timeout_secs = 7200
             let request = Request::builder()
                 .method("POST")
                 .uri(uri)
-                .header(header::HOST, "localhost")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::json!({ "instruction": instruction }).to_string(),
@@ -3625,7 +3698,9 @@ thread_timeout_secs = 7200
             .expect("patch should run after submission")
             .unwrap()
             .unwrap_err();
-        assert!(patch_error.to_string().contains("busy with an active run"));
+        assert!(patch_error
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -3739,7 +3814,7 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
-    async fn external_active_run_lease_rejects_patch_from_independent_manager() {
+    async fn external_active_operation_lease_rejects_patch_from_independent_manager() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("external_active_patch");
         let nac_home = root.join("nac-home");
@@ -3770,7 +3845,7 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("PATCH cannot commit beneath another process run");
-        assert!(error.to_string().contains("busy with an active run"));
+        assert!(error.to_string().contains("busy with an active operation"));
         assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
         let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(after.model, before.model);
@@ -3822,6 +3897,7 @@ thread_timeout_secs = 7200
                     reasoning_effort: RequestField::Value("high".to_string()),
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -3874,7 +3950,7 @@ thread_timeout_secs = 7200
         seed_editable_session(&root, "session");
         let first_manager = test_manager(&root);
         let second_manager = test_manager(&root);
-        let held = sessions::SessionRunLease::try_acquire(&root.join("store.db"), "session")
+        let held = sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "session")
             .expect("first process lease");
 
         let conflict = second_manager
@@ -3887,7 +3963,9 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("a concurrent shared lease must reject PATCH without waiting");
-        assert!(conflict.to_string().contains("busy with an active run"));
+        assert!(conflict
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -3970,6 +4048,9 @@ base_url = "https://api.openai.com/v1"
 reasoning_effort = "medium"
 api_key_env = "OPENAI_API_KEY"
 extra_headers = { X-Config = "yes" }
+
+[compaction]
+threshold_tokens = 64000
 "#,
         )
         .unwrap();
@@ -3988,6 +4069,7 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(stored.model, "config-model");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
         assert_eq!(
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
@@ -4000,6 +4082,7 @@ extra_headers = { X-Config = "yes" }
             config.extra_headers_json.as_deref(),
             Some("{\"X-Config\":\"yes\"}")
         );
+        assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
         assert!(manager
             .snapshot(&inherited_id)
             .await
@@ -4016,6 +4099,7 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Null,
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Null,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -4027,6 +4111,28 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(stored.reasoning_effort, None);
         assert_eq!(stored.api_key_env, None);
         assert!(stored.extra_headers.is_empty());
+        assert_eq!(stored.orchestrator_compaction_threshold, None);
+
+        let zero_disabled = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("zero-disabled-model".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Null,
+                api_key_env: RequestField::Null,
+                extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Value(0),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("zero should disable an inherited compaction threshold");
+        let zero_disabled_id = zero_disabled.metadata.session_id.unwrap();
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), &zero_disabled_id)
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            None
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4260,7 +4366,7 @@ api_key_env = "OPENAI_API_KEY"
             incomplete.backend = backend;
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
-            sessions::update_session_model_config(&store_path, &incomplete).unwrap();
+            sessions::update_session_config(&store_path, &incomplete).unwrap();
 
             manager
                 .update_session_config(session_id, UpdateConfigRequest::default())
@@ -4290,7 +4396,7 @@ api_key_env = "OPENAI_API_KEY"
         let store_path = root.join("store.db");
         let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
         api_key_session.reasoning_effort = None;
-        sessions::update_session_model_config(&store_path, &api_key_session).unwrap();
+        sessions::update_session_config(&store_path, &api_key_session).unwrap();
         let manager = test_manager(&root);
 
         manager
@@ -4431,7 +4537,7 @@ api_key_env = "OPENAI_API_KEY"
         stored.backend = BackendKind::ChatGptCodexResponses;
         stored.base_url = "https://chatgpt.com/backend-api".to_string();
         stored.api_key_env = None;
-        sessions::update_session_model_config(&root.join("store.db"), &stored).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &stored).unwrap();
         let manager = test_manager(&root);
 
         let error = manager
@@ -4716,6 +4822,7 @@ api_key_env = "OPENAI_API_KEY"
                         "X-Replaced".to_string(),
                         "true".to_string(),
                     )]))),
+                    orchestrator_compaction_threshold: RequestField::Value(64_000),
                 },
             )
             .await
@@ -4731,6 +4838,14 @@ api_key_env = "OPENAI_API_KEY"
         assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
+        assert_eq!(replaced.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(
+            manager
+                .session_config("session")
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            Some(64_000)
+        );
 
         manager.attach_session("session").await.unwrap();
         manager
@@ -4742,6 +4857,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Null,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Null,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -4752,6 +4868,7 @@ api_key_env = "OPENAI_API_KEY"
         assert_eq!(arcee_auth.reasoning_effort, None);
         assert_eq!(arcee_auth.api_key_env, None);
         assert!(arcee_auth.extra_headers.is_empty());
+        assert_eq!(arcee_auth.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -4759,17 +4876,15 @@ api_key_env = "OPENAI_API_KEY"
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-api".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    orchestrator_compaction_threshold: RequestField::Value(32_000),
                     ..UpdateConfigRequest::default()
                 },
             )
             .await
             .expect("switch to Arcee API key mode");
-        assert_eq!(
-            sessions::load_session(&root.join("store.db"), "session")
-                .unwrap()
-                .backend,
-            BackendKind::ArceeApi
-        );
+        let arcee_api = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(arcee_api.backend, BackendKind::ArceeApi);
+        assert_eq!(arcee_api.orchestrator_compaction_threshold, Some(32_000));
 
         manager
             .update_session_config(
@@ -4778,6 +4893,7 @@ api_key_env = "OPENAI_API_KEY"
                     backend: RequestField::Value("chatgpt-codex-responses".to_string()),
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Value(0),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -4786,6 +4902,7 @@ api_key_env = "OPENAI_API_KEY"
         let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
         assert_eq!(codex.api_key_env, None);
+        assert_eq!(codex.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -4836,6 +4953,12 @@ api_key_env = "OPENAI_API_KEY"
         manager.attach_session("session").await.unwrap();
 
         let invalid = [
+            UpdateConfigRequest {
+                orchestrator_compaction_threshold: RequestField::Value(
+                    nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1,
+                ),
+                ..UpdateConfigRequest::default()
+            },
             UpdateConfigRequest {
                 model: RequestField::Null,
                 ..UpdateConfigRequest::default()
@@ -4972,6 +5095,7 @@ api_key_env = "OPENAI_API_KEY"
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5012,6 +5136,7 @@ api_key_env = "OPENAI_API_KEY"
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -5030,7 +5155,7 @@ api_key_env = "OPENAI_API_KEY"
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
         attach_snapshot.backend = BackendKind::ArceeApi;
         attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
-        sessions::update_session_model_config(&store_path, &attach_snapshot).unwrap();
+        sessions::update_session_config(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
@@ -5055,6 +5180,7 @@ api_key_env = "OPENAI_API_KEY"
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5082,6 +5208,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -5101,6 +5228,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -5118,6 +5246,7 @@ api_key_env = "OPENAI_API_KEY"
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -5161,6 +5290,7 @@ api_key_env = "OPENAI_API_KEY"
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await

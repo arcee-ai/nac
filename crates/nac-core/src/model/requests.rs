@@ -61,9 +61,11 @@ pub(super) fn fireworks_chat_request(
             .iter()
             .map(fireworks_message_to_value)
             .collect::<Vec<_>>(),
-        "tools": tools,
         "temperature": 0.0,
     });
+    if !tools.is_empty() {
+        request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+    }
     match reasoning_effort {
         None => {}
         Some(ReasoningEffort::None) => {
@@ -90,9 +92,11 @@ pub(super) fn together_chat_request(
             .iter()
             .map(fireworks_message_to_value)
             .collect::<Vec<_>>(),
-        "tools": tools,
         "temperature": 0.0,
     });
+    if !tools.is_empty() {
+        request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+    }
     match reasoning_effort {
         None => {}
         Some(ReasoningEffort::None) => {

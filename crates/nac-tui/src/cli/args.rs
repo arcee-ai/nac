@@ -18,6 +18,12 @@ pub(super) struct RunCli {
     #[command(flatten)]
     pub(super) model: ModelArgs,
 
+    /// Compact orchestrator context at this absolute token count (0 disables)
+    ///
+    /// Omit to inherit `[compaction].threshold_tokens` from config.toml.
+    #[arg(long, value_name = "TOKENS")]
+    pub(super) orchestrator_compaction_threshold: Option<u64>,
+
     #[command(flatten)]
     pub(super) sandbox: SandboxArgs,
 }
@@ -764,6 +770,45 @@ mod tests {
     }
 
     #[test]
+    fn public_compaction_threshold_accepts_positive_and_explicit_zero() {
+        let positive =
+            RunCli::try_parse_from(["nac", "--orchestrator-compaction-threshold", "64000"])
+                .unwrap();
+        assert_eq!(positive.orchestrator_compaction_threshold, Some(64_000));
+
+        let disabled =
+            RunCli::try_parse_from(["nac", "--orchestrator-compaction-threshold", "0"]).unwrap();
+        assert_eq!(disabled.orchestrator_compaction_threshold, Some(0));
+        assert_eq!(
+            RunCli::try_parse_from(["nac"])
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            None
+        );
+    }
+
+    #[test]
+    fn hidden_worker_does_not_accept_orchestrator_compaction_threshold() {
+        let error = ManagedWorkerCli::try_parse_from([
+            "nac __worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch",
+            "--action",
+            "work",
+            "--orchestrator-compaction-threshold",
+            "64000",
+        ])
+        .err()
+        .expect("worker CLI must reject orchestrator-only threshold")
+        .to_string();
+        assert!(error.contains("unexpected argument"), "{error}");
+    }
+
+    #[test]
     fn long_help_documents_strict_model_and_credential_contract() {
         let help = RunCli::command().render_long_help().to_string();
         for expected in [
@@ -775,6 +820,8 @@ mod tests {
             "--effort",
             "--clear-effort",
             "--extra-headers",
+            "--orchestrator-compaction-threshold",
+            "absolute token count",
             "required here or in config.toml",
             "exactly the environment variable",
             "OPENAI_MODEL and OPENAI_BASE_URL are ignored",

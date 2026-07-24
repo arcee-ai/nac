@@ -4,14 +4,14 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub(super) struct ScriptedResponse {
+pub(crate) struct ScriptedResponse {
     status: &'static str,
     headers: BTreeMap<String, String>,
     body: String,
 }
 
 impl ScriptedResponse {
-    pub(super) fn json(status: &'static str, body: impl Into<String>) -> Self {
+    pub(crate) fn json(status: &'static str, body: impl Into<String>) -> Self {
         Self {
             status,
             headers: BTreeMap::new(),
@@ -19,7 +19,7 @@ impl ScriptedResponse {
         }
     }
 
-    pub(super) fn redirect(
+    pub(crate) fn redirect(
         status: &'static str,
         location: impl Into<String>,
         body: impl Into<String>,
@@ -33,21 +33,28 @@ impl ScriptedResponse {
 }
 
 #[derive(Debug)]
-pub(super) struct CapturedRequest {
-    pub(super) method: String,
-    pub(super) path: String,
-    pub(super) headers: BTreeMap<String, String>,
-    pub(super) header_counts: BTreeMap<String, usize>,
-    pub(super) body: Vec<u8>,
+pub(crate) struct CapturedRequest {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) headers: BTreeMap<String, String>,
+    pub(crate) header_counts: BTreeMap<String, usize>,
+    pub(crate) body: Vec<u8>,
 }
 
-pub(super) struct ScriptedServer {
-    pub(super) base_url: String,
+pub(crate) struct ScriptedServer {
+    pub(crate) base_url: String,
     handle: thread::JoinHandle<Vec<CapturedRequest>>,
 }
 
 impl ScriptedServer {
-    pub(super) fn start(responses: Vec<ScriptedResponse>) -> Self {
+    pub(crate) fn start(responses: Vec<ScriptedResponse>) -> Self {
+        Self::start_observed(responses, |_index, _request| {})
+    }
+
+    pub(crate) fn start_observed<F>(responses: Vec<ScriptedResponse>, observer: F) -> Self
+    where
+        F: Fn(usize, &CapturedRequest) + Send + 'static,
+    {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind scripted HTTP server");
         listener
             .set_nonblocking(true)
@@ -56,7 +63,7 @@ impl ScriptedServer {
         let handle = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut requests = Vec::with_capacity(responses.len());
-            for response in responses {
+            for (index, response) in responses.into_iter().enumerate() {
                 let mut stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
@@ -71,7 +78,9 @@ impl ScriptedServer {
                         Err(error) => panic!("accept scripted HTTP request: {error}"),
                     }
                 };
-                requests.push(read_request(&mut stream));
+                let request = read_request(&mut stream);
+                observer(index, &request);
+                requests.push(request);
                 write_response(&mut stream, &response);
             }
             requests
@@ -79,7 +88,7 @@ impl ScriptedServer {
         Self { base_url, handle }
     }
 
-    pub(super) fn start_same_origin_redirect(
+    pub(crate) fn start_same_origin_redirect(
         status: &'static str,
         redirect_path: &str,
         body: impl Into<String>,
@@ -114,7 +123,7 @@ impl ScriptedServer {
         Self { base_url, handle }
     }
 
-    pub(super) fn finish(self) -> Vec<CapturedRequest> {
+    pub(crate) fn finish(self) -> Vec<CapturedRequest> {
         self.handle.join().expect("scripted HTTP server thread")
     }
 }
@@ -187,8 +196,25 @@ fn write_response(stream: &mut TcpStream, response: &ScriptedResponse) {
         response.body.len(),
         response.body
     );
-    stream
-        .write_all(wire.as_bytes())
-        .expect("write scripted HTTP response");
-    stream.flush().expect("flush scripted HTTP response");
+    if let Err(error) = stream.write_all(wire.as_bytes()) {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        ) {
+            return;
+        }
+        panic!("write scripted HTTP response: {error}");
+    }
+    if let Err(error) = stream.flush() {
+        if !matches!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        ) {
+            panic!("flush scripted HTTP response: {error}");
+        }
+    }
 }
