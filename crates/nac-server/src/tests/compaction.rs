@@ -19,8 +19,7 @@ use tower::ServiceExt;
 async fn post_compact(app: Router, session_id: &str, body: Option<&str>) -> Response {
     let mut request = Request::builder()
         .method("POST")
-        .uri(format!("/sessions/{session_id}/compact"))
-        .header(header::HOST, "localhost");
+        .uri(format!("/sessions/{session_id}/compact"));
     if body.is_some() {
         request = request.header(header::CONTENT_TYPE, "application/json");
     }

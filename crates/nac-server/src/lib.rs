@@ -14,9 +14,8 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, Request, State},
-    http::{header, uri::Authority, HeaderMap, HeaderValue, StatusCode},
-    middleware::{self, Next},
+    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
+    http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -1211,89 +1210,6 @@ fn response_compression_layer() -> CompressionLayer<impl Predicate> {
         .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
 }
 
-fn single_header<'a>(
-    headers: &'a HeaderMap,
-    name: &str,
-) -> std::result::Result<Option<&'a HeaderValue>, ()> {
-    let mut values = headers.get_all(name).iter();
-    let value = values.next();
-    if values.next().is_some() {
-        return Err(());
-    }
-    Ok(value)
-}
-
-fn loopback_authority(value: &HeaderValue) -> Option<(String, Option<u16>)> {
-    let value = value.to_str().ok()?;
-    if value.is_empty() || value.contains('@') {
-        return None;
-    }
-    let authority = value.parse::<Authority>().ok()?;
-    let host = authority.host().trim_matches(['[', ']']);
-    let host = match host.parse::<std::net::IpAddr>() {
-        Ok(address) if address.is_loopback() => address.to_string(),
-        Err(_) if host.eq_ignore_ascii_case("localhost") => "localhost".to_string(),
-        _ => return None,
-    };
-    Some((host, authority.port_u16()))
-}
-
-fn browser_request_is_allowed(headers: &HeaderMap) -> bool {
-    let Ok(Some(host)) = single_header(headers, "host") else {
-        return false;
-    };
-    let Some((host_name, host_port)) = loopback_authority(host) else {
-        return false;
-    };
-
-    let Ok(fetch_site) = single_header(headers, "sec-fetch-site") else {
-        return false;
-    };
-    if let Some(value) = fetch_site {
-        match value.to_str() {
-            Ok(value) if !value.eq_ignore_ascii_case("cross-site") => {}
-            _ => return false,
-        }
-    }
-
-    let Ok(origin) = single_header(headers, "origin") else {
-        return false;
-    };
-    let Some(origin) = origin else {
-        return true;
-    };
-    let Ok(origin) = origin.to_str() else {
-        return false;
-    };
-    let Some((scheme, origin_authority)) = origin.split_once("://") else {
-        return false;
-    };
-    if !scheme.eq_ignore_ascii_case("http") {
-        return false;
-    }
-    if origin_authority.is_empty()
-        || origin_authority
-            .chars()
-            .any(|character| matches!(character, '/' | '?' | '#'))
-    {
-        return false;
-    }
-    let Ok(origin_value) = HeaderValue::from_str(origin_authority) else {
-        return false;
-    };
-    let Some((origin_name, origin_port)) = loopback_authority(&origin_value) else {
-        return false;
-    };
-    origin_name == host_name && origin_port.unwrap_or(80) == host_port.unwrap_or(80)
-}
-
-async fn browser_request_boundary(request: Request, next: Next) -> Response {
-    if !browser_request_is_allowed(request.headers()) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    next.run(request).await
-}
-
 fn validate_bind_address(addr: SocketAddr) -> Result<()> {
     if !addr.ip().is_loopback() {
         anyhow::bail!(
@@ -1366,7 +1282,6 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(middleware::from_fn(browser_request_boundary))
         .layer(response_compression_layer())
         .with_state(manager)
 }
@@ -2394,89 +2309,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn browser_boundary_accepts_only_local_same_origin_or_originless_requests() {
-        let root = temp_root("browser_boundary");
+    async fn public_proxy_headers_reach_get_json_and_sse_routes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("public_proxy_headers");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
         let app = router(test_manager(&root));
-        let cases = [
-            (Some("localhost"), None, None, StatusCode::OK),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:3210"),
-                Some("same-origin"),
-                StatusCode::OK,
-            ),
-            (
-                Some("127.0.0.1:3210"),
-                Some("http://127.0.0.1:3210"),
-                None,
-                StatusCode::OK,
-            ),
-            (
-                Some("[::1]:3210"),
-                Some("http://[::1]:3210"),
-                None,
-                StatusCode::OK,
-            ),
-            (Some("evil.example"), None, None, StatusCode::FORBIDDEN),
-            (
-                Some("localhost:3210"),
-                Some("http://evil.example:3210"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:9999"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("null"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                Some("http://localhost:3210/path"),
-                None,
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                Some("localhost:3210"),
-                None,
-                Some("cross-site"),
-                StatusCode::FORBIDDEN,
-            ),
-            (None, None, None, StatusCode::FORBIDDEN),
-        ];
 
-        for (host, origin, fetch_site, expected) in cases {
-            let mut request = Request::builder().uri("/health");
-            if let Some(host) = host {
-                request = request.header(header::HOST, host);
-            }
+        for (origin, fetch_site) in [
+            (Some("https://preview-1234.ngrok-free.app"), "same-origin"),
+            (None, "none"),
+            (Some("https://operator.example"), "cross-site"),
+        ] {
+            let mut request = Request::builder()
+                .uri("/health")
+                .header(header::HOST, "preview-1234.ngrok-free.app")
+                .header("sec-fetch-site", fetch_site);
             if let Some(origin) = origin {
                 request = request.header(header::ORIGIN, origin);
-            }
-            if let Some(fetch_site) = fetch_site {
-                request = request.header("sec-fetch-site", fetch_site);
             }
             let response = app
                 .clone()
                 .oneshot(request.body(Body::empty()).unwrap())
                 .await
                 .unwrap();
-            assert_eq!(
-                response.status(),
-                expected,
-                "host={host:?} origin={origin:?}"
-            );
+            assert_eq!(response.status(), StatusCode::OK, "{fetch_site}");
             assert!(response
                 .headers()
                 .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
                 .is_none());
         }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/missing/steering")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://operator.example")
+                    .header("sec-fetch-site", "cross-site")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"instruction":"do nothing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/session/events/stream")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://preview-1234.ngrok-free.app")
+                    .header("sec-fetch-site", "same-origin")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+
+        drop(response);
+        drop(app);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2706,9 +2610,7 @@ mod tests {
     }
 
     async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
-        let mut request = Request::builder()
-            .uri(uri)
-            .header(header::HOST, "localhost");
+        let mut request = Request::builder().uri(uri);
         if let Some(accept_encoding) = accept_encoding {
             request = request.header(header::ACCEPT_ENCODING, accept_encoding);
         }
@@ -3217,10 +3119,7 @@ mod tests {
             ),
             ("DELETE", "/sessions/session", None),
         ] {
-            let mut request = Request::builder()
-                .method(method)
-                .uri(uri)
-                .header(header::HOST, "localhost");
+            let mut request = Request::builder().method(method).uri(uri);
             if body.is_some() {
                 request = request.header(header::CONTENT_TYPE, "application/json");
             }
@@ -3642,7 +3541,6 @@ thread_timeout_secs = 7200
             let request = Request::builder()
                 .method("POST")
                 .uri(uri)
-                .header(header::HOST, "localhost")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::json!({ "instruction": instruction }).to_string(),
