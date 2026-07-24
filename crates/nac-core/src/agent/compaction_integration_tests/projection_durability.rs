@@ -68,6 +68,9 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
             reasoning_details: None,
             tool_calls: None,
         },
+        Message::System {
+            content: "canonical agents".to_string(),
+        },
         Message::User {
             content: "recent user".to_string(),
         },
@@ -85,34 +88,42 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
     let summary_input = summary_request["input"].as_array().unwrap();
     assert_eq!(
         summary_input.last().unwrap()["content"],
-        compaction::CODEX_COMPACTION_PROMPT
+        compaction::NAC_COMPACTION_PROMPT
     );
     assert_eq!(
-        summary_input[0]["content"],
-        compaction::SUMMARIZER_SYSTEM_INSTRUCTION
+        summary_input[0],
+        serde_json::json!({"role":"system","content":"canonical system"})
     );
+    assert_eq!(
+        summary_input[1],
+        serde_json::json!({"role":"system","content":"canonical agents"})
+    );
+    assert_eq!(summary_input[2]["content"], "old user");
+    assert_eq!(summary_input[3]["content"], "old assistant");
+    assert_eq!(summary_input.len(), 5);
 
     let ordinary_request: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
     assert!(!ordinary_request["tools"].as_array().unwrap().is_empty());
     let ordinary_input = ordinary_request["input"].as_array().unwrap();
     assert_eq!(ordinary_input[0]["content"], "canonical system");
-    assert!(ordinary_input[1]["content"]
+    assert_eq!(ordinary_input[1]["content"], "canonical agents");
+    assert!(ordinary_input[2]["content"]
         .as_str()
         .unwrap()
         .starts_with(compaction::HISTORICAL_CONTEXT_PREFIX));
-    assert_eq!(ordinary_input[2]["content"], "recent user");
-    assert_eq!(ordinary_input[3]["content"], "current user");
+    assert_eq!(ordinary_input[3]["content"], "recent user");
+    assert_eq!(ordinary_input[4]["content"], "current user");
 
     assert_eq!(
-        serde_json::to_value(&agent.messages[..4]).unwrap(),
+        serde_json::to_value(&agent.messages[..5]).unwrap(),
         canonical_before
     );
     assert!(matches!(
-        &agent.messages[4],
+        &agent.messages[5],
         Message::User { content } if content == "current user"
     ));
     assert!(matches!(
-        &agent.messages[5],
+        &agent.messages[6],
         Message::Assistant { content: Some(content), .. } if content == "ordinary answer"
     ));
     assert!(!serde_json::to_string(&agent.messages)
@@ -126,7 +137,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         )
         .unwrap();
     assert_eq!(checkpoints.len(), 1);
-    assert_eq!(checkpoints[0].tail_start_message_index, 3);
+    assert_eq!(checkpoints[0].tail_start_message_index, 4);
     assert_eq!(checkpoints[0].summary_prompt_tokens, Some(100));
     assert_eq!(checkpoints[0].summary_completion_tokens, Some(10));
     let usage = agent.last_usage.unwrap();
@@ -276,13 +287,13 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
     let second_summary: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
     let second_summary_input = second_summary["input"].to_string();
     assert!(second_summary_input.contains("first checkpoint"));
-    assert!(second_summary_input.contains("newly aged turn"));
-    assert!(!second_summary_input.contains("intermediate answer"));
+    assert!(second_summary_input.contains("intermediate answer"));
+    assert!(!second_summary_input.contains("newly aged turn"));
     assert!(!second_summary_input.contains("raw old answer"));
     let final_ordinary: serde_json::Value = serde_json::from_slice(&requests[3].body).unwrap();
     let final_input = final_ordinary["input"].to_string();
     assert!(final_input.contains("second checkpoint"));
-    assert!(final_input.contains("intermediate answer"));
+    assert!(!final_input.contains("intermediate answer"));
     assert!(final_input.contains("steer now"));
     assert!(!final_input.contains("first checkpoint"));
 
@@ -297,8 +308,8 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
         checkpoints[0].previous_checkpoint_id,
         Some(checkpoints[1].id)
     );
-    assert_eq!(checkpoints[0].tail_start_message_index, 4);
-    assert_eq!(checkpoints[1].tail_start_message_index, 3);
+    assert_eq!(checkpoints[0].tail_start_message_index, 6);
+    assert_eq!(checkpoints[1].tail_start_message_index, 5);
 
     let canonical = serde_json::to_string(&agent.messages).unwrap();
     assert!(canonical.contains("raw oldest"));

@@ -1201,6 +1201,55 @@ mod tests {
     }
 
     #[test]
+    fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
+        let messages = [
+            Message::System {
+                content: "primary".to_string(),
+            },
+            Message::System {
+                content: "agents".to_string(),
+            },
+            Message::User {
+                content: "historical checkpoint".to_string(),
+            },
+            Message::User {
+                content: "newly aged history".to_string(),
+            },
+            Message::User {
+                content: "compaction prompt".to_string(),
+            },
+        ];
+
+        let openai = openai_responses_request("model", None, &messages, &[]);
+        assert_eq!(openai["input"], serde_json::to_value(&messages).unwrap());
+        assert!(openai.get("tools").is_none());
+
+        for request in [
+            fireworks_chat_request("model", None, &messages, &[]),
+            together_chat_request("model", None, &messages, &[]),
+            deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]),
+        ] {
+            assert_eq!(
+                request["messages"],
+                serde_json::to_value(&messages).unwrap()
+            );
+            assert!(request.get("tools").is_none());
+        }
+
+        let anthropic =
+            anthropic_messages_request("claude-sonnet-4-6", None, &messages, &[], Some("1h"))
+                .unwrap();
+        assert_eq!(anthropic["system"][0]["text"], "primary\n\nagents");
+        assert_eq!(anthropic["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(anthropic["messages"][0]["content"], "historical checkpoint");
+        assert_eq!(
+            anthropic["messages"][2]["content"][0]["text"],
+            "compaction prompt"
+        );
+        assert!(anthropic.get("tools").is_none());
+    }
+
+    #[test]
     fn anthropic_response_tool_thinking_round_trips() {
         let thinking = json!({
             "type": "thinking",

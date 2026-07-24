@@ -291,13 +291,7 @@ impl ModelClient {
         parse_together_chat_response(&value, &url)
     }
 
-    async fn send_arcee_chat(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDefinition>,
-    ) -> Result<ModelTurnResponse> {
-        let url = arcee::chat_completions_url(&self.base_url)
-            .map_err(classify_model_configuration_error)?;
+    fn arcee_chat_request(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
         let mut request = json!({
             "model": self.model,
             "messages": messages
@@ -309,8 +303,19 @@ impl ModelClient {
 
         if !tools.is_empty() {
             request["tools"] =
-                serde_json::to_value(&tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+                serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
         }
+        request
+    }
+
+    async fn send_arcee_chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = arcee::chat_completions_url(&self.base_url)
+            .map_err(classify_model_configuration_error)?;
+        let request = self.arcee_chat_request(&messages, &tools);
 
         let value = match self.backend {
             BackendKind::ArceeAuth => {
@@ -590,6 +595,46 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    #[test]
+    fn both_arcee_backends_preserve_summary_system_order_and_omit_empty_tools() {
+        let messages = [
+            Message::System {
+                content: "primary".to_string(),
+            },
+            Message::System {
+                content: "agents".to_string(),
+            },
+            Message::User {
+                content: "historical checkpoint".to_string(),
+            },
+            Message::User {
+                content: "newly aged history".to_string(),
+            },
+            Message::User {
+                content: "compaction prompt".to_string(),
+            },
+        ];
+        let expected_messages = json!([
+            {"role": "system", "content": "primary"},
+            {"role": "system", "content": "agents"},
+            {"role": "user", "content": "historical checkpoint"},
+            {"role": "user", "content": "newly aged history"},
+            {"role": "user", "content": "compaction prompt"}
+        ]);
+
+        for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
+            let client = test_model_client(
+                backend,
+                "https://api.arcee.ai".to_string(),
+                std::collections::BTreeMap::new(),
+            );
+            let request = client.arcee_chat_request(&messages, &[]);
+
+            assert_eq!(request["messages"], expected_messages, "{backend}");
+            assert!(request.get("tools").is_none(), "{backend}");
+        }
+    }
 
     #[tokio::test]
     async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {

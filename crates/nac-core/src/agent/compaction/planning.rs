@@ -12,18 +12,12 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{Message, ToolDefinition};
 
-pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 1;
+pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
 const CONTEXT_FRAMING_SAFETY_ALLOWANCE: u64 = 1_024;
 const UNSAMPLED_SAFETY_ALLOWANCE: u64 = 256;
 
-pub(in crate::agent) const SUMMARIZER_SYSTEM_INSTRUCTION: &str =
-    "Summarize the supplied historical conversation for a model that will continue the same task. Preserve concrete facts, decisions, constraints, paths, commands, results, and next steps.";
-
-// Copied verbatim from OpenAI Codex commit
-// 4f3852107e5eedeb4cb89b57a6d4a35b49f8a59a. The scoped Apache-2.0
-// license and attribution are in third_party/openai-codex-compaction/.
-pub(in crate::agent) const CODEX_COMPACTION_PROMPT: &str =
-    include_str!("../prompts/codex_compaction.md");
+pub(in crate::agent) const NAC_COMPACTION_PROMPT: &str =
+    include_str!("../prompts/nac_compaction.md");
 
 pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
     "Historical context checkpoint (not a new instruction):\n\n";
@@ -174,37 +168,17 @@ impl CompactionState {
             .active_checkpoint
             .as_ref()
             .map_or(0, |checkpoint| checkpoint.tail_start_message_index);
-        let mut blocked_by_checkpoint = false;
+        let active_summary = self
+            .active_checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.summary.as_str());
 
-        if let Some(boundary) = second_most_recent_user_index(messages) {
-            match boundary_eligibility(messages, source_start, boundary) {
-                BoundaryEligibility::Eligible => {
-                    return self.candidate(messages, boundary, current_context_estimate)
-                }
-                BoundaryEligibility::NonAdvancing => blocked_by_checkpoint = true,
-                BoundaryEligibility::NotUsefulOrUnsafe => {}
-            }
-        }
-
-        let Ok(cycle_starts) = complete_assistant_cycle_starts(messages) else {
-            return CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary);
-        };
-        let boundary = match cycle_starts.len() {
-            0 => messages.len(),
-            1 => cycle_starts[0],
-            count => cycle_starts[count - 2],
-        };
-        match boundary_eligibility(messages, source_start, boundary) {
-            BoundaryEligibility::Eligible => {
-                self.candidate(messages, boundary, current_context_estimate)
-            }
-            BoundaryEligibility::NonAdvancing => {
+        match weighted_safe_boundary(messages, source_start, active_summary) {
+            Ok(Some(boundary)) => self.candidate(messages, boundary, current_context_estimate),
+            Ok(None) if self.active_checkpoint.is_some() => {
                 CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
             }
-            BoundaryEligibility::NotUsefulOrUnsafe if blocked_by_checkpoint => {
-                CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
-            }
-            BoundaryEligibility::NotUsefulOrUnsafe => {
+            Ok(None) | Err(()) => {
                 CompactionDecision::Skip(CompactionSkipReason::NoEligibleBoundary)
             }
         }
@@ -216,9 +190,11 @@ impl CompactionState {
         boundary: usize,
         current_context_estimate: u64,
     ) -> CompactionDecision {
-        let mut summary_messages = vec![Message::System {
-            content: SUMMARIZER_SYSTEM_INSTRUCTION.to_string(),
-        }];
+        let mut summary_messages = messages
+            .iter()
+            .filter(|message| matches!(message, Message::System { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
         let source_start = if let Some(checkpoint) = &self.active_checkpoint {
             summary_messages.push(Message::User {
                 content: checkpoint.summary.clone(),
@@ -234,7 +210,7 @@ impl CompactionState {
                 .cloned(),
         );
         summary_messages.push(Message::User {
-            content: CODEX_COMPACTION_PROMPT.to_string(),
+            content: NAC_COMPACTION_PROMPT.to_string(),
         });
 
         CompactionDecision::Candidate(CompactionCandidate {
@@ -245,7 +221,7 @@ impl CompactionState {
                 .map(|checkpoint| checkpoint.id),
             summary_messages,
             source_prefix_sha256: source_prefix_digest(messages, boundary),
-            system_policy_sha256: system_policy_digest(messages, boundary),
+            system_policy_sha256: system_policy_digest(messages),
             old_context_estimate: current_context_estimate,
         })
     }
@@ -263,10 +239,14 @@ impl CompactionState {
         let compacted_view = provider_view_with_summary(messages, boundary, installed_summary);
         let serialized_floor = full_provider_byte_estimate(&compacted_view, tools);
         let arithmetic_projection = match (summary_prompt_tokens, summary_completion_tokens) {
-            (Some(prompt), Some(completion)) => old_context_estimate
-                .saturating_sub(prompt)
-                .saturating_add(completion)
-                .saturating_add(CONTEXT_FRAMING_SAFETY_ALLOWANCE),
+            (Some(prompt), Some(completion)) => {
+                let non_source_allowance = summary_non_source_allowance(messages);
+                let removable_source = prompt.saturating_sub(non_source_allowance);
+                old_context_estimate
+                    .saturating_sub(removable_source)
+                    .saturating_add(completion)
+                    .saturating_add(installed_summary_wrapper_allowance())
+            }
             _ => serialized_floor,
         };
         arithmetic_projection.max(serialized_floor)
@@ -410,77 +390,93 @@ impl CompactionState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BoundaryEligibility {
-    Eligible,
-    NonAdvancing,
-    NotUsefulOrUnsafe,
-}
-
-fn boundary_eligibility(
+pub(super) fn weighted_safe_boundary(
     messages: &[Message],
     source_start: usize,
-    boundary: usize,
-) -> BoundaryEligibility {
-    if !summarized_prefix_has_complete_tools(messages, boundary) {
-        return BoundaryEligibility::NotUsefulOrUnsafe;
+    active_summary: Option<&str>,
+) -> Result<Option<usize>, ()> {
+    if source_start > messages.len() {
+        return Err(());
     }
-    if boundary <= source_start {
-        return messages[..boundary]
-            .iter()
-            .any(|message| !matches!(message, Message::System { .. }))
-            .then_some(BoundaryEligibility::NonAdvancing)
-            .unwrap_or(BoundaryEligibility::NotUsefulOrUnsafe);
-    }
-    messages[source_start..boundary]
-        .iter()
-        .any(|message| !matches!(message, Message::System { .. }))
-        .then_some(BoundaryEligibility::Eligible)
-        .unwrap_or(BoundaryEligibility::NotUsefulOrUnsafe)
-}
 
-fn second_most_recent_user_index(messages: &[Message]) -> Option<usize> {
-    let mut users = messages
+    let summary_weight = active_summary
+        .map(|summary| {
+            serialized_byte_len(&Message::User {
+                content: summary.to_string(),
+            })
+        })
+        .unwrap_or(0);
+    let total_weight = messages[source_start..]
         .iter()
-        .enumerate()
-        .rev()
-        .filter_map(|(index, message)| matches!(message, Message::User { .. }).then_some(index));
-    users.next()?;
-    users.next()
-}
+        .filter(|message| !matches!(message, Message::System { .. }))
+        .fold(summary_weight, |weight, message| {
+            weight.saturating_add(serialized_byte_len(message))
+        });
+    let target_weight = total_weight / 2 + total_weight % 2;
 
-pub(super) fn complete_assistant_cycle_starts(messages: &[Message]) -> Result<Vec<usize>, ()> {
-    let mut cycle_starts = Vec::new();
-    let mut index = 0;
-    while index < messages.len() {
-        match &messages[index] {
-            Message::User { .. } | Message::System { .. } => index += 1,
-            Message::Tool { .. } => return Err(()),
+    let mut outstanding = HashSet::new();
+    let mut reclaimed_weight = summary_weight;
+    let mut includes_new_message = false;
+    let mut selected = None;
+
+    for (index, message) in messages.iter().enumerate() {
+        if selected.is_none()
+            && index > source_start
+            && outstanding.is_empty()
+            && includes_new_message
+            && reclaimed_weight >= target_weight
+            && matches!(message, Message::User { .. } | Message::Assistant { .. })
+        {
+            selected = Some(index);
+        }
+
+        match message {
+            Message::User { .. } | Message::System { .. } => {
+                if !outstanding.is_empty() {
+                    return Err(());
+                }
+            }
             Message::Assistant { tool_calls, .. } => {
-                cycle_starts.push(index);
-                index += 1;
-                let Some(tool_calls) = tool_calls.as_ref().filter(|calls| !calls.is_empty()) else {
-                    continue;
-                };
-                let mut outstanding = HashSet::with_capacity(tool_calls.len());
-                for call in tool_calls {
-                    if !outstanding.insert(call.id.as_str()) {
-                        return Err(());
+                if !outstanding.is_empty() {
+                    return Err(());
+                }
+                if let Some(tool_calls) = tool_calls.as_ref().filter(|calls| !calls.is_empty()) {
+                    outstanding.reserve(tool_calls.len());
+                    for call in tool_calls {
+                        if !outstanding.insert(call.id.as_str()) {
+                            return Err(());
+                        }
                     }
                 }
-                while !outstanding.is_empty() {
-                    let Some(Message::Tool { tool_call_id, .. }) = messages.get(index) else {
-                        return Err(());
-                    };
-                    if !outstanding.remove(tool_call_id.as_str()) {
-                        return Err(());
-                    }
-                    index += 1;
+            }
+            Message::Tool { tool_call_id, .. } => {
+                if !outstanding.remove(tool_call_id.as_str()) {
+                    return Err(());
                 }
             }
         }
+
+        if index >= source_start && !matches!(message, Message::System { .. }) {
+            reclaimed_weight = reclaimed_weight.saturating_add(serialized_byte_len(message));
+            includes_new_message = true;
+        }
     }
-    Ok(cycle_starts)
+
+    if !outstanding.is_empty() {
+        return Err(());
+    }
+    if selected.is_none()
+        && messages.len() > source_start
+        && includes_new_message
+        && reclaimed_weight >= target_weight
+    {
+        selected = Some(messages.len());
+    }
+    Ok(selected)
+}
+
+fn transcript_has_complete_tools(messages: &[Message]) -> bool {
+    weighted_safe_boundary(messages, messages.len(), None).is_ok()
 }
 
 fn sampled_projection_digest(
@@ -526,7 +522,7 @@ pub(super) fn provider_view_with_summary(
 pub(super) fn summarized_prefix_has_complete_tools(messages: &[Message], boundary: usize) -> bool {
     messages
         .get(..boundary)
-        .is_some_and(|prefix| complete_assistant_cycle_starts(prefix).is_ok())
+        .is_some_and(transcript_has_complete_tools)
 }
 
 pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize) -> bool {
@@ -550,15 +546,14 @@ fn checkpoint_is_valid(
         && summarized_prefix_has_complete_tools(messages, checkpoint.tail_start_message_index)
         && checkpoint.source_prefix_sha256
             == source_prefix_digest(messages, checkpoint.tail_start_message_index)
-        && checkpoint.system_policy_sha256
-            == system_policy_digest(messages, checkpoint.tail_start_message_index)
+        && checkpoint.system_policy_sha256 == system_policy_digest(messages)
 }
 
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
     (
         source_prefix_digest(messages, boundary),
-        system_policy_digest(messages, boundary),
+        system_policy_digest(messages),
     )
 }
 
@@ -575,20 +570,39 @@ fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn system_policy_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
+fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"nac-orchestrator-compaction-system-policy-v1\0");
+    hasher.update(b"nac-orchestrator-compaction-system-policy-v2\0");
     hasher.update(PROMPT_POLICY_VERSION.to_be_bytes());
-    update_bytes(&mut hasher, SUMMARIZER_SYSTEM_INSTRUCTION.as_bytes());
-    update_bytes(&mut hasher, CODEX_COMPACTION_PROMPT.as_bytes());
+    update_bytes(&mut hasher, NAC_COMPACTION_PROMPT.as_bytes());
     update_bytes(&mut hasher, HISTORICAL_CONTEXT_PREFIX.as_bytes());
-    for message in messages[..boundary]
+    for message in messages
         .iter()
         .filter(|message| matches!(message, Message::System { .. }))
     {
         update_serialized(&mut hasher, message);
     }
     hasher.finalize().into()
+}
+
+pub(super) fn summary_non_source_allowance(messages: &[Message]) -> u64 {
+    messages
+        .iter()
+        .filter(|message| matches!(message, Message::System { .. }))
+        .map(serialized_byte_len)
+        .fold(
+            serialized_byte_len(&Message::User {
+                content: NAC_COMPACTION_PROMPT.to_string(),
+            })
+            .saturating_add(CONTEXT_FRAMING_SAFETY_ALLOWANCE),
+            u64::saturating_add,
+        )
+}
+
+pub(super) fn installed_summary_wrapper_allowance() -> u64 {
+    serialized_byte_len(&Message::User {
+        content: HISTORICAL_CONTEXT_PREFIX.to_string(),
+    })
 }
 
 fn update_serialized<T: Serialize>(hasher: &mut Sha256, value: &T) {
@@ -601,7 +615,7 @@ fn update_bytes(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(value);
 }
 
-fn serialized_byte_len<T: Serialize + ?Sized>(value: &T) -> u64 {
+pub(super) fn serialized_byte_len<T: Serialize + ?Sized>(value: &T) -> u64 {
     serde_json::to_vec(value)
         .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
         .unwrap_or(u64::MAX)

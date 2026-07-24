@@ -326,13 +326,16 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
     assert!(second.get("tools").is_none(), "second call must be summary");
     assert_eq!(
         second["input"].as_array().unwrap().last().unwrap()["content"],
-        compaction::CODEX_COMPACTION_PROMPT
+        compaction::NAC_COMPACTION_PROMPT
     );
+    let summary_input = second["input"].to_string();
+    assert!(summary_input.contains("call-1"));
+    assert!(summary_input.contains("unknown tool"));
     let third: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
     assert!(third.get("tools").is_some(), "third call must be ordinary");
     let final_input = third["input"].to_string();
-    assert!(final_input.contains("call-1"));
-    assert!(final_input.contains("unknown tool"));
+    assert!(final_input.contains("post-tool checkpoint"));
+    assert!(!final_input.contains("call-1"));
     assert_eq!(
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
             &store_path,
@@ -624,7 +627,11 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
     }
     let first_summary: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
     let retry_summary: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
-    assert_eq!(first_summary["input"], retry_summary["input"]);
+    assert!(!first_summary["input"].to_string().contains("retry-call"));
+    assert!(retry_summary["input"].to_string().contains("retry-call"));
+    assert!(retry_summary["input"]
+        .to_string()
+        .contains("unknown_retry_tool"));
     assert_eq!(
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
             &store_path,

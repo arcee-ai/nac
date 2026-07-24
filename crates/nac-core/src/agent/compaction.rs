@@ -11,9 +11,7 @@ pub(crate) use planning::checkpoint_digests;
 use planning::*;
 pub(super) use planning::{CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX};
 #[cfg(test)]
-pub(super) use planning::{
-    CODEX_COMPACTION_PROMPT, PROMPT_POLICY_VERSION, SUMMARIZER_SYSTEM_INSTRUCTION,
-};
+pub(super) use planning::{NAC_COMPACTION_PROMPT, PROMPT_POLICY_VERSION};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionResult {

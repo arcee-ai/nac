@@ -1622,7 +1622,10 @@ mod tests {
     fn codex_request_reasoning_is_driven_only_by_explicit_effort() {
         let messages = [
             Message::System {
-                content: "system instructions".to_string(),
+                content: "primary instructions".to_string(),
+            },
+            Message::System {
+                content: "agents instructions".to_string(),
             },
             Message::User {
                 content: "hello".to_string(),
@@ -1630,7 +1633,11 @@ mod tests {
         ];
         let absent = codex_responses_request("gpt-5.5", None, &messages, &[]);
         assert_eq!(absent["model"], "gpt-5.5");
-        assert_eq!(absent["instructions"], "system instructions");
+        assert_eq!(
+            absent["instructions"],
+            "primary instructions\n\nagents instructions"
+        );
+        assert_eq!(absent["input"], json!([{"role":"user","content":"hello"}]));
         assert_eq!(absent["store"], false);
         assert_eq!(absent["stream"], true);
         assert_eq!(absent["text"]["verbosity"], "low");

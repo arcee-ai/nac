@@ -26,6 +26,8 @@ mod live_tests;
 
 #[cfg(test)]
 pub(crate) use compaction::checkpoint_digests as compaction_checkpoint_digests_for_test;
+#[cfg(test)]
+pub(crate) const COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 = compaction::PROMPT_POLICY_VERSION;
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };

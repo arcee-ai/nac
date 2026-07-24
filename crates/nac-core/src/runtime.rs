@@ -2377,7 +2377,8 @@ url = "https://mcp.context7.com/mcp"
                 tail_start_message_index: 2,
                 source_prefix_sha256: source,
                 system_policy_sha256: policy,
-                prompt_policy_version: 1,
+                prompt_policy_version:
+                    crate::agent::COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST,
                 old_context_estimate: 1_000,
                 summary_prompt_tokens: Some(800),
                 summary_completion_tokens: Some(100),
