@@ -37,7 +37,7 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionOverviewRecord,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
         SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
@@ -882,13 +882,6 @@ impl SessionManager {
             .thread_events_page(thread_name, before_id, limit)
     }
 
-    pub async fn generate_overview(&self, session_id: &str) -> Result<SessionOverviewRecord> {
-        self.attach_session(session_id)
-            .await?
-            .generate_overview()
-            .await
-    }
-
     pub async fn workspace_file_diff(
         &self,
         session_id: &str,
@@ -1262,10 +1255,6 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/config",
             get(session_config_handler).patch(update_config_handler),
         )
-        .route(
-            "/sessions/{session_id}/overview",
-            post(generate_overview_handler),
-        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/compact", post(compaction::handler))
         .route(
@@ -1487,12 +1476,6 @@ async fn thread_events(
     ))
 }
 
-async fn generate_overview_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<SessionOverviewRecord>, ApiError> {
-    Ok(Json(manager.generate_overview(&session_id).await?))
-}
 
 async fn workspace_diff(
     State(manager): State<SessionManager>,

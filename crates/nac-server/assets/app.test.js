@@ -266,7 +266,7 @@ function installWorkspaceElements(uiInstance) {
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
     "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
-    "refreshSession", "generatedOverview", "worksetRailSummary", "worksetRailCount",
+    "worksetRailSummary", "worksetRailCount",
     "orchestratorState", "orchestratorLedger", "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
     "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
@@ -506,7 +506,7 @@ scenario("SSE", "initial replay hydrates chronology without replaying stale run-
   assert.equal(isolated.state.sessionRunActivity.get(sessionId), true);
 });
 
-test("workset presentation and overview rail expose authoritative status, item counts, errors, and empty state", () => {
+test("workset presentation and rail expose authoritative status, item counts, errors, and empty state", () => {
   ui.el.worksetRailSummary = fakeElement();
   ui.el.worksetRailCount = fakeElement();
   ui.renderWorksetRail(undefined);
@@ -1444,7 +1444,7 @@ test("exact /compact posts once without run, steering, transcript, or snapshot s
   assert.equal(isolated.el.sendPrompt.disabled, false);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
-  assert.ok(requests.every(({ path }) => !/\/runs|\/steering|cancel-active-run|\/overview/.test(path)));
+  assert.ok(requests.every(({ path }) => !/\/runs|\/steering|cancel-active-run/.test(path)));
 });
 
 test("/compact rejects arguments, prevents duplicates and ordinary submissions, and uses safe result notices", async () => {

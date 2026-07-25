@@ -134,16 +134,6 @@ fn assert_current_schema(conn: &Connection) {
         .iter()
         .any(|column| column == "orchestrator_compaction_threshold"));
     assert_eq!(
-        table_columns(conn, "session_overviews"),
-        [
-            "session_id",
-            "summary",
-            "model",
-            "generated_at",
-            "source_updated_at"
-        ]
-    );
-    assert_eq!(
         table_columns(conn, "thread_steering"),
         [
             "id",
@@ -168,7 +158,7 @@ fn assert_current_schema(conn: &Connection) {
             "created_at"
         ]
     );
-    for table in ["session_overviews", "thread_steering", "thread_events"] {
+    for table in ["thread_steering", "thread_events"] {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
@@ -294,27 +284,13 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
     legacy
         .execute_batch(
             "PRAGMA user_version = 0;
-             CREATE TABLE session_overviews (
-                 session_id TEXT PRIMARY KEY,
-                 status TEXT NOT NULL,
-                 focus_json TEXT NOT NULL,
-                 completed_json TEXT NOT NULL,
-                 blockers_json TEXT NOT NULL,
-                 next_steps_json TEXT NOT NULL,
-                 model TEXT NOT NULL,
-                 generated_at TEXT NOT NULL,
-                 source_updated_at TEXT NOT NULL
-             );
-             CREATE TABLE thread_events (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 session_id TEXT NOT NULL,
-                 thread_name TEXT NOT NULL,
-                 event_json TEXT NOT NULL,
-                 created_at TEXT NOT NULL
-             );
-             INSERT INTO session_overviews VALUES
-                 ('owned', 'legacy summary', '[]', '[]', '[]', '[]',
-                  'model-a', 'generated', 'source');
+              CREATE TABLE thread_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  session_id TEXT NOT NULL,
+                  thread_name TEXT NOT NULL,
+                  event_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+              );
              INSERT INTO thread_events
                  (id, session_id, thread_name, event_json, created_at)
              VALUES (8, 'owned', 'pre-episode-worker',
@@ -328,12 +304,6 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 
     let migrated = Connection::open(&path).unwrap();
     assert_current_schema(&migrated);
-    let summary: String = migrated
-        .query_row("SELECT summary FROM session_overviews", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(summary, "legacy summary");
     let event: (i64, String) = migrated
         .query_row("SELECT id, thread_name FROM thread_events", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -355,17 +325,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
              PRAGMA user_version = 1;
-             CREATE TABLE session_overviews (
-                 session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                 status TEXT NOT NULL,
-                 focus_json TEXT NOT NULL,
-                 completed_json TEXT NOT NULL,
-                 blockers_json TEXT NOT NULL,
-                 next_steps_json TEXT NOT NULL,
-                 model TEXT NOT NULL,
-                 generated_at TEXT NOT NULL,
-                 source_updated_at TEXT NOT NULL
-             );
              CREATE TABLE thread_steering (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  session_id TEXT NOT NULL,
@@ -383,12 +342,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
                  event_json TEXT NOT NULL,
                  created_at TEXT NOT NULL
              );
-             INSERT INTO session_overviews VALUES
-                 ('owned', 'owned summary', '[]', '[]', '[]', '[]',
-                  'model-a', 'generated-a', 'source-a');
-             INSERT INTO session_overviews VALUES
-                 ('orphan', 'secret orphan', '[]', '[]', '[]', '[]',
-                  'model-b', 'generated-b', 'source-b');
              INSERT INTO thread_steering VALUES
                  (7, 'owned', 'worker', 'queued instruction', 'queued',
                   'created-7', NULL, NULL);
@@ -421,23 +374,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
 
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
-    let overview: (String, String, String, String) = migrated
-        .query_row(
-            "SELECT summary, model, generated_at, source_updated_at
-             FROM session_overviews",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        overview,
-        (
-            "owned summary".to_string(),
-            "model-a".to_string(),
-            "generated-a".to_string(),
-            "source-a".to_string()
-        )
-    );
 
     let steering = migrated
         .prepare(

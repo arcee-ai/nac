@@ -85,9 +85,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             // Both v0 and v1 may contain some or all of the branch's v1
             // auxiliary tables. Rebuild every table that exists and create the
             // missing ones before applying the v3 addition.
-            migrate_session_overviews(&transaction)?;
             migrate_thread_steering(&transaction)?;
             migrate_thread_events(&transaction)?;
+            transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | STORE_SCHEMA_VERSION => {}
         unsupported => {
@@ -204,45 +204,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              ON sessions(updated_at DESC);",
         crate::MAX_SUPPORTED_TOKEN_COUNT,
     ))?;
-    Ok(())
-}
-
-fn migrate_session_overviews(conn: &Connection) -> Result<()> {
-    if !table_exists(conn, "session_overviews")? {
-        create_session_overviews_table(conn, "session_overviews")?;
-        return Ok(());
-    }
-
-    let summary_column = if column_exists(conn, "session_overviews", "summary")? {
-        "summary"
-    } else if column_exists(conn, "session_overviews", "status")? {
-        "status"
-    } else {
-        return Err(anyhow!(
-            "session_overviews has neither a summary nor legacy status column"
-        ));
-    };
-    let (source_count, orphan_count) = owned_row_counts(conn, "session_overviews")?;
-    report_omitted_orphans("session_overviews", orphan_count);
-
-    conn.execute_batch("DROP TABLE IF EXISTS session_overviews_v2")?;
-    create_session_overviews_table(conn, "session_overviews_v2")?;
-    let copied = conn.execute(
-        &format!(
-            "INSERT INTO session_overviews_v2
-                 (session_id, summary, model, generated_at, source_updated_at)
-             SELECT o.session_id, o.{summary_column}, o.model, o.generated_at,
-                    o.source_updated_at
-             FROM session_overviews o
-             INNER JOIN sessions s ON s.session_id = o.session_id"
-        ),
-        [],
-    )?;
-    verify_copy_count("session_overviews", source_count, orphan_count, copied)?;
-    conn.execute_batch(
-        "DROP TABLE session_overviews;
-         ALTER TABLE session_overviews_v2 RENAME TO session_overviews;",
-    )?;
     Ok(())
 }
 
@@ -376,20 +337,6 @@ fn migrate_thread_events(conn: &Connection) -> Result<()> {
     )?;
     restore_autoincrement_sequence(conn, "thread_events", prior_sequence)?;
     create_thread_events_index(conn)?;
-    Ok(())
-}
-
-fn create_session_overviews_table(conn: &Connection, table: &str) -> Result<()> {
-    conn.execute_batch(&format!(
-        "CREATE TABLE {table} (
-             session_id TEXT PRIMARY KEY
-                 REFERENCES sessions(session_id) ON DELETE CASCADE,
-             summary TEXT NOT NULL,
-             model TEXT NOT NULL,
-             generated_at TEXT NOT NULL,
-             source_updated_at TEXT NOT NULL
-         );"
-    ))?;
     Ok(())
 }
 
@@ -595,7 +542,6 @@ fn restore_autoincrement_sequence(
 
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
-        "session_overviews",
         "thread_steering",
         "thread_events",
         "orchestrator_compaction_checkpoints",

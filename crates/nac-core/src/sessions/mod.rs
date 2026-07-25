@@ -1120,14 +1120,6 @@ mod tests {
             r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
         )
         .unwrap();
-        crate::store::write_session_overview(
-            &store_path,
-            "session-del",
-            "Work is active.",
-            "model-a",
-            &snapshot.updated_at,
-        )
-        .unwrap();
 
         // Verify data exists
         assert!(!crate::store::list_threads(&store_path, "session-del")
@@ -1145,11 +1137,6 @@ mod tests {
                 .unwrap()
                 .len(),
             1
-        );
-        assert!(
-            crate::store::read_session_overview(&store_path, "session-del")
-                .unwrap()
-                .is_some()
         );
         assert_eq!(
             crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"]
@@ -1176,11 +1163,6 @@ mod tests {
             crate::store::list_thread_steering(&store_path, "session-del")
                 .unwrap()
                 .is_empty()
-        );
-        assert!(
-            crate::store::read_session_overview(&store_path, "session-del")
-                .unwrap()
-                .is_none()
         );
         assert!(
             crate::store::load_all_thread_events(&store_path, "session-del", 20)

@@ -7,7 +7,6 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 pub(crate) mod orchestrator_compaction;
 mod render;
 mod schema;
-mod session_overviews;
 mod steering;
 mod thread_events;
 mod threads;
@@ -16,7 +15,6 @@ mod worksets;
 
 pub use render::*;
 pub use schema::{default_store_path, initialize};
-pub use session_overviews::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;

@@ -20,7 +20,6 @@ const state = {
   statsLoadedAt: 0,
   statusTimer: null,
   commandIndex: 0,
-  overviewGenerationId: null,
   focusView: null,
   settingsFocus: null,
   settingsRequestGeneration: 0,
@@ -85,7 +84,7 @@ function bindElements() {
     "app", "pickerTitle", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
-    "metricChanges", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
+    "metricChanges", "sessionNavStatus", "stopRun",
     "worksetRail", "worksetRailCount", "worksetRailSummary", "expandWorksets",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
     "orchestratorState", "orchestratorLedger", "expandOrchestrator",
@@ -119,7 +118,6 @@ function bindEvents() {
   el.sessionInfo.addEventListener("click", () => openFocusView("info"));
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
   el.stopRun.addEventListener("click", stopActiveRun);
-  el.refreshSession.addEventListener("click", generateOverview);
   el.expandWorksets.addEventListener("click", () => openFocusView("worksets"));
   el.expandOrchestrator.addEventListener("click", () => openFocusView("orchestrator"));
   el.closeFocusPanel.addEventListener("click", closeFocusView);
@@ -2028,7 +2026,8 @@ function renderWorkspace() {
   const active = timing?.state === "active";
   el.stopRun.disabled = !active;
   el.stopRun.hidden = false;
-  renderOverview(snapshot);
+  renderWorksetRail(snapshot);
+  renderOrchestratorLedger(snapshot);
   renderThreads(snapshot);
   renderComposerTarget();
   if (state.focusView?.type !== "settings" || !el.focusContent.querySelector("#settingsForm")) renderFocusView(snapshot);
@@ -2096,26 +2095,6 @@ function tokenUsageTitle(usage) {
   return `input ${exact(usage.input_tokens)} · cache read ${exact(usage.cache_read_tokens)} · output ${exact(usage.output_tokens)}`;
 }
 
-function renderOverview(snapshot) {
-  const overview = snapshot?.overview;
-  const generating = state.overviewGenerationId === state.currentId;
-  const action = overview ? "Regenerate" : "Generate";
-  el.refreshSession.disabled = generating;
-  el.refreshSession.classList.toggle("is-generating", generating);
-  el.refreshSession.setAttribute("aria-label", generating ? "Generating overview" : `${action} overview`);
-  el.refreshSession.title = generating ? "Generating overview" : `${action} from current session state`;
-  if (generating) el.refreshSession.setAttribute("aria-busy", "true");
-  else el.refreshSession.removeAttribute("aria-busy");
-  el.generatedOverview.classList.toggle("is-empty", !overview);
-  if (!overview) {
-    el.generatedOverview.innerHTML = `<p class="overview-empty">${generating ? "Generating overview…" : "No overview yet."}</p>`;
-  } else {
-    el.generatedOverview.innerHTML = `<p class="overview-copy">${escapeHtml(overview.summary || overview.status || "")}</p>`;
-  }
-  renderWorksetRail(snapshot);
-  renderOrchestratorLedger(snapshot);
-}
-
 function worksetsPresentation(snapshot) {
   if (!snapshot) return { state: "loading", items: [], error: "" };
   if (!Object.prototype.hasOwnProperty.call(snapshot, "worksets") || !snapshot.worksets) {
@@ -2172,24 +2151,6 @@ function renderWorksetRail(snapshot) {
     el.worksetRailSummary.innerHTML = "<p>No worksets yet.</p>";
   } else {
     el.worksetRailSummary.innerHTML = presentation.items.map(renderCompactWorkset).join("");
-  }
-}
-
-async function generateOverview() {
-  if (!state.currentId || el.refreshSession.disabled) return;
-  const sessionId = state.currentId;
-  state.overviewGenerationId = sessionId;
-  renderOverview(currentSnapshot());
-  try {
-    const overview = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/overview`);
-    const snapshot = state.snapshots.get(sessionId);
-    if (snapshot) snapshot.overview = overview;
-    showToast("Overview generated from current session state");
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    if (state.overviewGenerationId === sessionId) state.overviewGenerationId = null;
-    if (state.currentId === sessionId) renderOverview(state.snapshots.get(sessionId));
   }
 }
 
