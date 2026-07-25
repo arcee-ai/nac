@@ -63,8 +63,8 @@ function loadApp(overrides = {}) {
       handleDrawerSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
       captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
-      restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, openDrawer,
-      closeDrawer, handleDrawerKeydown, renderConfigRepairGuidance, recordSessionEnvelope,
+      restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
+      renderConfigRepairGuidance, recordSessionEnvelope,
       connectEventStream, worksetsPresentation, renderWorksetRail, renderWorksetsFocus,
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
@@ -72,7 +72,7 @@ function loadApp(overrides = {}) {
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
-      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown, showHelpDrawer,
+      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -1005,9 +1005,7 @@ test("a successfully deleted preserved session cannot be resurrected by its acti
     window: { setTimeout: () => 84, clearTimeout() {} },
   });
   installWorkspaceElements(isolated);
-  isolated.el.utilityDrawer = { hidden: true };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.drawerContent = { innerHTML: "" };
+  isolated.el.focusContent = { innerHTML: "", querySelector: () => null };
   isolated.state.currentId = "created-session";
   isolated.upsertCreatedSession(sessionSnapshot("created-session", {
     metadata: { session_id: "created-session", cwd: "/created", model: "model", backend: "test" },
@@ -1917,15 +1915,14 @@ test("terminal run events clear only matching active-run caches", () => {
   assert.equal(ui.state.sessionRunActivity.get("terminal"), false);
 });
 
-test("late deletion completion cannot navigate away from a newer session or close its drawer", async () => {
+test("late deletion completion cannot navigate away from a newer session or close its focus view", async () => {
   const deletion = deferred();
   const isolated = loadApp({ fetch: async (path, options) => {
       if (options?.method === "DELETE") return deletion.promise;
       if (path === "/sessions?workspace_stats=true") return jsonResponse([sessionListEntry("session-b")]);
       throw new Error(`unexpected request ${path}`); }, });
   installWorkspaceElements(isolated);
-  isolated.el.drawerContent = { querySelector: () => ({ id: "newer-form" }) };
-  isolated.el.utilityDrawer = { hidden: false };
+  isolated.el.focusContent = { querySelector: () => ({ id: "newer-form" }) };
   isolated.state.currentId = "session-a";
   isolated.state.sessions = [sessionListEntry("session-a"), sessionListEntry("session-b")];
   const status = fakeElement();
@@ -1935,7 +1932,6 @@ test("late deletion completion cannot navigate away from a newer session or clos
   deletion.resolve(jsonResponse({}));
   await pending;
   assert.equal(isolated.state.currentId, "session-b");
-  assert.equal(isolated.el.utilityDrawer.hidden, false);
 });
 
 test("session-list recovery retries retained hashes and session navigation hands off focus", async () => {
@@ -1957,9 +1953,6 @@ test("session-list recovery retries retained hashes and session navigation hands
   installWorkspaceElements(isolated);
   isolated.el.renameSession.focus = () => focused.push("title");
   isolated.el.pickerTitle = { focus: () => focused.push("picker-title") };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.utilityDrawer = { hidden: true };
   isolated.el.app = fakeElement();
   isolated.el.sessionGrid.querySelector = () => ({ focus: () => focused.push("card") });
   await isolated.loadSessions();
@@ -2002,14 +1995,13 @@ test("session cards and command menu expose reviewed accessibility behavior", ()
   assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "false");
   assert.equal(isolated.el.commandMenu.hidden, true);
 
-  isolated.el.utilityDrawer = { hidden: true, dataset: {} };
-  isolated.el.drawerTitle = fakeElement();
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.closeDrawer = { focus() {} };
-  isolated.el.app = fakeElement();
-  isolated.showHelpDrawer();
-  assert.match(isolated.el.drawerContent.innerHTML, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
+  isolated.el.focusContent = { innerHTML: "" };
+  isolated.el.focusTitle = fakeElement();
+  isolated.el.focusState = fakeElement();
+  isolated.el.focusPanel = { ...fakeElement(), hidden: true, classList: { toggle() {}, add() {}, remove() {} } };
+  isolated.el.sessionLayout = { classList: { toggle() {} } };
+  isolated.el.focusContent.innerHTML = isolated.renderCommandReference();
+  assert.match(isolated.el.focusContent.innerHTML, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
 });
 
 
@@ -3476,40 +3468,11 @@ test("fullscreen focus entry targets its heading, clears leaked state, and close
   assert.equal(document.activeElement, isolated.el.promptInput, "a hidden remembered opener must fall back to the visible default control");
 });
 
-test("utility drawer applies modal background semantics, contains Tab, and restores its opener", () => {
-  let document;
-  const focusable = (id) => ({ ...fakeElement(), id,
-    tagName: "BUTTON", isConnected: true, hidden: false,
-    disabled: false, focus() { document.activeElement = this; }, });
-  const opener = focusable("drawer-opener");
-  const close = focusable("closeDrawer");
-  const action = focusable("drawer-action");
-  document = {
-    addEventListener() {}, hidden: false, body: {}, documentElement: {}, activeElement: opener,
-    getElementById(id) { return id === opener.id ? opener : null; },
-    querySelectorAll() { return []; }, };
-  const isolated = loadApp({ document });
-  isolated.el.app = { ...fakeElement(), inert: false };
-  isolated.el.drawerTitle = fakeElement();
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.closeDrawer = close;
-  isolated.el.utilityDrawer = { ...fakeElement(), hidden: true,
-    querySelectorAll() { return [close, action]; },
-    contains(item) { return item === close || item === action; }, };
-  isolated.openDrawer("commands", "<button>action</button>");
-  assert.equal(document.activeElement, close);
-  assert.equal(isolated.el.app.inert, true);
-  assert.equal(isolated.el.app.getAttribute("aria-hidden"), "true");
-  document.activeElement = action;
-  let prevented = false;
-  isolated.handleDrawerKeydown({ key: "Tab", shiftKey: false, preventDefault() { prevented = true; } });
-  assert.equal(prevented, true);
-  assert.equal(document.activeElement, close);
-  isolated.closeDrawer();
-  assert.equal(isolated.el.app.inert, false);
-  assert.equal(isolated.el.app.getAttribute("aria-hidden"), null);
-  assert.equal(document.activeElement, opener);
+test("renderCommandReference produces the command reference HTML", () => {
+  const html = ui.renderCommandReference();
+  assert.match(html, /<div class="command-reference">/);
+  assert.match(html, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
+  assert.match(html, /<code>\/help<\/code><span>show all commands<\/span>/);
 });
 
 test("boot starts store and session requests concurrently and does not await a hung store", async () => {

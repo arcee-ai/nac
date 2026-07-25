@@ -180,7 +180,6 @@ svg {
 
 .session-identity,
 .rail-section h2,
-.drawer-header h2,
 .modal-header h2 {
   margin: 0;
   font-weight: var(--fw-semibold);
@@ -784,16 +783,9 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .command-option:hover, .command-option.is-active { background: var(--surface-hover); }
 .command-option span { overflow: hidden; color: var(--ink-muted); font-size: var(--fs-base); text-overflow: ellipsis; white-space: nowrap; }
 
-.drawer-backdrop { position: fixed; z-index: 60; inset: 0; background: rgba(0,0,0,.68); backdrop-filter: blur(4px); }
-.utility-drawer, .modal { font-family: var(--sans); }
-.utility-drawer { position: fixed; z-index: 70; top: 8px; right: 8px; bottom: 8px; width: min(720px, calc(100vw - 16px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--surface); box-shadow: -24px 0 70px #000; }
-.utility-drawer[data-view="compact"] { bottom: auto; max-height: calc(100dvh - 16px); }
-.utility-drawer[data-view="compact"] .drawer-content { flex: none; }
-.drawer-header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 12px 21px; border-bottom: 1px solid #242424; }
-.drawer-header h2 { font-family: var(--sans); font-size: var(--fs-3xl); font-weight: var(--fw-semibold); letter-spacing: var(--ls-tight); }
-.drawer-header .icon-button, .modal-header .icon-button { width: 34px; height: 34px; border-color: var(--line-strong); border-radius: var(--r-md); background: var(--surface-hover); color: var(--ink-soft); }
-.drawer-header .icon-button:hover, .modal-header .icon-button:hover { border-color: var(--ink-faint); background: var(--surface-hover); color: var(--ink); }
-.drawer-content { min-height: 0; flex: 1; overflow: auto; padding: 22px 22px 30px; }
+.modal { font-family: var(--sans); }
+.modal-header .icon-button { width: 34px; height: 34px; border-color: var(--line-strong); border-radius: var(--r-md); background: var(--surface-hover); color: var(--ink-soft); }
+.modal-header .icon-button:hover { border-color: var(--ink-faint); background: var(--surface-hover); color: var(--ink); }
 
 .workset-goal { margin: 9px 0 12px; color: var(--ink-soft); font-size: var(--fs-md); line-height: var(--lh-normal); }
 .command-reference { display: grid; gap: 4px; }

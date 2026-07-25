@@ -46,7 +46,6 @@ const state = {
   workspaceRenderSessionId: null,
   workspaceRestoreId: 0,
   focusOpener: null,
-  drawerOpener: null,
 };
 
 const ACTION_LEDGER_LIMIT = 5;
@@ -90,8 +89,7 @@ function bindElements() {
     "orchestratorState", "orchestratorLedger", "expandOrchestrator",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
-    "promptInput", "sendPrompt", "commandMenu", "drawerBackdrop", "utilityDrawer",
-    "drawerTitle", "drawerContent", "closeDrawer", "launchDialog", "launchForm",
+    "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
@@ -139,10 +137,6 @@ function bindEvents() {
     const closer = event.target.closest("[data-close-dialog]");
     if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
   });
-  el.drawerBackdrop.addEventListener("click", closeDrawer);
-  el.closeDrawer.addEventListener("click", closeDrawer);
-  el.utilityDrawer.addEventListener("keydown", handleDrawerKeydown);
-  el.drawerContent.addEventListener("submit", handleDrawerSubmit);
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
@@ -1047,7 +1041,6 @@ function showPicker(updateHash = true) {
   if (state.eventSource) state.eventSource.close();
   state.eventSource = null;
   stopRuntimeTimer();
-  closeDrawer();
   el.sessionWorkspace.hidden = true;
   el.sessionPicker.hidden = false;
   if (updateHash) history.pushState(null, "", window.location.pathname);
@@ -2545,7 +2538,11 @@ function closeFocusView() {
     ? el.threadGrid.querySelector(`[data-focus-thread="${cssEscape(state.focusView.name)}"]`)
     : state.focusView?.type === "orchestrator" ? el.expandOrchestrator
       : state.focusView?.type === "worksets" ? el.expandWorksets
-        : state.focusView?.type === "info" ? el.sessionInfo : el.promptInput;
+        : state.focusView?.type === "info" ? el.sessionInfo
+          : state.focusView?.type === "rename" ? el.renameSession
+            : state.focusView?.type === "delete" ? el.renameSession
+              : state.focusView?.type === "help" ? el.promptInput
+                : el.promptInput;
   const openerTarget = state.focusOpener;
   const fallbackTarget = captureFocusTarget(fallback);
   if (state.focusView?.type === "settings") {
@@ -2636,6 +2633,23 @@ function renderFocusView(snapshot) {
     el.focusState.dataset.state = topology.mode;
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderSessionInfo(summary, snapshot);
+  } else if (view.type === "rename") {
+    const entry = sessionEntry();
+    el.focusTitle.textContent = "Rename session";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry?.summary?.title || "")}" placeholder="${escapeAttr(shortId(entry?.summary?.session_id || ""))}"></label><div class="settings-actions"><span class="form-status" data-rename-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-primary" type="submit">save title</button></div></form>`;
+  } else if (view.type === "delete") {
+    const entry = sessionEntry();
+    el.focusTitle.textContent = "Delete session";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry?.summary?.session_id || "")}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry?.summary))}</strong> and its transcript, worksets, episode history, and guidance history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`;
+  } else if (view.type === "help") {
+    el.focusTitle.textContent = "Commands";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = renderCommandReference();
   } else {
     el.focusTitle.textContent = "Settings";
     el.focusState.textContent = "session configuration";
@@ -4278,81 +4292,15 @@ function runCommand(name) {
   else if (name === "workspace") openFocusView("workspace");
   else if (name === "info") openFocusView("info");
   else if (name === "settings") openFocusView("settings");
-  else if (name === "help") showHelpDrawer();
+  else if (name === "help") openFocusView("help");
   else if (name === "stop") stopActiveRun();
   else if (name === "rename") renameCurrentSession();
   else if (name === "delete") deleteCurrentSession();
   else if (name === "clear") clearThreadTarget();
 }
 
-function setAppModalState(active) {
-  if (!el.app) return;
-  el.app.inert = Boolean(active);
-  if (active) {
-    el.app.setAttribute("inert", "");
-    el.app.setAttribute("aria-hidden", "true");
-  } else {
-    el.app.removeAttribute("inert");
-    el.app.removeAttribute("aria-hidden");
-  }
-}
-
-function drawerFocusableElements() {
-  const selector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
-  return [...(el.utilityDrawer?.querySelectorAll?.(selector) || [])]
-    .filter((item) => !item.hidden && item.getAttribute?.("aria-hidden") !== "true");
-}
-
-function openDrawer(title, html, view = "detail") {
-  if (el.utilityDrawer.hidden) state.drawerOpener = captureFocusTarget(document.activeElement);
-  el.drawerTitle.textContent = title;
-  el.drawerContent.innerHTML = html;
-  el.utilityDrawer.dataset.view = view;
-  el.drawerBackdrop.hidden = false;
-  el.utilityDrawer.hidden = false;
-  el.closeDrawer.focus({ preventScroll: true });
-  setAppModalState(true);
-}
-
-function closeDrawer() {
-  const wasOpen = !el.utilityDrawer.hidden;
-  const returnTarget = state.drawerOpener;
-  state.drawerOpener = null;
-  el.drawerBackdrop.hidden = true;
-  el.utilityDrawer.hidden = true;
-  el.drawerContent.innerHTML = "";
-  setAppModalState(false);
-  if (wasOpen) requestAnimationFrame(() => restoreFocusTarget(returnTarget));
-}
-
-function handleDrawerKeydown(event) {
-  if (el.utilityDrawer.hidden) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    closeDrawer();
-    return;
-  }
-  if (event.key !== "Tab") return;
-  const focusable = drawerFocusableElements();
-  if (!focusable.length) {
-    event.preventDefault();
-    el.utilityDrawer.focus?.({ preventScroll: true });
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable.at(-1);
-  if (event.shiftKey && (document.activeElement === first || !el.utilityDrawer.contains?.(document.activeElement))) {
-    event.preventDefault();
-    last.focus({ preventScroll: true });
-  } else if (!event.shiftKey && (document.activeElement === last || !el.utilityDrawer.contains?.(document.activeElement))) {
-    event.preventDefault();
-    first.focus({ preventScroll: true });
-  }
-}
-
-function showHelpDrawer() {
-  openDrawer("commands", `<div class="command-reference">${commands.map((command) => `<div><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></div>`).join("")}</div>`, "compact");
+function renderCommandReference() {
+  return `<div class="command-reference">${commands.map((command) => `<div><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></div>`).join("")}</div>`;
 }
 
 async function reconcileCompletedSettingsSave(submission) {
@@ -4466,10 +4414,9 @@ async function stopActiveRun() {
 }
 
 function renameCurrentSession() {
-  const entry = sessionEntry();
-  if (!entry) return;
-  openDrawer("rename session", `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry.summary.title || "")}" placeholder="${escapeAttr(shortId(entry.summary.session_id))}"></label><div class="settings-actions"><span class="form-status" data-rename-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-primary" type="submit">save title</button></div></form>`, "compact");
-  requestAnimationFrame(() => el.drawerContent.querySelector('input[name="title"]')?.focus());
+  if (!sessionEntry()) return;
+  openFocusView("rename");
+  requestAnimationFrame(() => el.focusContent.querySelector('input[name="title"]')?.focus());
 }
 
 async function saveSessionRename(formElement) {
@@ -4486,7 +4433,7 @@ async function saveSessionRename(formElement) {
     });
     renderWorkspace();
     renderPicker();
-    closeDrawer();
+    closeFocusView();
     showToast("Session renamed");
   } catch (error) {
     status.textContent = error.message;
@@ -4495,9 +4442,8 @@ async function saveSessionRename(formElement) {
 }
 
 function deleteCurrentSession() {
-  const entry = sessionEntry();
-  if (!entry) return;
-  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry.summary.session_id)}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, episode history, and guidance history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
+  if (!sessionEntry()) return;
+  openFocusView("delete");
 }
 
 async function confirmSessionDeletion(formElement) {
@@ -4505,7 +4451,7 @@ async function confirmSessionDeletion(formElement) {
   const sessionId = String(formElement.dataset?.sessionId || state.currentId || "");
   if (!sessionId) return;
   const ownsView = () => state.currentId === sessionId
-    && el.drawerContent?.querySelector?.("#deleteSessionForm") === formElement;
+    && el.focusContent?.querySelector?.("#deleteSessionForm") === formElement;
   status.textContent = "Deleting…";
   try {
     await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
@@ -4938,8 +4884,7 @@ function handleGlobalKeydown(event) {
     event.preventDefault();
     el.promptInput.focus();
   }
-  if (event.key === "Escape" && !el.utilityDrawer.hidden) closeDrawer();
-  else if (event.key === "Escape" && state.focusView) closeFocusView();
+  if (event.key === "Escape" && state.focusView) closeFocusView();
 }
 
 function showToast(message, error = false) {
