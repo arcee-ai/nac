@@ -521,7 +521,7 @@ test("workset presentation and overview rail expose authoritative status, item c
   assert.equal(ui.el.worksetRailSummary.dataset.state, "error");
   assert.match(ui.el.worksetRailSummary.innerHTML, /database &lt;offline&gt;/);
   assert.doesNotMatch(ui.el.worksetRailSummary.innerHTML, /database <offline>/);
-  assert.equal(ui.el.worksetRailCount.textContent, "!");
+  assert.equal(ui.el.worksetRailCount.textContent, "Error");
   ui.renderWorksetRail({ worksets: { items: [], error: null } });
   assert.equal(ui.el.worksetRailSummary.dataset.state, "empty");
   assert.match(ui.el.worksetRailSummary.innerHTML, /No worksets yet/);
@@ -691,11 +691,11 @@ test("compaction activity correlates lifecycle IDs and safely renders every term
     id: action.compactionId, result: action.result, state: action.state, detail: action.detail,
     finishSequenceId: action.finishSequenceId ?? null,
   })), [
-    { id: "completed-id", result: "completed", state: "done", detail: "manual", finishSequenceId: 2 },
-    { id: "skipped-without-start", result: "unchanged", state: "recorded", detail: "automatic · no eligible boundary", finishSequenceId: null },
-    { id: "failed-without-start", result: "failed", state: "error", detail: "manual · checkpoint persistence failed", finishSequenceId: null },
-    { id: "running-id", result: "running", state: "live", detail: "automatic", finishSequenceId: null },
-    { id: "unknown-safe", result: "failed", state: "error", detail: "trigger unavailable · failure type unavailable", finishSequenceId: null },
+    { id: "completed-id", result: "completed", state: "done", detail: "Manual", finishSequenceId: 2 },
+    { id: "skipped-without-start", result: "unchanged", state: "recorded", detail: "Automatic · Nothing to compact", finishSequenceId: null },
+    { id: "failed-without-start", result: "failed", state: "error", detail: "Manual · Failed to save checkpoint", finishSequenceId: null },
+    { id: "running-id", result: "running", state: "live", detail: "Automatic", finishSequenceId: null },
+    { id: "unknown-safe", result: "failed", state: "error", detail: "Not triggered · failure type unavailable", finishSequenceId: null },
   ]);
   const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
   assert.equal(occurrences(html, />context compaction</g), 5);
@@ -703,7 +703,7 @@ test("compaction activity correlates lifecycle IDs and safely renders every term
   assert.match(html, />unchanged</);
   assert.match(html, />failed</);
   assert.match(html, />running</);
-  assert.match(html, /manual|automatic/);
+  assert.match(html, /Manual|Automatic/);
   assert.doesNotMatch(html, /SECRET|RAW|private|checkpoint-id|<script>|raw failure/i);
 });
 
@@ -734,8 +734,8 @@ scenario("SSE", "compaction replay retains correlated activity and reconciles ma
   assert.equal(isolated.state.lastSequence.get(sessionId), 4);
   const actions = isolated.buildOrchestratorActions({ messages: [] }, { limit: false });
   assert.deepEqual(plain(actions.map(({ result, detail }) => ({ result, detail }))), [
-    { result: "completed", detail: "manual" },
-    { result: "unchanged", detail: "automatic · already compacted" },
+    { result: "completed", detail: "Manual" },
+    { result: "unchanged", detail: "Automatic · Already compacted" },
   ]);
 });
 
@@ -762,7 +762,7 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
     role: "user", content: "just accepted", pending: true, pendingSource: "accepted response <client>",
   });
   assert.match(pending, /class="focus-message is-pending"/);
-  assert.match(pending, /submitted · pending/);
+  assert.match(pending, /Sending…/);
   assert.match(pending, /data-pending-source="accepted response &lt;client&gt;"/);
   assert.doesNotMatch(pending, />#\d+</);
 });
@@ -1317,7 +1317,7 @@ test("an accepted run immediately supplies pending transcript and active elapsed
     state: "active", label: "00:00:04",
     title: "Active elapsed runtime: 00:00:04", elapsedMs: 4_500, });
   const html = ui.renderOrchestratorConversation(snapshot);
-  assert.match(html, /submitted · pending/);
+  assert.match(html, /Sending…/);
   assert.match(html, /\/run accepted-workset/);
   const reconciled = { ...snapshot,
     messages: [...snapshot.messages, { role: "user", content: "expanded canonical command body" }],
@@ -1601,7 +1601,7 @@ test("active_compaction snapshots and manual lifecycle events reconcile composer
   assert.equal(Boolean(isolated.effectiveActiveRun(active, "reconcile-compact")), false);
   assert.equal(isolated.orchestratorLifecycle(active, "reconcile-compact").state, "no-run");
   isolated.renderWorkspace();
-  assert.equal(isolated.el.stopRun.hidden, true, "manual compaction never exposes the run-only stop control");
+  assert.equal(isolated.el.stopRun.disabled, true, "manual compaction never exposes the run-only stop control");
 
   isolated.acceptSnapshot("reconcile-compact", sessionSnapshot("reconcile-compact"));
   assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), false);
@@ -1891,8 +1891,8 @@ test("tile selection protects the latest response, error, and terminal row", () 
     { name: "error", kind: "error", state: "error" },
     { name: "ordinary 2", kind: "tool_call_started" },
     { name: "thread", kind: "thread_finished", state: "done" },
-    { name: "ordinary 3", kind: "steering" },
-    { name: "ordinary 4", kind: "steering" },
+    { name: "ordinary 3", kind: "guidance" },
+    { name: "ordinary 4", kind: "guidance" },
   ];
   const selected = ui.selectTileActions(actions);
   assert.equal(selected.length, 5);
@@ -2018,11 +2018,10 @@ test("thread fullscreen episodes keep counting labels and expose durable identit
     { id: 41, session_id: "session-a", thread_name: "worker", created_at: "created-41", action: "Inspect <schema> fully", content: "First response" },
     { id: 99, session_id: "session-a", thread_name: "worker", created_at: "created-99", action: "Verify migration", content: "Second response" },
   ]);
-  assert.match(html, /Episode 1 · ID 41/);
-  assert.match(html, /Episode 2 · ID 99/);
+  assert.match(html, /Episode 1/);
+  assert.match(html, /Episode 2/);
   assert.equal(occurrences(html, /<details class="focus-episode"/g), 2);
   assert.equal(occurrences(html, /<details class="focus-episode"[^>]* open/g), 1);
-  assert.match(html, /<dt>Durable episode ID<\/dt><dd>99<\/dd>/);
   assert.match(html, /<dt>Session ID<\/dt><dd>session-a<\/dd>/);
   assert.match(html, /<dt>Thread<\/dt><dd>worker<\/dd>/);
   assert.match(html, /<dt>Created<\/dt><dd>created-99<\/dd>/);
@@ -2070,7 +2069,7 @@ test("session telemetry preserves old UI token semantics and folds live model-ca
     output_tokens: 32, cache_read_tokens: 63, cache_write_tokens: 11,
     reasoning_tokens: 13, total_tokens: 700, });
   assert.equal(ui.orchestratorContextTokens(usage), 700);
-  assert.equal(ui.tokenUsageSummary(usage), "↑160 R63 ↓32");
+  assert.equal(ui.tokenUsageSummary(usage), "In 160 · Out 32 · Cache 63");
   assert.equal(ui.tokenUsageTitle(usage), "input 160 · cache read 63 · output 32");
 });
 
@@ -2803,9 +2802,7 @@ scenario("Launch modes and defaults", "launch-default preview limits claims and 
   assert.match(ready, /Canonical URL: <code>https:\/\/chatgpt\.com\/backend-api<\/code>/);
   assert.match(ready, /server-stored ChatGPT login/);
   assert.match(ready, /secret values are never returned/);
-  assert.match(ready, /reports configured backend and base URL only/);
-  assert.match(ready, /does not validate model availability/);
-  assert.match(ready, /credentials will work/);
+  assert.match(ready, /Preview only/);
   assert.doesNotMatch(ready, /must-not-render|super-secret/);
   const arcee = ui.managedLaunchDefaults("arcee-auth", "https://custom.example.test");
   assert.equal(arcee.usesCanonicalUrl, false);
@@ -3242,7 +3239,7 @@ test("session info renders only complete requested identity and execution fields
     root_cwd: "/excluded/server/root",
     store_path: "/var/lib/nac/<exact store>.sqlite",
     worker_executable: "/excluded/worker", });
-  for (const label of ["Session ID", "Working directory", "Execution topology", "SSH host", "Sandbox state", "Backend", "Model", "Store path"]) {
+  for (const label of ["Session ID", "Working directory", "Execution mode", "SSH host", "Sandbox state", "Backend", "Model", "Store path"]) {
     assert.match(html, new RegExp(`<dt>${label}</dt>`)); }
   for (const exactValue of [ "session-&lt;full&gt;-0123456789",
     "/remote/work trees/&lt;complete&gt;/repository",
@@ -3256,8 +3253,8 @@ test("session info renders only complete requested identity and execution fields
     assert.doesNotMatch(html, new RegExp(excluded)); }
   assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: true }, {
     metadata: { ...snapshot.metadata, sandbox_status: "running: podman" },
-  }, { store_path: "/store.db" }), /<dt>Execution topology<\/dt><dd>sandbox<\/dd>[\s\S]*<dt>Sandbox state<\/dt><dd>running: podman<\/dd>/);
-  assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: false }, null, { store_path: "/store.db" }), /<dt>Execution topology<\/dt><dd>local<\/dd>/);
+  }, { store_path: "/store.db" }), /<dt>Execution mode<\/dt><dd>sandbox<\/dd>[\s\S]*<dt>Sandbox state<\/dt><dd>running: podman<\/dd>/);
+  assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: false }, null, { store_path: "/store.db" }), /<dt>Execution mode<\/dt><dd>local<\/dd>/);
 });
 
 test("compact session and thread surfaces recover full identities through titles and ARIA", () => {
@@ -3268,15 +3265,15 @@ test("compact session and thread surfaces recover full identities through titles
     backend: "openai-responses", sandboxed: false, pinned: true,
     visible_message_count: 2, };
   const card = ui.renderSessionCard({ summary }, 0, [{ summary }]);
-  assert.match(card, /title="A compact session title · session 12345678-full-session-identity"/);
+  assert.match(card, /title="A compact session title"/);
   assert.match(card, /title="local · \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable"/);
   assert.match(card, /title="provider\/a-model-name-that-is-longer-than-twenty-four-characters" aria-label="Model: provider\/a-model-name-that-is-longer-than-twenty-four-characters"/);
-  assert.match(card, /aria-label="A compact session title · session 12345678-full-session-identity\. Idle\. No prompt submitted\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
+  assert.match(card, /aria-label="A compact session title\. Idle\. No prompt submitted\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
   const thread = ui.renderThreadTile({
     name: "worker/a-very-long-thread-name-<with-context>",
     state: "running", compact: false, actions: [], });
   assert.match(thread, /class="thread-name" title="worker\/a-very-long-thread-name-&lt;with-context&gt;"/);
-  assert.match(thread, /aria-label="Target worker\/a-very-long-thread-name-&lt;with-context&gt; for steering"/);
+  assert.match(thread, /aria-label="Target worker\/a-very-long-thread-name-&lt;with-context&gt; for guidance"/);
   assert.match(thread, /aria-label="Open worker\/a-very-long-thread-name-&lt;with-context&gt; fullscreen"/);
   assert.doesNotMatch(thread, /<with-context>/);
 });

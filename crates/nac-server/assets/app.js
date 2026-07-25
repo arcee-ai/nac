@@ -543,7 +543,7 @@ function renderPicker() {
   const sessions = state.sessions;
   el.pickerSessionTotal.textContent = sessions.length;
   if (!sessions.length) {
-    el.sessionGrid.innerHTML = `<div class="empty-picker"><div><strong>No sessions yet</strong>Launch one to start orchestrating.</div></div>`;
+    el.sessionGrid.innerHTML = `<div class="empty-picker"><div><h2>No sessions yet</h2>Launch one to start orchestrating.</div></div>`;
     return;
   }
   const pinned = sessions.filter((entry) => entry.summary.pinned);
@@ -646,7 +646,7 @@ function renderSessionCard(entry, index = 0, entries = []) {
   const workspaceLocation = [branch, basename(summary.cwd)].filter(Boolean).join(" · ") || summary.cwd;
   const fullLocation = location.text;
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
-  const identity = `${displaySessionTitle(summary)} · session ${sessionId}`;
+  const identity = displaySessionTitle(summary);
   const prompt = summary.last_user_prompt || "No prompt submitted";
   const statusLabel = status === "running" ? "Running" : status === "attention" ? "Finished, needs attention" : "Idle";
   const changes = workspaceSummaryPresentation(entry.workspace_diff);
@@ -1418,7 +1418,7 @@ async function loadOlderOrchestratorMessages(scroller) {
   if (loader) {
     loader.classList.add("is-loading");
     const label = loader.querySelector("span");
-    if (label) label.textContent = "loading earlier messages";
+    if (label) label.textContent = "Loading earlier messages…";
   }
   const anchor = {
     sessionId,
@@ -2008,9 +2008,9 @@ function renderWorkspace() {
   const sessionId = String(summary.session_id || state.currentId || "");
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
   el.sessionTitle.textContent = displayTitle;
-  el.sessionTitle.title = `${displayTitle} · session ${sessionId}`;
-  el.renameSession.title = `Rename ${displayTitle} · session ${sessionId}`;
-  el.renameSession.setAttribute("aria-label", `Rename ${displayTitle}; session ID ${sessionId}`);
+  el.sessionTitle.title = displayTitle;
+  el.renameSession.title = `Rename ${displayTitle}`;
+  el.renameSession.setAttribute("aria-label", `Rename ${displayTitle}`);
   applySessionExecutionLocation(el.sessionLocation, location);
   renderConfigRepairGuidance(summary);
   el.metricModel.textContent = shortModel(fullModel);
@@ -2026,7 +2026,8 @@ function renderWorkspace() {
   const diff = workspace ?? entry.workspace_diff;
   applyWorkspaceSummaryMetric(el.metricChanges, workspaceSummaryPresentation(diff));
   const active = timing?.state === "active";
-  el.stopRun.hidden = !active;
+  el.stopRun.disabled = !active;
+  el.stopRun.hidden = false;
   renderOverview(snapshot);
   renderThreads(snapshot);
   renderComposerTarget();
@@ -2084,10 +2085,9 @@ function orchestratorContextTokens(usage) {
 
 function tokenUsageSummary(usage) {
   if (!usage) return "—";
-  const parts = [`↑${formatTokenCount(usage.input_tokens)}`];
-  if (Number(usage.cache_read_tokens || 0) > 0) parts.push(`R${formatTokenCount(usage.cache_read_tokens)}`);
-  parts.push(`↓${formatTokenCount(usage.output_tokens)}`);
-  return parts.join(" ");
+  const parts = [`In ${formatTokenCount(usage.input_tokens)}`, `Out ${formatTokenCount(usage.output_tokens)}`];
+  if (Number(usage.cache_read_tokens || 0) > 0) parts.push(`Cache ${formatTokenCount(usage.cache_read_tokens)}`);
+  return parts.join(" · ");
 }
 
 function tokenUsageTitle(usage) {
@@ -2108,7 +2108,7 @@ function renderOverview(snapshot) {
   else el.refreshSession.removeAttribute("aria-busy");
   el.generatedOverview.classList.toggle("is-empty", !overview);
   if (!overview) {
-    el.generatedOverview.innerHTML = `<p class="overview-empty">${generating ? "Generating current state…" : "Not generated."}</p>`;
+    el.generatedOverview.innerHTML = `<p class="overview-empty">${generating ? "Generating overview…" : "No overview yet."}</p>`;
   } else {
     el.generatedOverview.innerHTML = `<p class="overview-copy">${escapeHtml(overview.summary || overview.status || "")}</p>`;
   }
@@ -2163,7 +2163,7 @@ function renderWorksetRail(snapshot) {
   el.worksetRailSummary.dataset.state = presentation.state;
   el.worksetRailCount.textContent = presentation.state === "loading"
     ? "…"
-    : presentation.state === "error" ? "!" : String(presentation.items.length);
+    : presentation.state === "error" ? "Error" : String(presentation.items.length);
   if (presentation.state === "loading") {
     el.worksetRailSummary.innerHTML = "<p>Loading worksets…</p>";
   } else if (presentation.state === "error") {
@@ -2251,14 +2251,26 @@ function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
   };
 }
 
+function humanStateLabel(state) {
+  const labels = {
+    "no-run": "Idle",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "loading": "Loading…",
+    "unavailable": "Unavailable",
+  };
+  return labels[state] || state;
+}
+
 function renderOrchestratorLedger(snapshot) {
   const lifecycle = orchestratorLifecycle(snapshot);
-  el.orchestratorState.textContent = lifecycle.state;
+  el.orchestratorState.textContent = humanStateLabel(lifecycle.state);
   el.orchestratorState.dataset.state = lifecycle.state;
   el.orchestratorState.classList.toggle("is-active", lifecycle.state === "running");
   el.orchestratorLedger.innerHTML = renderActionRows(
     buildOrchestratorActions(snapshot),
-    "No orchestrator action evidence",
+    "No activity yet.",
   );
 }
 
@@ -2284,22 +2296,22 @@ function combineActionDetail(...values) {
 }
 
 function compactionReasonLabel(reason) {
-  if (reason === "manual") return "manual";
-  if (reason === "auto") return "automatic";
-  return "trigger unavailable";
+  if (reason === "manual") return "Manual";
+  if (reason === "auto") return "Automatic";
+  return "Not triggered";
 }
 
 function compactionSkipLabel(cause) {
-  if (cause === "no_eligible_boundary") return "no eligible boundary";
-  if (cause === "already_compacted") return "already compacted";
+  if (cause === "no_eligible_boundary") return "Nothing to compact";
+  if (cause === "already_compacted") return "Already compacted";
   return "skip cause unavailable";
 }
 
 function compactionFailureLabel(failure) {
-  if (failure === "summary_request_failed") return "summary request failed";
-  if (failure === "summary_rejected") return "summary rejected";
-  if (failure === "checkpoint_persistence_failed") return "checkpoint persistence failed";
-  if (failure === "cancelled") return "cancelled";
+  if (failure === "summary_request_failed") return "Summary generation failed";
+  if (failure === "summary_rejected") return "Summary rejected";
+  if (failure === "checkpoint_persistence_failed") return "Failed to save checkpoint";
+  if (failure === "cancelled") return "Cancelled";
   return "failure type unavailable";
 }
 
@@ -2394,7 +2406,7 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
         state: "live",
         callId: event.call_id || null,
         argumentsDetail,
-        detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", argumentsDetail),
+        detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : null, argumentsDetail),
         ...evidence,
       };
       actions.push(action);
@@ -2405,11 +2417,11 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
     } else if (event.type === "tool_call_finished") {
       if (event.call_id) observedCallIds.add(event.call_id);
       const existing = calls.get(event.call_id);
-      const resultDetail = event.content_preview ? `result: ${event.content_preview}` : "Result preview unavailable";
+      const resultDetail = event.content_preview ? `result: ${event.content_preview}` : null;
       if (existing) {
         existing.result = event.is_error ? "failed" : "done";
         existing.state = event.is_error ? "error" : "done";
-        existing.detail = combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", existing.argumentsDetail, resultDetail);
+        existing.detail = combineActionDetail(event.call_id ? `call ${event.call_id}` : null, existing.argumentsDetail, resultDetail);
         existing.finishSequenceId = evidence.sequenceId;
       } else {
         actions.push({
@@ -2417,7 +2429,7 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
           result: event.is_error ? "failed" : "done",
           state: event.is_error ? "error" : "done",
           callId: event.call_id || null,
-          detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", resultDetail),
+          detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : null, resultDetail),
           ...evidence,
         });
       }
@@ -2431,11 +2443,11 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
       const result = event.type.split("_").at(-1);
       observedSteering.add(event.steering_id);
       actions.push({
-        name: "steering",
+        name: "guidance",
         result,
         state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
         steeringId: event.steering_id ?? null,
-        detail: combineActionDetail(event.steering_id == null ? "Steering ID unavailable" : `steering #${event.steering_id}`, event.instruction_preview),
+        detail: combineActionDetail(event.steering_id == null ? null : `guidance #${event.steering_id}`, event.instruction_preview),
         ...evidence,
       });
     } else if (event.type === "run_started" || event.type === "run_finished") {
@@ -2470,7 +2482,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           kind: "tool_call",
           callId: call.id || null,
           argumentsDetail: "",
-          detail: call.id ? `call ${call.id}` : "Call ID unavailable",
+          detail: call.id ? `call ${call.id}` : null,
         };
         actions.push(action);
         if (call.id) calls.set(call.id, action);
@@ -2480,7 +2492,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
       if (existing) {
         existing.result = "completed";
         existing.state = "done";
-        existing.detail = message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable";
+        existing.detail = message.tool_call_id ? `call ${message.tool_call_id}` : null;
       } else {
         actions.push({
           name: "tool result",
@@ -2489,7 +2501,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           provenance: "persisted",
           kind: "tool_result",
           callId: message.tool_call_id || null,
-          detail: message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable",
+          detail: message.tool_call_id ? `call ${message.tool_call_id}` : null,
         });
       }
     } else if (message.role === "assistant" && message.content) {
@@ -2521,11 +2533,10 @@ function renderSessionInfo(summary = sessionEntry()?.summary, snapshot = current
   const storePath = store?.store_path ?? snapshot?.metadata?.store_path;
   const sshHost = topology.host || `Not applicable for ${topology.mode} execution`;
   return `<div class="focus-info-scroll"><section class="session-info" aria-label="Complete session identity">
-    <p>Complete values for the selected session. Credential selectors, header values, and other secrets are not shown.</p>
     <dl class="session-info-grid">
       ${renderEvidenceField("Session ID", sessionId)}
       ${renderEvidenceField("Working directory", cwd)}
-      ${renderEvidenceField("Execution topology", topology.detail)}
+      ${renderEvidenceField("Execution mode", topology.detail)}
       ${renderEvidenceField("SSH host", sshHost)}
       ${renderEvidenceField("Sandbox state", sandboxStateForInfo(summary, snapshot))}
       ${renderEvidenceField("Backend", backend)}
@@ -2619,7 +2630,7 @@ function renderFocusView(snapshot) {
   if (view.type === "orchestrator") {
     const lifecycle = orchestratorLifecycle(snapshot);
     el.focusTitle.textContent = "Orchestrator";
-    el.focusState.textContent = lifecycle.state;
+    el.focusState.textContent = humanStateLabel(lifecycle.state);
     el.focusState.dataset.state = lifecycle.state;
     el.focusState.classList.toggle("is-active", lifecycle.state === "running");
     el.focusContent.innerHTML = renderOrchestratorConversation(snapshot);
@@ -2665,7 +2676,7 @@ function renderFocusView(snapshot) {
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderSessionInfo(summary, snapshot);
   } else {
-    el.focusTitle.textContent = "settings";
+    el.focusTitle.textContent = "Settings";
     el.focusState.textContent = "session configuration";
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderFocusSettings();
@@ -2868,18 +2879,18 @@ function buildSettingsPatch(values, initial) {
 function renderFocusSettings() {
   const settings = state.settingsFocus;
   if (!settings || settings.sessionId !== state.currentId || settings.status === "loading") {
-    const message = settings?.message || "loading configuration…";
+    const message = settings?.message || "Loading configuration…";
     return `<div class="focus-settings-layout"><div class="focus-empty">${escapeHtml(message)}</div></div>`;
   }
   if (settings.status === "error") {
     const repairError = sessionEntry()?.summary?.model_config_error;
-    return `<div class="focus-settings-layout"><section class="settings-load-error" role="alert"><strong>Configuration could not be loaded.</strong><p>${escapeHtml(settings.error)}</p>${repairError ? `<p>Repair required: ${escapeHtml(repairError)}</p>` : ""}<button class="button" type="button" data-retry-settings>retry configuration load</button></section></div>`;
+    return `<div class="focus-settings-layout"><section class="settings-load-error" role="alert"><h3>Configuration could not be loaded.</h3><p>${escapeHtml(settings.error)}</p>${repairError ? `<p>Repair required: ${escapeHtml(repairError)}</p>` : ""}<button class="button" type="button" data-retry-settings>retry configuration load</button></section></div>`;
   }
   const config = settings.config || {};
   const headers = rawHeadersFromConfig(config);
   const diagnostics = Array.isArray(config.diagnostics) ? config.diagnostics : [];
   const diagnosticHtml = diagnostics.length
-    ? `<section class="settings-diagnostics" role="alert"><strong>Repair required</strong><p>Replace every unsupported or malformed value, then save.</p><ul>${diagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic)}</li>`).join("")}</ul></section>`
+    ? `<section class="settings-diagnostics" role="alert"><h3>Repair required</h3><p>Replace every unsupported or malformed value, then save.</p><ul>${diagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic)}</li>`).join("")}</ul></section>`
     : "";
   const submission = state.settingsSubmission;
   const savingThisSession = submission?.sessionId === state.currentId;
@@ -2937,11 +2948,11 @@ function renderOrchestratorConversation(snapshot) {
   })).join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
-    ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "loading earlier messages" : "scroll up for earlier messages"}</span></div>`
+    ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
     : "";
   const lifecycle = orchestratorLifecycle(snapshot);
   const actions = buildOrchestratorActions(snapshot, { limit: false }).reverse();
-  const live = `<section class="focus-live"><div class="focus-column-heading"><span>Live activity</span><strong>${actions.length} persisted + observed</strong></div>${renderFocusActions(actions, { showTechnicalEvidence: true })}</section>`;
+  const live = `<section class="focus-live"><div class="focus-column-heading"><h3>Live activity</h3></div>${renderFocusActions(actions)}</section>`;
   return `<div class="focus-orchestrator-layout" data-state="${escapeAttr(lifecycle.state)}"><div class="focus-orchestrator-sidebar">${live}</div><section class="focus-chat"><div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div></section></div>`;
 }
 
@@ -3010,13 +3021,13 @@ function renderWorksetDetail(workset) {
 function renderWorksetsFocus(snapshot) {
   const presentation = worksetsPresentation(snapshot);
   if (presentation.state === "loading") {
-    return `<div class="focus-worksets-scroll" data-state="loading"><div class="worksets-focus-state" role="status"><strong>Loading worksets…</strong><p>Waiting for the session snapshot.</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="loading"><div class="worksets-focus-state" role="status"><h3>Loading worksets…</h3><p>Waiting for the session snapshot.</p></div></div>`;
   }
   if (presentation.state === "error") {
-    return `<div class="focus-worksets-scroll" data-state="error"><div class="worksets-focus-state is-error" role="alert"><strong>Worksets could not be loaded.</strong><p>${escapeHtml(presentation.error)}</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="error"><div class="worksets-focus-state is-error" role="alert"><h3>Worksets could not be loaded.</h3><p>${escapeHtml(presentation.error)}</p></div></div>`;
   }
   if (presentation.state === "empty") {
-    return `<div class="focus-worksets-scroll" data-state="empty"><div class="worksets-focus-state"><strong>No worksets yet.</strong><p>This session has no persisted worksets.</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="empty"><div class="worksets-focus-state"><h3>No worksets yet.</h3><p>This session has no persisted worksets.</p></div></div>`;
   }
   return `<div class="focus-worksets-scroll" data-state="populated"><div class="worksets-focus-list">${presentation.items.map(renderWorksetDetail).join("")}</div></div>`;
 }
@@ -3104,10 +3115,10 @@ function renderWorkspaceFocus(workspace, selectedPath) {
     : "";
   return `<div class="focus-workspace-layout"><aside class="focus-files" aria-label="Changed files">
     <div class="focus-repository-context" aria-label="Workspace repository context"><span>Repository</span><strong>${repoLabel}</strong><div>${branch}</div>${workspaceDisplay}</div>
-    <div class="focus-column-heading"><span>Changed files</span><strong>${files.length}</strong></div>
+    <div class="focus-column-heading"><h3>Changed files</h3><strong>${files.length}</strong></div>
     <div class="focus-workspace-totals" aria-label="Workspace totals: ${escapeAttr(workspace.total_additions || 0)} additions and ${escapeAttr(workspace.total_deletions || 0)} deletions"><span>+${escapeHtml(workspace.total_additions || 0)}</span><span>−${escapeHtml(workspace.total_deletions || 0)}</span></div>
     <div class="focus-file-list">${files.map((file) => renderWorkspaceFile(file, selectedPath)).join("")}</div>
-  </aside><section class="focus-diff" aria-label="File diff"><div class="focus-column-heading"><span>${selectedPath ? escapeHtml(selectedPath) : "Diff"}</span></div>${detail}</section></div>`;
+  </aside><section class="focus-diff" aria-label="File diff"><div class="focus-column-heading"><h3>${selectedPath ? escapeHtml(selectedPath) : "Diff"}</h3></div>${detail}</section></div>`;
 }
 
 function workspaceDiffLinePresentation(line) {
@@ -3317,7 +3328,7 @@ function renderOrchestratorToolTurn(message, { ordinal = null } = {}) {
   const body = summaries.map(({ operation, target }) => `<div class="focus-tool-summary"><span>${escapeHtml(operation)}</span>${target ? `<strong>${escapeHtml(target)}</strong>` : ""}</div>`).join("");
   const ordinalLabel = ordinal === null
     ? ""
-    : `<span class="focus-message-ordinal" title="Transcript ordinal among messages included by this query; not a durable message ID">#${escapeHtml(ordinal)}</span>`;
+    : `<span class="focus-message-ordinal" title="Position in conversation">#${escapeHtml(ordinal)}</span>`;
   const meta = ordinalLabel ? `<div class="focus-message-meta">${ordinalLabel}</div>` : "";
   return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span>${meta}</div><div class="focus-message-body"><div class="focus-tool-summaries">${body}</div></div></article>`;
 }
@@ -3347,8 +3358,8 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
     ? `${reasoningBlock}${copy}`
     : `<div class="focus-message-copy is-empty"><span class="focus-message-content-kind">empty message</span>${renderFocusMarkdown("[empty]")}</div>`;
   const ordinalLabel = message?.pending
-    ? `<span class="focus-message-ordinal is-submitted" title="Pending user message from ${escapeAttr(message.pendingSource || "submission")}; removed when its canonical transcript row arrives">submitted · pending</span>`
-    : ordinal === null ? "" : `<span class="focus-message-ordinal" title="Transcript ordinal among messages included by this query; not a durable message ID">#${escapeHtml(ordinal)}</span>`;
+    ? `<span class="focus-message-ordinal is-submitted" title="Pending message — will be sent when the session is available">Sending…</span>`
+    : ordinal === null ? "" : `<span class="focus-message-ordinal" title="Position in conversation">#${escapeHtml(ordinal)}</span>`;
   const duration = durationMs !== null && durationMs !== undefined && Number.isFinite(Number(durationMs))
     ? `<span class="focus-message-duration" title="Response duration: ${escapeAttr(Number(durationMs).toLocaleString())} ms">response ${escapeHtml(formatDuration(Number(durationMs)))}</span>`
     : "";
@@ -3474,10 +3485,10 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
       || event.type === "thread_steering_expired") {
     const result = event.type.split("_").at(-1);
     return {
-      name: "steering", result,
+      name: "guidance", result,
       state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
       steeringId: event.steering_id ?? null,
-      detail: combineActionDetail(event.steering_id == null ? "Steering ID unavailable" : `steering #${event.steering_id}`, event.instruction_preview),
+      detail: combineActionDetail(event.steering_id == null ? null : `guidance #${event.steering_id}`, event.instruction_preview),
       ...evidence,
     };
   }
@@ -3492,7 +3503,7 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
   if (event.type === "run_finished") {
     return { name: "agent run", result: "finished", state: "done", detail: "", ...evidence };
   }
-  return { name: "Activity", result: "recorded", state: "recorded", detail: "Activity recorded", ...evidence };
+  return null;
 }
 
 function projectThreadActions(entries, { newestFirst = false } = {}) {
@@ -3539,7 +3550,7 @@ function latestThreadEvidence(entries, type) {
 function renderWorkerUsage(usageEvidence) {
   const usage = usageEvidence?.usage;
   const metric = (label, value) => `<div><dt>${escapeHtml(label)}</dt><dd>${usage ? Number(value || 0).toLocaleString() : `<span class="evidence-unavailable">Unavailable</span>`}</dd></div>`;
-  return `<section class="worker-usage"><div class="thread-evidence-heading"><h4>Worker usage</h4></div><dl>
+  return `<section class="worker-usage"><div class="thread-evidence-heading"><h4>Token usage</h4></div><dl>
     ${metric("Input", usage?.input_tokens)}
     ${metric("Cache read", usage?.cache_read_tokens)}
     ${metric("Output", usage?.output_tokens)}
@@ -3548,7 +3559,7 @@ function renderWorkerUsage(usageEvidence) {
 }
 
 function renderThreadSteering(records) {
-  if (!records.length) return `<div class="thread-evidence-empty">No persisted steering records.</div>`;
+  if (!records.length) return `<div class="thread-evidence-empty">No guidance history.</div>`;
   return `<ol class="thread-steering-list">${records.map((record) => `<li data-status="${escapeAttr(record.status || "unknown")}">
     <header><strong>${record.id == null ? "ID unavailable" : `#${escapeHtml(record.id)}`}</strong><span>${escapeHtml(record.status || "status unavailable")}</span></header>
     <p>${escapeHtml(record.instruction || "Instruction unavailable")}</p>
@@ -3578,7 +3589,7 @@ function renderThreadEvidence(name, model, snapshot, entries) {
   const steering = (snapshot?.thread_steering || []).filter((item) => item.thread_name === name);
   const status = threadStatusPresentation(model?.state);
   return `<section class="thread-evidence" data-state="${escapeAttr(status.state)}">
-    <div class="thread-evidence-heading"><h3>Lifecycle</h3><span>${escapeHtml(status.label)}</span></div>
+    <div class="thread-evidence-heading"><h3>Status</h3><span>${escapeHtml(status.label)}</span></div>
     <dl class="evidence-grid">
       ${renderEvidenceField("Outcome", model?.outcome)}
       ${renderEvidenceField("Session ID", record?.session_id || snapshot?.metadata?.session_id || summary?.session_id)}
@@ -3586,7 +3597,6 @@ function renderThreadEvidence(name, model, snapshot, entries) {
       ${renderEvidenceField("Session updated", summary?.updated_at)}
       ${renderEvidenceField("Thread created", record?.created_at)}
       ${renderEvidenceField("Thread updated", record?.updated_at)}
-      ${renderEvidenceField("Persisted episode count", record?.episode_count)}
       ${renderEvidenceField("Source threads", sourceText, start ? "Source-thread field unavailable" : "No start event in current evidence")}
       ${renderEvidenceField("Start time", start?.timestamp)}
       ${renderEvidenceField("Finish time", finish?.timestamp)}
@@ -3596,7 +3606,7 @@ function renderThreadEvidence(name, model, snapshot, entries) {
       ${renderEvidenceField("Latest error", model?.latestError)}
     </dl>
     ${renderWorkerUsage(model?.usageEvidence)}
-    <section class="thread-steering"><div class="thread-evidence-heading"><h4>Steering history</h4><span>${steering.length}</span></div>${renderThreadSteering(steering)}</section>
+    <section class="thread-steering"><div class="thread-evidence-heading"><h4>Guidance history</h4><span>${steering.length}</span></div>${renderThreadSteering(steering)}</section>
   </section>`;
 }
 
@@ -3606,25 +3616,23 @@ function renderThreadFocus(name, model, snapshot) {
   const entries = threadFocusEvidenceEntries(name, snapshot, windowState);
   const actions = threadFocusActions(name, snapshot, windowState);
   const historyLoader = windowState?.hasOlder
-    ? `<div class="focus-event-loader ${windowState.loading ? "is-loading" : ""}" data-event-loader role="status"><span>${windowState.loading ? "loading earlier events" : "scroll down for earlier events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></div>`
+    ? `<div class="focus-event-loader ${windowState.loading ? "is-loading" : ""}" data-event-loader role="status"><span>${windowState.loading ? "Loading earlier events…" : "scroll down for earlier events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></div>`
     : "";
   const episodes = snapshot?.thread_episodes?.[name] || [];
   const episodeHtml = renderThreadEpisodes(episodes);
-  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Action evidence · latest first</h3><span>${actions.length}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${actions.length}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
 }
 
 function renderThreadEpisodes(episodes) {
-  if (!episodes.length) return `<div class="focus-empty">No retained episodes. Episode identity and content are unavailable.</div>`;
+  if (!episodes.length) return `<div class="focus-empty">No episode history recorded.</div>`;
   return episodes.map((episode, index) => {
     const action = episode.action || "Action unavailable";
     const response = episode.content || "";
     const isLatest = index === episodes.length - 1;
-    const durableId = episode.id == null ? "ID unavailable" : `ID ${episode.id}`;
     return `<details class="focus-episode" data-episode-index="${index}" data-episode-id="${escapeAttr(episode.id ?? "")}"${isLatest ? " open" : ""}>
-      <summary data-episode-summary="${index}"><span>Episode ${index + 1} · ${escapeHtml(durableId)}</span><strong>${escapeHtml(action)}</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
+      <summary data-episode-summary="${index}"><span>Episode ${index + 1}</span><strong>${escapeHtml(action)}</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
       <div class="focus-episode-body">
         <dl class="episode-identity">
-          ${renderEvidenceField("Durable episode ID", episode.id)}
           ${renderEvidenceField("Session ID", episode.session_id)}
           ${renderEvidenceField("Thread", episode.thread_name)}
           ${renderEvidenceField("Created", episode.created_at)}
@@ -3636,22 +3644,11 @@ function renderThreadEpisodes(episodes) {
   }).join("");
 }
 
-function renderFocusActions(actions, { showTechnicalEvidence = false } = {}) {
-  if (!actions.length) return `<div class="focus-empty">No action evidence is available.</div>`;
+function renderFocusActions(actions) {
+  if (!actions.length) return `<div class="focus-empty">No activity yet.</div>`;
   return `<ol class="focus-action-list">${actions.map((action) => {
     const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
-    const evidence = showTechnicalEvidence ? [
-      action.provenance === "observed" ? "observed live" : action.provenance,
-      action.kind,
-      action.sequenceId == null ? null : `sequence #${action.sequenceId}`,
-      action.finishSequenceId == null ? null : `finished #${action.finishSequenceId}`,
-      action.eventId == null ? null : `event #${action.eventId}`,
-      action.timestamp,
-      action.callId ? `call ${action.callId}` : null,
-      action.steeringId == null ? null : `steering #${action.steeringId}`,
-    ].filter(Boolean) : [];
-    const provenance = showTechnicalEvidence ? ` data-provenance="${escapeAttr(action.provenance || "unavailable")}"` : "";
-    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"${provenance}><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${evidence.length ? `<div class="focus-action-evidence">${evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}${action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : ""}</li>`;
+    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : ""}</li>`;
   }).join("")}</ol>`;
 }
 function renderMarkdownImageToken(tokens, index, options, env, renderer) {
@@ -3873,7 +3870,7 @@ function steeringRecordAction(record) {
   const result = record?.status || "status unavailable";
   const transitionTime = result === "delivered" ? record.delivered_at : result === "expired" ? record.expired_at : null;
   return {
-    name: "steering",
+    name: "guidance",
     result,
     state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
     provenance: "persisted",
@@ -3881,7 +3878,7 @@ function steeringRecordAction(record) {
     steeringId: record?.id ?? null,
     timestamp: transitionTime || record?.created_at || null,
     detail: combineActionDetail(
-      record?.id == null ? "Steering ID unavailable" : `steering #${record.id}`,
+      record?.id == null ? null : `guidance #${record.id}`,
       record?.instruction || "Instruction unavailable",
       record?.created_at ? `created ${record.created_at}` : "created time unavailable",
       record?.delivered_at ? `delivered ${record.delivered_at}` : "",
@@ -3898,7 +3895,7 @@ function renderThreads(snapshot) {
   const earlier = models.filter((thread) => thread.compact);
   const currentGrid = current.length ? `<div class="thread-current-grid">${current.map(renderThreadTile).join("")}</div>` : "";
   const earlierGrid = earlier.length ? `<div class="thread-earlier-grid ${current.length ? "" : "is-only"}">${earlier.map(renderThreadTile).join("")}</div>` : "";
-  const empty = models.length ? "" : `<p class="thread-board-empty">No thread lifecycle or retained-history evidence.</p>`;
+  const empty = models.length ? "" : `<p class="thread-board-empty">No threads yet.</p>`;
   el.threadGrid.innerHTML = currentGrid + earlierGrid + empty;
   renderComposerTarget();
   scheduleActiveControlRestoration(activeControl);
@@ -3908,8 +3905,8 @@ function renderThreadTile(thread) {
   const selected = state.targetedThread === thread.name;
   const status = threadStatusPresentation(thread.state);
   const available = ["running", "queued"].includes(status.state);
-  const label = available ? `Target ${thread.name} for steering` : `Open ${thread.name} fullscreen`;
-  const ledger = thread.compact ? "" : `<ol class="action-ledger">${renderActionRows(thread.actions, "No action evidence")}</ol>`;
+  const label = available ? `Target ${thread.name} for guidance` : `Open ${thread.name} fullscreen`;
+  const ledger = thread.compact ? "" : `<ol class="action-ledger">${renderActionRows(thread.actions, "No activity yet.")}</ol>`;
   return `<article class="thread-tile ${thread.compact ? "is-compact" : ""} ${selected ? "is-selected" : ""}" data-state="${escapeAttr(status.state)}"><header class="thread-tile-head"><button class="thread-select" type="button" data-thread-name="${escapeAttr(thread.name)}" data-thread-state="${escapeAttr(status.state)}" aria-pressed="${selected}" aria-label="${escapeAttr(label)}"><span class="thread-name" title="${escapeAttr(thread.name)}">${escapeHtml(thread.name)}</span><span class="thread-state" aria-label="${escapeAttr(status.label)}">${escapeHtml(status.label)}</span></button><button class="expand-button thread-expand" type="button" data-focus-thread="${escapeAttr(thread.name)}" aria-label="Open ${escapeAttr(thread.name)} fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg></button></header>${ledger}</article>`;
 }
 
@@ -3961,7 +3958,7 @@ function toolDisplayName(value) {
 }
 
 function formatToolArguments(argsPreview) {
-  return compactActionDetail(argsPreview, 280) || "Arguments unavailable";
+  return compactActionDetail(argsPreview, 280) || "—";
 }
 
 function toolCompletionDetail(argumentsDetail, event) {
@@ -4279,7 +4276,7 @@ function renderCommandMenu() {
   el.commandMenu.hidden = false;
   el.promptInput.setAttribute?.("aria-expanded", "true");
   el.promptInput.setAttribute?.("aria-activedescendant", commandOptionId(matches[state.commandIndex].name));
-  el.commandMenu.innerHTML = matches.map((command, index) => `<button id="${commandOptionId(command.name)}" class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" role="option" aria-selected="${index === state.commandIndex}" tabindex="-1" data-command-option="${command.name}"><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></button>`).join("");
+  el.commandMenu.innerHTML = matches.map((command, index) => `<button id="${commandOptionId(command.name)}" class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" role="option" aria-selected="${index === state.commandIndex}" tabindex="-1" data-command-option="${command.name}"><span class="command-name">/${command.name}</span><span>${escapeHtml(command.description)}</span></button>`).join("");
 }
 
 function handleComposerKeydown(event) {
@@ -4539,7 +4536,7 @@ async function saveSessionRename(formElement) {
 function deleteCurrentSession() {
   const entry = sessionEntry();
   if (!entry) return;
-  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry.summary.session_id)}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, retained episodes, and steering history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
+  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry.summary.session_id)}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, episode history, and guidance history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
 }
 
 async function confirmSessionDeletion(formElement) {
@@ -4772,7 +4769,7 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
   return `<dl class="launch-default-values">
     <div><dt>Configured backend</dt><dd>${escapeHtml(backend)}</dd></div>
     <div><dt>Configured base URL</dt><dd>${escapeHtml(baseUrl)}</dd></div>
-  </dl>${managedHtml}<p class="launch-default-scope">This preview reports configured backend and base URL only. It does not validate model availability or whether stored or named credentials will work; session creation may still fail.</p>`;
+  </dl>${managedHtml}<p class="launch-default-scope">Preview only — session creation validates these settings.</p>`;
 }
 
 function renderLaunchDefaultsPreview() {
@@ -4990,14 +4987,17 @@ function showToast(message, error = false) {
   const inactive = target === el.sessionNavStatus ? el.pickerNavStatus : el.sessionNavStatus;
   inactive.hidden = true;
   inactive.textContent = "";
+  inactive.classList.remove("is-toast");
   target.textContent = message;
   target.title = message;
   target.classList.toggle("is-error", error);
+  target.classList.add("is-toast");
   target.hidden = false;
   state.statusTimer = window.setTimeout(() => {
     target.hidden = true;
     target.textContent = "";
     target.removeAttribute("title");
+    target.classList.remove("is-toast");
   }, error ? 5_500 : 2_500);
 }
 
