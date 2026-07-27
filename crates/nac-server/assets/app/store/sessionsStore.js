@@ -1,5 +1,7 @@
 import { createStore } from "../lib/store.js";
 import { api } from "../services/api.js";
+import { isActiveRun } from "../lib/format.js";
+import { selectionStore } from "./selectionStore.js";
 
 // Global sessions state (no Redux). Holds store info, the session list
 // (ManagedSessionSummary[]), per-session snapshots, plus polling + SSE plumbing.
@@ -7,11 +9,40 @@ export const sessionsStore = createStore({
   storeInfo: null,
   sessions: [], // ManagedSessionSummary[]
   snapshots: {}, // id -> SessionSummarySnapshot (full snapshot)
+  attention: {}, // id -> true when a run finished while unfocused
   loading: false,
   error: null,
 });
 
 const { getState, setState, useStore } = sessionsStore;
+const summaryOf = (entry) => entry.summary || entry;
+
+// Track prior run activity across polls so we can flag "attention" (a run that
+// finished for a session the user isn't currently viewing).
+let prevActive = {};
+
+function trackAttention(list) {
+  const selId = selectionStore.getState().selectedId;
+  const nextActive = {};
+  const attention = { ...getState().attention };
+  for (const entry of list) {
+    const s = summaryOf(entry);
+    const id = s.session_id;
+    const active = isActiveRun(entry.active_run || s.active_run);
+    nextActive[id] = active;
+    if (prevActive[id] === true && !active && id !== selId) attention[id] = true;
+  }
+  prevActive = nextActive;
+  return attention;
+}
+
+export function clearAttention(id) {
+  const cur = getState().attention;
+  if (!cur[id]) return;
+  const attention = { ...cur };
+  delete attention[id];
+  setState({ attention });
+}
 
 let pollTimer = null;
 let eventSource = null;
@@ -31,11 +62,12 @@ export async function loadStoreInfo() {
 export async function loadSessions({ workspaceStats = false, silent = false } = {}) {
   if (!silent) setState({ loading: true, error: null });
   try {
-    const list = await api.listSessions(workspaceStats);
-    setState({ sessions: Array.isArray(list) ? list : [], loading: false });
+    const raw = await api.listSessions(workspaceStats);
+    const list = Array.isArray(raw) ? raw : [];
+    setState({ sessions: list, loading: false, attention: trackAttention(list) });
     return list;
   } catch (e) {
-    setState({ loading: false, error: `sesje: ${e.message}` });
+    setState({ loading: false, error: `sessions: ${e.message}` });
     return null;
   }
 }
@@ -82,6 +114,53 @@ export async function updateConfig(id, payload) {
   return res;
 }
 
+// Pin/unpin a session, preserving its current title and presentation version.
+export async function togglePin(entry) {
+  const s = summaryOf(entry);
+  const res = await api.renameSession(s.session_id, {
+    title: typeof s.title === "string" ? s.title : "",
+    pinned: !s.pinned,
+    expected_version: Number(s.presentation_version) || 0,
+  });
+  await loadSessions({ silent: true });
+  return res;
+}
+
+// Optimistically move `dragId` to `targetId`'s slot within the same pinned
+// group. Returns the group's `pinned` flag (to persist) or null if the move is
+// invalid (cross-group or unknown ids).
+export function reorderSessionsLocal(dragId, targetId) {
+  if (dragId === targetId) return null;
+  let pinned = null;
+  setState((st) => {
+    const list = st.sessions.slice();
+    const from = list.findIndex((e) => summaryOf(e).session_id === dragId);
+    const to = list.findIndex((e) => summaryOf(e).session_id === targetId);
+    if (from < 0 || to < 0) return {};
+    const dragged = list[from];
+    if (!!summaryOf(dragged).pinned !== !!summaryOf(list[to]).pinned) return {};
+    pinned = !!summaryOf(dragged).pinned;
+    list.splice(from, 1);
+    list.splice(to, 0, dragged);
+    return { sessions: list };
+  });
+  return pinned;
+}
+
+// Persist the current order of one pinned group via PUT /sessions/order.
+export async function persistReorder(pinned) {
+  const group = getState().sessions.filter((e) => !!summaryOf(e).pinned === !!pinned);
+  const session_ids = group.map((e) => summaryOf(e).session_id);
+  const expected_versions = {};
+  group.forEach((e) => {
+    const s = summaryOf(e);
+    expected_versions[s.session_id] = s.presentation_version ?? 0;
+  });
+  const res = await api.reorderSessions({ pinned: !!pinned, session_ids, expected_versions });
+  await loadSessions({ silent: true });
+  return res;
+}
+
 export function startPolling(ms = 5000, opts = {}) {
   stopPolling();
   pollTimer = setInterval(() => loadSessions({ ...opts, silent: true }), ms);
@@ -98,7 +177,7 @@ export function stopPolling() {
 // (`session_event`, `replay_boundary`, `replay_gap`, `lagged`), so we must use
 // addEventListener — EventSource.onmessage only fires for unnamed events.
 // onEnvelope receives the parsed SessionEventEnvelope for each `session_event`.
-export function connectStream(id, onEnvelope) {
+export function connectStream(id, onEnvelope, onStatus) {
   disconnectStream();
   if (!id) return null;
   eventSessionId = id;
@@ -112,6 +191,7 @@ export function connectStream(id, onEnvelope) {
     }
   };
 
+  eventSource.onopen = () => onStatus && onStatus("live");
   eventSource.addEventListener("session_event", (e) => {
     const env = parse(e);
     if (env && onEnvelope) onEnvelope(env);
@@ -121,7 +201,8 @@ export function connectStream(id, onEnvelope) {
   eventSource.addEventListener("replay_boundary", () => {});
   eventSource.addEventListener("replay_gap", () => {});
   eventSource.onerror = () => {
-    /* browser auto-reconnects */
+    // The browser auto-reconnects; reflect the transient state in the UI.
+    if (onStatus) onStatus("reconnecting");
   };
   return eventSource;
 }
@@ -140,5 +221,6 @@ export const useSessions = () => useStore((s) => s.sessions);
 export const useSessionsLoading = () => useStore((s) => s.loading);
 export const useSessionsError = () => useStore((s) => s.error);
 export const useSnapshot = (id) => useStore((s) => (id ? s.snapshots[id] : undefined));
+export const useAttention = (id) => useStore((s) => (id ? !!s.attention[id] : false));
 
 export { getState as getSessionsState };

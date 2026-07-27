@@ -3,6 +3,9 @@ import { usePaneRatio, setPaneRatio } from "../store/selectionStore.js";
 
 const { useCallback } = React;
 const STEP = 0.03;
+const BIG_STEP = 0.1;
+const MIN_RATIO = 0.2;
+const MAX_RATIO = 0.75;
 
 export function Splitter({ containerRef }) {
   const ratio = usePaneRatio();
@@ -31,12 +34,19 @@ export function Splitter({ containerRef }) {
 
   const onKeyDown = useCallback(
     (e) => {
+      const step = e.shiftKey ? BIG_STEP : STEP;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setPaneRatio(ratio - STEP);
+        setPaneRatio(ratio - step);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setPaneRatio(ratio + STEP);
+        setPaneRatio(ratio + step);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setPaneRatio(MIN_RATIO);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setPaneRatio(MAX_RATIO);
       }
     },
     [ratio],

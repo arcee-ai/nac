@@ -1,4 +1,5 @@
 import { React, html } from "../lib/html.js";
+import { Logo } from "../atoms/logo.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 import { SessionBoard } from "./SessionBoard.js";
 import { Splitter } from "./Splitter.js";
@@ -9,6 +10,8 @@ import { DeleteModal } from "./modals/DeleteModal.js";
 import { SettingsModal } from "./modals/SettingsModal.js";
 import { useToast } from "../providers/ToastProvider.js";
 import { useIsDesktop } from "../hooks/useMediaQuery.js";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import { pushLocalEvent } from "../store/runtimeStore.js";
 import { api } from "../services/api.js";
 import {
   loadStoreInfo,
@@ -37,6 +40,7 @@ export function AppShell() {
   const isDesktop = useIsDesktop();
   const selectedId = useSelectedId();
   const entry = useSelectedEntry();
+  const sessions = useSessions();
   const paneRatio = usePaneRatio();
   const fullscreen = useInspectorFullscreen();
   const mobileDetailOpen = useMobileDetailOpen();
@@ -46,16 +50,25 @@ export function AppShell() {
 
   useEffect(() => {
     loadStoreInfo();
-    loadSessions();
-    startPolling(5000);
+    loadSessions({ workspaceStats: true });
+    startPolling(5000, { workspaceStats: true });
     return () => stopPolling();
   }, []);
 
   const closeModal = () => setModal(null);
+
+  useKeyboardShortcuts({
+    sessions,
+    selectedId,
+    modal,
+    closeModal,
+    openLaunch: () => setModal("launch"),
+  });
   const onCancelRun = async () => {
     if (!selectedId) return;
     try {
       await api.cancelActiveRun(selectedId);
+      pushLocalEvent("run", "■ run cancellation requested");
       toast.success("Run cancellation requested");
       loadSnapshot(selectedId);
     } catch (e) {
@@ -93,7 +106,7 @@ export function AppShell() {
   return html`<div class="h-screen flex flex-col">
     <header class="flex items-center justify-between px-3 h-12 border-b border-primary bg-elevation-ground shrink-0">
       <div class="flex items-center gap-2">
-        <span class="header-small text-basic-primary">nac</span>
+        <${Logo} height=${32} className="text-basic-primary" />
         <span class="tag-label text-basic-muted">sessions</span>
       </div>
       <div class="flex items-center gap-1">

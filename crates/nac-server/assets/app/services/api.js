@@ -1,9 +1,9 @@
-// Thin API client for the nac-web backend. When the page is served from the
-// static preview server (any port != 3210) it targets the live API on :3210;
-// when served by nac-web itself it uses same-origin. CORS on nac-web is
-// permissive, which makes the buildless preview work.
+// Thin API client for the nac-web backend. Normally the app is served by
+// nac-web itself, so it talks to the same origin (works on any bind port).
+// Only the buildless static preview (python server on :8001) targets the live
+// API on :3210 cross-origin, which nac-web's permissive CORS allows.
 export const API_BASE =
-  window.location.port === "3210" ? "" : "http://127.0.0.1:3210";
+  window.location.port === "8001" ? "http://127.0.0.1:3210" : "";
 
 async function request(method, path, body) {
   const res = await fetch(API_BASE + path, {
@@ -37,8 +37,9 @@ export const api = {
     request("GET", "/sessions" + (workspaceStats ? "?workspace_stats=true" : "")),
   getSession: (id) => request("GET", `/sessions/${encodeURIComponent(id)}`),
   createSession: (payload) => request("POST", "/sessions", payload),
+  launchDefaults: (location) => request("POST", "/sessions/launch-defaults", location),
   deleteSession: (id) => request("DELETE", `/sessions/${encodeURIComponent(id)}`),
-  reorderSessions: (order) => request("PUT", "/sessions/order", { order }),
+  reorderSessions: (payload) => request("PUT", "/sessions/order", payload),
   renameSession: (id, payload) =>
     request("PUT", `/sessions/${encodeURIComponent(id)}/presentation`, payload),
   updateConfig: (id, payload) =>
@@ -47,8 +48,12 @@ export const api = {
     request("POST", `/sessions/${encodeURIComponent(id)}/runs`, payload),
   cancelActiveRun: (id) =>
     request("POST", `/sessions/${encodeURIComponent(id)}/cancel-active-run`),
-  getWorkspaceDiff: (id) =>
-    request("GET", `/sessions/${encodeURIComponent(id)}/workspace/diff`),
+  getWorkspaceDiff: (id, path, { stage, context } = {}) => {
+    const qs = new URLSearchParams({ path });
+    if (stage) qs.set("stage", stage);
+    if (context != null) qs.set("context", String(context));
+    return request("GET", `/sessions/${encodeURIComponent(id)}/workspace/diff?${qs.toString()}`);
+  },
   eventStreamUrl: (id) =>
     API_BASE + `/sessions/${encodeURIComponent(id)}/events/stream`,
 };

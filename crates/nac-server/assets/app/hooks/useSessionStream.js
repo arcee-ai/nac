@@ -1,6 +1,6 @@
 import { React } from "../lib/html.js";
 import { loadSnapshot, connectStream, disconnectStream } from "../store/sessionsStore.js";
-import { resetRuntime, applyEnvelope } from "../store/runtimeStore.js";
+import { resetRuntime, applyEnvelope, setStreamStatus } from "../store/runtimeStore.js";
 
 const { useEffect, useRef } = React;
 
@@ -26,10 +26,14 @@ export function useSessionStream(id) {
       }, 250);
     };
 
-    connectStream(id, (env) => {
-      const needsReload = applyEnvelope(env);
-      if (needsReload) scheduleReload();
-    });
+    connectStream(
+      id,
+      (env) => {
+        const needsReload = applyEnvelope(env);
+        if (needsReload) scheduleReload();
+      },
+      setStreamStatus,
+    );
 
     return () => {
       disconnectStream();

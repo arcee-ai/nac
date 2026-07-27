@@ -9,7 +9,9 @@ export const runtimeStore = createStore({
   running: false,
   activity: "",
   error: null,
-  events: [], // [{ seq, kind, text, isError, ts }]
+  streamStatus: "idle", // idle | connecting | live | reconnecting
+  events: [], // [{ seq, kind, text, isError, ts, local }]
+  threads: {}, // name -> { status, action, lastLine, exitCode, isError }
 });
 
 const { setState, getState, useStore } = runtimeStore;
@@ -17,7 +19,25 @@ const { setState, getState, useStore } = runtimeStore;
 const MAX_EVENTS = 300;
 
 export function resetRuntime(sessionId) {
-  setState({ sessionId, running: false, activity: "", error: null, events: [] });
+  setState({
+    sessionId,
+    running: false,
+    activity: "",
+    error: null,
+    streamStatus: "connecting",
+    events: [],
+    threads: {},
+  });
+}
+
+export function setStreamStatus(streamStatus) {
+  setState({ streamStatus });
+}
+
+// Record a client-side event (prompt submitted, run cancelled, stream error) so
+// the Events tab shows the full interaction, not just server frames.
+export function pushLocalEvent(kind, text, isError = false) {
+  pushEvent({ seq: null, kind, text, isError, local: true });
 }
 
 function pushEvent(ev) {
@@ -26,6 +46,11 @@ function pushEvent(ev) {
     events.push({ ts: Date.now(), ...ev });
     return { events };
   });
+}
+
+function updateThread(name, patch) {
+  if (!name) return;
+  setState((s) => ({ threads: { ...s.threads, [name]: { ...(s.threads[name] || {}), name, ...patch } } }));
 }
 
 // Classify one envelope. Returns true when the canonical snapshot should be
@@ -75,12 +100,15 @@ function applyAgent(seq, a) {
     case "thread_started":
       setState({ activity: `Thread ${a.name}: ${a.action || ""}` });
       pushEvent({ seq, kind: "thread", text: `⌥ thread "${a.name}" — ${a.action || ""}` });
+      updateThread(a.name, { status: "running", action: a.action || "", lastLine: "", exitCode: null });
       return false;
     case "thread_log":
       pushEvent({ seq, kind: "log", text: `${a.name}: ${a.line || ""}` });
+      updateThread(a.name, { lastLine: a.line || "" });
       return false;
     case "thread_finished":
       pushEvent({ seq, kind: "thread", text: `⌦ thread "${a.name}" (exit ${a.exit_code})` });
+      updateThread(a.name, { status: "finished", exitCode: a.exit_code, isError: !!a.exit_code });
       return false;
     case "assistant_message":
       setState({ activity: "" });
@@ -101,4 +129,6 @@ export const useRunning = () => useStore((s) => s.running);
 export const useActivity = () => useStore((s) => s.activity);
 export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);
+export const useStreamStatus = () => useStore((s) => s.streamStatus);
+export const useLiveThreads = () => useStore((s) => s.threads);
 export { getState as getRuntimeState };

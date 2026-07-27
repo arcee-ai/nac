@@ -6,7 +6,7 @@ import { displaySessionTitle, shortId, isActiveRun } from "../../lib/format.js";
 import {
   useInspectorFullscreen,
   toggleInspectorFullscreen,
-  clearSelection,
+  setMobileDetailOpen,
 } from "../../store/selectionStore.js";
 
 function ActionButton({ title, icon, onClick, variant = ButtonVariant.Ghost, disabled = false }) {
@@ -39,7 +39,7 @@ export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete
           variant=${ButtonVariant.Ghost}
           size=${ButtonSize.Small}
           content=${ButtonContent.IconLeft}
-          onClick=${clearSelection}
+          onClick=${() => setMobileDetailOpen(false)}
         >
           <${Icon} name="arrowLeft" /> Sessions
         </${Button}>`

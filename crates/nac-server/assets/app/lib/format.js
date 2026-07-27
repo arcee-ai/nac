@@ -1,7 +1,37 @@
 // Presentation helpers ported from app.js (card view model + metrics bar).
 
 export function shortId(id) {
-  return (id || "").slice(0, 8);
+  if (!id) return "--";
+  return id.length > 13 ? `${id.slice(0, 8)}:${id.slice(-4)}` : id;
+}
+
+// Collapse a `/plan` or `/run` command message back to its short human form
+// (mirrors app.js displayPromptFromMessageText). Non-command text is returned
+// unchanged.
+export function displayPromptFromMessageText(content) {
+  const text = String(content || "");
+  const normalized = text.replaceAll("\r\n", "\n");
+  const header = normalized.split("\n", 1)[0] || "";
+  const match = header.match(/^# \/(plan|run)\s*:/);
+  if (!match) return text;
+  const kind = match[1];
+  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex === -1) return text;
+  const valueStart = markerIndex + marker.length;
+  const valueEnd = normalized.indexOf("\n\n", valueStart);
+  if (valueEnd === -1) return text;
+  const value = normalized.slice(valueStart, valueEnd).trim();
+  return value ? `/${kind} ${value}` : text;
+}
+
+// Compact duration, e.g. 850 -> "0.9s", 62000 -> "1m 2s".
+export function formatDurationShort(ms) {
+  if (ms == null || !isFinite(ms)) return "--";
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s % 60)}s`;
 }
 
 export function displaySessionTitle(summary) {
@@ -72,12 +102,15 @@ export function metricsFromSnapshot(snapshot, entry) {
     (snapshot && Array.isArray(snapshot.messages) ? snapshot.messages.length : undefined) ??
     summary.visible_message_count ??
     0;
+  const rt = (snapshot && snapshot.response_timing) || {};
   return {
     model: meta.model || summary.model || "--",
     backend: meta.backend || summary.backend || "--",
     messages,
     run: active ? "running" : "idle",
     active,
+    startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
+    lastResponseMs: rt.last_response_duration_ms ?? null,
     tokens,
     context,
   };

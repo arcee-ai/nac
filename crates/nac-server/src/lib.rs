@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
+use include_dir::{include_dir, Dir};
 use axum::{
     extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
     http::{header, StatusCode},
@@ -917,43 +918,10 @@ pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
-        .route("/react", get(react_demo_html))
-        .route("/react/transcript", get(react_transcript_html))
-        .route("/assets/app.css", get(app_css))
-        .route("/assets/app.js", get(app_js))
-        .route("/assets/app-react.js", get(app_react_js))
-        .route(
-            "/assets/app-react-transcript.js",
-            get(app_react_transcript_js),
-        )
-        .route(
-            "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
-            get(doto_rounded_extra_bold_font),
-        )
-        .route("/assets/fonts/doto/OFL.txt", get(doto_font_license))
-        .route("/assets/vendor/purify.min.js", get(vendor_purify_js))
-        .route(
-            "/assets/vendor/markdown-it.min.js",
-            get(vendor_markdown_it_js),
-        )
-        .route(
-            "/assets/vendor/react.production.min.js",
-            get(vendor_react_js),
-        )
-        .route(
-            "/assets/vendor/react-dom.production.min.js",
-            get(vendor_react_dom_js),
-        )
-        .route("/assets/vendor/htm.js", get(vendor_htm_js))
-        .route("/assets/vendor/highlight.min.js", get(vendor_highlight_js))
-        .route(
-            "/assets/vendor/highlight-github-dark.min.css",
-            get(vendor_highlight_css),
-        )
-        .route(
-            "/assets/vendor/html-react-parser.min.js",
-            get(vendor_html_react_parser_js),
-        )
+        // Legacy vanilla-JS UI kept for side-by-side verification during the
+        // migration. Its assets are served by the embedded `/assets/*` handler.
+        .route("/legacy", get(legacy_index_html))
+        .route("/assets/{*path}", get(serve_asset))
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route(
@@ -999,144 +967,46 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
+// The frontend is a buildless React + htm app under `assets/`. It is embedded
+// into the binary at compile time so `nac-web` stays a single self-contained
+// executable with no runtime filesystem dependency on the asset tree.
+static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
+
 async fn index_html() -> Html<&'static str> {
+    Html(include_str!("../assets/next.html"))
+}
+
+async fn legacy_index_html() -> Html<&'static str> {
     Html(include_str!("../assets/index.html"))
 }
 
-async fn app_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/app.css"),
-    )
+fn asset_content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") | Some("map") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        Some("png") => "image/png",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
 
-async fn app_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/app.js"),
-    )
-}
-
-async fn react_demo_html() -> Html<&'static str> {
-    Html(include_str!("../assets/react-demo.html"))
-}
-
-async fn app_react_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/app-react.js"),
-    )
-}
-
-async fn doto_rounded_extra_bold_font() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "font/woff2")],
-        include_bytes!("../assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2").as_slice(),
-    )
-}
-
-async fn doto_font_license() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        include_str!("../assets/fonts/doto/OFL.txt"),
-    )
-}
-
-async fn vendor_purify_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/purify.min.js"),
-    )
-}
-
-async fn vendor_markdown_it_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/markdown-it.min.js"),
-    )
-}
-
-async fn vendor_react_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/react.production.min.js"),
-    )
-}
-
-async fn vendor_react_dom_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/react-dom.production.min.js"),
-    )
-}
-
-async fn vendor_htm_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/htm.js"),
-    )
-}
-
-async fn react_transcript_html() -> Html<&'static str> {
-    Html(include_str!("../assets/react-transcript.html"))
-}
-
-async fn app_react_transcript_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/app-react-transcript.js"),
-    )
-}
-
-async fn vendor_highlight_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/highlight.min.js"),
-    )
-}
-
-async fn vendor_highlight_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/vendor/highlight-github-dark.min.css"),
-    )
-}
-
-async fn vendor_html_react_parser_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/html-react-parser.min.js"),
-    )
+// Serve any embedded asset by its path relative to the `assets/` root (the
+// `/assets/` prefix is stripped by the route). Returns 404 for unknown paths.
+async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
+    match ASSETS.get_file(&path) {
+        Some(file) => (
+            [(header::CONTENT_TYPE, asset_content_type(&path))],
+            file.contents(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "asset not found").into_response(),
+    }
 }
 
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {

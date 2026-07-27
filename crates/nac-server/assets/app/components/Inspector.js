@@ -5,6 +5,9 @@ import { InspectorHeader } from "./inspector/InspectorHeader.js";
 import { MetricsBar } from "./inspector/MetricsBar.js";
 import { ChatTab } from "./inspector/ChatTab.js";
 import { EventsView } from "./inspector/EventsView.js";
+import { ThreadsView } from "./inspector/ThreadsView.js";
+import { WorksetsView } from "./inspector/WorksetsView.js";
+import { WorkspaceView } from "./inspector/WorkspaceView.js";
 import { useSnapshot } from "../store/sessionsStore.js";
 import { useActiveTab, setActiveTab, TABS } from "../store/selectionStore.js";
 import { useSessionStream } from "../hooks/useSessionStream.js";
@@ -35,12 +38,31 @@ function Placeholder({ tab }) {
   </div>`;
 }
 
+function RepairBanner({ message, onSettings }) {
+  return html`<div class="flex items-center gap-3 px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary shrink-0">
+    <${Icon} name="repair" size=${16} />
+    <div class="flex-grow min-w-0">
+      <div class="label-small">Configuration needs repair</div>
+      <div class="text-micro truncate">${message}</div>
+    </div>
+    <button
+      type="button"
+      class="label-small underline shrink-0 hover:opacity-80"
+      onClick=${onSettings}
+    >
+      Open settings
+    </button>
+  </div>`;
+}
+
 export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings, onCancelRun }) {
   const snapshot = useSnapshot(id);
   const activeTab = useActiveTab();
   useSessionStream(id);
 
   if (!id) return EmptyState();
+
+  const configError = entry && entry.summary && entry.summary.model_config_error;
 
   return html`<section class="inspector flex flex-col min-h-0 h-full bg-elevation-level-0-5">
     <${InspectorHeader}
@@ -52,6 +74,7 @@ export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings
       onSettings=${onSettings}
       onCancelRun=${onCancelRun}
     />
+    ${configError ? html`<${RepairBanner} message=${configError} onSettings=${onSettings} />` : null}
     <nav class="flex gap-1 px-2 border-b border-primary shrink-0 overflow-x-auto">
       ${TABS.map(
         (t) => html`<${HorizontalTabsItem}
@@ -70,7 +93,13 @@ export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings
         ? html`<${ChatTab} id=${id} />`
         : activeTab === "events"
           ? html`<${EventsView} />`
-          : html`<div class="h-full overflow-auto"><${Placeholder} tab=${activeTab} /></div>`}
+          : activeTab === "threads"
+            ? html`<${ThreadsView} id=${id} />`
+            : activeTab === "worksets"
+              ? html`<${WorksetsView} id=${id} />`
+              : activeTab === "workspace"
+                ? html`<${WorkspaceView} id=${id} />`
+                : html`<div class="h-full overflow-auto"><${Placeholder} tab=${activeTab} /></div>`}
     </div>
   </section>`;
 }

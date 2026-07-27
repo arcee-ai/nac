@@ -5,7 +5,7 @@ import { Button, ButtonVariant, ButtonContent } from "../../atoms/button.js";
 import { api } from "../../services/api.js";
 import { useToast } from "../../providers/ToastProvider.js";
 import { loadSnapshot } from "../../store/sessionsStore.js";
-import { useRunning } from "../../store/runtimeStore.js";
+import { useRunning, pushLocalEvent } from "../../store/runtimeStore.js";
 
 const { useState, useRef, useCallback } = React;
 
@@ -24,10 +24,12 @@ export function PromptForm({ id }) {
     setSending(true);
     try {
       await api.submitRun(id, { prompt });
+      pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
       setValue("");
       loadSnapshot(id); // user message appears; stream drives the rest
       if (ref.current) ref.current.style.height = "auto";
     } catch (e) {
+      pushLocalEvent("error", `submit failed: ${e.message}`, true);
       toast.error(`Failed to send: ${e.message}`);
     } finally {
       setSending(false);
@@ -35,7 +37,8 @@ export function PromptForm({ id }) {
   }, [value, busy, id, toast]);
 
   const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Send on Cmd/Ctrl+Enter; plain Enter inserts a newline (matches old UI).
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       submit();
     }
@@ -57,12 +60,13 @@ export function PromptForm({ id }) {
   >
     <textarea
       ref=${ref}
+      data-prompt-input="true"
       class=${cn(
         "input rounded-[8px] px-3 py-2 resize-none flex-grow font-normal leading-relaxed",
         "min-h-[44px] max-h-[200px]",
       )}
       rows=${1}
-      placeholder=${running ? "Run in progress…" : "Type a message…  (Enter to send, Shift+Enter for newline)"}
+      placeholder=${running ? "Run in progress…" : "Type a message…  (Cmd/Ctrl+Enter to send)"}
       spellcheck="false"
       value=${value}
       disabled=${busy}
