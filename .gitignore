@@ -6,3 +6,5 @@ nac.db
 .dots/
 # local-only model client overrides
 crates/nac-core/src/model/client_local.rs
+# local-only Cursor rules / agent handoff notes
+.cursor/

@@ -81,7 +81,7 @@ export function ThreadsView({ id }) {
 
   const runningCount = ordered.filter((t) => isRunning(t.name)).length;
 
-  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3">
+  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3 [&>*]:shrink-0">
     ${runningCount > 0
       ? html`<div class="tag-label text-basic-muted">Running (${runningCount})</div>`
       : null}

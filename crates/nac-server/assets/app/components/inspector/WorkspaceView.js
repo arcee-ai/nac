@@ -221,7 +221,7 @@ export function WorkspaceView({ id }) {
 
   if (!snap) return html`<div class="p-6 text-basic-muted label-small">Loading…</div>`;
 
-  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3">
+  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3 [&>*]:shrink-0">
     <div class="rounded-xl border border-secondary bg-elevation-level-1 p-3 flex flex-col gap-1">
       <div class="flex items-center gap-2">
         <${Icon} name="folder" />

@@ -76,7 +76,7 @@ export function WorksetsView({ id }) {
   if (items.length === 0)
     return html`<div class="p-6 text-basic-muted label-small">No worksets defined for this session.</div>`;
 
-  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3">
+  return html`<div class="h-full overflow-auto p-4 flex flex-col gap-3 [&>*]:shrink-0">
     ${items.map((w) => html`<${Workset} key=${w.id} workset=${w} />`)}
   </div>`;
 }
