@@ -15,6 +15,13 @@ enum ArceeCredentialSource {
     ApiKey,
 }
 
+/// A terminal HTTP outcome from a model request, carrying the status code so
+/// callers (e.g. the arcee-auth 401 refresh fallback) can branch on it.
+struct ModelHttpError {
+    status: Option<u16>,
+    message: String,
+}
+
 fn is_sensitive_model_header(name: &str) -> bool {
     ["host", "authorization", "proxy-authorization", "x-api-key"]
         .iter()
@@ -44,17 +51,11 @@ fn validate_extra_headers(
     Ok(())
 }
 
-fn resolve_arcee_auth_credentials(
-    explicit_base_url: Option<&str>,
-) -> Result<(String, String, ArceeCredentialSource)> {
+fn resolve_arcee_auth_base_url(explicit_base_url: Option<&str>) -> Result<String> {
     match explicit_base_url {
         None => {
             let record = arcee::read_stored_auth().map_err(classify_stored_arcee_auth_error)?;
-            Ok((
-                record.base_url,
-                record.api_key,
-                ArceeCredentialSource::StoredLogin,
-            ))
+            Ok(record.base_url)
         }
         Some(base_url) => {
             let requested_url = arcee::validate_approved_base_url(base_url)
@@ -69,11 +70,7 @@ fn resolve_arcee_auth_credentials(
                     stored_url.origin().ascii_serialization()
                 )));
             }
-            Ok((
-                base_url.to_string(),
-                record.api_key,
-                ArceeCredentialSource::StoredLogin,
-            ))
+            Ok(base_url.to_string())
         }
     }
 }
@@ -101,7 +98,7 @@ pub fn validate_model_configuration(
     validate_backend_api_key_env(backend, base_url, api_key_env)?;
     match backend {
         BackendKind::ArceeAuth => {
-            resolve_arcee_auth_credentials(base_url)?;
+            resolve_arcee_auth_base_url(base_url)?;
         }
         BackendKind::ArceeApi => {
             let base_url = base_url.ok_or_else(|| {
@@ -166,9 +163,8 @@ impl ModelClient {
                     Some(&settings.base_url),
                     settings.api_key_env.as_deref(),
                 )?;
-                let (_, api_key, source) =
-                    resolve_arcee_auth_credentials(Some(&settings.base_url))?;
-                (api_key, Some(source))
+                resolve_arcee_auth_base_url(Some(&settings.base_url))?;
+                (String::new(), Some(ArceeCredentialSource::StoredLogin))
             }
             BackendKind::ArceeApi => {
                 let (_, api_key, source) = resolve_arcee_api_credentials(
@@ -295,13 +291,7 @@ impl ModelClient {
         parse_together_chat_response(&value, &url)
     }
 
-    async fn send_arcee_chat(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDefinition>,
-    ) -> Result<ModelTurnResponse> {
-        let url = arcee::chat_completions_url(&self.base_url)
-            .map_err(classify_model_configuration_error)?;
+    fn arcee_chat_request(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
         let mut request = json!({
             "model": self.model,
             "messages": messages
@@ -313,12 +303,27 @@ impl ModelClient {
 
         if !tools.is_empty() {
             request["tools"] =
-                serde_json::to_value(&tools).unwrap_or_else(|_| Value::Array(Vec::new()));
+                serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
         }
+        request
+    }
 
-        let value = self
-            .post_arcee_json_with_retry(url.as_str(), &request)
-            .await?;
+    async fn send_arcee_chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ModelTurnResponse> {
+        let url = arcee::chat_completions_url(&self.base_url)
+            .map_err(classify_model_configuration_error)?;
+        let request = self.arcee_chat_request(&messages, &tools);
+
+        let value = match self.backend {
+            BackendKind::ArceeAuth => {
+                self.post_arcee_auth_with_refresh(url.as_str(), &request)
+                    .await?
+            }
+            _ => self.post_json_with_retry(url.as_str(), &request).await?,
+        };
         parse_chat_completions_response(&value, url.as_str())
     }
 
@@ -373,13 +378,35 @@ impl ModelClient {
         .await
     }
 
-    async fn post_arcee_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
-        debug_assert!(self.arcee_credential_source.is_some());
-        let api_key = self.api_key.as_str();
-        self.post_json_with_retry_headers(url, body, |request| {
-            request
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("X-Arcee-Client", "nac-cli")
+    /// Sends an `arcee-auth` inference request using a device-flow access token,
+    /// refreshing proactively before the request and once more on a 401 fallback.
+    async fn post_arcee_auth_with_refresh(&self, url: &str, body: &Value) -> Result<Value> {
+        debug_assert!(matches!(
+            self.arcee_credential_source,
+            Some(ArceeCredentialSource::StoredLogin)
+        ));
+        let token = arcee::fresh_access_token(&self.client, &self.base_url).await?;
+        match self.try_post_arcee_auth(url, body, &token).await {
+            Ok(value) => Ok(value),
+            Err(error) if error.status == Some(401) => {
+                let refreshed =
+                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token).await?;
+                self.try_post_arcee_auth(url, body, &refreshed)
+                    .await
+                    .map_err(|error| anyhow!(error.message))
+            }
+            Err(error) => Err(anyhow!(error.message)),
+        }
+    }
+
+    async fn try_post_arcee_auth(
+        &self,
+        url: &str,
+        body: &Value,
+        token: &str,
+    ) -> std::result::Result<Value, ModelHttpError> {
+        self.try_post_json_with_retry_headers(url, body, |request| {
+            request.header("Authorization", format!("Bearer {token}"))
         })
         .await
     }
@@ -408,7 +435,24 @@ impl ModelClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
-        let mut last_error = anyhow!("No attempts made");
+        self.try_post_json_with_retry_headers(url, body, apply_headers)
+            .await
+            .map_err(|error| anyhow!(error.message))
+    }
+
+    async fn try_post_json_with_retry_headers<F>(
+        &self,
+        url: &str,
+        body: &Value,
+        apply_headers: F,
+    ) -> std::result::Result<Value, ModelHttpError>
+    where
+        F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+    {
+        let mut last_error = ModelHttpError {
+            status: None,
+            message: "No attempts made".to_string(),
+        };
 
         for attempt in 0..3 {
             if attempt > 0 {
@@ -421,11 +465,18 @@ impl ModelClient {
                 request = request.header("Content-Type", "application/json");
             }
             let response = self
-                .apply_extra_headers(apply_headers(request))?
+                .apply_extra_headers(apply_headers(request))
+                .map_err(|error| ModelHttpError {
+                    status: None,
+                    message: error.to_string(),
+                })?
                 .json(body)
                 .send()
                 .await
-                .map_err(|e| anyhow!("HTTP request failed for {}: {}", url, e))?;
+                .map_err(|e| ModelHttpError {
+                    status: None,
+                    message: format!("HTTP request failed for {}: {}", url, e),
+                })?;
 
             let status = response.status();
             let redirect_location = response
@@ -433,53 +484,57 @@ impl ModelClient {
                 .get(reqwest::header::LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let body = response
-                .text()
-                .await
-                .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+            let body = response.text().await.map_err(|e| ModelHttpError {
+                status: Some(status.as_u16()),
+                message: format!("Failed to read response body: {}", e),
+            })?;
 
             if status.is_redirection() {
                 let location = redirect_location
                     .as_deref()
                     .map(|value| format!(" Location: {}.", truncate_utf8(value, 500)))
                     .unwrap_or_default();
-                return Err(anyhow!(
-                    "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
-                    self.backend,
-                    status.as_u16(),
-                    url,
-                    location,
-                    truncate_utf8(&body, 500)
-                ));
+                return Err(ModelHttpError {
+                    status: Some(status.as_u16()),
+                    message: format!(
+                        "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                        self.backend,
+                        status.as_u16(),
+                        url,
+                        location,
+                        truncate_utf8(&body, 500)
+                    ),
+                });
             }
 
             if status.is_success() {
-                return serde_json::from_str::<Value>(&body).map_err(|e| {
-                    anyhow!(
+                return serde_json::from_str::<Value>(&body).map_err(|e| ModelHttpError {
+                    status: Some(status.as_u16()),
+                    message: format!(
                         "Failed to parse response from {}: {}\nBody: {}",
                         url,
                         e,
                         truncate_utf8(&body, 500)
-                    )
+                    ),
                 });
             }
 
-            if status.as_u16() == 429 || status.is_server_error() {
-                last_error = anyhow!(
+            let error = ModelHttpError {
+                status: Some(status.as_u16()),
+                message: format!(
                     "HTTP {} from {}: {}",
                     status.as_u16(),
                     url,
                     truncate_utf8(&body, 500)
-                );
+                ),
+            };
+
+            if status.as_u16() == 429 || status.is_server_error() {
+                last_error = error;
                 continue;
             }
 
-            return Err(anyhow!(
-                "HTTP {} from {}: {}",
-                status.as_u16(),
-                url,
-                truncate_utf8(&body, 500)
-            ));
+            return Err(error);
         }
 
         Err(last_error)
@@ -509,6 +564,13 @@ impl ModelClient {
 
 #[cfg(test)]
 impl ModelClient {
+    pub(crate) fn new_for_test_server(base_url: String) -> Self {
+        let mut client = Self::new_for_test();
+        client.base_url = base_url;
+        client.reasoning_effort = None;
+        client
+    }
+
     pub fn new_for_test() -> Self {
         Self {
             client: no_redirect_model_client().expect("build no-redirect test model client"),
@@ -533,6 +595,46 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    #[test]
+    fn both_arcee_backends_preserve_summary_system_order_and_omit_empty_tools() {
+        let messages = [
+            Message::System {
+                content: "primary".to_string(),
+            },
+            Message::System {
+                content: "agents".to_string(),
+            },
+            Message::User {
+                content: "historical checkpoint".to_string(),
+            },
+            Message::User {
+                content: "newly aged history".to_string(),
+            },
+            Message::User {
+                content: "compaction prompt".to_string(),
+            },
+        ];
+        let expected_messages = json!([
+            {"role": "system", "content": "primary"},
+            {"role": "system", "content": "agents"},
+            {"role": "user", "content": "historical checkpoint"},
+            {"role": "user", "content": "newly aged history"},
+            {"role": "user", "content": "compaction prompt"}
+        ]);
+
+        for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
+            let client = test_model_client(
+                backend,
+                "https://api.arcee.ai".to_string(),
+                std::collections::BTreeMap::new(),
+            );
+            let request = client.arcee_chat_request(&messages, &[]);
+
+            assert_eq!(request["messages"], expected_messages, "{backend}");
+            assert!(request.get("tools").is_none(), "{backend}");
+        }
+    }
 
     #[tokio::test]
     async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
@@ -560,14 +662,14 @@ mod tests {
             base_url: format!("{}/tenant/base", server.base_url),
             api_key: "stored-login-credential".to_string(),
             model: "arcee-test-model".to_string(),
-            backend: BackendKind::ArceeAuth,
+            backend: BackendKind::ArceeApi,
             reasoning_effort: None,
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::from([(
                 "X-Arcee-Tenant".to_string(),
                 "tenant-test".to_string(),
             )]),
-            arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
+            arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
         };
         let messages = vec![
@@ -620,9 +722,9 @@ mod tests {
             request.headers.get("authorization").map(String::as_str),
             Some("Bearer stored-login-credential")
         );
-        assert_eq!(
-            request.headers.get("x-arcee-client").map(String::as_str),
-            Some("nac-cli")
+        assert!(
+            request.headers.get("x-arcee-client").is_none(),
+            "x-arcee-client header must no longer be sent"
         );
         assert_eq!(
             request.headers.get("content-type").map(String::as_str),
@@ -718,14 +820,14 @@ mod tests {
                 base_url: source.base_url.clone(),
                 api_key: "sensitive-arcee-credential".to_string(),
                 model: "arcee-test-model".to_string(),
-                backend: BackendKind::ArceeAuth,
+                backend: BackendKind::ArceeApi,
                 reasoning_effort: None,
                 api_key_env: None,
                 extra_headers: std::collections::BTreeMap::from([(
                     "X-Arcee-Tenant".to_string(),
                     "sensitive-tenant-header".to_string(),
                 )]),
-                arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
+                arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
                 cache_ttl: None,
             };
 
@@ -996,14 +1098,14 @@ mod tests {
             base_url: format!("http://{address}"),
             api_key: "stored-login-secret-must-not-leak".to_string(),
             model: "test-model".to_string(),
-            backend: BackendKind::ArceeAuth,
+            backend: BackendKind::ArceeApi,
             reasoning_effort: None,
             api_key_env: None,
             extra_headers: std::collections::BTreeMap::from([(
                 "hOsT".to_string(),
                 address.to_string(),
             )]),
-            arcee_credential_source: Some(ArceeCredentialSource::StoredLogin),
+            arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
         };
 

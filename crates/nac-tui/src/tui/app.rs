@@ -7,6 +7,7 @@ pub(super) struct App {
     pub(super) composer: TextArea<'static>,
     pub(super) composer_notice: Option<ComposerNotice>,
     pub(super) active_run_id: Option<SessionRunId>,
+    pub(super) active_manual_compaction_id: Option<String>,
     pub(super) quit: bool,
     pub(super) working_started_at: Option<Instant>,
     pub(super) restored_message_count: usize,
@@ -100,6 +101,10 @@ impl App {
     ) -> Self {
         let workspace = load_workspace_snapshot(read_service.as_ref(), &metadata);
         let worksets = load_worksets_snapshot(read_service.as_ref(), &metadata);
+        let active_manual_compaction_id = read_service
+            .as_ref()
+            .and_then(SessionService::active_compaction)
+            .map(|compaction| compaction.compaction_id.to_string());
 
         let mut panel_scrolls = HashMap::new();
         panel_scrolls.insert(PanelId::Prompt, 0);
@@ -117,6 +122,7 @@ impl App {
             composer: build_composer(),
             composer_notice: None,
             active_run_id: None,
+            active_manual_compaction_id,
             quit: false,
             working_started_at: None,
             restored_message_count: visible_restored_message_count(restored_messages),
@@ -213,7 +219,7 @@ impl App {
         if self.help_visible || matches!(self.screen, ScreenMode::SessionPicker { .. }) {
             return AppAction::None;
         }
-        if self.is_run_active() {
+        if self.is_composer_busy() {
             return AppAction::None;
         }
 
@@ -431,7 +437,7 @@ impl App {
                 modifiers,
                 ..
             } if modifiers.contains(KeyModifiers::SHIFT) => {
-                if !self.is_run_active() {
+                if !self.is_composer_busy() {
                     self.composer.insert_newline();
                 }
                 AppAction::None
@@ -444,7 +450,7 @@ impl App {
             } if modifiers.contains(KeyModifiers::CONTROL)
                 && !modifiers.contains(KeyModifiers::ALT) =>
             {
-                if !self.is_run_active() {
+                if !self.is_composer_busy() {
                     self.composer.insert_newline();
                 }
                 AppAction::None
@@ -455,7 +461,7 @@ impl App {
             } => {
                 let prompt = self.prompt();
                 let trimmed = prompt.trim();
-                if trimmed.is_empty() || self.is_run_active() {
+                if trimmed.is_empty() || self.is_composer_busy() {
                     return AppAction::None;
                 }
 
@@ -475,6 +481,9 @@ impl App {
                         self.help_visible = true;
                         self.clear_composer();
                         AppAction::None
+                    }
+                    PreparedUserInput::FrontendCommand(FrontendCommand::Compact) => {
+                        AppAction::Compact
                     }
                     PreparedUserInput::SubmitPrompt(prompt) => AppAction::Submit(prompt),
                     PreparedUserInput::InvalidSlashCommand { message } => {
@@ -499,7 +508,7 @@ impl App {
                 AppAction::None
             }
             _ => {
-                if !self.is_run_active() {
+                if !self.is_composer_busy() {
                     self.clear_composer_notice();
                     self.composer.input(key);
                 }
@@ -981,12 +990,13 @@ impl App {
                     Tone::Muted,
                 );
             }
-            AgentEvent::ModelCallStarted {
-                thread_name,
-                iteration,
-            } => {
-                let actor = thread_name.unwrap_or_else(|| "model".to_string());
-                self.push_timeline(actor, format!("model turn {iteration}"), Tone::Muted);
+            AgentEvent::ModelCallStarted { .. } => {}
+            AgentEvent::TokenUsageUpdated { .. } => {}
+            event @ (AgentEvent::OrchestratorCompactionStarted { .. }
+            | AgentEvent::OrchestratorCompactionCompleted { .. }
+            | AgentEvent::OrchestratorCompactionSkipped { .. }
+            | AgentEvent::OrchestratorCompactionFailed { .. }) => {
+                apply_compaction_event(self, event);
             }
             AgentEvent::ToolCallStarted {
                 thread_name,
@@ -1089,8 +1099,75 @@ impl App {
                 };
                 self.push_timeline(name, detail, Tone::Success);
             }
-            AgentEvent::ThreadLog { name, line } => {
-                self.push_timeline(name, format!("log • {}", fit_text(&line, 110)), Tone::Muted);
+            AgentEvent::ThreadLog { .. } => {}
+            AgentEvent::ThreadSteeringQueued {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::ThreadSteeringDelivered {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::ThreadSteeringExpired {
+                name,
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    name,
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
+            }
+            AgentEvent::OrchestratorSteeringQueued {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering queued • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Info,
+                );
+            }
+            AgentEvent::OrchestratorSteeringDelivered {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!(
+                        "steering delivered • {}",
+                        fit_text(&instruction_preview, 110)
+                    ),
+                    Tone::Success,
+                );
+            }
+            AgentEvent::OrchestratorSteeringExpired {
+                instruction_preview,
+                ..
+            } => {
+                self.push_timeline(
+                    "orchestrator",
+                    format!("steering expired • {}", fit_text(&instruction_preview, 110)),
+                    Tone::Warning,
+                );
             }
             AgentEvent::ThreadFinished {
                 name,
@@ -2047,6 +2124,18 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(
+                    "/compact",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " compact session context",
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
                     "/plan /run",
                     Style::default()
                         .fg(Color::Cyan)
@@ -2616,9 +2705,16 @@ impl App {
             return;
         }
 
-        if self.is_run_active() {
+        let busy_placeholder = if self.is_run_active() {
+            Some(RUNNING_COMPOSER_PLACEHOLDER)
+        } else if self.is_manual_compaction_active() {
+            Some(COMPACTION_COMPOSER_PLACEHOLDER)
+        } else {
+            None
+        };
+        if let Some(placeholder) = busy_placeholder {
             let line = Line::from(Span::styled(
-                fit_text(RUNNING_COMPOSER_PLACEHOLDER, inner.width as usize),
+                fit_text(placeholder, inner.width as usize),
                 Style::default().fg(Color::DarkGray),
             ));
             frame.render_widget(Paragraph::new(line), inner);

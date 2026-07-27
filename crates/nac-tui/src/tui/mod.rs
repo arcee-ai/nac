@@ -43,6 +43,7 @@ use nac_core::view::{
 
 mod app;
 mod commands;
+mod compaction;
 mod markdown;
 mod render;
 mod selection;
@@ -55,6 +56,7 @@ mod wrap;
 
 use app::*;
 use commands::*;
+use compaction::*;
 use markdown::*;
 use render::*;
 use selection::*;
@@ -76,6 +78,7 @@ const PROMPT_SEPARATOR: &str = " › ";
 const COMMAND_SEPARATOR: &str = " / ";
 const CONTINUATION_PREFIX: &str = "   ";
 const RUNNING_COMPOSER_PLACEHOLDER: &str = "Awaiting orchestrator reply.";
+const COMPACTION_COMPOSER_PLACEHOLDER: &str = "Compacting session context.";
 
 type UiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -86,6 +89,7 @@ enum AppAction {
     None,
     Quit,
     Submit(PreparedPrompt),
+    Compact,
     ResumeSession(String),
 }
 
@@ -162,6 +166,8 @@ async fn run_inner(
     start_in_session_picker: bool,
 ) -> Result<TuiOutcome> {
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<CrosstermEvent>();
+    let (compaction_tx, mut compaction_rx) =
+        mpsc::unbounded_channel::<ManualCompactionCompletion>();
     let SessionServiceInit {
         metadata,
         restored_messages,
@@ -237,6 +243,17 @@ async fn run_inner(
                                         submit_prompt(prompt, service, &mut app, &mut terminal)?;
                                         terminal_action = true;
                                     }
+                                    AppAction::Compact => {
+                                        let service = service.as_ref().ok_or_else(|| {
+                                            anyhow::anyhow!("session picker cannot compact sessions")
+                                        })?;
+                                        start_manual_compaction(
+                                            service,
+                                            &mut app,
+                                            compaction_tx.clone(),
+                                        );
+                                        terminal_action = true;
+                                    }
                                     AppAction::ResumeSession(session_id) => {
                                         outcome = TuiOutcome::ResumeSession(session_id);
                                         app.quit = true;
@@ -258,6 +275,17 @@ async fn run_inner(
                                                     anyhow::anyhow!("session picker cannot submit prompts")
                                                 })?;
                                                 submit_prompt(prompt, service, &mut app, &mut terminal)?;
+                                                break;
+                                            }
+                                            AppAction::Compact => {
+                                                let service = service.as_ref().ok_or_else(|| {
+                                                    anyhow::anyhow!("session picker cannot compact sessions")
+                                                })?;
+                                                start_manual_compaction(
+                                                    service,
+                                                    &mut app,
+                                                    compaction_tx.clone(),
+                                                );
                                                 break;
                                             }
                                             AppAction::ResumeSession(session_id) => {
@@ -312,11 +340,16 @@ async fn run_inner(
                         }
                     }
                 }
+                completion = compaction_rx.recv() => {
+                    let completion = completion.expect("manual compaction channel cannot close");
+                    finish_manual_compaction(&mut app, completion);
+                }
                 _ = ui_tick.tick() => {
                     app.maybe_refresh_workspace();
                 }
             }
 
+            app.reconcile_manual_compaction_state();
             app.check_workspace_channel();
             terminal.draw(|frame| app.render(frame))?;
         }
@@ -433,16 +466,26 @@ fn submit_prompt(
             app.clear_composer();
             begin_top_level_run(app, handle.run_id, display_prompt);
         }
-        Err(SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. }) => {
-            app.show_composer_notice("session is busy; wait for the current reply", Tone::Warning);
-        }
-        Err(SessionSubmitError::Coordination { message }) => {
-            app.show_composer_notice(&message, Tone::Error);
+        Err(error) => {
+            let (message, tone) = submission_admission_notice(&error);
+            app.show_composer_notice(message, tone);
         }
     }
 
     terminal.draw(|frame| app.render(frame))?;
     Ok(())
+}
+
+fn submission_admission_notice(error: &SessionSubmitError) -> (&'static str, Tone) {
+    match error {
+        SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => (
+            "session is busy; wait for the current operation",
+            Tone::Warning,
+        ),
+        SessionSubmitError::Coordination { .. } => {
+            ("Session operation could not start", Tone::Error)
+        }
+    }
 }
 
 fn build_composer() -> TextArea<'static> {
@@ -548,11 +591,11 @@ mod tests {
             );
             sessions::create_session(&metadata.store_path, &snapshot).unwrap();
         }
-        let mut raw = sessions::load_session_model_config(&metadata.store_path, "invalid").unwrap();
+        let mut raw = sessions::load_session_config(&metadata.store_path, "invalid").unwrap();
         raw.backend = Some("auto".to_string());
         raw.reasoning_effort = Some("ultra".to_string());
         raw.extra_headers_json = Some("{broken".to_string());
-        sessions::update_raw_session_model_config(&metadata.store_path, &raw).unwrap();
+        sessions::update_raw_session_config(&metadata.store_path, &raw).unwrap();
 
         let mut app = App::new_without_service(metadata, &[], true);
         app.refresh_session_picker();
@@ -647,6 +690,21 @@ mod tests {
             _ => panic!("expected submit"),
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn submission_coordination_notice_does_not_expose_internal_paths() {
+        const CANARY: &str = "/private/canary/session-store.db";
+        let error = SessionSubmitError::Coordination {
+            message: nac_core::session_service::SessionCoordinationError::Store {
+                detail: format!("failed to open {CANARY}"),
+            },
+        };
+
+        let notice = submission_admission_notice(&error);
+
+        assert_eq!(notice, ("Session operation could not start", Tone::Error));
+        assert!(!notice.0.contains(CANARY));
     }
 
     #[test]
@@ -1130,6 +1188,36 @@ mod tests {
     }
 
     #[test]
+    fn manual_compaction_is_composer_busy_without_becoming_an_active_run() {
+        let dir = temp_dir("compaction-composer-busy");
+        let mut app = App::new(metadata_for(&dir), &[], false);
+        app.composer.insert_str("draft");
+        app.note_manual_compaction_admitted("compaction-id".to_string());
+
+        assert!(app.is_manual_compaction_active());
+        assert!(app.is_composer_busy());
+        assert!(!app.is_run_active());
+        assert!(matches!(app.handle_paste(" pasted"), AppAction::None));
+        assert!(matches!(
+            app.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            AppAction::None
+        ));
+        assert!(matches!(
+            app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppAction::None
+        ));
+        assert_eq!(app.prompt(), "draft");
+        assert_eq!(line_to_plain_text(&app.composer_panel_title()), " [ ASK ] ");
+
+        let mut terminal = Terminal::new(TestBackend::new(80, COMPOSER_HEIGHT)).unwrap();
+        terminal
+            .draw(|frame| app.render_composer(frame, Rect::new(0, 0, 80, COMPOSER_HEIGHT)))
+            .unwrap();
+        assert!(rendered_symbols(&terminal).contains(COMPACTION_COMPOSER_PLACEHOLDER));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn prompt_history_focus_navigation_guard_and_reset_to_latest() {
         let dir = temp_dir("prompt-history-nav");
         let mut app = App::new(metadata_for(&dir), &[], false);
@@ -1392,6 +1480,7 @@ mod tests {
         assert!(!help.contains("Ctrl-O"));
         assert!(!help.contains("focus tools"));
         assert!(help.contains("Ctrl-W / Ctrl-K"));
+        assert!(help.contains("/compact"));
 
         let _ = std::fs::remove_dir_all(dir);
     }

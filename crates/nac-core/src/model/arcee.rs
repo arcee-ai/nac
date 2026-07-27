@@ -1,6 +1,6 @@
 use super::auth_store::{
-    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path, with_arcee_auth_lock,
-    write_arcee_auth_string,
+    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path,
+    try_acquire_arcee_auth_lock, with_arcee_auth_lock, write_arcee_auth_string, FileLock,
 };
 use super::*;
 use anyhow::Context;
@@ -10,10 +10,14 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "nac-cli";
-const AUTH_TYPE: &str = "arcee_api_key";
+const AUTH_TYPE: &str = "arcee_device_token";
 const CANONICAL_AUTH_SERVICE_BASE_URL: &str = "https://api.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
-const DEFAULT_EXPIRES_IN_SECS: u64 = 900;
+const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
+const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 3600;
+const REFRESH_SKEW_MS: u64 = 60_000;
+const REFRESH_LOCK_POLL_INTERVAL_MS: u64 = 50;
+const REFRESH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
 
 pub(super) fn no_redirect_client() -> Result<Client> {
@@ -287,7 +291,10 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]
     auth_type: String,
-    pub(super) api_key: String,
+    pub(super) access_token: String,
+    refresh_token: String,
+    token_type: String,
+    expires_at_ms: u64,
     pub(super) base_url: String,
     organization_id: String,
     workspace_name: String,
@@ -295,10 +302,27 @@ pub(super) struct StoredArceeAuth {
 
 #[derive(Debug, Deserialize)]
 struct TokenSuccess {
-    api_key: String,
+    access_token: String,
+    refresh_token: String,
+    token_type: Option<String>,
+    expires_in: Option<u64>,
     base_url: String,
     organization_id: String,
     workspace_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshSuccess {
+    access_token: String,
+    refresh_token: Option<String>,
+    token_type: Option<String>,
+    expires_in: Option<u64>,
+}
+
+#[derive(Debug)]
+enum RefreshOutcome {
+    Success(RefreshSuccess),
+    Revoked,
 }
 
 #[derive(Debug)]
@@ -342,6 +366,10 @@ impl ArceeAuthService {
 
     fn device_token_url(&self) -> String {
         format!("{}/app/v1/device/token", self.base_url)
+    }
+
+    fn device_refresh_url(&self) -> String {
+        format!("{}/app/v1/device/refresh", self.base_url)
     }
 }
 
@@ -393,6 +421,7 @@ pub(super) fn arcee_auth_status() -> Result<()> {
             println!("workspace: {}", auth.workspace_name);
             println!("organization: {}", auth.organization_id);
             println!("base_url: {}", auth.base_url);
+            println!("access token: {}", expiry_status(auth.expires_at_ms));
             println!("path: {}", path.display());
         }
         None => {
@@ -468,13 +497,192 @@ fn remove_auth_path(path: &Path) -> Result<bool> {
 fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAuth> {
     validate_stored_base_url(&success.base_url)
         .context("Arcee login returned an invalid credential base URL")?;
+    let expires_in = success.expires_in.unwrap_or(DEFAULT_TOKEN_EXPIRES_IN_SECS);
     Ok(StoredArceeAuth {
         auth_type: AUTH_TYPE.to_string(),
-        api_key: success.api_key,
+        access_token: success.access_token,
+        refresh_token: success.refresh_token,
+        token_type: success.token_type.unwrap_or_else(|| "bearer".to_string()),
+        expires_at_ms: now_ms().saturating_add(expires_in.saturating_mul(1000)),
         base_url: success.base_url,
         organization_id: success.organization_id,
         workspace_name: success.workspace_name,
     })
+}
+
+fn near_expiry(auth: &StoredArceeAuth) -> bool {
+    auth.expires_at_ms <= now_ms().saturating_add(REFRESH_SKEW_MS)
+}
+
+/// Process-wide async gate that single-flights refreshes within this process. It
+/// yields the executor while waiting (unlike a blocking file lock), so
+/// concurrent arcee-auth calls never stall Tokio workers.
+fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
+    static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &GATE
+}
+
+/// Acquires the cross-process refresh lock without ever blocking a Tokio worker:
+/// it polls the non-blocking file lock and yields between attempts. The server
+/// rotates the refresh token on every call, so two nac processes refreshing at
+/// once could invalidate each other's tokens; this serializes them.
+async fn acquire_refresh_lock() -> Result<FileLock> {
+    let started = now_ms();
+    loop {
+        if let Some(lock) = try_acquire_arcee_auth_lock()? {
+            return Ok(lock);
+        }
+        if now_ms().saturating_sub(started) >= REFRESH_LOCK_TIMEOUT_MS {
+            return Err(anyhow!(
+                "timed out waiting for the Arcee auth refresh lock; another nac process may be refreshing"
+            ));
+        }
+        sleep(Duration::from_millis(REFRESH_LOCK_POLL_INTERVAL_MS)).await;
+    }
+}
+
+/// Returns a valid access token bound to `expected_base_url`, refreshing
+/// proactively when it is at or near expiry. The pre-check read is lock-free
+/// (credential writes are atomic renames, so a reader always sees a complete
+/// record); the refresh itself is serialized in- and cross-process.
+pub(super) async fn fresh_access_token(client: &Client, expected_base_url: &str) -> Result<String> {
+    let auth = read_stored_auth_for_base_url(expected_base_url)?;
+    if !near_expiry(&auth) {
+        return Ok(auth.access_token);
+    }
+    refresh_locked(client, expected_base_url, near_expiry).await
+}
+
+/// Refreshes after a 401. Passing the access token that failed lets a queued
+/// caller detect that another holder already rotated past it and reuse the new
+/// token instead of triggering a redundant rotation. Every re-read remains
+/// bound to the inference origin selected by the existing model client.
+pub(super) async fn force_refresh_access_token(
+    client: &Client,
+    expected_base_url: &str,
+    stale_access_token: &str,
+) -> Result<String> {
+    refresh_locked(client, expected_base_url, |auth| {
+        auth.access_token == stale_access_token
+    })
+    .await
+}
+
+/// Serializes the refresh across this process (async gate) and across processes
+/// (polled file lock), re-reads the freshest stored record under both locks, and
+/// only performs the network refresh when `should_refresh` still holds.
+async fn refresh_locked(
+    client: &Client,
+    expected_base_url: &str,
+    should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+) -> Result<String> {
+    let _gate = refresh_gate().lock().await;
+    let _lock = acquire_refresh_lock().await?;
+    let auth = read_stored_auth_for_base_url(expected_base_url)?;
+    if !should_refresh(&auth) {
+        return Ok(auth.access_token);
+    }
+    Ok(refresh_and_store_auth(client, auth).await?.access_token)
+}
+
+async fn refresh_and_store_auth(
+    client: &Client,
+    current: StoredArceeAuth,
+) -> Result<StoredArceeAuth> {
+    let service = ArceeAuthService::canonical()?;
+    match request_token_refresh(client, &service, &current.refresh_token).await? {
+        RefreshOutcome::Success(refreshed) => {
+            let updated = stored_auth_from_refresh(current, refreshed);
+            write_stored_auth(&updated)?;
+            Ok(updated)
+        }
+        RefreshOutcome::Revoked => {
+            let _ = remove_auth_path(&arcee_auth_file_path()?);
+            Err(stored_auth_configuration_error(
+                "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
+            ))
+        }
+    }
+}
+
+fn stored_auth_from_refresh(
+    current: StoredArceeAuth,
+    refreshed: RefreshSuccess,
+) -> StoredArceeAuth {
+    let expires_in = refreshed
+        .expires_in
+        .unwrap_or(DEFAULT_TOKEN_EXPIRES_IN_SECS);
+    StoredArceeAuth {
+        auth_type: AUTH_TYPE.to_string(),
+        access_token: refreshed.access_token,
+        // The server rotates the refresh token on every refresh; persist the new
+        // one. Fall back to the current token only if the response omits it.
+        refresh_token: refreshed.refresh_token.unwrap_or(current.refresh_token),
+        token_type: refreshed.token_type.unwrap_or(current.token_type),
+        expires_at_ms: now_ms().saturating_add(expires_in.saturating_mul(1000)),
+        base_url: current.base_url,
+        organization_id: current.organization_id,
+        workspace_name: current.workspace_name,
+    }
+}
+
+async fn request_token_refresh(
+    client: &Client,
+    service: &ArceeAuthService,
+    refresh_token: &str,
+) -> Result<RefreshOutcome> {
+    let url = service.device_refresh_url();
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("User-Agent", user_agent())
+        .json(&json!({ "refresh_token": refresh_token, "client_id": CLIENT_ID }))
+        .send()
+        .await
+        .context("failed to refresh Arcee access token")?;
+
+    let status = response.status();
+    let redirect_location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let body = response
+        .text()
+        .await
+        .context("failed to read Arcee token refresh response")?;
+
+    if status.is_redirection() {
+        return Err(arcee_redirect_error(
+            "token refresh request",
+            &url,
+            status,
+            redirect_location.as_deref(),
+            &body,
+        ));
+    }
+
+    if status.is_success() {
+        return serde_json::from_str::<RefreshSuccess>(&body)
+            .map(RefreshOutcome::Success)
+            .context("failed to parse Arcee token refresh response");
+    }
+
+    let error_code = serde_json::from_str::<Value>(&body).ok().and_then(|value| {
+        value
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+
+    match error_code.as_deref() {
+        Some("invalid_grant") | Some("invalid_client") => Ok(RefreshOutcome::Revoked),
+        _ => Err(anyhow!(
+            "Arcee token refresh failed with HTTP {}: {}",
+            status.as_u16(),
+            truncate(&body)
+        )),
+    }
 }
 
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
@@ -485,6 +693,20 @@ pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
                 "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
             )
         })
+}
+
+fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<StoredArceeAuth> {
+    let auth = read_stored_auth()?;
+    let expected_url = validate_approved_base_url(expected_base_url)?;
+    let stored_url = validate_stored_base_url(&auth.base_url)?;
+    if expected_url.origin() != stored_url.origin() {
+        return Err(stored_auth_configuration_error(format!(
+            "Arcee endpoint origin '{}' does not match the stored credential origin '{}'; log in for the selected origin or select 'arcee-api' with separate API-key credentials",
+            expected_url.origin().ascii_serialization(),
+            stored_url.origin().ascii_serialization()
+        )));
+    }
+    Ok(auth)
 }
 
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
@@ -514,6 +736,18 @@ fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> 
             error
         ))
     })?;
+    for (field, field_value) in [
+        ("access_token", auth.access_token.as_str()),
+        ("refresh_token", auth.refresh_token.as_str()),
+    ] {
+        if field_value.trim().is_empty() {
+            return Err(stored_auth_configuration_error(format!(
+                "stored Arcee auth in {} requires nonblank field '{}'",
+                path.display(),
+                field
+            )));
+        }
+    }
     validate_stored_base_url(&auth.base_url).map_err(|error| {
         stored_auth_configuration_error(format!(
             "stored Arcee auth in {} has an invalid base_url: {}",
@@ -587,7 +821,7 @@ async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Res
     let expires_in_secs = value
         .get("expires_in")
         .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_EXPIRES_IN_SECS);
+        .unwrap_or(DEFAULT_DEVICE_EXPIRES_IN_SECS);
 
     Ok(DeviceCode {
         device_code,
@@ -713,6 +947,17 @@ fn now_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+fn expiry_status(expires_at_ms: u64) -> String {
+    let now = now_ms();
+    if expires_at_ms <= now {
+        let seconds = now.saturating_sub(expires_at_ms) / 1000;
+        format!("expired {seconds}s ago")
+    } else {
+        let seconds = expires_at_ms.saturating_sub(now) / 1000;
+        format!("valid for {seconds}s")
+    }
+}
+
 fn user_agent() -> String {
     format!("nac/{}", env!("CARGO_PKG_VERSION"))
 }
@@ -779,10 +1024,13 @@ mod tests {
         }
     }
 
-    fn stored_auth(api_key: &str) -> StoredArceeAuth {
+    fn stored_auth(access_token: &str) -> StoredArceeAuth {
         StoredArceeAuth {
             auth_type: AUTH_TYPE.to_string(),
-            api_key: api_key.to_string(),
+            access_token: access_token.to_string(),
+            refresh_token: "refresh-1".to_string(),
+            token_type: "bearer".to_string(),
+            expires_at_ms: u64::MAX,
             base_url: "https://api.arcee.ai".to_string(),
             organization_id: "org-1".to_string(),
             workspace_name: "acme".to_string(),
@@ -878,7 +1126,7 @@ mod tests {
             "https://accounts.arcee.ai/device"
         );
         assert_eq!(device.interval_secs, DEFAULT_INTERVAL_SECS);
-        assert_eq!(device.expires_in_secs, DEFAULT_EXPIRES_IN_SECS);
+        assert_eq!(device.expires_in_secs, DEFAULT_DEVICE_EXPIRES_IN_SECS);
     }
 
     #[tokio::test]
@@ -1013,7 +1261,10 @@ mod tests {
             ScriptedResponse::json(
                 "200 OK",
                 json!({
-                    "api_key": "rcai-device-token",
+                    "access_token": "jwt-access-token",
+                    "refresh_token": "opaque-refresh-token",
+                    "token_type": "bearer",
+                    "expires_in": 3600,
                     "base_url": "https://api.arcee.ai",
                     "organization_id": "org-device",
                     "workspace_name": "device-workspace"
@@ -1053,7 +1304,10 @@ mod tests {
         .expect("pending poll should eventually succeed");
         let requests = server.finish();
 
-        assert_eq!(success.api_key, "rcai-device-token");
+        assert_eq!(success.access_token, "jwt-access-token");
+        assert_eq!(success.refresh_token, "opaque-refresh-token");
+        assert_eq!(success.token_type.as_deref(), Some("bearer"));
+        assert_eq!(success.expires_in, Some(3600));
         assert_eq!(success.base_url, "https://api.arcee.ai");
         assert_eq!(success.organization_id, "org-device");
         assert_eq!(success.workspace_name, "device-workspace");
@@ -1086,7 +1340,7 @@ mod tests {
             ),
             (
                 "200 OK",
-                r#"{"api_key":"missing-other-success-fields"}"#,
+                r#"{"access_token":"missing-other-success-fields"}"#,
                 "failed to parse Arcee device authorization response",
             ),
             (
@@ -1136,6 +1390,10 @@ mod tests {
         assert_eq!(
             service.device_token_url(),
             "https://api.arcee.ai/app/v1/device/token"
+        );
+        assert_eq!(
+            service.device_refresh_url(),
+            "https://api.arcee.ai/app/v1/device/refresh"
         );
     }
 
@@ -1409,7 +1667,10 @@ mod tests {
     #[test]
     fn login_token_base_url_must_be_an_approved_arcee_origin() {
         let success = TokenSuccess {
-            api_key: "rcai-hostile".to_string(),
+            access_token: "jwt-hostile".to_string(),
+            refresh_token: "opaque-hostile".to_string(),
+            token_type: Some("bearer".to_string()),
+            expires_in: Some(3600),
             base_url: "https://capture.attacker.example/v1".to_string(),
             organization_id: "org-1".to_string(),
             workspace_name: "acme".to_string(),
@@ -1439,12 +1700,145 @@ mod tests {
 
     #[test]
     fn stored_auth_round_trips() {
-        let auth = stored_auth("rcai-abc");
+        let auth = stored_auth("jwt-abc");
         let raw = serde_json::to_string(&auth).unwrap();
         let value: Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(value["type"], "arcee_api_key");
-        assert_eq!(value["api_key"], "rcai-abc");
+        assert_eq!(value["type"], "arcee_device_token");
+        assert_eq!(value["access_token"], "jwt-abc");
+        assert_eq!(value["refresh_token"], "refresh-1");
         assert_eq!(value["base_url"], "https://api.arcee.ai");
+    }
+
+    #[test]
+    fn stored_auth_from_token_success_computes_absolute_expiry() {
+        let success = TokenSuccess {
+            access_token: "jwt-access".to_string(),
+            refresh_token: "opaque-refresh".to_string(),
+            token_type: None,
+            expires_in: Some(3600),
+            base_url: "https://api.arcee.ai".to_string(),
+            organization_id: "org-1".to_string(),
+            workspace_name: "acme".to_string(),
+        };
+
+        let auth = stored_auth_from_token_success(success).unwrap();
+
+        assert_eq!(auth.access_token, "jwt-access");
+        assert_eq!(auth.refresh_token, "opaque-refresh");
+        assert_eq!(auth.token_type, "bearer");
+        assert!(
+            auth.expires_at_ms > now_ms(),
+            "expiry should be in the future"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_refresh_rotates_and_persists_new_refresh_token() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "access_token": "jwt-access-2",
+                "refresh_token": "rotated-refresh-token",
+                "token_type": "bearer",
+                "expires_in": 3600
+            })
+            .to_string(),
+        )]);
+
+        let outcome = request_token_refresh(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+            "opaque-refresh",
+        )
+        .await
+        .expect("refresh should succeed");
+        let requests = server.finish();
+
+        let refreshed = match outcome {
+            RefreshOutcome::Success(refreshed) => refreshed,
+            RefreshOutcome::Revoked => panic!("unexpected revoked outcome"),
+        };
+        assert_eq!(refreshed.access_token, "jwt-access-2");
+        assert_eq!(
+            refreshed.refresh_token.as_deref(),
+            Some("rotated-refresh-token")
+        );
+        assert_eq!(refreshed.expires_in, Some(3600));
+
+        // The rotated refresh token replaces the one we sent — persisting the old
+        // one would lock the user out on the next refresh.
+        let current = stored_auth("jwt-access-1");
+        let updated = stored_auth_from_refresh(current, refreshed);
+        assert_eq!(updated.access_token, "jwt-access-2");
+        assert_eq!(updated.refresh_token, "rotated-refresh-token");
+
+        assert_eq!(requests.len(), 1);
+        assert_device_request(&requests[0], "/app/v1/device/refresh");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
+            json!({"refresh_token": "opaque-refresh", "client_id": CLIENT_ID})
+        );
+    }
+
+    #[test]
+    fn refresh_without_rotated_token_keeps_current_refresh_token() {
+        let refreshed = RefreshSuccess {
+            access_token: "jwt-access-2".to_string(),
+            refresh_token: None,
+            token_type: None,
+            expires_in: Some(3600),
+        };
+
+        let updated = stored_auth_from_refresh(stored_auth("jwt-access-1"), refreshed);
+
+        assert_eq!(updated.access_token, "jwt-access-2");
+        assert_eq!(updated.refresh_token, "refresh-1");
+    }
+
+    #[tokio::test]
+    async fn token_refresh_reports_revoked_for_invalid_grant_and_invalid_client() {
+        for error in ["invalid_grant", "invalid_client"] {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(
+                "400 Bad Request",
+                json!({ "error": error }).to_string(),
+            )]);
+
+            let outcome = request_token_refresh(
+                &no_redirect_client().unwrap(),
+                &ArceeAuthService::for_test(&server.base_url),
+                "opaque-refresh",
+            )
+            .await
+            .expect("revoked refresh should not be an error");
+            server.finish();
+
+            assert!(
+                matches!(outcome, RefreshOutcome::Revoked),
+                "{error} should map to revoked"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn token_refresh_propagates_other_http_errors() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "503 Service Unavailable",
+            "upstream unavailable",
+        )]);
+
+        let error = request_token_refresh(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+            "opaque-refresh",
+        )
+        .await
+        .expect_err("server error should propagate");
+        server.finish();
+
+        assert!(
+            error.to_string().contains("HTTP 503"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

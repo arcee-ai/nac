@@ -1,3 +1,7 @@
+mod compaction;
+
+pub use compaction::{CompactSessionError, CompactSessionResponse};
+
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
@@ -32,10 +36,13 @@ use nac_core::{
         StoreOptions,
     },
     session_service::{
-        ActiveRunSnapshot, SessionEventReceiver, SessionFrontendSnapshot, SessionRunHandle,
-        SessionService, SessionSubmitError,
+        ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
+        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionOverviewRecord,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    types::Message,
     view::{self, SessionSummarySnapshot},
 };
 use serde::{Deserialize, Serialize};
@@ -43,9 +50,16 @@ use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::compression::{
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+    CompressionLayer,
+};
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
+const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
+const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
+const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
+const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
@@ -198,6 +212,9 @@ pub struct CreateSessionRequest {
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -241,6 +258,9 @@ pub struct UpdateConfigRequest {
     /// Prefer a JSON object. Null or an empty object clears the persisted map.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
+    /// Omitted preserves; null or zero disables.
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
 }
 
 impl UpdateConfigRequest {
@@ -251,6 +271,10 @@ impl UpdateConfigRequest {
             && matches!(self.reasoning_effort, RequestField::Omitted)
             && matches!(self.api_key_env, RequestField::Omitted)
             && matches!(self.extra_headers, RequestField::Omitted)
+            && matches!(
+                self.orchestrator_compaction_threshold,
+                RequestField::Omitted
+            )
     }
 }
 
@@ -287,9 +311,116 @@ pub struct SubmitPromptResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OrchestratorSteeringResponse {
+    pub steering_id: i64,
+    pub status: String,
+    pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadSteeringRequest {
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThreadSteeringResponse {
+    pub steering_id: i64,
+    pub thread_name: String,
+    pub status: String,
+    pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct EventsQuery {
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SessionSnapshotQuery {
+    pub message_limit: Option<usize>,
+    pub thread_event_limit: Option<usize>,
+    pub include_sessions: Option<bool>,
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MessagesQuery {
+    pub before: Option<usize>,
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ThreadEventsQuery {
+    pub before_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessagePageMetadata {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesPageResponse {
+    pub messages: Vec<Message>,
+    pub page: MessagePageMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessageCycleMetadata {
+    pub marker: String,
+    pub thread_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSnapshotResponse {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_page: Option<MessagePageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {
+    fn from(page: nac_core::session_service::MessagePageMetadata) -> Self {
+        Self {
+            start: page.start,
+            end: page.end,
+            total: page.total,
+            has_older: page.has_older,
+        }
+    }
+}
+
+impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetadata {
+    fn from(cycle: nac_core::session_service::MessageCycleMetadata) -> Self {
+        Self {
+            marker: cycle.marker,
+            thread_names: cycle.thread_names,
+        }
+    }
+}
+
+impl From<MessagesPageSnapshot> for MessagesPageResponse {
+    fn from(page: MessagesPageSnapshot) -> Self {
+        Self {
+            messages: page.messages,
+            page: page.page.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -306,6 +437,7 @@ pub struct WorkspaceDiffQuery {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayBoundaryEvent {
+    pub epoch_id: String,
     pub replay_boundary_sequence_id: u64,
 }
 
@@ -567,6 +699,8 @@ impl SessionManager {
             ));
         }
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        let orchestrator_compaction_threshold =
+            create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
         let model = model_options(
             request.model,
             request.base_url,
@@ -584,6 +718,7 @@ impl SessionManager {
                     store_path: Some(self.inner.store_path.clone()),
                 },
                 model,
+                orchestrator_compaction_threshold,
                 sandbox: sandbox_options(request.sandbox),
                 ssh_host: location.ssh_host,
             },
@@ -644,15 +779,20 @@ impl SessionManager {
         Ok(service)
     }
 
-    /// Returns a service whose model configuration revision matches the store.
-    /// The caller must hold both the local lifecycle gate and the shared run
-    /// lease, preventing a PATCH between the revision read and run start.
-    async fn attach_current_submission_service_locked(
+    /// Returns a service whose model configuration matches the store. The
+    /// caller must hold both the local lifecycle gate and the supplied
+    /// operation lease. Durable compaction checkpoints are refreshed by the
+    /// core admission path after this returns.
+    async fn attach_current_operation_service_locked(
         &self,
         session_id: &str,
+        operation_lease: &sessions::SessionOperationLease,
     ) -> Result<Arc<SessionService>> {
+        operation_lease
+            .validate(&self.inner.store_path, session_id)
+            .map_err(anyhow::Error::new)?;
         let persisted_version =
-            sessions::load_session_model_config(&self.inner.store_path, session_id)?.config_version;
+            sessions::load_session_config(&self.inner.store_path, session_id)?.config_version;
         let cached = self
             .inner
             .active_sessions
@@ -660,28 +800,93 @@ impl SessionManager {
             .await
             .get(session_id)
             .cloned();
-        if let Some(service) = cached {
+        let service = if let Some(service) = cached {
             if service.config_version() == Some(persisted_version) {
-                return Ok(service);
+                service
+            } else {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation while its persisted configuration changed"
+                    ));
+                }
+                self.inner.active_sessions.write().await.remove(session_id);
+                self.attach_session_locked(session_id).await?
             }
-            if service.active_run().is_some() {
-                return Err(anyhow!(
-                    "session is busy with an active run while its persisted configuration changed"
-                ));
-            }
-            self.inner.active_sessions.write().await.remove(session_id);
-        }
-        self.attach_session_locked(session_id).await
+        } else {
+            self.attach_session_locked(session_id).await?
+        };
+        Ok(service)
     }
 
-    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionModelConfig> {
-        sessions::load_session_model_config(&self.inner.store_path, session_id)
+    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+        // Lease filenames hex-encode IDs; 120 bytes plus the suffix fits within
+        // the common 255-byte component limit.
+        const MAX_SESSION_ID_BYTES: usize = 120;
+
+        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+            return Ok(false);
+        }
+        sessions::session_exists(&self.inner.store_path, session_id)
+    }
+
+    fn require_persisted_operation_session(&self, session_id: &str) -> Result<()> {
+        if self.persisted_operation_session_exists(session_id)? {
+            Ok(())
+        } else {
+            Err(anyhow!("session '{}' was not found", session_id))
+        }
+    }
+
+    pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
+        sessions::load_session_config(&self.inner.store_path, session_id)
     }
 
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
         self.attach_session(session_id)
             .await?
             .frontend_snapshot()
+            .await
+    }
+
+    pub async fn snapshot_with_options(
+        &self,
+        session_id: &str,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        self.attach_session(session_id)
+            .await?
+            .frontend_snapshot_with_options(options)
+            .await
+    }
+
+    pub async fn messages_page(
+        &self,
+        session_id: &str,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        Ok(self
+            .attach_session(session_id)
+            .await?
+            .messages_page(request)
+            .await)
+    }
+
+    pub async fn thread_events(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        self.attach_session(session_id)
+            .await?
+            .thread_events_page(thread_name, before_id, limit)
+    }
+
+    pub async fn generate_overview(&self, session_id: &str) -> Result<SessionOverviewRecord> {
+        self.attach_session(session_id)
+            .await?
+            .generate_overview()
             .await
     }
 
@@ -716,13 +921,16 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
+        self.require_persisted_operation_session(session_id)?;
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        // The OS lease closes the cross-process gap between checking the
-        // persisted revision and synchronously establishing active-run state.
-        let run_lease = sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        // The OS lease closes the cross-process gap between checking durable
+        // state and synchronously establishing active-run state.
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
         let service = self
-            .attach_current_submission_service_locked(session_id)
+            .attach_current_operation_service_locked(session_id, &operation_lease)
             .await?;
         let client = service.connect_client();
         match client.prepare_user_input(&request.prompt) {
@@ -735,11 +943,43 @@ impl SessionManager {
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
-                    .try_submit_prepared_prompt_with_lease(prompt, run_lease)
-                    .map_err(submit_error_to_anyhow)?;
+                    .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
+                    .map_err(anyhow::Error::new)?;
                 Ok(submit_response(handle, display_prompt))
             }
         }
+    }
+
+    pub async fn queue_thread_steering(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        request: ThreadSteeringRequest,
+    ) -> Result<ThreadSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service
+            .queue_thread_steering(thread_name, &request.instruction)
+            .await?;
+        Ok(ThreadSteeringResponse {
+            steering_id: record.id,
+            thread_name: record.thread_name,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    pub async fn queue_orchestrator_steering(
+        &self,
+        session_id: &str,
+        request: OrchestratorSteeringRequest,
+    ) -> Result<OrchestratorSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let record = service.queue_orchestrator_steering(&request.instruction)?;
+        Ok(OrchestratorSteeringResponse {
+            steering_id: record.id,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
     }
 
     pub async fn recent_events(
@@ -760,6 +1000,7 @@ impl SessionManager {
         after_sequence_id: Option<u64>,
         limit: usize,
     ) -> Result<(
+        String,
         u64,
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
@@ -770,6 +1011,7 @@ impl SessionManager {
             .connect_client()
             .subscribe_events_with_replay(after_sequence_id, limit);
         Ok((
+            subscription.epoch_id,
             subscription.replay_boundary_sequence_id,
             subscription.replay_gap,
             subscription.replayed_events,
@@ -793,29 +1035,52 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        // Cancel any active run, destroy the sandbox, and remove from the
-        // in-memory map.
-        {
-            let active = self.inner.active_sessions.read().await;
-            if let Some(service) = active.get(session_id) {
-                if let Some(active_run) = service.active_run() {
-                    let _ = service
-                        .connect_client()
-                        .request_cancel(&active_run.run_id)
-                        .await;
+        self.require_persisted_operation_session(session_id)?;
+        // Submission, config changes, and deletion share this gate. The
+        // operation lease extends the exclusion to independent processes and
+        // remains held through deletion so an old run cannot save the row back.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let service = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        if let Some(service) = service.as_ref() {
+            if service.active_compaction().is_some() {
+                return Err(anyhow!("session is busy with an active manual compaction"));
+            }
+            if let Some(active_run) = service.active_run() {
+                if let Err(error) = service
+                    .connect_client()
+                    .request_cancel(&active_run.run_id)
+                    .await
+                {
+                    if service.active_run().is_some() {
+                        return Err(anyhow!(error.to_string()));
+                    }
                 }
-                // Explicitly destroy the sandbox so it is torn down even
-                // if SSE handlers or other clones keep the Arc alive.
-                service.destroy_sandbox().await;
+            }
+            if service.has_active_operation() {
+                return Err(anyhow!("session is busy with an active operation"));
             }
         }
-        self.inner.active_sessions.write().await.remove(session_id);
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
+        if let Some(service) = service {
+            // Explicitly destroy the sandbox even if SSE handlers retain the service.
+            service.destroy_sandbox().await;
+        }
 
-        // Cascade-delete all DB rows for this session.
+        // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
         }
+        self.inner.active_sessions.write().await.remove(session_id);
         Ok(())
     }
 
@@ -827,11 +1092,29 @@ impl SessionManager {
         session_id: &str,
         request: UpdateConfigRequest,
     ) -> Result<()> {
-        // An omitted patch is intentionally independent of persisted settings
-        // and credentials. In particular, it must not evict an attached service.
-        if request.is_empty() {
-            return Ok(());
+        let request_empty = request.is_empty();
+        if request_empty {
+            if let Some(service) = self
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .get(session_id)
+                .cloned()
+            {
+                if service.has_active_operation() {
+                    return Err(anyhow!(
+                        "session is busy with an active operation; wait for it before updating config"
+                    ));
+                }
+                return Ok(());
+            }
         }
+        self.require_persisted_operation_session(session_id)?;
+
+        let backend_selected = matches!(&request.backend, RequestField::Value(_));
+        let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
+        let api_key_env_omitted = matches!(&request.api_key_env, RequestField::Omitted);
 
         // Submission and update both hold this per-session gate. A submission
         // that wins establishes active-run state synchronously before releasing
@@ -843,9 +1126,9 @@ impl SessionManager {
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.inner.active_sessions.write().await;
         if let Some(service) = active.get(session_id) {
-            if service.active_run().is_some() {
+            if service.has_active_operation() {
                 return Err(anyhow!(
-                    "session is busy with an active run; cancel it before updating config"
+                    "session is busy with an active operation; wait for it before updating config"
                 ));
             }
         }
@@ -853,14 +1136,22 @@ impl SessionManager {
         // Independent server/TUI processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
-        let _run_lease =
-            sessions::SessionRunLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
 
-        let current = sessions::load_session_model_config(&self.inner.store_path, session_id)?;
+        let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
+        if request_empty && !managed_config_needs_repair(&current) {
+            return Ok(());
+        }
         let mut prospective = current.clone();
         apply_raw_config_patch(&mut prospective, request)?;
-        let (backend, reasoning_effort, extra_headers) =
-            parse_prospective_model_config(&mut prospective)?;
+        let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
+            &mut prospective,
+            backend_selected,
+            base_url_omitted,
+            api_key_env_omitted,
+        )?;
 
         let _settings = EffectiveModelSettings::new(
             backend,
@@ -879,11 +1170,11 @@ impl SessionManager {
             &extra_headers,
         )?;
 
-        // Persist only model columns after all caller-controlled configuration
-        // and credential checks succeed. The revision CAS rejects a concurrent
-        // PATCH, while run/history writes remain independent of these columns.
+        // Persist only revisioned session-configuration columns after all
+        // caller-controlled model configuration and credential checks succeed.
+        // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
         // A store failure or conflict leaves the active map untouched.
-        sessions::update_raw_session_model_config(&self.inner.store_path, &prospective)?;
+        sessions::update_raw_session_config(&self.inner.store_path, &prospective)?;
         active.remove(session_id);
         Ok(())
     }
@@ -914,6 +1205,21 @@ impl SessionManager {
     }
 }
 
+fn response_compression_layer() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new()
+        .gzip(true)
+        .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
+}
+
+fn validate_bind_address(addr: SocketAddr) -> Result<()> {
+    if !addr.ip().is_loopback() {
+        anyhow::bail!(
+            "refusing non-loopback bind address {addr}; nac-web has no remote authentication"
+        );
+    }
+    Ok(())
+}
+
 pub fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/", get(index_html))
@@ -921,6 +1227,9 @@ pub fn router(manager: SessionManager) -> Router {
         // Legacy vanilla-JS UI kept for side-by-side verification during the
         // migration. Its assets are served by the embedded `/assets/*` handler.
         .route("/legacy", get(legacy_index_html))
+        // `app.css` no longer exists on disk, so the compatibility alias needs
+        // an explicit route ahead of the embedded-asset wildcard.
+        .route("/assets/app.css", get(redesign_css))
         .route("/assets/{*path}", get(serve_asset))
         .route("/health", get(health))
         .route("/store", get(store_info))
@@ -934,6 +1243,11 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/presentation",
             put(update_session_presentation_handler),
         )
+        .route("/sessions/{session_id}/messages", get(session_messages))
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/events",
+            get(thread_events),
+        )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route(
             "/sessions/{session_id}",
@@ -943,18 +1257,32 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/config",
             get(session_config_handler).patch(update_config_handler),
         )
+        .route(
+            "/sessions/{session_id}/overview",
+            post(generate_overview_handler),
+        )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route("/sessions/{session_id}/compact", post(compaction::handler))
+        .route(
+            "/sessions/{session_id}/steering",
+            post(queue_orchestrator_steering_handler),
+        )
+        .route(
+            "/sessions/{session_id}/threads/{thread_name}/steering",
+            post(queue_thread_steering_handler),
+        )
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
         .route(
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(CorsLayer::permissive())
+        .layer(response_compression_layer())
         .with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
@@ -994,6 +1322,13 @@ fn asset_content_type(path: &str) -> &'static str {
         Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
+}
+
+async fn redesign_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, asset_content_type("redesign.css"))],
+        include_str!("../assets/redesign.css"),
+    )
 }
 
 // Serve any embedded asset by its path relative to the `assets/` root (the
@@ -1077,8 +1412,75 @@ async fn create_session(
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<SessionFrontendSnapshot>, ApiError> {
-    Ok(Json(manager.snapshot(&session_id).await?))
+    Query(query): Query<SessionSnapshotQuery>,
+) -> std::result::Result<Json<SessionSnapshotResponse>, ApiError> {
+    let mut options = FrontendSnapshotLoadOptions::default();
+    if let Some(limit) = query.thread_event_limit {
+        options.thread_event_limit = limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT);
+    }
+    options.include_sessions = query.include_sessions.unwrap_or(true);
+    if let Some(limit) = query.message_limit {
+        options.messages = FrontendSnapshotMessages::Page(MessagePageRequest {
+            before: None,
+            limit: limit.clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+            include_system: query.include_system,
+        });
+    }
+
+    let loaded = manager.snapshot_with_options(&session_id, options).await?;
+    Ok(Json(SessionSnapshotResponse {
+        snapshot: loaded.snapshot,
+        message_page: loaded.message_page.map(Into::into),
+        message_cycle: loaded.message_cycle.map(Into::into),
+    }))
+}
+
+async fn session_messages(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<MessagesQuery>,
+) -> std::result::Result<Json<MessagesPageResponse>, ApiError> {
+    let page = manager
+        .messages_page(
+            &session_id,
+            MessagePageRequest {
+                before: query.before,
+                limit: query
+                    .limit
+                    .unwrap_or(DEFAULT_MESSAGE_PAGE_LIMIT)
+                    .clamp(1, MAX_MESSAGE_PAGE_LIMIT),
+                include_system: query.include_system,
+            },
+        )
+        .await?;
+    Ok(Json(page.into()))
+}
+
+async fn thread_events(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    Query(query): Query<ThreadEventsQuery>,
+) -> std::result::Result<Json<ThreadEventPage>, ApiError> {
+    Ok(Json(
+        manager
+            .thread_events(
+                &session_id,
+                &thread_name,
+                query.before_id,
+                query
+                    .limit
+                    .unwrap_or(DEFAULT_THREAD_EVENT_PAGE_LIMIT)
+                    .clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
+            )
+            .await?,
+    ))
+}
+
+async fn generate_overview_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<SessionOverviewRecord>, ApiError> {
+    Ok(Json(manager.generate_overview(&session_id).await?))
 }
 
 async fn workspace_diff(
@@ -1097,6 +1499,40 @@ async fn submit_prompt(
     Ok((
         StatusCode::ACCEPTED,
         Json(manager.submit_prompt(&session_id, request).await?),
+    ))
+}
+
+async fn queue_orchestrator_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<OrchestratorSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_orchestrator_steering(&session_id, request)
+                .await?,
+        ),
+    ))
+}
+
+async fn queue_thread_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ThreadSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .queue_thread_steering(&session_id, &thread_name, request)
+                .await?,
+        ),
     ))
 }
 
@@ -1123,7 +1559,7 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
+    let (epoch_id, replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
@@ -1131,6 +1567,7 @@ async fn stream_events(
         )
         .await?;
     let event_stream = session_event_stream(
+        epoch_id,
         replay_boundary_sequence_id,
         replay_gap,
         replayed_events,
@@ -1163,7 +1600,7 @@ async fn delete_session_handler(
 async fn session_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<sessions::RawSessionModelConfig>, ApiError> {
+) -> std::result::Result<Json<sessions::RawSessionConfig>, ApiError> {
     Ok(Json(manager.session_config(&session_id)?))
 }
 
@@ -1188,6 +1625,17 @@ impl std::fmt::Display for RequestConfigurationError {
 
 impl std::error::Error for RequestConfigurationError {}
 
+fn validate_steering_instruction(
+    instruction: &str,
+) -> std::result::Result<(), RequestConfigurationError> {
+    if instruction.trim().is_empty() {
+        return Err(RequestConfigurationError(
+            "steering instruction must not be empty or whitespace-only".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(RequestConfigurationError(message.into()))
 }
@@ -1209,6 +1657,24 @@ fn required_create_string(field: RequestField<String>, name: &str) -> Result<Opt
             "invalid model configuration: required field '{name}' cannot be null"
         ))),
         RequestField::Value(value) => nonblank_request_string(value, name).map(Some),
+    }
+}
+
+fn validated_compaction_threshold(threshold: u64) -> Result<u64> {
+    if threshold > nac_core::MAX_SUPPORTED_TOKEN_COUNT {
+        return Err(request_configuration_error(format!(
+            "invalid orchestrator compaction threshold: must not exceed {} tokens",
+            nac_core::MAX_SUPPORTED_TOKEN_COUNT
+        )));
+    }
+    Ok(threshold)
+}
+
+fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Option<u64>> {
+    match field {
+        RequestField::Omitted => Ok(None),
+        RequestField::Null => Ok(Some(0)),
+        RequestField::Value(threshold) => validated_compaction_threshold(threshold).map(Some),
     }
 }
 
@@ -1256,7 +1722,7 @@ fn model_options(
 }
 
 fn apply_raw_config_patch(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
     request: UpdateConfigRequest,
 ) -> Result<()> {
     match request.model {
@@ -1317,12 +1783,35 @@ fn apply_raw_config_patch(
             };
         }
     }
+    match request.orchestrator_compaction_threshold {
+        RequestField::Omitted => {}
+        RequestField::Null => config.orchestrator_compaction_threshold = None,
+        RequestField::Value(threshold) => {
+            let threshold = validated_compaction_threshold(threshold)?;
+            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+        }
+    }
     config.diagnostics.clear();
     Ok(())
 }
 
+fn managed_config_needs_repair(config: &sessions::RawSessionConfig) -> bool {
+    let Some(backend) = config
+        .backend
+        .as_deref()
+        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
+    else {
+        return false;
+    };
+    managed_backend_base_url(backend).is_some()
+        && (config.base_url.trim().is_empty() || config.api_key_env.is_some())
+}
+
 fn parse_prospective_model_config(
-    config: &mut sessions::RawSessionModelConfig,
+    config: &mut sessions::RawSessionConfig,
+    backend_selected: bool,
+    base_url_omitted: bool,
+    api_key_env_omitted: bool,
 ) -> Result<(
     BackendKind,
     Option<ReasoningEffort>,
@@ -1336,15 +1825,22 @@ fn parse_prospective_model_config(
     })?;
     let backend_raw = nonblank_request_string(backend_raw.to_string(), "backend")?;
     let backend = parse_request_enum::<BackendKind>(&backend_raw, "backend")?;
-    // A zero-length stored value is how legacy/incomplete rows represent an
-    // absent NOT NULL base_url. Concrete request values are rejected before
-    // reaching this point, so only repair can take the managed default path.
-    let stored_base_url = if config.base_url.is_empty() {
+    let managed_base_url = managed_backend_base_url(backend);
+    // Selecting a managed backend is a tuple-level operation: omitted fields
+    // select its canonical endpoint and stored credential mode rather than
+    // inheriting an unrelated API-key backend's values. Concrete request values
+    // remain authoritative and proceed to normal validation.
+    let use_managed_base_url = managed_base_url.is_some()
+        && ((backend_selected && base_url_omitted) || config.base_url.trim().is_empty());
+    let stored_base_url = if use_managed_base_url {
         None
     } else {
         Some(config.base_url.clone())
     };
     config.base_url = resolve_model_base_url(backend, stored_base_url)?;
+    if managed_base_url.is_some() && api_key_env_omitted {
+        config.api_key_env = None;
+    }
     let reasoning_effort = config
         .reasoning_effort
         .as_deref()
@@ -1409,21 +1905,6 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
         || request.workdir.is_some()
 }
 
-fn submit_error_to_anyhow(error: SessionSubmitError) -> anyhow::Error {
-    match error {
-        SessionSubmitError::Busy { active_run } => anyhow!(
-            "session is busy with run {} ({})",
-            active_run.run_id,
-            active_run.prompt_preview
-        ),
-        SessionSubmitError::ExternalBusy { session_id } => anyhow!(
-            "session '{}' is busy with an active run in another process",
-            session_id
-        ),
-        SessionSubmitError::Coordination { message } => anyhow!(message),
-    }
-}
-
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {
     SubmitPromptResponse {
         run_id: handle.run_id.to_string(),
@@ -1440,10 +1921,12 @@ fn frontend_command_name(command: FrontendCommand) -> &'static str {
         FrontendCommand::Exit => "exit",
         FrontendCommand::Sessions => "sessions",
         FrontendCommand::Help => "help",
+        FrontendCommand::Compact => "compact",
     }
 }
 
 fn session_event_stream(
+    epoch_id: String,
     replay_boundary_sequence_id: u64,
     replay_gap: Option<SessionReplayGap>,
     replayed_events: Vec<SessionEventEnvelope>,
@@ -1455,6 +1938,7 @@ fn session_event_stream(
             "replay_boundary",
             None,
             &ReplayBoundaryEvent {
+                epoch_id,
                 replay_boundary_sequence_id,
             },
         ));
@@ -1490,8 +1974,8 @@ fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
 
 fn sse_json_event<T: Serialize>(event: &str, id: Option<String>, payload: &T) -> Event {
     let data = serde_json::to_string(payload).unwrap_or_else(|error| {
-        serde_json::json!({ "error": format!("failed to serialize SSE payload: {error}") })
-            .to_string()
+        let _ = error;
+        serde_json::json!({ "error": "failed to serialize SSE payload" }).to_string()
     });
     let event = Event::default().event(event).data(data);
     match id {
@@ -1560,6 +2044,15 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
     }
 }
 
+impl From<RequestConfigurationError> for ApiError {
+    fn from(error: RequestConfigurationError) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
@@ -1569,6 +2062,23 @@ impl From<anyhow::Error> for ApiError {
                 sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
+            match error {
+                SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
+                    StatusCode::CONFLICT
+                }
+                SessionSubmitError::Coordination {
+                    message:
+                        SessionCoordinationError::StaleConfiguration { .. }
+                        | SessionCoordinationError::LocalAgentBusy,
+                } => StatusCode::CONFLICT,
+                SessionSubmitError::Coordination { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<sessions::SessionOperationLeaseError>() {
+            match error {
+                sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,
+                sessions::SessionOperationLeaseError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
             }
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
@@ -1580,7 +2090,11 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unknown host")
         {
             StatusCode::NOT_FOUND
-        } else if message.contains("busy") || message.contains("no active run") {
+        } else if message.contains("busy")
+            || message.contains("no active run")
+            || message.contains("not active")
+            || message.contains("active run is finishing")
+        {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
             || message.contains("cancellation is not supported")
@@ -1613,6 +2127,17 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    use axum::{
+        body::{to_bytes, Body, Bytes},
+        http::Request,
+    };
+    use flate2::read::GzDecoder;
+    use tower::ServiceExt;
+
+    #[path = "compaction.rs"]
+    mod compaction;
 
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
@@ -1623,7 +2148,8 @@ mod tests {
                 "backend":"openai-responses",
                 "reasoning_effort":"xhigh",
                 "api_key_env":null,
-                "extra_headers":{"X-Trace":"launch"}
+                "extra_headers":{"X-Trace":"launch"},
+                "orchestrator_compaction_threshold":0
             }"#,
         )
         .unwrap();
@@ -1645,6 +2171,10 @@ mod tests {
                 "X-Trace".to_string(),
                 "launch".to_string()
             )])))
+        );
+        assert_eq!(
+            request.orchestrator_compaction_threshold,
+            RequestField::Value(0)
         );
         assert_eq!(request.cwd, None);
     }
@@ -1749,135 +2279,173 @@ mod tests {
     }
 
     #[test]
-    fn web_configuration_controls_include_together_and_launch_parity_fields() {
-        let html = include_str!("../assets/index.html");
-        for select_id in ["launchBackend", "settingsBackend"] {
-            let select = html
-                .split(&format!("id=\"{select_id}\""))
-                .nth(1)
-                .and_then(|tail| tail.split("</select>").next())
-                .expect("backend select");
-            assert!(select.contains("<option value=\"together-chat\">together-chat</option>"));
-        }
-        assert!(html.contains("id=\"launchApiKeyEnv\""));
-        assert!(html.contains("id=\"launchExtraHeaders\""));
+    fn production_asset_routes_and_privacy_smoke_contract() {
+        const HTML: &str = include_str!("../assets/index.html");
+        const CSS: &str = include_str!("../assets/redesign.css");
+        const APP: &str = include_str!("../assets/app.js");
 
-        let app = include_str!("../assets/app.js");
-        assert!(app.contains("buildLaunchModelPayload"));
-        assert!(app.contains("payload.api_key_env = apiKeyEnv"));
-        assert!(app.contains("payload.extra_headers = headers"));
-        assert!(app.contains("body = buildSettingsPatch"));
+        for asset in ["/assets/redesign.css", "/assets/app.js"] {
+            assert!(HTML.contains(asset), "missing production asset {asset}");
+        }
+        assert!(!HTML.contains("/assets/app.css"));
+        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
+        assert!(!CSS.trim().is_empty());
+        assert!(!APP.trim().is_empty());
+        assert!(
+            !APP.contains("include_system"),
+            "production frontend must not opt into system messages"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_proxy_headers_reach_get_json_and_sse_routes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("public_proxy_headers");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let app = router(test_manager(&root));
+
+        for (origin, fetch_site) in [
+            (Some("https://preview-1234.ngrok-free.app"), "same-origin"),
+            (None, "none"),
+            (Some("https://operator.example"), "cross-site"),
+        ] {
+            let mut request = Request::builder()
+                .uri("/health")
+                .header(header::HOST, "preview-1234.ngrok-free.app")
+                .header("sec-fetch-site", fetch_site);
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{fetch_site}");
+            assert!(response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none());
+        }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/missing/steering")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://operator.example")
+                    .header("sec-fetch-site", "cross-site")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"instruction":"do nothing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/session/events/stream")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://preview-1234.ngrok-free.app")
+                    .header("sec-fetch-site", "same-origin")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+
+        drop(response);
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn grouped_events_and_tiled_threads_assets_expose_their_contracts() {
-        let html = include_str!("../assets/index.html");
-        for id in ["eventStreamStatus", "eventLog", "threadsView"] {
-            assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
+    fn bind_address_must_be_ipv4_or_ipv6_loopback() {
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            validate_bind_address(address.parse().unwrap()).unwrap();
         }
-        assert!(!html.contains("eventViewThreads"));
-        assert!(!html.contains("eventViewChronology"));
-        assert!(!html.contains("events-view-switch"));
-        assert!(html.contains("role=\"status\" aria-live=\"polite\""));
-        assert!(html.contains("class=\"event-log event-streams\""));
-        assert!(html.contains("class=\"threads-view\" aria-label=\"Thread lifecycle\""));
+        for address in ["0.0.0.0:3210", "[::]:3210", "192.168.1.10:3210"] {
+            assert!(validate_bind_address(address.parse().unwrap()).is_err());
+        }
+    }
 
-        let app = include_str!("../assets/app.js");
-        let event_lifecycle_order = ["Orchestrator", "Running", "Queued", "Finished"];
-        let event_positions: Vec<_> = event_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderEventStreamArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing dense Events {area} area"))
-            })
-            .collect();
-        assert!(event_positions.windows(2).all(|pair| pair[0] < pair[1]));
-        let thread_lifecycle_order = ["Running", "Queued", "Finished"];
-        let thread_positions: Vec<_> = thread_lifecycle_order
-            .iter()
-            .map(|area| {
-                app.find(&format!("renderThreadTileArea(\"{area}\""))
-                    .unwrap_or_else(|| panic!("missing Threads tile {area} area"))
-            })
-            .collect();
-        assert!(thread_positions.windows(2).all(|pair| pair[0] < pair[1]));
-
-        assert!(app.contains(
-            "const orderedStreams = area === \"orchestrator\" ? [...streams] : orderedThreadsByName(streams);"
-        ));
-        assert!(app.contains("orderedStreams.map((stream) => area === \"orchestrator\""));
-        assert!(app.contains("const orderedTiles = orderedThreadTiles(tiles);"));
-
-        assert!(!app.contains("renderThreadTileArea(\"Orchestrator\""));
-        assert!(!app.contains("renderOrchestratorThreadTile"));
+    #[tokio::test]
+    async fn legacy_css_route_is_an_exact_alias() {
+        let root = temp_root("css_alias");
+        let app = router(test_manager(&root));
+        let canonical = get_response(app.clone(), "/assets/redesign.css", None).await;
+        let alias = get_response(app, "/assets/app.css", None).await;
+        assert_eq!(canonical.status(), StatusCode::OK);
+        assert_eq!(alias.status(), StatusCode::OK);
         assert_eq!(
-            app.matches("const orchestrator = deriveOrchestratorPresentation(snapshot, evidence);")
-                .count(),
-            1,
-            "Events must remain the sole Orchestrator presentation consumer"
+            canonical.headers().get(header::CONTENT_TYPE),
+            alias.headers().get(header::CONTENT_TYPE)
         );
-        assert!(app.contains("class=\"event-stream-tile-grid\""));
-        assert!(app.contains("class=\"event-thread-stream event-tone-${tone}\""));
-        assert!(app.contains("items.map(renderDenseEventRow)"));
-        assert!(app.contains("stream.activity"));
-        assert!(!app.contains("stream.allActivity"));
-        assert!(!app.contains("[...items].reverse()"));
-        assert!(!app.contains("renderEventChronology"));
-        assert!(!app.contains("eventsViewBySession"));
-        assert!(app.contains("data-thread-key=\"${escapeAttr(key)}\""));
-        assert!(app.contains("aria-expanded=\"${expanded ? \"true\" : \"false\"}\""));
-        assert!(app.contains("aria-controls=\"${escapeAttr(controlsId)}\""));
-        assert!(app.contains("label: \"Timed out\""));
-        assert!(app.contains("label: \"Dispatch error\""));
-        assert!(app.contains(
-            "const terminalError = threadError\n      && evidenceIsNewer(threadError, dispatch.start);"
-        ));
-        assert!(!app.contains("&& !snapshotActive"));
-        assert!(app.contains("label: \"Retained history\""));
-        assert!(app.contains("tile.episodes.map(renderThreadEpisode)"));
-        assert!(app.contains("const episodes = snapshot?.thread_episodes?.[name] || [];"));
-        assert!(app.contains("episodes,\n      retained,"));
+        assert_eq!(response_body(canonical).await, response_body(alias).await);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
-        let css = include_str!("../assets/app.css");
-        assert!(css.contains("container-name: events"));
-        for threshold in [600, 900, 1200] {
-            assert!(css.contains(&format!("@container events (min-width: {threshold}px)")));
-            assert!(css.contains(&format!("@container threads (min-width: {threshold}px)")));
-        }
-        assert!(css.contains(".event-stream-area-orchestrator .event-thread-stream"));
-        assert!(css.contains(".event-stream-tile-grid"));
-        for removed_thread_selector in [
-            ".thread-orchestrator-cell",
-            ".thread-orchestrator-summary",
-            ".thread-orchestrator-card",
-        ] {
-            assert!(!css.contains(removed_thread_selector));
-        }
-        for accent_selector in [
-            ".event-tone-running",
-            ".event-tone-queued",
-            ".thread-pulse-card.thread-tone-running",
-            ".thread-pulse-card.thread-tone-queued",
-            ".thread-tone-running .thread-card-status",
-            ".thread-tone-queued .thread-card-status",
-        ] {
-            assert!(
-                !css.contains(accent_selector),
-                "lifecycle tile must remain neutral: {accent_selector}"
-            );
-        }
-        assert!(css.contains(".event-thread-stream.event-tone-danger"));
-        assert!(css.contains(".thread-pulse-card.thread-tone-danger"));
-        assert!(!css.contains("box-shadow: 0 0 12px var(--danger-ring)"));
-        assert!(css.contains(".thread-tile-cell.is-expanded"));
-        assert!(css.contains("grid-column: 1 / -1"));
-        assert!(css.contains(".event-stream-row"));
+    #[tokio::test]
+    async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
+        let root = temp_root("route_compression");
+        let app = router(test_manager(&root));
+
+        let identity = get_response(app.clone(), "/assets/app.js", None).await;
+        assert_eq!(identity.status(), StatusCode::OK);
+        assert!(identity.headers().get(header::CONTENT_ENCODING).is_none());
+        let identity_body = response_body(identity).await;
+        assert_eq!(identity_body.as_ref(), include_bytes!("../assets/app.js"));
+
+        let compressed = get_response(app.clone(), "/assets/app.js", Some("gzip")).await;
+        assert_eq!(compressed.status(), StatusCode::OK);
+        assert_eq!(
+            compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(gunzip(&response_body(compressed).await), identity_body);
+
+        let json_identity = get_response(app.clone(), "/store", None).await;
+        assert_eq!(json_identity.status(), StatusCode::OK);
+        assert!(json_identity
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .is_none());
+        let json_identity_body = response_body(json_identity).await;
+        let _: serde_json::Value = serde_json::from_slice(&json_identity_body).unwrap();
+
+        let json_compressed = get_response(app, "/store", Some("gzip")).await;
+        assert_eq!(json_compressed.status(), StatusCode::OK);
+        assert_eq!(
+            json_compressed.headers().get(header::CONTENT_ENCODING),
+            Some(&header::HeaderValue::from_static("gzip"))
+        );
+        assert_eq!(
+            gunzip(&response_body(json_compressed).await),
+            json_identity_body
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn session_event_envelope_serializes_for_sse_payloads() {
         let envelope = SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id: 42,
             client_id: None,
             run_id: None,
@@ -1992,8 +2560,11 @@ mod tests {
         write_managed_credential(
             &nac_home.join("arcee_auth.json"),
             serde_json::json!({
-                "type": "arcee_api_key",
-                "api_key": "rcai-server-test",
+                "type": "arcee_device_token",
+                "access_token": "arcee-access-server-test",
+                "refresh_token": "arcee-refresh-server-test",
+                "token_type": "bearer",
+                "expires_at_ms": u64::MAX,
                 "base_url": base_url,
                 "organization_id": "org-server-test",
                 "workspace_name": "server-test"
@@ -2019,6 +2590,36 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {
+        let lock_dir = root.join("store.db.run-locks");
+        std::fs::write(&lock_dir, b"not a directory").expect("poison operation lease directory");
+        lock_dir
+    }
+
+    async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {
+        let mut request = Request::builder().uri(uri);
+        if let Some(accept_encoding) = accept_encoding {
+            request = request.header(header::ACCEPT_ENCODING, accept_encoding);
+        }
+        app.oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn response_body(response: Response) -> Bytes {
+        to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        serde_json::from_slice(&response_body(response).await).unwrap()
+    }
+
+    fn gunzip(body: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::new();
+        GzDecoder::new(body).read_to_end(&mut decoded).unwrap();
+        decoded
     }
 
     #[test]
@@ -2210,6 +2811,7 @@ mod tests {
             reasoning_effort: RequestField::Omitted,
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
+            orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             sandbox: SandboxRequest {
                 enabled: true,
@@ -2238,6 +2840,7 @@ mod tests {
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                     ssh_host: None,
                     sandbox: SandboxRequest::default(),
                 })
@@ -2280,6 +2883,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2321,13 +2925,14 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
                 .unwrap_err();
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             assert!(error.to_string().contains("unsafe permissions 0644"));
-            assert!(!format!("{error:#}").contains("rcai-server-test"));
+            assert!(!format!("{error:#}").contains("arcee-access-server-test"));
             let response = ApiError::from(error);
             assert_eq!(response.status, StatusCode::BAD_REQUEST);
             assert!(response.message.contains("mode to 0600"));
@@ -2355,6 +2960,7 @@ mod tests {
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -2390,6 +2996,78 @@ mod tests {
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session");
     }
 
+    fn test_transcript() -> Vec<Message> {
+        vec![
+            Message::System {
+                content: "hidden system preface".to_string(),
+            },
+            Message::User {
+                content: "old cycle".to_string(),
+            },
+            Message::Assistant {
+                content: Some("old answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::User {
+                content: "current cycle".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: Some("thinking".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![nac_core::types::ToolCall {
+                    id: "call-thread".to_string(),
+                    call_type: "function".to_string(),
+                    function: nac_core::types::FunctionCall {
+                        name: "thread".to_string(),
+                        arguments: r#"{"name":"current/research"}"#.to_string(),
+                    },
+                }]),
+            },
+            Message::System {
+                content: "hidden tail".to_string(),
+            },
+            Message::Assistant {
+                content: Some("done".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ]
+    }
+
+    fn seed_session_with_messages(
+        root: &std::path::Path,
+        session_id: &str,
+        created_at: &str,
+        messages: Vec<Message>,
+    ) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            messages,
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        snapshot.created_at = created_at.to_string();
+        snapshot.updated_at = created_at.to_string();
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session messages");
+    }
+
     fn seed_editable_session(root: &std::path::Path, session_id: &str) {
         let mut snapshot = sessions::new_snapshot(
             session_id.to_string(),
@@ -2407,6 +3085,64 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    #[tokio::test]
+    async fn operation_lease_store_failures_are_path_safe_for_submit_patch_and_delete_apis() {
+        const CANARY: &str = "operation_lease_private_path_canary";
+        let root = temp_root(CANARY);
+        seed_editable_session(&root, "session");
+        let lock_dir = poison_operation_lease_directory(&root);
+        let app = router(test_manager(&root));
+
+        for (method, uri, body) in [
+            (
+                "POST",
+                "/sessions/session/runs",
+                Some(r#"{"prompt":"must not run"}"#),
+            ),
+            (
+                "PATCH",
+                "/sessions/session/config",
+                Some(r#"{"model":"must-not-change"}"#),
+            ),
+            ("DELETE", "/sessions/session", None),
+        ] {
+            let mut request = Request::builder().method(method).uri(uri);
+            if body.is_some() {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+            }
+            let response = app
+                .clone()
+                .oneshot(
+                    request
+                        .body(body.map_or_else(Body::empty, Body::from))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{uri}"
+            );
+            let response = response_json(response).await;
+            assert_eq!(
+                response,
+                serde_json::json!({"error": "session operation lease failed"}),
+                "{uri}"
+            );
+            assert!(!response.to_string().contains(CANARY), "{uri}");
+            assert!(
+                !response.to_string().contains(&root.display().to_string()),
+                "{uri}"
+            );
+        }
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "model-a");
+        assert!(lock_dir.is_file());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -2474,7 +3210,7 @@ thread_timeout_secs = 7200
         let mut missing_value =
             sessions::load_session(&store_path, "missing-environment-value").unwrap();
         missing_value.api_key_env = Some("MISSING_SERVER_REPAIR_KEY".to_string());
-        sessions::update_session_model_config(&store_path, &missing_value).unwrap();
+        sessions::update_session_config(&store_path, &missing_value).unwrap();
 
         seed_session(
             &root,
@@ -2486,7 +3222,7 @@ thread_timeout_secs = 7200
         unavailable_auth.backend = BackendKind::ArceeAuth;
         unavailable_auth.base_url = "https://api.arcee.ai".to_string();
         unavailable_auth.api_key_env = None;
-        sessions::update_session_model_config(&store_path, &unavailable_auth).unwrap();
+        sessions::update_session_config(&store_path, &unavailable_auth).unwrap();
 
         let manager = test_manager(&root);
         let Json(endpoint_config) = session_config_handler(
@@ -2618,7 +3354,7 @@ thread_timeout_secs = 7200
             seed_editable_session(&root, id);
         }
         for id in ["auto", "arcee", "missing", "effort", "headers"] {
-            let mut raw = sessions::load_session_model_config(&store_path, id).unwrap();
+            let mut raw = sessions::load_session_config(&store_path, id).unwrap();
             match id {
                 "auto" => raw.backend = Some("auto".to_string()),
                 "arcee" => raw.backend = Some("arcee".to_string()),
@@ -2627,7 +3363,7 @@ thread_timeout_secs = 7200
                 "headers" => raw.extra_headers_json = Some("{broken".to_string()),
                 _ => unreachable!(),
             }
-            sessions::update_raw_session_model_config(&store_path, &raw).unwrap();
+            sessions::update_raw_session_config(&store_path, &raw).unwrap();
         }
 
         let manager = test_manager(&root);
@@ -2750,7 +3486,7 @@ thread_timeout_secs = 7200
         let address = listener.local_addr().unwrap();
         let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
         snapshot.base_url = format!("http://{address}/v1");
-        sessions::update_session_model_config(&root.join("store.db"), &snapshot).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
 
         tokio::spawn(async move {
             if let Ok((socket, _)) = listener.accept().await {
@@ -2758,6 +3494,138 @@ thread_timeout_secs = 7200
                 std::future::pending::<()>().await;
             }
         })
+    }
+
+    #[tokio::test]
+    async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("steering_validation");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let app = router(test_manager(&root));
+
+        for (uri, instruction, expected) in [
+            (
+                "/sessions/missing/steering",
+                "  \n ",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/missing/threads/worker/steering",
+                "\t",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/sessions/session/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+            (
+                "/sessions/session/threads/worker/steering",
+                "redirect",
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "instruction": instruction }).to_string(),
+                ))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), expected, "{uri}: {instruction:?}");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn active_run_accepts_orchestrator_steering() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("orchestrator_steering");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "begin the original task".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let steering = manager
+            .queue_orchestrator_steering(
+                "session",
+                OrchestratorSteeringRequest {
+                    instruction: "change direction".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(steering.status, "queued");
+        let records = manager.snapshot("session").await.unwrap().thread_steering;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].thread_name, "__orchestrator__");
+        assert_eq!(records[0].instruction, "change direction");
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
+        let root = temp_root("delete_before_submit");
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let gate = manager.lifecycle_gate("session");
+        let blocker = gate.lock().await;
+
+        let (delete_started_tx, delete_started_rx) = tokio::sync::oneshot::channel();
+        let delete_manager = manager.clone();
+        let delete = tokio::spawn(async move {
+            delete_started_tx.send(()).unwrap();
+            delete_manager.delete_session("session").await
+        });
+        delete_started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        let submit_manager = manager.clone();
+        let submit = tokio::spawn(async move {
+            submit_manager
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "must not revive deleted state".to_string(),
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!delete.is_finished());
+        assert!(!submit.is_finished());
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), delete)
+            .await
+            .expect("delete should acquire the lifecycle gate")
+            .unwrap()
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), submit)
+            .await
+            .expect("submission should observe the deletion")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("was not found"), "{error:#}");
+        assert!(sessions::load_session(&root.join("store.db"), "session").is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -2819,7 +3687,9 @@ thread_timeout_secs = 7200
             .expect("patch should run after submission")
             .unwrap()
             .unwrap_err();
-        assert!(patch_error.to_string().contains("busy with an active run"));
+        assert!(patch_error
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -2933,7 +3803,7 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
-    async fn external_active_run_lease_rejects_patch_from_independent_manager() {
+    async fn external_active_operation_lease_rejects_patch_from_independent_manager() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("external_active_patch");
         let nac_home = root.join("nac-home");
@@ -2964,7 +3834,7 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("PATCH cannot commit beneath another process run");
-        assert!(error.to_string().contains("busy with an active run"));
+        assert!(error.to_string().contains("busy with an active operation"));
         assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
         let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(after.model, before.model);
@@ -3016,6 +3886,7 @@ thread_timeout_secs = 7200
                     reasoning_effort: RequestField::Value("high".to_string()),
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -3068,7 +3939,7 @@ thread_timeout_secs = 7200
         seed_editable_session(&root, "session");
         let first_manager = test_manager(&root);
         let second_manager = test_manager(&root);
-        let held = sessions::SessionRunLease::try_acquire(&root.join("store.db"), "session")
+        let held = sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "session")
             .expect("first process lease");
 
         let conflict = second_manager
@@ -3081,7 +3952,9 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("a concurrent shared lease must reject PATCH without waiting");
-        assert!(conflict.to_string().contains("busy with an active run"));
+        assert!(conflict
+            .to_string()
+            .contains("busy with an active operation"));
         assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -3164,6 +4037,9 @@ base_url = "https://api.openai.com/v1"
 reasoning_effort = "medium"
 api_key_env = "OPENAI_API_KEY"
 extra_headers = { X-Config = "yes" }
+
+[compaction]
+threshold_tokens = 64000
 "#,
         )
         .unwrap();
@@ -3175,16 +4051,34 @@ extra_headers = { X-Config = "yes" }
             .create_session(CreateSessionRequest::default())
             .await
             .expect("omitted fields should inherit config");
+        assert!(inherited.metadata.extra_headers.is_empty());
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
         assert_eq!(stored.model, "config-model");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
         assert_eq!(
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
         );
+        let Json(config) =
+            session_config_handler(State(manager.clone()), AxumPath(inherited_id.clone()))
+                .await
+                .unwrap();
+        assert_eq!(
+            config.extra_headers_json.as_deref(),
+            Some("{\"X-Config\":\"yes\"}")
+        );
+        assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
+        assert!(manager
+            .snapshot(&inherited_id)
+            .await
+            .unwrap()
+            .metadata
+            .extra_headers
+            .is_empty());
 
         let cleared = manager
             .create_session(CreateSessionRequest {
@@ -3194,6 +4088,7 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Null,
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Null,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -3205,8 +4100,76 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(stored.reasoning_effort, None);
         assert_eq!(stored.api_key_env, None);
         assert!(stored.extra_headers.is_empty());
+        assert_eq!(stored.orchestrator_compaction_threshold, None);
+
+        let zero_disabled = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("zero-disabled-model".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                reasoning_effort: RequestField::Null,
+                api_key_env: RequestField::Null,
+                extra_headers: RequestField::Null,
+                orchestrator_compaction_threshold: RequestField::Value(0),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("zero should disable an inherited compaction threshold");
+        let zero_disabled_id = zero_disabled.metadata.session_id.unwrap();
+        assert_eq!(
+            sessions::load_session(&root.join("store.db"), &zero_disabled_id)
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            None
+        );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("openai_to_arcee_launch");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            r#"[model]
+backend = "openai-responses"
+model = "openai-model"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+"#,
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("arcee-model".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("managed launch must not inherit the OpenAI URL or selector");
+        assert_eq!(
+            created.metadata.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(created.metadata.api_key_env, None);
+
+        let session_id = created.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -3391,24 +4354,65 @@ extra_headers = { X-Config = "yes" }
             let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
             incomplete.backend = backend;
             incomplete.base_url.clear();
-            incomplete.api_key_env = None;
-            sessions::update_session_model_config(&store_path, &incomplete).unwrap();
+            incomplete.api_key_env = Some("STALE_API_KEY".to_string());
+            sessions::update_session_config(&store_path, &incomplete).unwrap();
 
             manager
-                .update_session_config(
-                    session_id,
-                    UpdateConfigRequest {
-                        model: RequestField::Value("repaired-model".to_string()),
-                        ..UpdateConfigRequest::default()
-                    },
-                )
+                .update_session_config(session_id, UpdateConfigRequest::default())
                 .await
-                .expect("repair PATCH should materialize an absent managed base URL");
+                .expect("empty repair PATCH should materialize the managed tuple");
             let repaired = sessions::load_session(&store_path, session_id).unwrap();
             assert_eq!(repaired.base_url, expected_base);
+            assert_eq!(repaired.api_key_env, None);
+            let rehydrated = manager.session_config(session_id).unwrap();
+            assert_eq!(rehydrated.base_url, expected_base);
+            assert_eq!(rehydrated.api_key_env, None);
             let resumed = manager.snapshot(session_id).await.unwrap();
             assert_eq!(resumed.metadata.base_url, expected_base);
         }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("api_key_to_arcee_patch");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
+        api_key_session.reasoning_effort = None;
+        sessions::update_session_config(&store_path, &api_key_session).unwrap();
+        let manager = test_manager(&root);
+
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("backend-only PATCH must select the complete managed tuple");
+
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            stored.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(stored.api_key_env, None);
+        let rehydrated = manager.session_config("session").unwrap();
+        assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
+        assert_eq!(
+            rehydrated.base_url,
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(rehydrated.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3522,7 +4526,7 @@ extra_headers = { X-Config = "yes" }
         stored.backend = BackendKind::ChatGptCodexResponses;
         stored.base_url = "https://chatgpt.com/backend-api".to_string();
         stored.api_key_env = None;
-        sessions::update_session_model_config(&root.join("store.db"), &stored).unwrap();
+        sessions::update_session_config(&root.join("store.db"), &stored).unwrap();
         let manager = test_manager(&root);
 
         let error = manager
@@ -3807,6 +4811,7 @@ extra_headers = { X-Config = "yes" }
                         "X-Replaced".to_string(),
                         "true".to_string(),
                     )]))),
+                    orchestrator_compaction_threshold: RequestField::Value(64_000),
                 },
             )
             .await
@@ -3822,6 +4827,14 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
+        assert_eq!(replaced.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(
+            manager
+                .session_config("session")
+                .unwrap()
+                .orchestrator_compaction_threshold,
+            Some(64_000)
+        );
 
         manager.attach_session("session").await.unwrap();
         manager
@@ -3833,6 +4846,7 @@ extra_headers = { X-Config = "yes" }
                     reasoning_effort: RequestField::Null,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Null,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -3843,6 +4857,7 @@ extra_headers = { X-Config = "yes" }
         assert_eq!(arcee_auth.reasoning_effort, None);
         assert_eq!(arcee_auth.api_key_env, None);
         assert!(arcee_auth.extra_headers.is_empty());
+        assert_eq!(arcee_auth.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -3850,17 +4865,15 @@ extra_headers = { X-Config = "yes" }
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-api".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+                    orchestrator_compaction_threshold: RequestField::Value(32_000),
                     ..UpdateConfigRequest::default()
                 },
             )
             .await
             .expect("switch to Arcee API key mode");
-        assert_eq!(
-            sessions::load_session(&root.join("store.db"), "session")
-                .unwrap()
-                .backend,
-            BackendKind::ArceeApi
-        );
+        let arcee_api = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(arcee_api.backend, BackendKind::ArceeApi);
+        assert_eq!(arcee_api.orchestrator_compaction_threshold, Some(32_000));
 
         manager
             .update_session_config(
@@ -3869,6 +4882,7 @@ extra_headers = { X-Config = "yes" }
                     backend: RequestField::Value("chatgpt-codex-responses".to_string()),
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
+                    orchestrator_compaction_threshold: RequestField::Value(0),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -3877,6 +4891,7 @@ extra_headers = { X-Config = "yes" }
         let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
         assert_eq!(codex.api_key_env, None);
+        assert_eq!(codex.orchestrator_compaction_threshold, None);
 
         manager
             .update_session_config(
@@ -3927,6 +4942,12 @@ extra_headers = { X-Config = "yes" }
         manager.attach_session("session").await.unwrap();
 
         let invalid = [
+            UpdateConfigRequest {
+                orchestrator_compaction_threshold: RequestField::Value(
+                    nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1,
+                ),
+                ..UpdateConfigRequest::default()
+            },
             UpdateConfigRequest {
                 model: RequestField::Null,
                 ..UpdateConfigRequest::default()
@@ -4063,6 +5084,7 @@ extra_headers = { X-Config = "yes" }
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -4103,6 +5125,7 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -4121,7 +5144,7 @@ extra_headers = { X-Config = "yes" }
         let mut attach_snapshot = sessions::load_session(&store_path, "attach-invalid").unwrap();
         attach_snapshot.backend = BackendKind::ArceeApi;
         attach_snapshot.base_url = "https://api.arcee.ai/api/v1".to_string();
-        sessions::update_session_model_config(&store_path, &attach_snapshot).unwrap();
+        sessions::update_session_config(&store_path, &attach_snapshot).unwrap();
         let attach_error = match manager.attach_session("attach-invalid").await {
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
@@ -4146,6 +5169,7 @@ extra_headers = { X-Config = "yes" }
                         reasoning_effort: RequestField::Omitted,
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
+                        orchestrator_compaction_threshold: RequestField::Omitted,
                     },
                 )
                 .await
@@ -4173,6 +5197,7 @@ extra_headers = { X-Config = "yes" }
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -4192,6 +5217,7 @@ extra_headers = { X-Config = "yes" }
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -4209,6 +5235,7 @@ extra_headers = { X-Config = "yes" }
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
+                orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
                 sandbox: SandboxRequest::default(),
             })
@@ -4252,6 +5279,7 @@ extra_headers = { X-Config = "yes" }
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -4267,6 +5295,7 @@ extra_headers = { X-Config = "yes" }
     fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
             session_id: Some("session-1".to_string()),
+            epoch_id: "test-epoch".to_string(),
             sequence_id,
             client_id: None,
             run_id: None,
@@ -4501,26 +5530,129 @@ extra_headers = { X-Config = "yes" }
     }
 
     #[tokio::test]
-    async fn sse_orders_boundary_then_gap_replay_and_live_events() {
-        let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
-        let live = test_event(6, "live-6");
-        let (sender, receiver) = tokio::sync::broadcast::channel(4);
-        sender.send(live).unwrap();
-        drop(sender);
-
-        let stream = session_event_stream(
-            5,
-            Some(SessionReplayGap {
-                missing_from_sequence_id: 2,
-                missing_to_sequence_id: 3,
-            }),
-            replayed,
-            receiver,
+    async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("snapshot_projection");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let transcript = test_transcript();
+        seed_session_with_messages(
+            &root,
+            "target",
+            "2026-01-02 00:00:00.000000000",
+            transcript.clone(),
         );
-        let response = Sse::new(stream).into_response();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        seed_session(&root, "other", "2026-01-01 00:00:00.000000000");
+        let app = router(test_manager(&root));
+        let query = "message_limit=2&thread_event_limit=24";
+
+        let default_response =
+            get_response(app.clone(), &format!("/sessions/target?{query}"), None).await;
+        let default_status = default_response.status();
+        let default_body = response_body(default_response).await;
+        assert_eq!(
+            default_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&default_body)
+        );
+        let default: serde_json::Value = serde_json::from_slice(&default_body).unwrap();
+
+        let true_response = get_response(
+            app.clone(),
+            &format!("/sessions/target?{query}&include_sessions=true"),
+            None,
+        )
+        .await;
+        assert_eq!(true_response.status(), StatusCode::OK);
+        let included: serde_json::Value =
+            serde_json::from_slice(&response_body(true_response).await).unwrap();
+        assert_eq!(included, default);
+        assert_eq!(default["sessions"].as_array().unwrap().len(), 2);
+
+        let false_response = get_response(
+            app,
+            &format!("/sessions/target?{query}&include_sessions=false"),
+            None,
+        )
+        .await;
+        assert_eq!(false_response.status(), StatusCode::OK);
+        let projected: serde_json::Value =
+            serde_json::from_slice(&response_body(false_response).await).unwrap();
+        assert_eq!(projected["sessions"], serde_json::json!([]));
+        let mut expected_projected = default.clone();
+        expected_projected["sessions"] = serde_json::json!([]);
+        assert_eq!(projected, expected_projected);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn paged_message_queries_exclude_system_prompts_by_default() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=2".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(!snapshot_query.include_system);
+        assert!(!messages_query.include_system);
+    }
+
+    #[test]
+    fn paged_message_queries_include_system_prompts_when_requested() {
+        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
+            &"/sessions/test?message_limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
+            &"/sessions/test/messages?before=3&limit=3&include_system=true"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(snapshot_query.include_system);
+        assert!(messages_query.include_system);
+    }
+
+    #[tokio::test]
+    async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
+        async fn finite_sse_route(
+        ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
+            let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
+            let live = test_event(6, "live-6");
+            let (sender, receiver) = tokio::sync::broadcast::channel(4);
+            sender.send(live).unwrap();
+            drop(sender);
+
+            Sse::new(session_event_stream(
+                "test-epoch".to_string(),
+                5,
+                Some(SessionReplayGap {
+                    missing_from_sequence_id: 2,
+                    missing_to_sequence_id: 3,
+                }),
+                replayed,
+                receiver,
+            ))
+        }
+
+        let app = Router::new()
+            .route("/events", get(finite_sse_route))
+            .layer(response_compression_layer());
+        let response = get_response(app, "/events", Some("gzip")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = response_body(response).await;
         let body = String::from_utf8(body.to_vec()).unwrap();
 
         let boundary = body.find("event: replay_boundary").unwrap();
@@ -4530,6 +5662,7 @@ extra_headers = { X-Config = "yes" }
         let live_6 = body.find("\"sequence_id\":6").unwrap();
         assert!(boundary < gap && gap < replay_4 && replay_4 < replay_5 && replay_5 < live_6);
         assert!(body.contains("\"replay_boundary_sequence_id\":5"));
+        assert!(body.contains("\"epoch_id\":\"test-epoch\""));
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));

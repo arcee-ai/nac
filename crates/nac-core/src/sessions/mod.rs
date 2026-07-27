@@ -12,23 +12,28 @@ use crate::types::Message;
 
 mod codec;
 mod db;
-mod run_lease;
+mod operation_lease;
 mod snapshot;
 mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_model_config, reorder_sessions, save_session, update_raw_session_model_config,
-    update_session_model_config, update_session_presentation,
+    load_session_config, reorder_sessions, save_session, session_exists, update_raw_session_config,
+    update_session_config, update_session_presentation,
 };
-pub use run_lease::{SessionRunLease, SessionRunLeaseError};
+pub use operation_lease::{
+    SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
+};
+// Compatibility aliases for callers that have not yet adopted operation-wide naming.
+pub type SessionRunLease = SessionOperationLease;
+pub type SessionRunLeaseError = SessionOperationLeaseError;
 pub use snapshot::{new_snapshot, refresh_snapshot};
 
 use codec::*;
 use summary::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RawSessionModelConfig {
+pub struct RawSessionConfig {
     pub session_id: String,
     pub model: String,
     pub base_url: String,
@@ -36,6 +41,7 @@ pub struct RawSessionModelConfig {
     pub reasoning_effort: Option<String>,
     pub api_key_env: Option<String>,
     pub extra_headers_json: Option<String>,
+    pub orchestrator_compaction_threshold: Option<u64>,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,
     /// not migrations: callers must explicitly PATCH every invalid value.
@@ -100,7 +106,10 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
-    /// Monotonic revision for optimistic model-configuration updates.
+    /// Absolute compaction threshold captured for this orchestrator session.
+    /// `None` disables new checkpoint generation; valid stored checkpoints still project.
+    pub orchestrator_compaction_threshold: Option<u64>,
+    /// Monotonic revision for optimistic session-configuration updates.
     pub config_version: i64,
     pub messages: Vec<Message>,
     pub last_response_duration_ms: Option<u64>,
@@ -262,6 +271,7 @@ mod tests {
             None,
             BTreeMap::new(),
         );
+        snapshot.orchestrator_compaction_threshold = Some(32_768);
         snapshot.last_response_duration_ms = Some(12_345);
         snapshot.previous_response_duration_ms = Some(6_789);
         snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
@@ -289,6 +299,7 @@ mod tests {
         assert_eq!(loaded.session_id, "session-1");
         assert_eq!(loaded.cwd, PathBuf::from("/repo"));
         assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.orchestrator_compaction_threshold, Some(32_768));
         assert_eq!(loaded.last_response_duration_ms, Some(12_345));
         assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
         assert_eq!(
@@ -306,6 +317,39 @@ mod tests {
                 .orchestrator_context_tokens,
             330
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_load_rejects_threshold_above_supported_maximum() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("oversized_compaction_threshold");
+        let snapshot = test_snapshot(
+            "oversized-threshold",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.pragma_update(None, "ignore_check_constraints", "ON")
+            .unwrap();
+        conn.execute(
+            "UPDATE sessions
+             SET orchestrator_compaction_threshold = ?1
+             WHERE session_id = 'oversized-threshold'",
+            [(crate::MAX_SUPPORTED_TOKEN_COUNT + 1) as i64],
+        )
+        .unwrap();
+        drop(conn);
+
+        for error in [
+            load_session(&store_path, "oversized-threshold").unwrap_err(),
+            load_session_config(&store_path, "oversized-threshold").unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("exceeds supported maximum"));
+        }
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -697,7 +741,7 @@ mod tests {
             .unwrap()
             .contains("malformed stored extra headers"));
 
-        let raw = load_session_model_config(&store_path, "headers").unwrap();
+        let raw = load_session_config(&store_path, "headers").unwrap();
         assert_eq!(raw.extra_headers_json.as_deref(), Some("{broken"));
         assert_eq!(raw.config_version, 0);
         assert!(!raw.diagnostics.is_empty());
@@ -705,17 +749,17 @@ mod tests {
         repaired.extra_headers_json = None;
         repaired.diagnostics.clear();
         assert_eq!(
-            update_raw_session_model_config(&store_path, &repaired).unwrap(),
+            update_raw_session_config(&store_path, &repaired).unwrap(),
             1
         );
         let mut stale = raw;
         stale.extra_headers_json = Some("{\"X-Test\":\"yes\"}".to_string());
         assert!(matches!(
-            update_raw_session_model_config(&store_path, &stale),
+            update_raw_session_config(&store_path, &stale),
             Err(SessionConfigUpdateError::Conflict(_))
         ));
         assert_eq!(
-            load_session_model_config(&store_path, "headers")
+            load_session_config(&store_path, "headers")
                 .unwrap()
                 .extra_headers_json,
             None
@@ -733,7 +777,7 @@ mod tests {
         headers.insert("X-Org".to_string(), "my-org".to_string());
 
         let raw_selector = " MY_CUSTOM_API_KEY ";
-        let snapshot = new_snapshot(
+        let mut snapshot = new_snapshot(
             "session-config".to_string(),
             PathBuf::from("/repo"),
             "model-a".to_string(),
@@ -748,6 +792,7 @@ mod tests {
             Some(raw_selector.to_string()),
             headers.clone(),
         );
+        snapshot.orchestrator_compaction_threshold = Some(65_536);
         create_session(&store_path, &snapshot).unwrap();
 
         let loaded = load_session(&store_path, "session-config").unwrap();
@@ -772,6 +817,7 @@ mod tests {
         );
         assert_eq!(refreshed.api_key_env.as_deref(), Some(raw_selector));
         assert_eq!(refreshed.extra_headers, headers);
+        assert_eq!(refreshed.orchestrator_compaction_threshold, Some(65_536));
         save_session(&store_path, &refreshed).unwrap();
 
         let reloaded = load_session(&store_path, "session-config").unwrap();
@@ -790,11 +836,12 @@ mod tests {
             ("history-then-config", false),
             ("config-then-history", true),
         ] {
-            let initial = test_snapshot(
+            let mut initial = test_snapshot(
                 session_id,
                 "2026-01-01 00:00:00.000000000",
                 "2026-01-01 00:00:00.000000000",
             );
+            initial.orchestrator_compaction_threshold = Some(4_096);
             create_session(&store_path, &initial).unwrap();
             crate::store::append_episode(
                 &store_path,
@@ -814,6 +861,7 @@ mod tests {
             config_patch.api_key_env = Some("PATCHED_KEY".to_string());
             config_patch.extra_headers =
                 BTreeMap::from([("X-Patched".to_string(), "true".to_string())]);
+            config_patch.orchestrator_compaction_threshold = Some(8_192);
 
             let mut completed_run = load_session(&store_path, session_id).unwrap();
             completed_run.messages = vec![
@@ -841,11 +889,11 @@ mod tests {
             completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
 
             if config_first {
-                update_session_model_config(&store_path, &config_patch).unwrap();
+                update_session_config(&store_path, &config_patch).unwrap();
                 save_session(&store_path, &completed_run).unwrap();
             } else {
                 save_session(&store_path, &completed_run).unwrap();
-                update_session_model_config(&store_path, &config_patch).unwrap();
+                update_session_config(&store_path, &config_patch).unwrap();
             }
 
             let stored = load_session(&store_path, session_id).unwrap();
@@ -858,6 +906,7 @@ mod tests {
                 stored.extra_headers.get("X-Patched").map(String::as_str),
                 Some("true")
             );
+            assert_eq!(stored.orchestrator_compaction_threshold, Some(8_192));
             assert_eq!(stored.config_version, 1);
             assert_eq!(stored.messages.len(), 2);
             assert!(matches!(
@@ -905,13 +954,13 @@ mod tests {
         let first_barrier = barrier.clone();
         let first_update = std::thread::spawn(move || {
             first_barrier.wait();
-            update_session_model_config(&first_path, &first)
+            update_session_config(&first_path, &first)
         });
         let second_path = store_path.clone();
         let second_barrier = barrier.clone();
         let second_update = std::thread::spawn(move || {
             second_barrier.wait();
-            update_session_model_config(&second_path, &second)
+            update_session_config(&second_path, &second)
         });
         barrier.wait();
 
@@ -1004,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_session_cascades_to_threads_episodes_and_worksets() {
+    fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("delete_cascade");
 
@@ -1056,6 +1105,29 @@ mod tests {
             }],
         };
         crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
+        crate::store::queue_thread_steering(
+            &store_path,
+            "session-del",
+            "auth",
+            "auth-dispatch",
+            "check the failure path",
+        )
+        .unwrap();
+        crate::store::append_thread_event(
+            &store_path,
+            "session-del",
+            "auth",
+            r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
+        )
+        .unwrap();
+        crate::store::write_session_overview(
+            &store_path,
+            "session-del",
+            "Work is active.",
+            "model-a",
+            &snapshot.updated_at,
+        )
+        .unwrap();
 
         // Verify data exists
         assert!(!crate::store::list_threads(&store_path, "session-del")
@@ -1068,6 +1140,22 @@ mod tests {
                 == 1
         );
         assert!(list_sessions(&store_path).unwrap().len() == 1);
+        assert_eq!(
+            crate::store::list_thread_steering(&store_path, "session-del")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            crate::store::read_session_overview(&store_path, "session-del")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"]
+                .len(),
+            1
+        );
 
         // Delete the session
         let deleted = delete_session(&store_path, "session-del").unwrap();
@@ -1084,6 +1172,21 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(list_sessions(&store_path).unwrap().is_empty());
+        assert!(
+            crate::store::list_thread_steering(&store_path, "session-del")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            crate::store::read_session_overview(&store_path, "session-del")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            crate::store::load_all_thread_events(&store_path, "session-del", 20)
+                .unwrap()
+                .is_empty()
+        );
 
         // Deleting a non-existent session returns false
         let deleted_again = delete_session(&store_path, "session-del").unwrap();

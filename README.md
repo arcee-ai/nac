@@ -43,14 +43,26 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/messages`
+- `GET /sessions/{session_id}/threads/{thread_name}/events`
 - `GET /sessions/{session_id}/config`
 - `PATCH /sessions/{session_id}/config`
+- `POST /sessions/{session_id}/overview`
+- `POST /sessions/{session_id}/compact`
 - `POST /sessions/{session_id}/runs`
+- `POST /sessions/{session_id}/steering`
+- `POST /sessions/{session_id}/threads/{thread_name}/steering`
 - `GET /sessions/{session_id}/events?after_sequence_id=0`
 - `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
 - `POST /sessions/{session_id}/cancel-active-run`
 
-`AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Thread history does not auto-compact right now.
+`nac-web` binds only to IPv4/IPv6 loopback and has no built-in authentication. NAC does not enforce `Host` or `Origin` headers, restrict `Sec-Fetch-Site`, or provide built-in CSRF protection. Tunnels and reverse proxies can expose the loopback listener remotely; if you use one, it must provide strong authentication before forwarding traffic to `nac-web`. Anyone able to reach the server is trusted.
+
+Snapshot messages can be bounded with `message_limit`; only then does snapshot `include_system=true` affect the selected page and add `message_page`/`message_cycle`. `GET .../messages` pages backward with `before` and `limit` (and accepts `include_system`), while thread events page with `before_id` and `limit` and return `next_before_id`. Persisted snapshot and initial thread-event-page baselines carry `thread_event_boundary: {epoch_id, sequence_id}`; merge only later envelopes from the same epoch. SSE first reports `{epoch_id, replay_boundary_sequence_id}` and supports sequence replay within that epoch. Finite responses may be gzip-compressed; SSE is never compressed.
+
+The store schema is version 3 and upgrades forward. Back up each store before upgrading; v3 stores must not be opened with older binaries or downgraded. Do not use mixed-version writers against one store. Parent binaries and custom worker executables must use matching releases; mixed versions are unsupported because the required `--dispatch-id` worker protocol is version-coupled. Operational tool telemetry is intentionally lossy and fail-closed: tool/log/error text is omitted or sanitized before persistence and streaming. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view. `/assets/app.css` is a compatibility alias for `/assets/redesign.css`. Generating an overview invokes model inference and can consume provider tokens or incur cost.
+
+`AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): use `nac resume` for the picker, `nac resume --last` for the newest session, or `nac resume SESSION_ID` for a specific session. Worker thread history does not auto-compact.
 
 Uninstall:
 
@@ -67,6 +79,7 @@ nac --sandbox
 By default this mounts the current directory into the sandbox at `/workspace`.
 
 For a custom setup:
+
 - `--no-mount-cwd` disables the default current-directory mount
 - `--mount HOST:GUEST` adds a read-write mount
 - `--mount-ro HOST:GUEST` adds a read-only mount
@@ -91,7 +104,7 @@ smolvm uses the same default OCI image (`python:3.13-bookworm`) and the same mou
 
 ## Model configuration
 
-Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
+Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` and `[compaction]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
 
 Model selection is config-first, not environment-driven:
 
@@ -99,9 +112,15 @@ Model selection is config-first, not environment-driven:
 - NAC does not search provider API-key variables. An API key is read only through the exact `api_key_env` selector described below.
 - A created session persists its complete effective model settings. Resume, server attachment, and managed workers use that stored snapshot rather than re-resolving the model tuple or credential selector from ambient config. Non-model runtime settings can still come from the current config.
 
-Persisted model settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, and `null` or `{}` clears `extra_headers`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings.
+Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
 
-The TUI has the same tri-state launch behavior. Omit a model option to inherit its new-session config value. Use `--clear-api-key-env` to remove a configured selector, `--clear-effort` to omit reasoning effort, and `--extra-headers '{}'` to replace configured headers with an empty map. `--effort none` is a concrete effort value and is distinct from `--clear-effort`.
+The TUI has the same tri-state launch behavior. Omit a model option to inherit its new-session config value. Use `--clear-api-key-env` to remove a configured selector, `--clear-effort` to omit reasoning effort, and `--extra-headers '{}'` to replace configured headers with an empty map. `--effort none` is a concrete effort value and is distinct from `--clear-effort`. Use `--orchestrator-compaction-threshold TOKENS` for a fresh session; omit it to inherit `[compaction].threshold_tokens`, or pass `0` to disable an inherited value. Resume always uses the value persisted with the session, and managed workers do not inherit this orchestrator-only setting.
+
+### Orchestrator compaction threshold
+
+`[compaction].threshold_tokens` is an optional absolute token count for new orchestrator sessions. A positive value is captured in each new session; an absent or zero value disables creating new checkpoints. The create-session JSON field is `orchestrator_compaction_threshold`: omission inherits config, while `null` or `0` disables it. GET returns the persisted positive value or `null`; PATCH omission preserves it, and PATCH `null` or `0` disables it. The web launch and Settings forms expose the same rules.
+
+Before each ordinary model call, a session-backed orchestrator automatically compacts only when its estimated context reaches the configured threshold. Compaction replaces an oldest prefix with a durable historical summary, targeting at least half (rounded up) of the serialized UTF-8 JSON byte weight of the compactable provider context. Canonical System messages and separately supplied tool definitions are excluded from that weight and remain preserved; Tool messages count toward it, and the cut snaps forward to the first safe User, Assistant, or end boundary without splitting a tool-call/result group. The complete canonical transcript remains unchanged in session storage, checkpoint rows stay private, and workers never compact. The threshold is a proactive trigger rather than a hard context limit; an oversized retained tail can still produce a terminal `finish_reason=length`. Existing valid checkpoints remain active on resume even when creating new checkpoints is disabled. Use `/compact` in the web dashboard or TUI to bypass the threshold and request the same operation immediately without submitting a prompt; the manual command is unavailable while another run or manual compaction is active.
 
 ### API-key selection
 
@@ -141,6 +160,9 @@ model = "gpt-5.5"
 base_url = "https://api.openai.com/v1"
 reasoning_effort = "xhigh"
 api_key_env = "OPENAI_API_KEY"
+
+[compaction]
+threshold_tokens = 64000
 
 [sandbox]
 image = "python:3.13-bookworm"

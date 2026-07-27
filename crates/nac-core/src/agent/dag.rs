@@ -343,10 +343,20 @@ pub(crate) async fn execute_with_dag(
     // at the end — unmarking a thread that was already active from a prior
     // turn would clobber its mutual-exclusion guarantee.
     let mut failed_indices: HashSet<usize> = HashSet::new();
-    let mut marked_by_us: HashSet<String> = HashSet::new();
+    let mut marked_by_us: HashMap<String, (String, String)> = HashMap::new();
     for (i, dispatch) in thread_dispatches.iter().enumerate() {
-        if thread::mark_thread_active(&runtime, &dispatch.params.thread_name).await {
-            marked_by_us.insert(dispatch.params.thread_name.clone());
+        if thread::mark_thread_active(
+            &runtime,
+            &dispatch.params.thread_name,
+            &dispatch.params.dispatch_id,
+        ) {
+            marked_by_us.insert(
+                dispatch.params.thread_name.clone(),
+                (
+                    dispatch.params.session_id.clone(),
+                    dispatch.params.dispatch_id.clone(),
+                ),
+            );
         } else {
             let result = ToolResult {
                 content: format!(
@@ -435,8 +445,7 @@ pub(crate) async fn execute_with_dag(
                 let result = ToolResult {
                     content: format!(
                         "Source thread '{}' failed; dispatch '{}' skipped.",
-                        failed_dep_name,
-                        dispatch.params.thread_name
+                        failed_dep_name, dispatch.params.thread_name
                     ),
                     is_error: true,
                 };
@@ -626,11 +635,8 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 6. Unmark only threads we successfully marked (including skipped ones
-    //    that were marked but not spawned).  Threads that were already active
-    //    from a prior turn were NOT marked by us, so we must not unmark them.
-    for name in &marked_by_us {
-        thread::unmark_thread_active(&runtime, name).await;
+    for (name, (session_id, dispatch_id)) in &marked_by_us {
+        thread::close_thread_dispatch(&runtime, session_id, name, dispatch_id);
     }
 
     // 7. Sort by original index and return.
@@ -662,6 +668,7 @@ mod tests {
             args_str,
             params: ParsedDispatchParams {
                 thread_name: name.to_string(),
+                dispatch_id: format!("dispatch-{index}"),
                 action: "test action".to_string(),
                 source_threads: source_threads.iter().map(|s| s.to_string()).collect(),
                 scheduled_skills: Vec::new(),
@@ -773,16 +780,17 @@ mod tests {
         assert_eq!(dag.waves[1], vec![1], "wave 1: B");
 
         // B's only in-batch dep is A (index 0). "preexisting" is ignored.
-        assert_eq!(dag.in_batch_deps[1], vec![0], "only A should be an in-batch dep");
+        assert_eq!(
+            dag.in_batch_deps[1],
+            vec![0],
+            "only A should be an in-batch dep"
+        );
     }
 
     #[test]
     fn test_build_dag_detects_cycle() {
         // A → B, B → A
-        let dispatches = vec![
-            make_dispatch(0, "A", &["B"]),
-            make_dispatch(1, "B", &["A"]),
-        ];
+        let dispatches = vec![make_dispatch(0, "A", &["B"]), make_dispatch(1, "B", &["A"])];
 
         let err = build_dag(&dispatches).unwrap_err();
         assert!(matches!(err, DagError::Cycle(_)));
@@ -790,10 +798,7 @@ mod tests {
 
     #[test]
     fn test_build_dag_detects_duplicate_names() {
-        let dispatches = vec![
-            make_dispatch(0, "X", &[]),
-            make_dispatch(1, "X", &[]),
-        ];
+        let dispatches = vec![make_dispatch(0, "X", &[]), make_dispatch(1, "X", &[])];
 
         let err = build_dag(&dispatches).unwrap_err();
         match err {
@@ -821,7 +826,11 @@ mod tests {
         let tool_calls = vec![
             make_tool_call("call_0", "thread", json!({"name": "A", "action": "work"})),
             make_tool_call("call_1", "read", json!({"path": "src/main.rs"})),
-            make_tool_call("call_2", "thread", json!({"name": "B", "action": "work", "threads": ["A"]})),
+            make_tool_call(
+                "call_2",
+                "thread",
+                json!({"name": "B", "action": "work", "threads": ["A"]}),
+            ),
         ];
 
         let (thread_dispatches, other_calls, parse_errors) =
@@ -843,9 +852,11 @@ mod tests {
     #[test]
     fn test_partition_returns_error_for_missing_name() {
         let runtime = test_runtime();
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({"action": "work"})),
-        ];
+        let tool_calls = vec![make_tool_call(
+            "call_0",
+            "thread",
+            json!({"action": "work"}),
+        )];
 
         let (thread_dispatches, other_calls, parse_errors) =
             partition_tool_calls(tool_calls, &runtime);
@@ -915,7 +926,10 @@ mod tests {
         // All three should be in failed_indices.
         assert!(failed_indices.contains(&0), "A failed");
         assert!(failed_indices.contains(&1), "B skipped due to A");
-        assert!(failed_indices.contains(&2), "C skipped due to B (transitive)");
+        assert!(
+            failed_indices.contains(&2),
+            "C skipped due to B (transitive)"
+        );
     }
 
     /// When A fails in a diamond A→{B,C}→D, both B and C are skipped, and
@@ -958,7 +972,11 @@ mod tests {
             }
         }
 
-        assert_eq!(failed_indices.len(), 4, "all four dispatches should be failed/skipped");
+        assert_eq!(
+            failed_indices.len(),
+            4,
+            "all four dispatches should be failed/skipped"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -991,8 +1009,7 @@ mod tests {
                     assert!(
                         has_earlier_dep,
                         "dispatch {} in wave {} must have a dep in an earlier wave",
-                        dispatch_idx,
-                        wave_idx
+                        dispatch_idx, wave_idx
                     );
                 } else {
                     assert!(
@@ -1020,8 +1037,16 @@ mod tests {
         let runtime = test_runtime();
         let tool_calls = vec![
             make_tool_call("call_0", "thread", json!({"name": "A", "action": "work"})),
-            make_tool_call("call_1", "thread", json!({"name": "B", "action": "work", "threads": ["A"]})),
-            make_tool_call("call_2", "thread", json!({"name": "C", "action": "work", "threads": ["A", "preexisting"]})),
+            make_tool_call(
+                "call_1",
+                "thread",
+                json!({"name": "B", "action": "work", "threads": ["A"]}),
+            ),
+            make_tool_call(
+                "call_2",
+                "thread",
+                json!({"name": "C", "action": "work", "threads": ["A", "preexisting"]}),
+            ),
             make_tool_call("call_3", "read", json!({"path": "src/main.rs"})),
         ];
 
@@ -1036,7 +1061,10 @@ mod tests {
         assert_eq!(thread_dispatches[1].params.source_threads, vec!["A"]);
 
         assert_eq!(thread_dispatches[2].params.thread_name, "C");
-        assert_eq!(thread_dispatches[2].params.source_threads, vec!["A", "preexisting"]);
+        assert_eq!(
+            thread_dispatches[2].params.source_threads,
+            vec!["A", "preexisting"]
+        );
 
         assert_eq!(other_calls.len(), 1);
         assert_eq!(other_calls[0].2, "read");
@@ -1049,13 +1077,15 @@ mod tests {
     #[test]
     fn test_partition_skills_error_without_registry() {
         let runtime = test_runtime();
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({
+        let tool_calls = vec![make_tool_call(
+            "call_0",
+            "thread",
+            json!({
                 "name": "A",
                 "action": "work",
                 "skills": ["lint"]
-            })),
-        ];
+            }),
+        )];
 
         let (thread_dispatches, other_calls, parse_errors) =
             partition_tool_calls(tool_calls, &runtime);
@@ -1064,20 +1094,25 @@ mod tests {
         assert!(other_calls.is_empty());
         assert_eq!(parse_errors.len(), 1);
         assert!(parse_errors[0].3.is_error);
-        assert!(parse_errors[0].3.content.contains("no skills are available"));
+        assert!(parse_errors[0]
+            .3
+            .content
+            .contains("no skills are available"));
     }
 
     /// Partition should succeed when a thread call has an empty skills array.
     #[test]
     fn test_partition_empty_skills_succeeds() {
         let runtime = test_runtime();
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({
+        let tool_calls = vec![make_tool_call(
+            "call_0",
+            "thread",
+            json!({
                 "name": "A",
                 "action": "work",
                 "skills": []
-            })),
-        ];
+            }),
+        )];
 
         let (thread_dispatches, other_calls, parse_errors) =
             partition_tool_calls(tool_calls, &runtime);

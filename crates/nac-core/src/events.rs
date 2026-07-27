@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
+    path::PathBuf,
     sync::{Arc, Mutex as StdMutex},
 };
 
@@ -90,6 +91,29 @@ impl std::fmt::Display for SessionRunId {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionReason {
+    Auto,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionSkipReason {
+    NoEligibleBoundary,
+    AlreadyCompacted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionFailure {
+    SummaryRequestFailed,
+    SummaryRejected,
+    CheckpointPersistenceFailed,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -100,6 +124,10 @@ pub enum AgentEvent {
     ModelCallStarted {
         thread_name: Option<String>,
         iteration: usize,
+    },
+    TokenUsageUpdated {
+        thread_name: Option<String>,
+        usage: crate::model::TokenUsage,
     },
     ToolCallStarted {
         thread_name: Option<String>,
@@ -124,6 +152,51 @@ pub enum AgentEvent {
     ThreadLog {
         name: String,
         line: String,
+    },
+    ThreadSteeringQueued {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    ThreadSteeringDelivered {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    ThreadSteeringExpired {
+        name: String,
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringQueued {
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringDelivered {
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorSteeringExpired {
+        steering_id: i64,
+        instruction_preview: String,
+    },
+    OrchestratorCompactionStarted {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    },
+    OrchestratorCompactionCompleted {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    },
+    OrchestratorCompactionSkipped {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+        cause: CompactionSkipReason,
+    },
+    OrchestratorCompactionFailed {
+        compaction_id: Uuid,
+        reason: CompactionReason,
+        failure: CompactionFailure,
     },
     ThreadFinished {
         name: String,
@@ -152,12 +225,19 @@ pub enum AgentEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionEventEnvelope {
     pub session_id: Option<String>,
+    pub epoch_id: String,
     pub sequence_id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<SessionClientId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<SessionRunId>,
     pub event: SessionEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionEventBoundary {
+    pub epoch_id: String,
+    pub sequence_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -214,6 +294,7 @@ pub struct SessionEventSubscription {
 }
 
 pub struct SessionEventReplaySubscription {
+    pub epoch_id: String,
     pub client_id: SessionClientId,
     pub subscription_id: SessionSubscriptionId,
     pub requested_after_sequence_id: Option<u64>,
@@ -228,14 +309,30 @@ pub struct SessionEventReplaySubscription {
 #[derive(Clone)]
 pub struct SessionEventBus {
     session_id: Option<String>,
+    thread_event_persistence: ThreadEventPersistence,
+    epoch_id: String,
     sender: broadcast::Sender<SessionEventEnvelope>,
     state: Arc<StdMutex<SessionEventBusState>>,
     recent_capacity: usize,
     recent_byte_capacity: usize,
 }
 
+#[derive(Clone)]
+enum ThreadEventPersistence {
+    Disabled,
+    Available(ThreadEventStore),
+    Unavailable,
+}
+
+#[derive(Clone)]
+struct ThreadEventStore {
+    writer: Arc<crate::store::ThreadEventWriter>,
+    session_id: String,
+}
+
 struct SessionEventBusState {
     next_sequence_id: u64,
+    published_sequence_id: u64,
     recent: VecDeque<RecentSessionEvent>,
     recent_bytes: usize,
 }
@@ -254,15 +351,36 @@ impl SessionEventBus {
         Self::with_limits(session_id, capacity, SESSION_EVENT_BUS_REPLAY_BYTE_CAP)
     }
 
+    pub fn with_thread_event_store(session_id: Option<String>, path: PathBuf) -> Self {
+        let mut bus = Self::new(session_id.clone());
+        bus.thread_event_persistence = match session_id {
+            Some(session_id) => match crate::store::ThreadEventWriter::new(&path) {
+                Ok(writer) => ThreadEventPersistence::Available(ThreadEventStore {
+                    writer: Arc::new(writer),
+                    session_id,
+                }),
+                Err(error) => {
+                    eprintln!("nac: failed to open thread event store: {error:#}");
+                    ThreadEventPersistence::Unavailable
+                }
+            },
+            None => ThreadEventPersistence::Disabled,
+        };
+        bus
+    }
+
     fn with_limits(session_id: Option<String>, capacity: usize, byte_capacity: usize) -> Self {
         let capacity = capacity.max(1);
         let byte_capacity = byte_capacity.max(1);
         let (sender, _) = broadcast::channel(capacity);
         Self {
             session_id,
+            thread_event_persistence: ThreadEventPersistence::Disabled,
+            epoch_id: Uuid::new_v4().to_string(),
             sender,
             state: Arc::new(StdMutex::new(SessionEventBusState {
                 next_sequence_id: 0,
+                published_sequence_id: 0,
                 recent: VecDeque::with_capacity(capacity),
                 recent_bytes: 0,
             })),
@@ -290,7 +408,7 @@ impl SessionEventBus {
         limit: usize,
     ) -> SessionEventReplaySubscription {
         let state = self.lock_state();
-        let replay_boundary_sequence_id = state.next_sequence_id;
+        let replay_boundary_sequence_id = state.published_sequence_id;
         let oldest_retained_sequence_id =
             state.recent.front().map(|entry| entry.envelope.sequence_id);
         let newest_retained_sequence_id =
@@ -308,6 +426,7 @@ impl SessionEventBus {
         );
         let receiver = self.sender.subscribe();
         SessionEventReplaySubscription {
+            epoch_id: self.epoch_id.clone(),
             client_id,
             subscription_id: SessionSubscriptionId::new(),
             requested_after_sequence_id: after_sequence_id,
@@ -330,15 +449,34 @@ impl SessionEventBus {
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> SessionEventEnvelope {
+        let event = sanitize_external_session_event(event)
+            .expect("internal-only agent events cannot be emitted on the session event bus");
+        self.emit_sanitized(event, run_id, client_id)
+    }
+
+    fn emit_sanitized(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> SessionEventEnvelope {
         let mut state = self.lock_state();
-        state.next_sequence_id = state.next_sequence_id.saturating_add(1);
+        state.next_sequence_id = state
+            .next_sequence_id
+            .checked_add(1)
+            .expect("session event sequence overflow");
         let envelope = SessionEventEnvelope {
             session_id: self.session_id.clone(),
+            epoch_id: self.epoch_id.clone(),
             sequence_id: state.next_sequence_id,
             client_id,
             run_id,
             event,
         };
+        if !self.persist_thread_event(&envelope) {
+            return envelope;
+        }
+        state.published_sequence_id = envelope.sequence_id;
         if let Some(serialized_bytes) =
             serialized_envelope_len(&envelope, self.recent_byte_capacity)
         {
@@ -360,7 +498,7 @@ impl SessionEventBus {
         envelope
     }
 
-    pub fn emit_agent(&self, event: AgentEvent) -> SessionEventEnvelope {
+    pub fn emit_agent(&self, event: AgentEvent) -> Option<SessionEventEnvelope> {
         self.emit_agent_with_context(event, None, None)
     }
 
@@ -369,8 +507,24 @@ impl SessionEventBus {
         event: AgentEvent,
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
-    ) -> SessionEventEnvelope {
-        self.emit_with_context(SessionEvent::Agent { event }, run_id, client_id)
+    ) -> Option<SessionEventEnvelope> {
+        let event = sanitize_external_agent_event(event)?;
+        Some(self.emit_sanitized(SessionEvent::Agent { event }, run_id, client_id))
+    }
+
+    pub fn thread_event_boundary<T>(
+        &self,
+        query: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<(SessionEventBoundary, T)> {
+        let state = self.lock_state();
+        let value = query()?;
+        Ok((
+            SessionEventBoundary {
+                epoch_id: self.epoch_id.clone(),
+                sequence_id: state.published_sequence_id,
+            },
+            value,
+        ))
     }
 
     pub fn recent_events(
@@ -390,6 +544,365 @@ impl SessionEventBus {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Persist thread-owned events before publication. `false` means this was a
+    /// persistable event whose configured writer could not append it.
+    fn persist_thread_event(&self, envelope: &SessionEventEnvelope) -> bool {
+        let SessionEvent::Agent { event } = &envelope.event else {
+            return true;
+        };
+        let Some(event) = sanitize_external_agent_event(event.clone()) else {
+            return true;
+        };
+        let Some(thread_name) = persisted_thread_event_name(&event) else {
+            return true;
+        };
+        let store = match &self.thread_event_persistence {
+            ThreadEventPersistence::Disabled => return true,
+            ThreadEventPersistence::Available(store) => store,
+            ThreadEventPersistence::Unavailable => return false,
+        };
+        let event_json = match serde_json::to_string(&event) {
+            Ok(event_json) => event_json,
+            Err(error) => {
+                eprintln!("nac: failed to serialize thread event: {error}");
+                return false;
+            }
+        };
+        match store
+            .writer
+            .append(&store.session_id, thread_name, &event_json)
+        {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("nac: failed to persist thread event: {error:#}");
+                false
+            }
+        }
+    }
+}
+
+fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
+    match event {
+        AgentEvent::RunStarted { thread_name, .. }
+        | AgentEvent::ToolCallStarted { thread_name, .. }
+        | AgentEvent::ToolCallFinished { thread_name, .. }
+        | AgentEvent::AssistantMessage { thread_name, .. }
+        | AgentEvent::Error { thread_name, .. }
+        | AgentEvent::RunFinished { thread_name } => thread_name.as_deref(),
+        AgentEvent::ThreadStarted { name, .. }
+        | AgentEvent::ThreadSteeringQueued { name, .. }
+        | AgentEvent::ThreadSteeringDelivered { name, .. }
+        | AgentEvent::ThreadSteeringExpired { name, .. }
+        | AgentEvent::ThreadFinished { name, .. } => Some(name),
+        // Usage updates are deliberately live-only. Persisting them would
+        // consume slots in the user-facing thread-event pages and make a DB
+        // written by this version unreadable by older AgentEvent enums.
+        AgentEvent::ModelCallStarted { .. }
+        | AgentEvent::TokenUsageUpdated { .. }
+        | AgentEvent::ThreadLog { .. }
+        | AgentEvent::OrchestratorSteeringQueued { .. }
+        | AgentEvent::OrchestratorSteeringDelivered { .. }
+        | AgentEvent::OrchestratorSteeringExpired { .. }
+        | AgentEvent::OrchestratorCompactionStarted { .. }
+        | AgentEvent::OrchestratorCompactionCompleted { .. }
+        | AgentEvent::OrchestratorCompactionSkipped { .. }
+        | AgentEvent::OrchestratorCompactionFailed { .. } => None,
+    }
+}
+
+pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEvent> {
+    Some(match event {
+        AgentEvent::ModelCallStarted { .. } | AgentEvent::ThreadLog { .. } => return None,
+        AgentEvent::RunStarted { thread_name, .. } => AgentEvent::RunStarted {
+            thread_name,
+            prompt_preview: "run started".to_string(),
+        },
+        AgentEvent::ToolCallStarted {
+            thread_name,
+            call_id,
+            name,
+            args_preview,
+            args_detail,
+        } => AgentEvent::ToolCallStarted {
+            thread_name,
+            call_id,
+            args_preview: safe_tool_arguments(&name, args_detail.as_deref(), &args_preview),
+            args_detail: None,
+            name,
+        },
+        AgentEvent::ToolCallFinished {
+            thread_name,
+            call_id,
+            name,
+            content_preview,
+            is_error,
+        } => AgentEvent::ToolCallFinished {
+            thread_name,
+            call_id,
+            name,
+            content_preview: safe_tool_result(&content_preview, is_error),
+            is_error,
+        },
+        AgentEvent::ThreadStarted {
+            name,
+            source_threads,
+            ..
+        } => AgentEvent::ThreadStarted {
+            name,
+            action: "thread dispatched".to_string(),
+            source_threads,
+        },
+        AgentEvent::ThreadSteeringQueued {
+            name, steering_id, ..
+        } => AgentEvent::ThreadSteeringQueued {
+            name,
+            steering_id,
+            instruction_preview: "steering queued".to_string(),
+        },
+        AgentEvent::ThreadSteeringDelivered {
+            name, steering_id, ..
+        } => AgentEvent::ThreadSteeringDelivered {
+            name,
+            steering_id,
+            instruction_preview: "steering delivered".to_string(),
+        },
+        AgentEvent::ThreadSteeringExpired {
+            name, steering_id, ..
+        } => AgentEvent::ThreadSteeringExpired {
+            name,
+            steering_id,
+            instruction_preview: "steering expired".to_string(),
+        },
+        AgentEvent::OrchestratorSteeringQueued { steering_id, .. } => {
+            AgentEvent::OrchestratorSteeringQueued {
+                steering_id,
+                instruction_preview: "steering queued".to_string(),
+            }
+        }
+        AgentEvent::OrchestratorSteeringDelivered { steering_id, .. } => {
+            AgentEvent::OrchestratorSteeringDelivered {
+                steering_id,
+                instruction_preview: "steering delivered".to_string(),
+            }
+        }
+        AgentEvent::OrchestratorSteeringExpired { steering_id, .. } => {
+            AgentEvent::OrchestratorSteeringExpired {
+                steering_id,
+                instruction_preview: "steering expired".to_string(),
+            }
+        }
+        AgentEvent::ThreadFinished {
+            name,
+            exit_code,
+            timed_out,
+            usage,
+            ..
+        } => AgentEvent::ThreadFinished {
+            name,
+            exit_code,
+            timed_out,
+            timeout_reason: timed_out.then(|| "thread timed out".to_string()),
+            usage,
+        },
+        AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
+            thread_name,
+            message: "operation failed".to_string(),
+        },
+        event @ (AgentEvent::TokenUsageUpdated { .. }
+        | AgentEvent::AssistantMessage { .. }
+        | AgentEvent::RunFinished { .. }
+        | AgentEvent::OrchestratorCompactionStarted { .. }
+        | AgentEvent::OrchestratorCompactionCompleted { .. }
+        | AgentEvent::OrchestratorCompactionSkipped { .. }
+        | AgentEvent::OrchestratorCompactionFailed { .. }) => event,
+    })
+}
+
+fn sanitize_external_session_event(event: SessionEvent) -> Option<SessionEvent> {
+    Some(match event {
+        SessionEvent::Agent { event } => SessionEvent::Agent {
+            event: sanitize_external_agent_event(event)?,
+        },
+        SessionEvent::RunFailed { .. } => SessionEvent::RunFailed {
+            message: "run failed".to_string(),
+        },
+        event => event,
+    })
+}
+
+fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> String {
+    let parsed = detail
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .or_else(|| serde_json::from_str::<serde_json::Value>(preview).ok());
+    let mut safe = serde_json::Map::new();
+    safe.insert(
+        "operation".to_string(),
+        serde_json::Value::String(
+            match name {
+                "read" => "read",
+                "write" => "write",
+                "edit" => "edit",
+                "exec_command" => "execute",
+                "write_stdin" => "terminal_input",
+                "thread" => "dispatch",
+                "threads" => "list_threads",
+                "thread_read" => "read_thread",
+                "thread_delete" => "delete_thread",
+                _ => "invoke",
+            }
+            .to_string(),
+        ),
+    );
+    let object = parsed.as_ref().and_then(serde_json::Value::as_object);
+    match name {
+        "read" => {
+            copy_safe_string(object, &mut safe, "path");
+            copy_safe_u64(object, &mut safe, "offset");
+            copy_safe_u64(object, &mut safe, "limit");
+        }
+        "write" => {
+            copy_safe_string(object, &mut safe, "path");
+            copy_string_length(object, &mut safe, "content", "content_chars");
+            copy_safe_u64(object, &mut safe, "content_chars");
+        }
+        "edit" => {
+            copy_safe_string(object, &mut safe, "path");
+            copy_string_length(object, &mut safe, "old_text", "old_text_chars");
+            copy_string_length(object, &mut safe, "new_text", "new_text_chars");
+            copy_safe_u64(object, &mut safe, "old_text_chars");
+            copy_safe_u64(object, &mut safe, "new_text_chars");
+        }
+        "exec_command" => {
+            copy_safe_string(object, &mut safe, "workdir");
+            copy_safe_bool(object, &mut safe, "tty");
+            copy_safe_u64(object, &mut safe, "yield_time_ms");
+            copy_safe_u64(object, &mut safe, "max_output_chars");
+        }
+        "write_stdin" => {
+            copy_string_length(object, &mut safe, "chars", "input_chars");
+            copy_safe_u64(object, &mut safe, "input_chars");
+            copy_safe_u64(object, &mut safe, "yield_time_ms");
+            copy_safe_u64(object, &mut safe, "max_output_chars");
+        }
+        "thread" => {
+            copy_safe_string(object, &mut safe, "name");
+            copy_array_length(object, &mut safe, "threads", "source_count");
+            copy_safe_u64(object, &mut safe, "source_count");
+            copy_array_length(object, &mut safe, "skills", "skill_count");
+            copy_safe_u64(object, &mut safe, "skill_count");
+            copy_safe_u64(object, &mut safe, "timeout");
+        }
+        "thread_read" | "thread_delete" => copy_safe_string(object, &mut safe, "name"),
+        _ => {}
+    }
+    serde_json::Value::Object(safe).to_string()
+}
+
+fn copy_safe_string(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    if let Some(value) = source
+        .and_then(|source| source.get(key))
+        .and_then(serde_json::Value::as_str)
+    {
+        let value: String = value
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(512)
+            .collect();
+        target.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn copy_safe_u64(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    if let Some(value) = source
+        .and_then(|source| source.get(key))
+        .and_then(serde_json::Value::as_u64)
+    {
+        target.insert(key.to_string(), serde_json::Value::from(value));
+    }
+}
+
+fn copy_safe_bool(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    if let Some(value) = source
+        .and_then(|source| source.get(key))
+        .and_then(serde_json::Value::as_bool)
+    {
+        target.insert(key.to_string(), serde_json::Value::from(value));
+    }
+}
+
+fn copy_string_length(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    source_key: &str,
+    target_key: &str,
+) {
+    if let Some(value) = source
+        .and_then(|source| source.get(source_key))
+        .and_then(serde_json::Value::as_str)
+    {
+        target.insert(
+            target_key.to_string(),
+            serde_json::Value::from(value.chars().count() as u64),
+        );
+    }
+}
+
+fn copy_array_length(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    source_key: &str,
+    target_key: &str,
+) {
+    if let Some(value) = source
+        .and_then(|source| source.get(source_key))
+        .and_then(serde_json::Value::as_array)
+    {
+        target.insert(
+            target_key.to_string(),
+            serde_json::Value::from(value.len() as u64),
+        );
+    }
+}
+
+fn safe_tool_result(content: &str, is_error: bool) -> String {
+    let normalized = content.trim().to_ascii_lowercase();
+    if normalized.contains("timed out") || normalized.contains("timeout") {
+        return "timed out".to_string();
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(exit_code) = value.get("exit_code").and_then(serde_json::Value::as_i64) {
+            return format!("exit code {exit_code}");
+        }
+    }
+    for prefix in ["exit code ", "exit code:", "exit "] {
+        if let Some(value) = normalized.strip_prefix(prefix) {
+            if let Some(code) = value
+                .split(|character: char| character.is_whitespace() || character == ':')
+                .next()
+                .and_then(|code| code.parse::<i64>().ok())
+            {
+                return format!("exit code {code}");
+            }
+        }
+    }
+    if is_error {
+        "failed".to_string()
+    } else {
+        "succeeded".to_string()
     }
 }
 
@@ -539,16 +1052,29 @@ impl EventSink {
     }
 
     pub fn emit(&self, event: AgentEvent) {
+        if matches!(event, AgentEvent::ModelCallStarted { .. }) {
+            if self.stderr_prefixed {
+                if let Ok(encoded) = serde_json::to_string(&event) {
+                    eprintln!("{}{}", STDERR_EVENT_PREFIX, encoded);
+                }
+            }
+            return;
+        }
+        let Some(event) = sanitize_external_agent_event(event) else {
+            return;
+        };
         if self.stderr_prefixed {
             if let Ok(encoded) = serde_json::to_string(&event) {
                 eprintln!("{}{}", STDERR_EVENT_PREFIX, encoded);
             }
         }
-
         if let Some(bus) = &self.bus {
-            bus.emit_agent_with_context(event.clone(), self.run_id.clone(), self.client_id.clone());
+            let _ = bus.emit_agent_with_context(
+                event.clone(),
+                self.run_id.clone(),
+                self.client_id.clone(),
+            );
         }
-
         if let Some(channel) = &self.channel {
             let _ = channel.send(event);
         }
@@ -586,15 +1112,281 @@ mod tests {
         assert!(decode_stderr_event("plain stderr line").is_none());
     }
 
+    const TEST_COMPACTION_ID: &str = "018f0f4e-7b31-7d2a-aaf1-27e9d4c87911";
+
+    fn test_compaction_id() -> Uuid {
+        Uuid::parse_str(TEST_COMPACTION_ID).unwrap()
+    }
+
+    fn test_compaction_events() -> Vec<AgentEvent> {
+        let compaction_id = test_compaction_id();
+        vec![
+            AgentEvent::OrchestratorCompactionStarted {
+                compaction_id,
+                reason: CompactionReason::Auto,
+            },
+            AgentEvent::OrchestratorCompactionCompleted {
+                compaction_id,
+                reason: CompactionReason::Manual,
+            },
+            AgentEvent::OrchestratorCompactionSkipped {
+                compaction_id,
+                reason: CompactionReason::Auto,
+                cause: CompactionSkipReason::NoEligibleBoundary,
+            },
+            AgentEvent::OrchestratorCompactionFailed {
+                compaction_id,
+                reason: CompactionReason::Manual,
+                failure: CompactionFailure::CheckpointPersistenceFailed,
+            },
+        ]
+    }
+
+    #[test]
+    fn compaction_enum_json_values_are_exact_and_round_trip() {
+        for (reason, expected) in [
+            (CompactionReason::Auto, r#""auto""#),
+            (CompactionReason::Manual, r#""manual""#),
+        ] {
+            assert_eq!(serde_json::to_string(&reason).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionReason>(expected).unwrap(),
+                reason
+            );
+        }
+        for (reason, expected) in [
+            (
+                CompactionSkipReason::NoEligibleBoundary,
+                r#""no_eligible_boundary""#,
+            ),
+            (
+                CompactionSkipReason::AlreadyCompacted,
+                r#""already_compacted""#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&reason).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionSkipReason>(expected).unwrap(),
+                reason
+            );
+        }
+        for (failure, expected) in [
+            (
+                CompactionFailure::SummaryRequestFailed,
+                r#""summary_request_failed""#,
+            ),
+            (CompactionFailure::SummaryRejected, r#""summary_rejected""#),
+            (
+                CompactionFailure::CheckpointPersistenceFailed,
+                r#""checkpoint_persistence_failed""#,
+            ),
+            (CompactionFailure::Cancelled, r#""cancelled""#),
+        ] {
+            assert_eq!(serde_json::to_string(&failure).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<CompactionFailure>(expected).unwrap(),
+                failure
+            );
+        }
+    }
+
+    #[test]
+    fn compaction_agent_event_json_is_exact_and_nested_under_agent() {
+        let expected = [
+            format!(
+                r#"{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_completed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_skipped","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto","cause":"no_eligible_boundary"}}"#
+            ),
+            format!(
+                r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"checkpoint_persistence_failed"}}"#
+            ),
+        ];
+
+        for (event, expected) in test_compaction_events().into_iter().zip(expected) {
+            assert_eq!(serde_json::to_string(&event).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_str::<AgentEvent>(&expected).unwrap(),
+                event
+            );
+        }
+
+        let event = AgentEvent::OrchestratorCompactionStarted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Manual,
+        };
+        assert_eq!(
+            serde_json::to_string(&SessionEvent::Agent { event }).unwrap(),
+            format!(
+                r#"{{"type":"agent","event":{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn compaction_event_sanitization_preserves_only_typed_safe_fields() {
+        for event in test_compaction_events() {
+            assert_eq!(sanitize_external_agent_event(event.clone()), Some(event));
+        }
+
+        let encoded = format!(
+            r#"{{
+                "type":"orchestrator_compaction_failed",
+                "compaction_id":"{TEST_COMPACTION_ID}",
+                "reason":"manual",
+                "failure":"summary_request_failed",
+                "summary":"CANARY_SUMMARY",
+                "prompt":"CANARY_PROMPT",
+                "transcript":"CANARY_TRANSCRIPT",
+                "provider_response":"CANARY_RESPONSE",
+                "path":"CANARY_PATH",
+                "digest":"CANARY_DIGEST",
+                "checkpoint_id":"CANARY_CHECKPOINT",
+                "estimates":"CANARY_ESTIMATES",
+                "error":"CANARY_ERROR"
+            }}"#
+        );
+        let decoded = serde_json::from_str::<AgentEvent>(&encoded).unwrap();
+        let sanitized = sanitize_external_agent_event(decoded).unwrap();
+        let serialized = serde_json::to_string(&sanitized).unwrap();
+
+        assert_eq!(
+            serialized,
+            format!(
+                r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"summary_request_failed"}}"#
+            )
+        );
+        assert!(!serialized.contains("CANARY"));
+    }
+
+    #[tokio::test]
+    async fn compaction_event_sink_supports_manual_and_automatic_context() {
+        let bus = SessionEventBus::new(Some("session-compaction-context".to_string()));
+        let mut receiver = bus.subscribe();
+        let manual_client_id = SessionClientId::new();
+        let automatic_client_id = SessionClientId::new();
+        let automatic_run_id = SessionRunId::new();
+        let manual_sink =
+            EventSink::bus_with_context(bus.clone(), None, Some(manual_client_id.clone()));
+        let automatic_sink = EventSink::bus_with_context(
+            bus,
+            Some(automatic_run_id.clone()),
+            Some(automatic_client_id.clone()),
+        );
+
+        manual_sink.emit(AgentEvent::OrchestratorCompactionStarted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Manual,
+        });
+        automatic_sink.emit(AgentEvent::OrchestratorCompactionCompleted {
+            compaction_id: test_compaction_id(),
+            reason: CompactionReason::Auto,
+        });
+
+        let manual = receiver.recv().await.unwrap();
+        assert_eq!(manual.run_id, None);
+        assert_eq!(manual.client_id, Some(manual_client_id));
+        assert!(matches!(
+            manual.event,
+            SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionStarted {
+                    reason: CompactionReason::Manual,
+                    ..
+                }
+            }
+        ));
+
+        let automatic = receiver.recv().await.unwrap();
+        assert_eq!(automatic.run_id, Some(automatic_run_id));
+        assert_eq!(automatic.client_id, Some(automatic_client_id));
+        assert!(matches!(
+            automatic.event,
+            SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionCompleted {
+                    reason: CompactionReason::Auto,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn compaction_events_are_bounded_and_participate_in_replay() {
+        let bus = SessionEventBus::new(Some("session-compaction-replay".to_string()));
+        let events = test_compaction_events();
+        let envelopes = events
+            .iter()
+            .cloned()
+            .map(|event| bus.emit_agent(event).unwrap())
+            .collect::<Vec<_>>();
+
+        for event in &events {
+            assert!(serde_json::to_vec(event).unwrap().len() < 256);
+        }
+        for envelope in &envelopes {
+            assert!(serialized_envelope_len(envelope, SESSION_EVENT_BUS_REPLAY_BYTE_CAP).is_some());
+        }
+        assert_eq!(bus.recent_events(None, events.len()), envelopes);
+
+        let subscription =
+            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(0), events.len());
+        assert_eq!(subscription.replay_gap, None);
+        assert_eq!(subscription.replayed_events, envelopes);
+    }
+
+    #[test]
+    fn compaction_events_are_replayed_but_never_persisted_as_thread_events() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_compaction_events_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-compaction-events");
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-compaction-events".to_string()),
+            path.clone(),
+        );
+        let events = test_compaction_events();
+
+        for event in &events {
+            assert_eq!(persisted_thread_event_name(event), None);
+            bus.emit_agent(event.clone()).unwrap();
+        }
+
+        assert!(crate::store::load_all_thread_events(
+            &path,
+            "session-compaction-events",
+            events.len()
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            bus.recent_events(None, events.len())
+                .into_iter()
+                .map(|envelope| match envelope.event {
+                    SessionEvent::Agent { event } => event,
+                    event => panic!("expected agent event, got {event:?}"),
+                })
+                .collect::<Vec<_>>(),
+            events
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
     #[tokio::test]
     async fn session_event_bus_broadcasts_monotonic_envelopes_to_multiple_subscribers() {
         let bus = SessionEventBus::new(Some("session-1".to_string()));
         let mut first = bus.subscribe();
         let mut second = bus.subscribe();
 
-        bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "started".to_string(),
+        bus.emit_agent(AgentEvent::AssistantMessage {
+            thread_name: Some("impl".to_string()),
+            content: "started".to_string(),
+            usage: None,
         });
         bus.emit(SessionEvent::RunCompleted {
             response: "done".to_string(),
@@ -616,7 +1408,7 @@ mod tests {
         assert!(matches!(
             first_one.event,
             SessionEvent::Agent {
-                event: AgentEvent::ThreadLog { .. }
+                event: AgentEvent::AssistantMessage { .. }
             }
         ));
         assert_eq!(
@@ -632,10 +1424,13 @@ mod tests {
     fn session_event_bus_replays_recent_envelopes_in_order() {
         let bus = SessionEventBus::new(Some("session-replay".to_string()));
 
-        let first = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "one".to_string(),
-        });
+        let first = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "one".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let second = bus.emit(SessionEvent::RunCompleted {
             response: "done".to_string(),
             duration_ms: None,
@@ -652,14 +1447,20 @@ mod tests {
     fn session_event_bus_replay_filters_after_sequence_and_trims_capacity() {
         let bus = SessionEventBus::with_capacity(Some("session-trim".to_string()), 2);
 
-        let first = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "one".to_string(),
-        });
-        let second = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "two".to_string(),
-        });
+        let first = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "one".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        let second = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "two".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let third = bus.emit(SessionEvent::RunFailed {
             message: "boom".to_string(),
         });
@@ -703,21 +1504,30 @@ mod tests {
     #[test]
     fn session_event_bus_replay_trims_to_byte_capacity() {
         let sample_bus = SessionEventBus::with_limits(Some("session-byte".to_string()), 10, 4096);
-        let sample = sample_bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "one".to_string(),
-        });
+        let sample = sample_bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "one".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let sample_size = serialized_envelope_len(&sample, usize::MAX).unwrap();
 
         let bus = SessionEventBus::with_limits(Some("session-byte".to_string()), 10, sample_size);
-        let first = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "one".to_string(),
-        });
-        let second = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "two".to_string(),
-        });
+        let first = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "one".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        let second = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "two".to_string(),
+                usage: None,
+            })
+            .unwrap();
 
         assert_eq!(first.sequence_id, 1);
         assert_eq!(second.sequence_id, 2);
@@ -742,28 +1552,37 @@ mod tests {
     fn replay_subscription_reports_non_replayable_gap_between_retained_events() {
         let sample_bus =
             SessionEventBus::with_limits(Some("session-replay-large".to_string()), 10, 4096);
-        let sample = sample_bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "sample".to_string(),
-        });
+        let sample = sample_bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "sample".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let byte_capacity = serialized_envelope_len(&sample, usize::MAX).unwrap() * 4;
         let bus = SessionEventBus::with_limits(
             Some("session-replay-large".to_string()),
             10,
             byte_capacity,
         );
-        let before = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "before".to_string(),
-        });
+        let before = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "before".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let oversize = bus.emit(SessionEvent::RunCompleted {
             response: "x".repeat(byte_capacity * 8),
             duration_ms: None,
         });
-        let after = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "after".to_string(),
-        });
+        let after = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "after".to_string(),
+                usage: None,
+            })
+            .unwrap();
 
         let subscription = bus.subscribe_for_client_with_replay(SessionClientId::new(), None, 10);
 
@@ -791,17 +1610,23 @@ mod tests {
     async fn replay_subscription_delivers_non_replayed_oversize_live_after_boundary() {
         let sample_bus =
             SessionEventBus::with_limits(Some("session-live-large".to_string()), 10, 4096);
-        let sample = sample_bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "sample".to_string(),
-        });
+        let sample = sample_bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "sample".to_string(),
+                usage: None,
+            })
+            .unwrap();
         let byte_capacity = serialized_envelope_len(&sample, usize::MAX).unwrap() * 4;
         let bus =
             SessionEventBus::with_limits(Some("session-live-large".to_string()), 10, byte_capacity);
-        let before = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "before".to_string(),
-        });
+        let before = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "before".to_string(),
+                usage: None,
+            })
+            .unwrap();
 
         let mut subscription =
             bus.subscribe_for_client_with_replay(SessionClientId::new(), None, 10);
@@ -809,10 +1634,13 @@ mod tests {
             response: "x".repeat(byte_capacity * 8),
             duration_ms: None,
         });
-        let after = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "after".to_string(),
-        });
+        let after = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "after".to_string(),
+                usage: None,
+            })
+            .unwrap();
 
         assert_eq!(subscription.replay_boundary_sequence_id, before.sequence_id);
         assert_eq!(subscription.replayed_events, vec![before]);
@@ -827,14 +1655,20 @@ mod tests {
     #[tokio::test]
     async fn replay_subscription_replays_boundary_events_then_live_without_gap() {
         let bus = SessionEventBus::new(Some("session-gap".to_string()));
-        let first = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "one".to_string(),
-        });
-        let second = bus.emit_agent(AgentEvent::ThreadLog {
-            name: "impl".to_string(),
-            line: "two".to_string(),
-        });
+        let first = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "one".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        let second = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("impl".to_string()),
+                content: "two".to_string(),
+                usage: None,
+            })
+            .unwrap();
 
         let mut subscription = bus.subscribe_for_client_with_replay(
             SessionClientId::new(),
@@ -916,16 +1750,325 @@ mod tests {
         let run_id = SessionRunId::new();
         let client_id = SessionClientId::new();
         let sink = EventSink::bus_with_context(bus, Some(run_id.clone()), Some(client_id.clone()));
-        let event = AgentEvent::ModelCallStarted {
-            thread_name: None,
-            iteration: 1,
-        };
 
-        sink.emit(event.clone());
+        sink.emit(AgentEvent::RunFinished { thread_name: None });
 
         let envelope = bus_rx.recv().await.unwrap();
         assert_eq!(envelope.run_id.as_ref(), Some(&run_id));
         assert_eq!(envelope.client_id.as_ref(), Some(&client_id));
-        assert_eq!(envelope.event, SessionEvent::Agent { event });
+        assert!(!envelope.epoch_id.is_empty());
+    }
+
+    #[test]
+    fn model_start_and_thread_logs_are_never_forwarded() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let channel_sink = EventSink::channel(sender);
+        let bus = SessionEventBus::new(Some("session-internal".to_string()));
+        let mut bus_receiver = bus.subscribe();
+        let bus_sink = EventSink::bus(bus.clone());
+        for event in [
+            AgentEvent::ModelCallStarted {
+                thread_name: Some("worker".to_string()),
+                iteration: 1,
+            },
+            AgentEvent::ThreadLog {
+                name: "worker".to_string(),
+                line: "CANARY_LOG".to_string(),
+            },
+        ] {
+            channel_sink.emit(event.clone());
+            bus_sink.emit(event);
+        }
+
+        assert!(receiver.try_recv().is_err());
+        assert!(bus_receiver.try_recv().is_err());
+        assert!(bus.recent_events(None, 10).is_empty());
+    }
+
+    #[test]
+    fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_sanitization_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-safe-events");
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-safe-events".to_string()),
+            path.clone(),
+        );
+        let bus_sink = EventSink::bus(bus.clone());
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let channel_sink = EventSink::channel(sender);
+        let started = AgentEvent::ToolCallStarted {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-safe".to_string(),
+            name: "exec_command".to_string(),
+            args_preview: "CANARY_COMMAND".to_string(),
+            args_detail: Some(
+                serde_json::json!({
+                    "cmd": "echo CANARY_COMMAND",
+                    "workdir": "/safe/work",
+                    "query": "CANARY_QUERY",
+                    "body": "CANARY_BODY",
+                    "headers": {"authorization": "CANARY_HEADER"},
+                    "chars": "CANARY_STDIN"
+                })
+                .to_string(),
+            ),
+        };
+        channel_sink.emit(started.clone());
+        channel_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-write".to_string(),
+            name: "write".to_string(),
+            args_preview: "CANARY_WRITE".to_string(),
+            args_detail: Some(
+                serde_json::json!({
+                    "path": "/safe/file.txt",
+                    "content": "CANARY_WRITE"
+                })
+                .to_string(),
+            ),
+        });
+        bus_sink.emit(started);
+        bus_sink.emit(AgentEvent::ToolCallFinished {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-safe".to_string(),
+            name: "exec_command".to_string(),
+            content_preview: "exit 7: CANARY_RESULT".to_string(),
+            is_error: true,
+        });
+        bus_sink.emit(AgentEvent::Error {
+            thread_name: Some("worker".to_string()),
+            message: "CANARY_ERROR".to_string(),
+        });
+        bus_sink.emit(AgentEvent::ThreadStarted {
+            name: "worker".to_string(),
+            action: "CANARY_ACTION".to_string(),
+            source_threads: vec!["source".to_string()],
+        });
+        bus_sink.emit(AgentEvent::ThreadFinished {
+            name: "worker".to_string(),
+            exit_code: -1,
+            timed_out: true,
+            timeout_reason: Some("CANARY_TIMEOUT".to_string()),
+            usage: None,
+        });
+
+        let channel_event = receiver.try_recv().unwrap();
+        let AgentEvent::ToolCallStarted {
+            args_preview,
+            args_detail,
+            ..
+        } = channel_event
+        else {
+            panic!("expected sanitized tool start");
+        };
+        assert!(args_detail.is_none());
+        assert!(args_preview.contains("/safe/work"));
+        assert!(args_preview.contains("execute"));
+        assert!(!args_preview.contains("CANARY"));
+        let AgentEvent::ToolCallStarted { args_preview, .. } = receiver.try_recv().unwrap() else {
+            panic!("expected sanitized write start");
+        };
+        assert!(args_preview.contains("/safe/file.txt"));
+        assert!(args_preview.contains("\"content_chars\":12"));
+        assert!(!args_preview.contains("CANARY"));
+
+        let records =
+            crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
+        assert_eq!(records["worker"].len(), 5);
+        let serialized = records["worker"]
+            .iter()
+            .map(|record| record.event_json.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!serialized.contains("CANARY"));
+        assert!(serialized.contains("/safe/work"));
+        assert!(serialized.contains("exit code 7"));
+        assert!(serialized.contains("operation failed"));
+        assert!(serialized.contains("thread dispatched"));
+        assert!(serialized.contains("thread timed out"));
+        let replay = serde_json::to_string(&bus.recent_events(None, 20)).unwrap();
+        assert!(!replay.contains("CANARY"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
+        const THREADS: usize = 8;
+        const EVENTS_PER_THREAD: usize = 16;
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_order_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-order");
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-order".to_string()),
+            path.clone(),
+        );
+        let mut receiver = bus.subscribe();
+        let barrier = Arc::new(std::sync::Barrier::new(THREADS));
+        let emitted = Arc::new(StdMutex::new(Vec::new()));
+        let handles = (0..THREADS)
+            .map(|thread| {
+                let bus = bus.clone();
+                let barrier = barrier.clone();
+                let emitted = emitted.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for index in 0..EVENTS_PER_THREAD {
+                        let content = format!("{thread}:{index}");
+                        let envelope = bus
+                            .emit_agent(AgentEvent::AssistantMessage {
+                                thread_name: Some("worker".to_string()),
+                                content: content.clone(),
+                                usage: None,
+                            })
+                            .unwrap();
+                        emitted
+                            .lock()
+                            .unwrap()
+                            .push((content, envelope.sequence_id));
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let total = THREADS * EVENTS_PER_THREAD;
+        let broadcast_ids = (0..total)
+            .map(|_| receiver.try_recv().unwrap().sequence_id)
+            .collect::<Vec<_>>();
+        assert_eq!(broadcast_ids, (1..=total as u64).collect::<Vec<_>>());
+        let replay_ids = bus
+            .recent_events(None, total)
+            .into_iter()
+            .map(|event| event.sequence_id)
+            .collect::<Vec<_>>();
+        assert_eq!(replay_ids, broadcast_ids);
+
+        let sequence_by_content = emitted
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashMap<_, _>>();
+        let records = crate::store::load_all_thread_events(&path, "session-order", total).unwrap();
+        let persisted_ids = records["worker"]
+            .iter()
+            .map(|record| {
+                let event: AgentEvent = serde_json::from_str(&record.event_json).unwrap();
+                let AgentEvent::AssistantMessage { content, .. } = event else {
+                    panic!("expected assistant event");
+                };
+                sequence_by_content[&content]
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(persisted_ids, broadcast_ids);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_writer_failure_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-writer-failure".to_string()),
+            path.clone(),
+        );
+        let mut receiver = bus.subscribe();
+
+        let failed = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("worker".to_string()),
+                content: "not persisted".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        assert_eq!(failed.sequence_id, 1);
+        assert!(receiver.try_recv().is_err());
+        assert!(bus.recent_events(None, 10).is_empty());
+        let (boundary, records) = bus
+            .thread_event_boundary(|| {
+                crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
+            })
+            .unwrap();
+        assert_eq!(boundary.sequence_id, 0);
+        assert!(records.is_empty());
+
+        crate::store::insert_test_session(&path, "session-writer-failure");
+        let published = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("worker".to_string()),
+                content: "persisted".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        assert_eq!(published.sequence_id, 2);
+        assert_eq!(receiver.try_recv().unwrap(), published);
+
+        let subscription = bus.subscribe_for_client_with_replay(SessionClientId::new(), None, 10);
+        assert_eq!(subscription.replay_boundary_sequence_id, 2);
+        assert_eq!(subscription.replayed_events, vec![published]);
+        assert_eq!(
+            subscription.replay_gap,
+            Some(SessionReplayGap {
+                missing_from_sequence_id: 1,
+                missing_to_sequence_id: 1,
+            })
+        );
+        let (boundary, records) = bus
+            .thread_event_boundary(|| {
+                crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
+            })
+            .unwrap();
+        assert_eq!(boundary.sequence_id, 2);
+        assert_eq!(records["worker"].len(), 1);
+        assert!(records["worker"][0].event_json.contains("persisted"));
+        assert!(!records["worker"][0].event_json.contains("not persisted"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn thread_event_boundary_blocks_concurrent_emit() {
+        let bus = SessionEventBus::new(Some("session-boundary".to_string()));
+        let query_bus = bus.clone();
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let query = std::thread::spawn(move || {
+            query_bus
+                .thread_event_boundary(|| {
+                    entered_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                    Ok(())
+                })
+                .unwrap()
+                .0
+        });
+        entered_receiver.recv().unwrap();
+        let emit_bus = bus.clone();
+        let (emitted_sender, emitted_receiver) = std::sync::mpsc::channel();
+        let emitter = std::thread::spawn(move || {
+            let envelope = emit_bus.emit(SessionEvent::SnapshotSaved {
+                session_id: "session-boundary".to_string(),
+            });
+            emitted_sender.send(envelope).unwrap();
+        });
+        assert!(emitted_receiver
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+        release_sender.send(()).unwrap();
+        let boundary = query.join().unwrap();
+        let emitted = emitted_receiver.recv().unwrap();
+        emitter.join().unwrap();
+        assert_eq!(boundary.sequence_id, 0);
+        assert_eq!(emitted.sequence_id, 1);
+        assert_eq!(boundary.epoch_id, emitted.epoch_id);
     }
 }

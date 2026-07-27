@@ -18,7 +18,7 @@ mod client;
 mod requests;
 mod responses;
 #[cfg(test)]
-mod test_http;
+pub(crate) mod test_http;
 mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
@@ -209,10 +209,13 @@ mod tests {
         }
     }
 
-    fn stored_arcee_auth(api_key: &str, base_url: &str) -> String {
+    fn stored_arcee_auth(access_token: &str, base_url: &str) -> String {
         json!({
-            "type": "arcee_api_key",
-            "api_key": api_key,
+            "type": "arcee_device_token",
+            "access_token": access_token,
+            "refresh_token": "refresh-test",
+            "token_type": "bearer",
+            "expires_at_ms": u64::MAX,
             "base_url": base_url,
             "organization_id": "org-test",
             "workspace_name": "workspace-test"
@@ -879,6 +882,52 @@ mod tests {
             .contains("does not match the stored credential origin"));
     }
 
+    #[tokio::test]
+    async fn existing_arcee_client_rejects_credentials_rotated_to_another_origin() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let initial_token = "initial-token-must-not-leak";
+        let rotated_token = "rotated-token-must-not-leak";
+        let env = IsolatedModelEnv::new("rotated-arcee-origin", None, None, None);
+        let auth_path = env.home.join("arcee_auth.json");
+        write_test_credential(
+            &auth_path,
+            stored_arcee_auth(initial_token, "https://api.arcee.ai"),
+        );
+        let client = ModelClient::from_effective_settings(effective_settings(
+            BackendKind::ArceeAuth,
+            "https://api.arcee.ai/api/v1",
+            None,
+        ))
+        .expect("initial credential origin should match the session");
+
+        write_test_credential(
+            &auth_path,
+            stored_arcee_auth(rotated_token, "https://tenant.arcee.ai"),
+        );
+
+        let fresh_error = client
+            .send_turn(Vec::new(), Vec::new())
+            .await
+            .expect_err("a fresh reload must reject a credential from another origin");
+        let forced_error = arcee::force_refresh_access_token(
+            &arcee::no_redirect_client().unwrap(),
+            client.base_url(),
+            initial_token,
+        )
+        .await
+        .expect_err("a forced refresh must reject a credential from another origin");
+
+        for error in [fresh_error, forced_error] {
+            let diagnostic = format!("{error:#}");
+            assert!(
+                diagnostic.contains("does not match the stored credential origin"),
+                "unexpected origin mismatch: {diagnostic}"
+            );
+            assert!(!diagnostic.contains(initial_token));
+            assert!(!diagnostic.contains(rotated_token));
+        }
+    }
+
     #[test]
     fn both_arcee_modes_validate_endpoints_and_sensitive_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -957,7 +1006,7 @@ mod tests {
         write_test_credential(&env.home.join("arcee_auth.json"), &arcee);
 
         let loaded = arcee::read_stored_auth().unwrap();
-        assert_eq!(loaded.api_key, "rcai-test");
+        assert_eq!(loaded.access_token, "rcai-test");
         codex_auth_status().unwrap();
 
         arcee_auth_logout().unwrap();
@@ -1017,6 +1066,50 @@ mod tests {
 
         assert_eq!(std::fs::read(&auth_path).unwrap(), before);
         assert!(!canonical_path.exists());
+    }
+
+    #[test]
+    fn token_usage_validation_and_accumulation_are_overflow_safe() {
+        let valid = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 2,
+            cache_write_tokens: 3,
+            reasoning_tokens: 4,
+            orchestrator_context_tokens: 20,
+        };
+        assert_eq!(valid.valid_provider_context(), Some(20));
+
+        let mut inconsistent = valid.clone();
+        inconsistent.orchestrator_context_tokens = 19;
+        assert_eq!(inconsistent.valid_provider_context(), None);
+
+        let mut maximum_total = valid.clone();
+        maximum_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT;
+        assert_eq!(
+            maximum_total.valid_provider_context(),
+            Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
+        );
+
+        let mut oversized_total = valid.clone();
+        oversized_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
+        assert_eq!(oversized_total.valid_provider_context(), None);
+
+        let hostile = TokenUsage {
+            input_tokens: u64::MAX,
+            output_tokens: u64::MAX,
+            cache_read_tokens: u64::MAX,
+            cache_write_tokens: u64::MAX,
+            reasoning_tokens: u64::MAX,
+            orchestrator_context_tokens: u64::MAX,
+        };
+        assert_eq!(hostile.valid_provider_context(), None);
+        let mut accumulated = hostile.clone();
+        accumulated.add_cost_saturating(&hostile);
+        accumulated += hostile;
+        assert_eq!(accumulated.input_tokens, u64::MAX);
+        assert_eq!(accumulated.output_tokens, u64::MAX);
+        assert_eq!(accumulated.orchestrator_context_tokens, u64::MAX);
     }
 
     #[test]
@@ -1105,6 +1198,55 @@ mod tests {
         assert!(request.get("tools").is_none());
         // No messages → empty array, no crash.
         assert_eq!(request["messages"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
+        let messages = [
+            Message::System {
+                content: "primary".to_string(),
+            },
+            Message::System {
+                content: "agents".to_string(),
+            },
+            Message::User {
+                content: "historical checkpoint".to_string(),
+            },
+            Message::User {
+                content: "newly aged history".to_string(),
+            },
+            Message::User {
+                content: "compaction prompt".to_string(),
+            },
+        ];
+
+        let openai = openai_responses_request("model", None, &messages, &[]);
+        assert_eq!(openai["input"], serde_json::to_value(&messages).unwrap());
+        assert!(openai.get("tools").is_none());
+
+        for request in [
+            fireworks_chat_request("model", None, &messages, &[]),
+            together_chat_request("model", None, &messages, &[]),
+            deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]),
+        ] {
+            assert_eq!(
+                request["messages"],
+                serde_json::to_value(&messages).unwrap()
+            );
+            assert!(request.get("tools").is_none());
+        }
+
+        let anthropic =
+            anthropic_messages_request("claude-sonnet-4-6", None, &messages, &[], Some("1h"))
+                .unwrap();
+        assert_eq!(anthropic["system"][0]["text"], "primary\n\nagents");
+        assert_eq!(anthropic["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(anthropic["messages"][0]["content"], "historical checkpoint");
+        assert_eq!(
+            anthropic["messages"][2]["content"][0]["text"],
+            "compaction prompt"
+        );
+        assert!(anthropic.get("tools").is_none());
     }
 
     #[test]
@@ -1250,6 +1392,7 @@ mod tests {
         let fireworks_absent = fireworks_chat_request("model", None, &messages, &[]);
         assert!(fireworks_absent.get("reasoning_effort").is_none());
         assert!(fireworks_absent.get("reasoning_history").is_none());
+        assert!(fireworks_absent.get("tools").is_none());
         let fireworks_none =
             fireworks_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
         assert_eq!(fireworks_none["reasoning_effort"], "none");
@@ -1268,6 +1411,7 @@ mod tests {
         assert!(together_absent.get("reasoning").is_none());
         assert!(together_absent.get("reasoning_effort").is_none());
         assert!(together_absent.get("chat_template_kwargs").is_none());
+        assert!(together_absent.get("tools").is_none());
         let together_none =
             together_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
         assert_eq!(together_none["reasoning"], json!({"enabled": false}));
@@ -1288,6 +1432,25 @@ mod tests {
 
         let openai_absent = openai_responses_request("model", None, &messages, &[]);
         assert!(openai_absent.get("reasoning").is_none());
+        assert!(openai_absent.get("tools").is_none());
+
+        let tools = [ToolDefinition {
+            def_type: "function".to_string(),
+            function: crate::types::FunctionDef {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+        }];
+        assert!(fireworks_chat_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
+        assert!(together_chat_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
+        assert!(openai_responses_request("model", None, &messages, &tools)
+            .get("tools")
+            .is_some());
         for effort in [
             ReasoningEffort::None,
             ReasoningEffort::Minimal,

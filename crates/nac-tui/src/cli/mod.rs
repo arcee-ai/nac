@@ -338,6 +338,7 @@ fn worker_dispatch_options(cli: WorkerDispatchArgs) -> WorkerDispatchOptions {
     WorkerDispatchOptions {
         session_id: cli.session_id,
         thread_name: cli.thread_name,
+        dispatch_id: cli.dispatch_id,
         action: cli.action,
         source_threads: cli.source_threads,
         skills: cli.skills,
@@ -356,6 +357,7 @@ fn run_options(
         worker_executable: Some(worker_executable),
         store: store_options(cli.store),
         model: model_options(cli.model),
+        orchestrator_compaction_threshold: cli.orchestrator_compaction_threshold,
         sandbox: sandbox_options(cli.sandbox),
         ssh_host: None,
     }
@@ -418,6 +420,9 @@ backend = "arcee"
 api_key_env = ["invalid-selector-shape"]
 extra_headers = "invalid-header-shape"
 
+[compaction]
+threshold_tokens = 64000
+
 [storage]
 store_path = "persisted.db"
 "#,
@@ -441,6 +446,8 @@ store_path = "persisted.db"
                 OsString::from("session-123"),
                 OsString::from("--thread-name"),
                 OsString::from("impl"),
+                OsString::from("--dispatch-id"),
+                OsString::from("dispatch-123"),
                 OsString::from("--action"),
                 OsString::from("do work"),
             ],
@@ -453,6 +460,7 @@ store_path = "persisted.db"
                 Some(Path::new("persisted.db"))
             );
             assert!(config.model.backend.is_none());
+            assert_eq!(config.compaction.threshold_tokens, None);
         }
 
         let new_session = parse_cli_from(vec![OsString::from("nac")]);
@@ -519,6 +527,8 @@ store_path = "persisted.db"
             OsString::from("session-123"),
             OsString::from("--thread-name"),
             OsString::from("impl"),
+            OsString::from("--dispatch-id"),
+            OsString::from("dispatch-123"),
             OsString::from("--action"),
             OsString::from("do work"),
             OsString::from("--workspace-cwd"),
@@ -534,6 +544,7 @@ store_path = "persisted.db"
             ParsedCli::ManagedWorker(worker) => {
                 assert_eq!(worker.dispatch.session_id, "session-123");
                 assert_eq!(worker.dispatch.thread_name, "impl");
+                assert_eq!(worker.dispatch.dispatch_id, "dispatch-123");
                 assert_eq!(worker.dispatch.action, "do work");
                 assert_eq!(
                     worker.workspace_cwd.as_deref(),
@@ -561,6 +572,8 @@ store_path = "persisted.db"
             OsString::from("session-123"),
             OsString::from("--thread-name"),
             OsString::from("impl"),
+            OsString::from("--dispatch-id"),
+            OsString::from("dispatch-123"),
             OsString::from("--action"),
             OsString::from("do work"),
             OsString::from("--workspace-cwd"),
