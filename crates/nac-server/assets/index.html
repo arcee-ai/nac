@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>nac</title>
     <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/redesign.css?v=quality-17" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=quality-22" />
   </head>
   <body>
     <div id="app" class="app-frame">
@@ -66,30 +66,7 @@
               <p id="configRepairDetail"></p>
               <button id="configRepairAction" class="button" type="button">open settings</button>
             </section>
-            <section class="rail-section orchestrator-section" aria-labelledby="orchestratorTitle">
-              <div class="section-heading">
-                <h2 id="orchestratorTitle">Orchestrator</h2>
-                <div class="section-actions">
-                  <span id="orchestratorState" class="orchestrator-state" data-state="no-run" role="status" aria-live="polite">Idle</span>
-                  <button id="expandOrchestrator" class="expand-button" type="button" aria-label="Open orchestrator conversation" title="Open orchestrator conversation">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>
-                  </button>
-                </div>
-              </div>
-              <ol id="orchestratorLedger" class="action-ledger orchestrator-ledger"></ol>
-            </section>
-            <section id="worksetRail" class="rail-section worksets-section" aria-labelledby="worksetsTitle">
-              <div class="section-heading">
-                <h2 id="worksetsTitle">Worksets</h2>
-                <div class="section-actions">
-                  <span id="worksetRailCount" class="workset-rail-count" aria-live="polite">…</span>
-                  <button id="expandWorksets" class="expand-button" type="button" aria-label="Open complete worksets" title="Open complete worksets">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>
-                  </button>
-                </div>
-              </div>
-              <div id="worksetRailSummary" class="workset-rail-summary" data-state="loading"><p>Loading worksets…</p></div>
-            </section>
+            <div id="orchestratorChatContent" class="orchestrator-chat-content"></div>
           </aside>
 
           <section id="focusPanel" class="focus-panel" aria-labelledby="focusTitle" hidden>
@@ -167,6 +144,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=quality-18" defer></script>
+    <script src="/assets/app.js?v=quality-21" defer></script>
   </body>
 </html>

@@ -58,7 +58,6 @@ let focusMarkdownRenderer = null;
 
 const commands = [
   { name: "worksets", description: "inspect complete persisted worksets" },
-  { name: "transcript", description: "open the orchestrator transcript" },
   { name: "workspace", description: "inspect changed files and diffs" },
   { name: "info", description: "show complete session and store identity" },
   { name: "settings", description: "edit this session's configuration" },
@@ -84,9 +83,8 @@ function bindElements() {
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
     "metricChanges", "sessionNavStatus", "stopRun",
-    "worksetRail", "worksetRailCount", "worksetRailSummary", "expandWorksets",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
-    "orchestratorState", "orchestratorLedger", "expandOrchestrator",
+    "orchestratorChatContent",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
@@ -116,8 +114,7 @@ function bindEvents() {
   el.sessionInfo.addEventListener("click", () => openFocusView("info"));
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
   el.stopRun.addEventListener("click", stopActiveRun);
-  el.expandWorksets.addEventListener("click", () => openFocusView("worksets"));
-  el.expandOrchestrator.addEventListener("click", () => openFocusView("orchestrator"));
+  el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
@@ -1380,17 +1377,6 @@ function responseDurationAssignments(snapshot, messages = snapshot?.messages || 
 
 function handleFocusScroll(event) {
   const scroller = event.target;
-  if (state.focusView?.type === "orchestrator" && scroller?.classList?.contains("focus-chat")) {
-    if (event.isTrusted) {
-      state.orchestratorViewport = {
-        sessionId: state.currentId,
-        pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
-        scrollTop: scroller.scrollTop,
-      };
-    }
-    if (scroller.scrollTop <= 36) loadOlderOrchestratorMessages(scroller);
-    return;
-  }
   if (state.focusView?.type === "thread" && scroller?.classList?.contains("focus-activity")) {
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48) {
       loadOlderThreadEvents(state.focusView.name, scroller);
@@ -1418,7 +1404,7 @@ async function loadOlderOrchestratorMessages(scroller) {
   };
   try {
     const response = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/messages?before=${messageWindow.start}&limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}`);
-    if (state.currentId !== sessionId || state.focusView?.type !== "orchestrator") {
+    if (state.currentId !== sessionId) {
       messageWindow.loading = false;
       return;
     }
@@ -1427,7 +1413,10 @@ async function loadOlderOrchestratorMessages(scroller) {
       return;
     }
     state.orchestratorPrependAnchor = anchor;
-    renderFocusView(snapshot);
+    renderOrchestratorChatRail(snapshot);
+    if (el.orchestratorChatContent && anchor) {
+      el.orchestratorChatContent.scrollTop = Math.max(0, el.orchestratorChatContent.scrollHeight - anchor.scrollHeight + anchor.scrollTop);
+    }
   } catch (error) {
     messageWindow.loading = false;
     showToast(error.message, true);
@@ -1449,9 +1438,9 @@ function orchestratorHistoryNeedsFill(scroller, messageWindow) {
 }
 
 function ensureOrchestratorScrollableHistory(renderId = state.focusRenderId) {
-  if (renderId !== state.focusRenderId || state.focusView?.type !== "orchestrator") return;
+  if (renderId !== state.focusRenderId || !state.currentId) return;
   const sessionId = state.currentId;
-  const scroller = el.focusContent?.querySelector?.(".focus-chat");
+  const scroller = el.orchestratorChatContent;
   const messageWindow = sessionId ? state.messageWindows.get(sessionId) : null;
   if (orchestratorHistoryNeedsFill(scroller, messageWindow)) {
     loadOlderOrchestratorMessages(scroller);
@@ -1883,8 +1872,6 @@ function focusScrollTargets() {
   const targets = [];
   if (el.focusContent) targets.push(["focus-content", el.focusContent]);
   const selectors = [
-    ["orchestrator-chat", ".focus-chat"],
-    ["orchestrator-live", ".focus-live"],
     ["thread-activity", ".focus-activity"],
     ["thread-episodes", ".focus-episodes"],
     ["worksets", ".focus-worksets-scroll"],
@@ -1951,23 +1938,7 @@ function restoreFocusViewState(restoration, { renderId, prependAnchor = null } =
   restoreFormControlStates(restoration.forms);
   const applyScroll = () => {
     if (renderId !== state.focusRenderId || restoration.identity !== focusViewIdentity()) return false;
-    const skip = state.focusView?.type === "orchestrator" ? new Set(["orchestrator-chat"]) : new Set();
-    restoreScrollPositions(restoration.scroll, focusScrollTargets(), { skip });
-    if (state.focusView?.type === "orchestrator") {
-      const scroller = el.focusContent?.querySelector?.(".focus-chat");
-      if (scroller) {
-        if (prependAnchor) {
-          scroller.scrollTop = Math.max(0, scroller.scrollHeight - prependAnchor.scrollHeight + prependAnchor.scrollTop);
-        } else {
-          const captured = restoration.scroll.find((entry) => entry.key === "orchestrator-chat");
-          const viewport = state.orchestratorViewport?.sessionId === state.currentId
-            ? state.orchestratorViewport
-            : null;
-          const pinnedToBottom = viewport?.pinnedToBottom ?? !captured;
-          scroller.scrollTop = pinnedToBottom ? scroller.scrollHeight : (captured?.top ?? viewport?.scrollTop ?? 0);
-        }
-      }
-    }
+    restoreScrollPositions(restoration.scroll, focusScrollTargets());
     return true;
   };
   // Restore synchronously so a steady event stream cannot starve restoration by
@@ -2019,8 +1990,8 @@ function renderWorkspace() {
   const active = timing?.state === "active";
   el.stopRun.disabled = !active;
   el.stopRun.hidden = false;
-  renderWorksetRail(snapshot);
-  renderOrchestratorLedger(snapshot);
+  renderOrchestratorChatRail(snapshot);
+  requestAnimationFrame(() => ensureOrchestratorScrollableHistory(state.focusRenderId));
   renderThreads(snapshot);
   renderComposerTarget();
   if (state.focusView?.type !== "settings" || !el.focusContent.querySelector("#settingsForm")) renderFocusView(snapshot);
@@ -2121,32 +2092,6 @@ function worksetStatusText(workset) {
   return status || "Status not recorded";
 }
 
-function renderCompactWorkset(workset) {
-  const summary = String(workset?.summary ?? "");
-  return `<article class="compact-workset" data-status="${escapeAttr(workset?.status ?? "")}">
-    <header><strong>${escapeHtml(workset?.id ?? "")}</strong><span>${escapeHtml(worksetStatusText(workset))}</span></header>
-    <div>${escapeHtml(worksetItemCountLabel(workset?.items))}</div>
-    ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
-  </article>`;
-}
-
-function renderWorksetRail(snapshot) {
-  const presentation = worksetsPresentation(snapshot);
-  el.worksetRailSummary.dataset.state = presentation.state;
-  el.worksetRailCount.textContent = presentation.state === "loading"
-    ? "…"
-    : presentation.state === "error" ? "Error" : String(presentation.items.length);
-  if (presentation.state === "loading") {
-    el.worksetRailSummary.innerHTML = "<p>Loading worksets…</p>";
-  } else if (presentation.state === "error") {
-    el.worksetRailSummary.innerHTML = `<p class="workset-rail-error" role="alert">${escapeHtml(presentation.error)}</p>`;
-  } else if (presentation.state === "empty") {
-    el.worksetRailSummary.innerHTML = "<p>No worksets yet.</p>";
-  } else {
-    el.worksetRailSummary.innerHTML = presentation.items.map(renderCompactWorkset).join("");
-  }
-}
-
 function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
   const events = state.events.get(sessionId) || [];
   let observed = null;
@@ -2215,17 +2160,6 @@ function humanStateLabel(state) {
     "unavailable": "Unavailable",
   };
   return labels[state] || state;
-}
-
-function renderOrchestratorLedger(snapshot) {
-  const lifecycle = orchestratorLifecycle(snapshot);
-  el.orchestratorState.textContent = humanStateLabel(lifecycle.state);
-  el.orchestratorState.dataset.state = lifecycle.state;
-  el.orchestratorState.classList.toggle("is-active", lifecycle.state === "running");
-  el.orchestratorLedger.innerHTML = renderActionRows(
-    buildOrchestratorActions(snapshot),
-    "No activity yet.",
-  );
 }
 
 function actionEvidence(entry, overrides = {}) {
@@ -2509,9 +2443,6 @@ function openFocusView(type, name = null) {
     state.settingsRequestGeneration += 1;
   }
   state.focusView = { type, name, path };
-  if (type === "orchestrator") {
-    state.orchestratorViewport = { sessionId: state.currentId, pinnedToBottom: true, scrollTop: 0 };
-  }
   if (type === "settings") {
     state.settingsFocus = {
       sessionId: state.currentId,
@@ -2536,13 +2467,12 @@ function openFocusView(type, name = null) {
 function closeFocusView() {
   const fallback = state.focusView?.type === "thread"
     ? el.threadGrid.querySelector(`[data-focus-thread="${cssEscape(state.focusView.name)}"]`)
-    : state.focusView?.type === "orchestrator" ? el.expandOrchestrator
-      : state.focusView?.type === "worksets" ? el.expandWorksets
-        : state.focusView?.type === "info" ? el.sessionInfo
-          : state.focusView?.type === "rename" ? el.renameSession
-            : state.focusView?.type === "delete" ? el.renameSession
-              : state.focusView?.type === "help" ? el.promptInput
-                : el.promptInput;
+    : state.focusView?.type === "worksets" ? el.promptInput
+      : state.focusView?.type === "info" ? el.sessionInfo
+        : state.focusView?.type === "rename" ? el.renameSession
+          : state.focusView?.type === "delete" ? el.renameSession
+            : state.focusView?.type === "help" ? el.promptInput
+              : el.promptInput;
   const openerTarget = state.focusOpener;
   const fallbackTarget = captureFocusTarget(fallback);
   if (state.focusView?.type === "settings") {
@@ -2551,7 +2481,6 @@ function closeFocusView() {
   }
   state.focusView = null;
   state.focusOpener = null;
-  state.orchestratorViewport = null;
   renderFocusView(currentSnapshot());
   requestAnimationFrame(() => {
     if (!restoreFocusTarget(openerTarget)) restoreFocusTarget(fallbackTarget);
@@ -2564,7 +2493,6 @@ function renderFocusView(snapshot) {
   const renderId = ++state.focusRenderId;
   el.sessionLayout.classList.toggle("is-focused", Boolean(view));
   el.focusPanel.classList.toggle("is-thread", view?.type === "thread");
-  el.focusPanel.classList.toggle("is-orchestrator", view?.type === "orchestrator");
   el.focusPanel.classList.toggle("is-worksets", view?.type === "worksets");
   el.focusPanel.classList.toggle("is-workspace", view?.type === "workspace");
   el.focusPanel.classList.toggle("is-info", view?.type === "info");
@@ -2580,19 +2508,9 @@ function renderFocusView(snapshot) {
   const nextIdentity = focusViewIdentity(view);
   el.focusPanel.dataset.viewIdentity = nextIdentity;
   delete el.focusState.dataset.state;
-  const prependAnchor = view.type === "orchestrator" && state.orchestratorPrependAnchor?.sessionId === state.currentId
-    ? state.orchestratorPrependAnchor
-    : null;
-  if (prependAnchor) state.orchestratorPrependAnchor = null;
+  const prependAnchor = null;
 
-  if (view.type === "orchestrator") {
-    const lifecycle = orchestratorLifecycle(snapshot);
-    el.focusTitle.textContent = "Orchestrator";
-    el.focusState.textContent = humanStateLabel(lifecycle.state);
-    el.focusState.dataset.state = lifecycle.state;
-    el.focusState.classList.toggle("is-active", lifecycle.state === "running");
-    el.focusContent.innerHTML = renderOrchestratorConversation(snapshot);
-  } else if (view.type === "thread") {
+  if (view.type === "thread") {
     const model = buildThreadModels(snapshot).find((thread) => thread.name === view.name);
     const status = threadStatusPresentation(model?.state);
     el.focusTitle.textContent = view.name || "Thread";
@@ -2657,9 +2575,6 @@ function renderFocusView(snapshot) {
     el.focusContent.innerHTML = renderFocusSettings();
   }
   restoreFocusViewState(restoration, { renderId, prependAnchor });
-  if (view.type === "orchestrator") {
-    requestAnimationFrame(() => ensureOrchestratorScrollableHistory(renderId));
-  }
 }
 
 function settingsContextIsCurrent(requestGeneration, sessionId) {
@@ -2902,7 +2817,7 @@ function renderEvidenceField(label, value, unavailable) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${evidenceValue(value, unavailable)}</dd></div>`;
 }
 
-function renderOrchestratorConversation(snapshot) {
+function renderOrchestratorChatRail(snapshot) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
   const durations = responseDurationAssignments(snapshot, messages);
@@ -2925,10 +2840,26 @@ function renderOrchestratorConversation(snapshot) {
   const historyLoader = messageWindow?.hasOlder
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
     : "";
-  const lifecycle = orchestratorLifecycle(snapshot);
-  const actions = buildOrchestratorActions(snapshot, { limit: false }).reverse();
-  const live = `<section class="focus-live"><div class="focus-column-heading"><h3>Live activity</h3></div>${renderFocusActions(actions)}</section>`;
-  return `<div class="focus-orchestrator-layout" data-state="${escapeAttr(lifecycle.state)}"><div class="focus-orchestrator-sidebar">${live}</div><section class="focus-chat"><div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div></section></div>`;
+  el.orchestratorChatContent.innerHTML = `<div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div>`;
+  const viewport = state.orchestratorViewport;
+  if (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom) {
+    requestAnimationFrame(() => {
+      el.orchestratorChatContent.scrollTop = el.orchestratorChatContent.scrollHeight;
+    });
+  }
+}
+
+function handleOrchestratorChatScroll(event) {
+  const scroller = event.target;
+  if (scroller !== el.orchestratorChatContent) return;
+  if (event.isTrusted) {
+    state.orchestratorViewport = {
+      sessionId: state.currentId,
+      pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
+      scrollTop: scroller.scrollTop,
+    };
+  }
+  if (scroller.scrollTop <= 36) loadOlderOrchestratorMessages(scroller);
 }
 
 function worksetValueHtml(value, emptyLabel = "Not recorded") {
@@ -4152,9 +4083,6 @@ async function submitComposer(event) {
   const submission = { sessionId, target };
   state.submittingSessions.add(sessionId);
   el.sendPrompt.disabled = true;
-  if (!target && state.focusView?.type === "orchestrator") {
-    state.orchestratorViewport = { sessionId, pinnedToBottom: true, scrollTop: 0 };
-  }
   const contextIsCurrent = () => state.currentId === sessionId;
   const clearSubmittedInput = () => clearComposerDraftIfUnchanged(sessionId, rawInput);
   const notify = (message, error = false) => {
@@ -4288,7 +4216,6 @@ function runCommand(name) {
   if (state.currentId) state.composerDrafts.set(state.currentId, "");
   resizeComposer();
   if (name === "worksets") openFocusView("worksets");
-  else if (name === "transcript") openFocusView("orchestrator");
   else if (name === "workspace") openFocusView("workspace");
   else if (name === "info") openFocusView("info");
   else if (name === "settings") openFocusView("settings");

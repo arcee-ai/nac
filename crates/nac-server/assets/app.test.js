@@ -44,7 +44,7 @@ function loadApp(overrides = {}) {
       reconcileSessionCompactionSnapshot, noteSessionCompactionEvent,
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
-      renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorConversation,
+      renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
@@ -64,8 +64,9 @@ function loadApp(overrides = {}) {
       captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
       restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
+      handleOrchestratorChatScroll,
       renderConfigRepairGuidance, recordSessionEnvelope,
-      connectEventStream, worksetsPresentation, renderWorksetRail, renderWorksetsFocus,
+      connectEventStream, worksetsPresentation, renderWorksetsFocus,
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
@@ -266,8 +267,8 @@ function installWorkspaceElements(uiInstance) {
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
     "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
-    "worksetRailSummary", "worksetRailCount",
-    "orchestratorState", "orchestratorLedger", "threadGrid", "composerTarget", "composerTargetName",
+    "orchestratorChatContent",
+    "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
     "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
   ]) uiInstance.el[name] = element();
@@ -291,10 +292,8 @@ test("production shell preserves privacy and mobile chat-only access", () => {
     assert.match(indexSource, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(indexSource, /Session Events/i);
-  assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(620px, 40vw\) minmax\(0, 1fr\)/s);
-  const mobile = redesignSource.match(/@media \(max-width: 780px\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-sidebar \{[^}]*display: none/);
+  assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\)/s);
+  assert.match(redesignSource, /\.orchestrator-chat-content \{/);
 });
 
 test("session opening renders the workspace and starts snapshot and SSE without removed-surface references", () => {
@@ -506,39 +505,23 @@ scenario("SSE", "initial replay hydrates chronology without replaying stale run-
   assert.equal(isolated.state.sessionRunActivity.get(sessionId), true);
 });
 
-test("workset presentation and rail expose authoritative status, item counts, errors, and empty state", () => {
-  ui.el.worksetRailSummary = fakeElement();
-  ui.el.worksetRailCount = fakeElement();
-  ui.renderWorksetRail(undefined);
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "loading");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /Loading worksets/);
-  assert.equal(ui.el.worksetRailCount.textContent, "…");
+test("workset presentation exposes authoritative status, item counts, errors, and empty state", () => {
   for (const snapshot of [{}, { worksets: null }, { worksets: { items: null, error: null } }]) {
     const presentation = ui.worksetsPresentation(snapshot);
     assert.equal(presentation.state, "error");
     assert.match(presentation.error, /unavailable/i); }
-  ui.renderWorksetRail({ worksets: { items: [], error: "database <offline>" } });
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "error");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /database &lt;offline&gt;/);
-  assert.doesNotMatch(ui.el.worksetRailSummary.innerHTML, /database <offline>/);
-  assert.equal(ui.el.worksetRailCount.textContent, "Error");
-  ui.renderWorksetRail({ worksets: { items: [], error: null } });
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "empty");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /No worksets yet/);
-  assert.equal(ui.el.worksetRailCount.textContent, "0");
-  ui.renderWorksetRail({ worksets: { error: null, items: [{
+  const errPresentation = ui.worksetsPresentation({ worksets: { items: [], error: "database <offline>" } });
+  assert.equal(errPresentation.state, "error");
+  assert.match(errPresentation.error, /database <offline>/);
+  const emptyPresentation = ui.worksetsPresentation({ worksets: { items: [], error: null } });
+  assert.equal(emptyPresentation.state, "empty");
+  const populatedPresentation = ui.worksetsPresentation({ worksets: { error: null, items: [{
         id: "plan-<ui>", status: "in_review",
         summary: "Restore <all> fields",
         items: [{ title: "one", status: "invented-item-status" }, { title: "two" }],
       }], }, });
-  const html = ui.el.worksetRailSummary.innerHTML;
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "populated");
-  assert.equal(ui.el.worksetRailCount.textContent, "1");
-  assert.match(html, /plan-&lt;ui&gt;/);
-  assert.match(html, /in_review/);
-  assert.match(html, /2 items/);
-  assert.match(html, /Restore &lt;all&gt; fields/);
-  assert.doesNotMatch(html, /invented-item-status|0\/2|progress-track/);
+  assert.equal(populatedPresentation.state, "populated");
+  assert.equal(populatedPresentation.items.length, 1);
 });
 
 test("worksets fullscreen distinguishes loading, error, empty, populated, and empty-workset states", () => {
@@ -620,7 +603,8 @@ test("session reordering uses pointer capture with touch targets and keyboard gr
 });
 
 scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, and omit result rows", () => {
-  const html = ui.renderOrchestratorConversation({
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail({
     messages: [
       { role: "user", content: "build the feature" },
       { role: "assistant", content: "private intermediate narration", reasoning_text: "private reasoning", tool_calls: [
@@ -634,6 +618,7 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
     ],
     active_run: null,
   });
+  const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /build the feature/);
   assert.match(html, /The feature is complete\./);
   assert.match(html, /focus-tool-summary/);
@@ -643,16 +628,6 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   assert.match(html, /impl\/shell, verify\/ui/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
   assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL|RAW_THREAD_ACTION/);
-});
-
-test("orchestrator fullscreen activity renders newest actions first", () => {
-  ui.state.currentId = "activity-order-session";
-  ui.state.events.set("activity-order-session", [
-    agentEnvelope(1, { type: "assistant_message", content: "older activity" }),
-    agentEnvelope(2, { type: "assistant_message", content: "newer activity" }),
-  ]);
-  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
-  assert.ok(html.indexOf("newer activity") < html.indexOf("older activity"));
 });
 
 test("compaction activity correlates lifecycle IDs and safely renders every terminal state", () => {
@@ -697,14 +672,6 @@ test("compaction activity correlates lifecycle IDs and safely renders every term
     { id: "running-id", result: "running", state: "live", detail: "Automatic", finishSequenceId: null },
     { id: "unknown-safe", result: "failed", state: "error", detail: "Not triggered · failure type unavailable", finishSequenceId: null },
   ]);
-  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
-  assert.equal(occurrences(html, />context compaction</g), 5);
-  assert.match(html, />completed</);
-  assert.match(html, />unchanged</);
-  assert.match(html, />failed</);
-  assert.match(html, />running</);
-  assert.match(html, /Manual|Automatic/);
-  assert.doesNotMatch(html, /SECRET|RAW|private|checkpoint-id|<script>|raw failure/i);
 });
 
 scenario("SSE", "compaction replay retains correlated activity and reconciles manual busy state", () => {
@@ -777,11 +744,13 @@ scenario("Transcript privacy", "unfiltered post-create transcripts hide system a
   assert.match(row, />reasoning</);
   assert.match(row, /reason &lt;carefully&gt; &amp; ignore &lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(row, /<img|empty message/);
-  const transcript = ui.renderOrchestratorConversation(sessionSnapshot("reasoning-session", {
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(sessionSnapshot("reasoning-session", {
     messages: [
       { role: "system", content: "private system prompt with AGENTS.md instructions <never-show>" },
       { role: "user", content: "visible user prompt" }, message, ],
     message_page: { start: 0, end: 3, total: 3, has_older: false }, }));
+  const transcript = ui.el.orchestratorChatContent.innerHTML;
   assert.equal(occurrences(transcript, /focus-message-copy is-reasoning/g), 1);
   assert.match(transcript, /visible user prompt/);
   assert.match(transcript, />#2</);
@@ -834,7 +803,7 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
   assert.equal(snapshot.messages[0].reasoning_text, "retained reasoning");
   assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=24&include_sessions=false");
   isolated.state.currentId = "page/session";
-  isolated.state.focusView = { type: "orchestrator" };
+  isolated.el.orchestratorChatContent = fakeElement();
   isolated.state.snapshots.set("page/session", {
     messages: [{ role: "user", content: "tail" }, { role: "assistant", content: "reply" }],
     message_page: { start: 3, end: 5, total: 5, has_older: true }, });
@@ -863,15 +832,12 @@ test("orchestrator history auto-fills an underflowing viewport until scrolling i
   const scroller = { scrollHeight: 620, clientHeight: 900, scrollTop: 0,
     querySelector() { return null; }, };
   isolated.state.currentId = "underfilled-session";
-  isolated.state.focusView = { type: "orchestrator" };
   isolated.state.focusRenderId = 7;
   isolated.state.snapshots.set("underfilled-session", sessionSnapshot("underfilled-session"));
   isolated.state.messageWindows.set("underfilled-session", {
     start: 24, end: 48, total: 80, hasOlder: true, loading: false, messages: [],
   });
-  isolated.el.focusContent = { querySelector(selector) {
-      return selector === ".focus-chat" ? scroller : null;
-    }, };
+  isolated.el.orchestratorChatContent = scroller;
   isolated.ensureOrchestratorScrollableHistory(7);
   assert.deepEqual(requests, ["/sessions/underfilled-session/messages?before=24&limit=24"]);
   assert.equal(isolated.state.messageWindows.get("underfilled-session").loading, true);
@@ -1314,7 +1280,9 @@ test("an accepted run immediately supplies pending transcript and active elapsed
   assert.deepEqual(plain(ui.runTimingPresentation(snapshot, sessionId, 14_500)), {
     state: "active", label: "00:00:04",
     title: "Active elapsed runtime: 00:00:04", elapsedMs: 4_500, });
-  const html = ui.renderOrchestratorConversation(snapshot);
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(snapshot);
+  const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /Sending…/);
   assert.match(html, /\/run accepted-workset/);
   const reconciled = { ...snapshot,
@@ -1806,14 +1774,16 @@ test("orchestrator message windows preserve loaded history across fresh tail sna
 
 test("orchestrator conversation keeps pagination available while filtering system rows", () => {
   ui.state.currentId = "loader-session";
+  ui.el.orchestratorChatContent = fakeElement();
   ui.state.messageWindows.set("loader-session", {
     start: 24, end: 48, total: 80, hasOlder: true, loading: false, messages: [],
   });
-  const html = ui.renderOrchestratorConversation({ messages: [
+  ui.renderOrchestratorChatRail({ messages: [
       { role: "system", content: "paged private AGENTS prompt" },
       { role: "user", content: "paged visible user prompt" }, ],
     message_page: { start: 24, end: 26, total: 80, has_older: true },
     active_run: null, worksets: { items: [] }, });
+  const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /data-history-loader/);
   assert.match(html, /scroll up for earlier messages/);
   assert.match(html, />#26</);
@@ -1823,8 +1793,9 @@ test("orchestrator conversation keeps pagination available while filtering syste
   ui.state.messageWindows.set("loader-session", {
     start: 0, end: 48, total: 48, hasOlder: false, loading: false, messages: [],
   });
+  ui.renderOrchestratorChatRail({ messages: [], active_run: null, worksets: { items: [] } });
   assert.doesNotMatch(
-    ui.renderOrchestratorConversation({ messages: [], active_run: null, worksets: { items: [] } }),
+    ui.el.orchestratorChatContent.innerHTML,
     /data-history-loader/);
 });
 
