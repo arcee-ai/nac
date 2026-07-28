@@ -2048,9 +2048,10 @@ function orchestratorContextTokens(usage) {
 
 function tokenUsageSummary(usage) {
   if (!usage) return "—";
-  const parts = [`In ${formatTokenCount(usage.input_tokens)}`, `Out ${formatTokenCount(usage.output_tokens)}`];
-  if (Number(usage.cache_read_tokens || 0) > 0) parts.push(`Cache ${formatTokenCount(usage.cache_read_tokens)}`);
-  return parts.join(" · ");
+  const parts = [`↑${formatTokenCount(usage.input_tokens)}`];
+  if (Number(usage.cache_read_tokens || 0) > 0) parts.push(`R${formatTokenCount(usage.cache_read_tokens)}`);
+  parts.push(`↓${formatTokenCount(usage.output_tokens)}`);
+  return parts.join(" ");
 }
 
 function tokenUsageTitle(usage) {

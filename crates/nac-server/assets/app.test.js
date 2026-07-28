@@ -2032,7 +2032,7 @@ test("session telemetry preserves old UI token semantics and folds live model-ca
     output_tokens: 32, cache_read_tokens: 63, cache_write_tokens: 11,
     reasoning_tokens: 13, total_tokens: 700, });
   assert.equal(ui.orchestratorContextTokens(usage), 700);
-  assert.equal(ui.tokenUsageSummary(usage), "In 160 · Out 32 · Cache 63");
+  assert.equal(ui.tokenUsageSummary(usage), "↑160 R63 ↓32");
   assert.equal(ui.tokenUsageTitle(usage), "input 160 · cache read 63 · output 32");
 });
 
