@@ -589,13 +589,18 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .focus-event-loader svg { width: 13px; height: 13px; fill: none; stroke: #696969; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .focus-event-loader.is-loading svg { animation: event-loader-pulse 700ms ease-in-out infinite alternate; }
 @keyframes event-loader-pulse { to { transform: translateY(3px); stroke: #aaa; } }
-.focus-message { display: flex; flex-direction: column; gap: 4px; padding: 20px 0; border-bottom: 1px solid #202020; }
-.focus-message-label { min-width: 0; display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); }
-.focus-message-role { color: var(--ink-muted); font: var(--fs-xs)/var(--lh-tight) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
-.focus-message[data-role="user"] .focus-message-role { color: var(--ink); }
-.focus-message[data-role="system"] .focus-message-role { color: #8f7f9f; }
+.rail-heading {
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  margin: 0;
+  color: var(--ink-muted);
+  font: var(--fw-semibold) var(--fs-xs)/var(--lh-none) var(--mono);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  flex: none;
+}
+.focus-message { display: flex; flex-direction: column; gap: 4px; padding: 20px 0; }
+.focus-message[data-role="user"] { border-left: 2px solid var(--line); padding-left: var(--sp-3); }
 .focus-message.is-pending { margin-inline: -10px; padding-inline: 10px; border: 1px dashed #4d4d4d; border-radius: var(--r-md); background: var(--surface-hover); }
-.focus-message.is-pending .focus-message-role { color: #b5b5b5; }
 .focus-message-body { min-width: 0; display: grid; gap: 10px; width: 100%; }
 .focus-message-copy { min-width: 0; overflow-wrap: anywhere; color: #d0d0d0; font: var(--fs-md)/var(--lh-relaxed) var(--mono); }
 .focus-message-copy.is-reasoning { padding: 10px 12px; border-left: 2px solid #3d3d3d; background: var(--surface); color: #929292; font-size: var(--fs-sm); }
@@ -637,7 +642,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 
 .tool-block {
   padding: var(--sp-2) 0;
-  border-bottom: 1px solid var(--line);
 }
 .tool-block-header {
   display: flex;
@@ -674,10 +678,8 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   flex-direction: column;
   gap: var(--sp-1);
   padding: var(--sp-2) 0;
-  border-top: 1px solid var(--line);
   font: var(--fs-sm)/var(--lh-tight) var(--mono);
 }
-.focus-action:first-child { border-top: 0; }
 .focus-action-event {
   flex-direction: row;
   align-items: baseline;
@@ -968,8 +970,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .thread-steering-list header { display: flex; justify-content: space-between; gap: 10px; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); text-transform: uppercase; }
 .thread-steering-list p { margin: 7px 0; overflow-wrap: anywhere; color: #929292; font: var(--fs-xs)/var(--lh-normal) var(--mono); white-space: pre-wrap; }
 .thread-steering-list dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0; }
-
-.focus-action-list + .focus-event-loader { border-top: 1px solid #202020; }
 
 .episode-identity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-bottom: 1px solid #242424; background: var(--surface); }
 .episode-identity > div { min-width: 0; padding: 9px 13px; border-right: 1px solid #242424; border-bottom: 1px solid #242424; }

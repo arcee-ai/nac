@@ -3161,13 +3161,6 @@ async function loadFocusWorkspaceDiff(path, { force = false } = {}) {
   return true;
 }
 
-function focusMessageRoleLabel(role) {
-  if (role === "system") return "System";
-  if (role === "user") return "You";
-  if (role === "assistant") return "Orchestrator";
-  return role || "Message";
-}
-
 function focusToolArguments(call) {
   const raw = call?.function?.arguments;
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
@@ -3217,7 +3210,7 @@ function renderOrchestratorToolTurn(message) {
     const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
     return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
   }).join("");
-  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span></div><div class="focus-message-body">${blocks}</div></article>`;
+  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-body">${blocks}</div></article>`;
 }
 
 function renderFocusMessage(message) {
@@ -3226,7 +3219,6 @@ function renderFocusMessage(message) {
   if (role === "assistant" && message?.tool_calls?.length) {
     return renderOrchestratorToolTurn(message);
   }
-  const label = focusMessageRoleLabel(role);
   const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)
     : "";
@@ -3245,7 +3237,7 @@ function renderFocusMessage(message) {
   const pendingBadge = message?.pending
     ? `<span class="focus-pending-badge">Sending…</span>`
     : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-label"><span class="focus-message-role">${escapeHtml(label)}</span>${pendingBadge}</div><div class="focus-message-body">${reasoningBlock}${copy}</div></article>`;
+  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}>${pendingBadge}<div class="focus-message-body">${reasoningBlock}${copy}</div></article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
