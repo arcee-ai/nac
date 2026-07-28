@@ -17,6 +17,7 @@ export const LoaderVariant = {
   Brand: "var(--color-fill-accent-primary)",
   Neutral: "var(--color-fill-basic-primary)",
   Destructive: "var(--color-fill-error-primary)",
+  OnPrimary: "var(--color-fill-btn-primary)",
 };
 
 export function Loader({

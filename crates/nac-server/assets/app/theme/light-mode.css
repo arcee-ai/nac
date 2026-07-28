@@ -8,10 +8,10 @@
   --color-bg-accent-inverse: var(--brand-450);
 
   /* Background / Buttons */
-  --color-bg-btn-primary: var(--brand-500);
-  --color-bg-btn-primary-hovered: var(--brand-600);
-  --color-bg-btn-primary-pressed: var(--brand-700);
-  --color-bg-btn-primary-disabled: var(--brand-trans-200);
+  --color-bg-btn-primary: var(--gray-900);
+  --color-bg-btn-primary-hovered: var(--gray-800);
+  --color-bg-btn-primary-pressed: var(--gray-750);
+  --color-bg-btn-primary-disabled: var(--dark-trans-300);
 
   --color-bg-btn-secondary: var(--white-trans-700);
   --color-bg-btn-secondary-hovered: var(--dark-trans-25);
@@ -187,8 +187,8 @@
   --color-fill-basic-muted: var(--dark-trans-400);
 
   /* fill / Buttons */
-  --color-fill-btn-primary: var(--brand-50);
-  --color-fill-btn-primary-disabled: var(--brand-50);
+  --color-fill-btn-primary: var(--gray-50);
+  --color-fill-btn-primary-disabled: var(--gray-50);
   --color-fill-btn-accent: var(--brand-550);
   --color-fill-btn-accent-hovered: var(--brand-600);
   --color-fill-btn-accent-pressed: var(--brand-800);

@@ -1,15 +1,12 @@
 import { React, html } from "../lib/html.js";
-import { Logo } from "../atoms/logo.js";
-import { ThemeToggle } from "./ThemeToggle.js";
-import { SessionBoard } from "./SessionBoard.js";
-import { Splitter } from "./Splitter.js";
-import { Inspector } from "./Inspector.js";
+import { TopBar } from "./TopBar.js";
+import { SessionsListPage } from "./pages/SessionsListPage.js";
+import { SessionDetailPage } from "./pages/SessionDetailPage.js";
 import { LaunchModal } from "./modals/LaunchModal.js";
 import { RenameModal } from "./modals/RenameModal.js";
 import { DeleteModal } from "./modals/DeleteModal.js";
 import { SettingsModal } from "./modals/SettingsModal.js";
 import { useToast } from "../providers/ToastProvider.js";
-import { useIsDesktop } from "../hooks/useMediaQuery.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import { pushLocalEvent } from "../store/runtimeStore.js";
 import { api } from "../services/api.js";
@@ -21,41 +18,36 @@ import {
   stopPolling,
   useSessions,
 } from "../store/sessionsStore.js";
-import {
-  useSelectedId,
-  usePaneRatio,
-  useInspectorFullscreen,
-  useMobileDetailOpen,
-} from "../store/selectionStore.js";
+import { useSelectedId } from "../store/selectionStore.js";
+import { ROUTE_SESSION, startRouter, useRoute, useRouteSessionId } from "../store/routeStore.js";
 
-const { useEffect, useRef, useState } = React;
+const { useEffect, useState } = React;
 
-function useSelectedEntry() {
-  const sessions = useSessions();
-  const id = useSelectedId();
-  return sessions.find((e) => (e.summary || e).session_id === id) || null;
-}
+const summaryOf = (entry) => entry.summary || entry;
 
 export function AppShell() {
-  const isDesktop = useIsDesktop();
+  const route = useRoute();
+  const routeSessionId = useRouteSessionId();
   const selectedId = useSelectedId();
-  const entry = useSelectedEntry();
   const sessions = useSessions();
-  const paneRatio = usePaneRatio();
-  const fullscreen = useInspectorFullscreen();
-  const mobileDetailOpen = useMobileDetailOpen();
   const toast = useToast();
-  const containerRef = useRef(null);
   const [modal, setModal] = useState(null); // "launch" | "rename" | "delete" | "settings" | null
+  // Card actions target their own session, which is not always the selected one.
+  const [actionId, setActionId] = useState(null);
 
   useEffect(() => {
     loadStoreInfo();
     loadSessions({ workspaceStats: true });
     startPolling(5000, { workspaceStats: true });
-    return () => stopPolling();
+    const stopRouter = startRouter();
+    return () => {
+      stopPolling();
+      stopRouter();
+    };
   }, []);
 
   const closeModal = () => setModal(null);
+  const entryOf = (id) => sessions.find((e) => summaryOf(e).session_id === id) || null;
 
   useKeyboardShortcuts({
     sessions,
@@ -64,60 +56,62 @@ export function AppShell() {
     closeModal,
     openLaunch: () => setModal("launch"),
   });
-  const onCancelRun = async () => {
-    if (!selectedId) return;
+
+  // Handlers are shared between card actions (called with an entry) and the
+  // inspector header (called with a click event), so the argument is validated.
+  const idOfEntry = (entry) => {
+    const s = entry && summaryOf(entry);
+    return s && typeof s.session_id === "string" ? s.session_id : null;
+  };
+
+  const openModalFor = (name) => (entry) => {
+    setActionId(idOfEntry(entry) || routeSessionId);
+    setModal(name);
+  };
+
+  const cancelRun = async (entry) => {
+    const id = idOfEntry(entry) || routeSessionId;
+    if (!id) return;
     try {
-      await api.cancelActiveRun(selectedId);
+      await api.cancelActiveRun(id);
       pushLocalEvent("run", "■ run cancellation requested");
       toast.success("Run cancellation requested");
-      loadSnapshot(selectedId);
+      loadSnapshot(id);
     } catch (e) {
       toast.error(`Failed to stop run: ${e.message}`);
     }
   };
 
-  const inspector = html`<${Inspector}
-    id=${selectedId}
-    entry=${entry}
-    isDesktop=${isDesktop}
-    onRename=${() => setModal("rename")}
-    onDelete=${() => setModal("delete")}
-    onSettings=${() => setModal("settings")}
-    onCancelRun=${onCancelRun}
-  />`;
-
-  const board = html`<${SessionBoard} onNewSession=${() => setModal("launch")} />`;
-
-  let body;
-  if (!isDesktop) {
-    // Mobile master/detail: show inspector when a session is opened, else board.
-    body = selectedId && mobileDetailOpen ? inspector : board;
-  } else if (fullscreen && selectedId) {
-    body = inspector;
-  } else {
-    const cols = `${Math.round(paneRatio * 100)}% auto ${Math.round((1 - paneRatio) * 100)}%`;
-    body = html`<div ref=${containerRef} class="grid min-h-0 h-full" style=${{ gridTemplateColumns: cols }}>
-      ${board}
-      <${Splitter} containerRef=${containerRef} />
-      ${inspector}
-    </div>`;
-  }
+  const onSession = route === ROUTE_SESSION && routeSessionId;
+  const modalEntry = entryOf(actionId || routeSessionId);
 
   return html`<div class="h-screen flex flex-col">
-    <header class="flex items-center justify-between px-3 h-12 border-b border-primary bg-elevation-ground shrink-0">
-      <div class="flex items-center gap-2">
-        <${Logo} height=${32} className="text-basic-primary" />
-        <span class="tag-label text-basic-muted">sessions</span>
-      </div>
-      <div class="flex items-center gap-1">
-        <${ThemeToggle} />
-      </div>
-    </header>
-    <main class="flex-1 min-h-0">${body}</main>
+    <${TopBar} />
+    <main class="flex-1 min-h-0">
+      ${onSession
+        ? html`<${SessionDetailPage}
+            id=${routeSessionId}
+            entry=${entryOf(routeSessionId)}
+            onRename=${openModalFor("rename")}
+            onDelete=${openModalFor("delete")}
+            onSettings=${openModalFor("settings")}
+            onCancelRun=${cancelRun}
+          />`
+        : html`<${SessionsListPage}
+            onNewSession=${() => setModal("launch")}
+            onRename=${openModalFor("rename")}
+            onDelete=${openModalFor("delete")}
+            onStop=${cancelRun}
+          />`}
+    </main>
 
     <${LaunchModal} open=${modal === "launch"} onClose=${closeModal} />
-    <${RenameModal} open=${modal === "rename"} onClose=${closeModal} entry=${entry} />
-    <${DeleteModal} open=${modal === "delete"} onClose=${closeModal} entry=${entry} />
-    <${SettingsModal} open=${modal === "settings"} onClose=${closeModal} id=${selectedId} />
+    <${RenameModal} open=${modal === "rename"} onClose=${closeModal} entry=${modalEntry} />
+    <${DeleteModal} open=${modal === "delete"} onClose=${closeModal} entry=${modalEntry} />
+    <${SettingsModal}
+      open=${modal === "settings"}
+      onClose=${closeModal}
+      id=${(modalEntry && summaryOf(modalEntry).session_id) || routeSessionId}
+    />
   </div>`;
 }

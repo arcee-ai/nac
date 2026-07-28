@@ -12,16 +12,20 @@ const FOCUSABLE =
 export const ModalSize = {
   Small: "max-w-[400px]",
   Medium: "max-w-[560px]",
+  Wide: "max-w-[600px]",
   Large: "max-w-[760px]",
 };
 
 // Generic dialog: overlay + centered card. Closes on overlay click / Escape.
+// `flush` switches to the design's full-bleed chrome: header and footer span
+// the card width, are separated by dividers, and only the body scrolls.
 export function Modal({
   open,
   onClose,
   title,
   size = ModalSize.Medium,
   closeOnOverlay = true,
+  flush = false,
   className = "",
   children,
   footer,
@@ -76,15 +80,24 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         class=${cn(
-          "popup-bounce w-full flex flex-col gap-4 rounded-[8px] p-5",
-          "bg-elevation-level-1 border border-secondary shadow-2xl",
+          "popup-bounce w-full flex flex-col shadow-2xl",
+          flush
+            ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-2 border border-muted"
+            : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-secondary",
           size,
           className,
         )}
       >
         ${title || onClose
-          ? html`<div class="flex items-start justify-between gap-4">
-              <div class="header-medium text-basic-primary">${title}</div>
+          ? html`<div
+              class=${cn(
+                "flex items-start justify-between gap-4",
+                flush && "px-4 py-3 border-b border-muted shrink-0 items-center",
+              )}
+            >
+              <div class=${flush ? "header-md text-basic-primary" : "header-medium text-basic-primary"}>
+                ${title}
+              </div>
               <${Button}
                 variant=${ButtonVariant.Tertiary}
                 size=${ButtonSize.Small}
@@ -96,8 +109,24 @@ export function Modal({
               </${Button}>
             </div>`
           : null}
-        <div class="paragraph-medium text-basic-secondary">${children}</div>
-        ${footer ? html`<div class="flex justify-end gap-2">${footer}</div>` : null}
+        <div
+          class=${cn(
+            "paragraph-medium text-basic-secondary",
+            flush && "flex-1 min-h-0 overflow-auto px-4 py-6",
+          )}
+        >
+          ${children}
+        </div>
+        ${footer
+          ? html`<div
+              class=${cn(
+                "flex justify-end gap-2",
+                flush && "items-center p-4 border-t border-muted shrink-0",
+              )}
+            >
+              ${footer}
+            </div>`
+          : null}
       </div>
     </div>
   `;

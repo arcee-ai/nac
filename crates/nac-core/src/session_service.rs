@@ -83,30 +83,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
     fn from(snapshot: &SessionSnapshot) -> Self {
         let last_token_usage = snapshot.token_usages.last().cloned().flatten();
 
-        // Sum input/output/cache tokens across all non-None per-response
-        // entries.  `orchestrator_context_tokens` is a context-window size,
-        // not a cumulative metric, so it is set to the last non-None entry's
-        // value rather than summed.
-        let cumulative_token_usage = {
-            let non_none: Vec<&crate::model::TokenUsage> = snapshot
-                .token_usages
-                .iter()
-                .filter_map(|tu| tu.as_ref())
-                .collect();
-            if non_none.is_empty() {
-                None
-            } else {
-                let mut cumulative = crate::model::TokenUsage::default();
-                for u in &non_none {
-                    cumulative += (*u).clone();
-                }
-                cumulative.orchestrator_context_tokens = non_none
-                    .last()
-                    .map(|u| u.orchestrator_context_tokens)
-                    .unwrap_or(0);
-                Some(cumulative)
-            }
-        };
+        let cumulative_token_usage = crate::model::TokenUsage::aggregate(&snapshot.token_usages);
 
         Self {
             last_response_duration_ms: snapshot.last_response_duration_ms,

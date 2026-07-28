@@ -6,12 +6,12 @@ import { useTheme } from "../providers/ThemeProvider.js";
 
 const THEME_ICON = { light: "sun", dark: "moon", system: "desktop" };
 
-export function ThemeToggle() {
+export function ThemeToggle({ size = ButtonSize.Small }) {
   const { theme, toggleTheme } = useTheme();
   return html`<${Tooltip} title=${`Theme: ${theme} (click to cycle)`} position="bottom-left">
     <${Button}
       variant=${ButtonVariant.Ghost}
-      size=${ButtonSize.Small}
+      size=${size}
       content=${ButtonContent.Icon}
       onClick=${toggleTheme}
       aria-label=${`Theme: ${theme}`}

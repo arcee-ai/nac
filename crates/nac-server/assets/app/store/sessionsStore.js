@@ -126,41 +126,6 @@ export async function togglePin(entry) {
   return res;
 }
 
-// Optimistically move `dragId` to `targetId`'s slot within the same pinned
-// group. Returns the group's `pinned` flag (to persist) or null if the move is
-// invalid (cross-group or unknown ids).
-export function reorderSessionsLocal(dragId, targetId) {
-  if (dragId === targetId) return null;
-  let pinned = null;
-  setState((st) => {
-    const list = st.sessions.slice();
-    const from = list.findIndex((e) => summaryOf(e).session_id === dragId);
-    const to = list.findIndex((e) => summaryOf(e).session_id === targetId);
-    if (from < 0 || to < 0) return {};
-    const dragged = list[from];
-    if (!!summaryOf(dragged).pinned !== !!summaryOf(list[to]).pinned) return {};
-    pinned = !!summaryOf(dragged).pinned;
-    list.splice(from, 1);
-    list.splice(to, 0, dragged);
-    return { sessions: list };
-  });
-  return pinned;
-}
-
-// Persist the current order of one pinned group via PUT /sessions/order.
-export async function persistReorder(pinned) {
-  const group = getState().sessions.filter((e) => !!summaryOf(e).pinned === !!pinned);
-  const session_ids = group.map((e) => summaryOf(e).session_id);
-  const expected_versions = {};
-  group.forEach((e) => {
-    const s = summaryOf(e);
-    expected_versions[s.session_id] = s.presentation_version ?? 0;
-  });
-  const res = await api.reorderSessions({ pinned: !!pinned, session_ids, expected_versions });
-  await loadSessions({ silent: true });
-  return res;
-}
-
 export function startPolling(ms = 5000, opts = {}) {
   stopPolling();
   pollTimer = setInterval(() => loadSessions({ ...opts, silent: true }), ms);

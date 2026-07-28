@@ -44,15 +44,16 @@ export function Toast({ content, variant = ToastVariant.Info, dismissing = false
       >
         <div
           class=${cn(
-            "rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-btn-primary shadow-2xl overflow-hidden w-[360px]",
+            "rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative shadow-2xl overflow-hidden w-[360px]",
             VARIANT_STYLES[variant],
           )}
+          style=${{ color: "var(--white)" }}
         >
           <${Icon}
             name=${VARIANT_ICONS[variant]}
             size=${20}
             className="flex-shrink-0 mt-[2px]"
-            color="var(--color-fill-white, #fff)"
+            color="var(--white)"
           />
           <span class="label-small flex-grow min-w-0 break-words whitespace-pre-line">${content}</span>
           <${Button}
@@ -61,7 +62,7 @@ export function Toast({ content, variant = ToastVariant.Info, dismissing = false
             className="absolute top-1 right-1 btn-icon-rotate flex-shrink-0"
             onClick=${onClose}
           >
-            <${Icon} name="close" color="var(--color-fill-white, #fff)" />
+            <${Icon} name="close" color="var(--white)" />
           </${Button}>
         </div>
       </div>

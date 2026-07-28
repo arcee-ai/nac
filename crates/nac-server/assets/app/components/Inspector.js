@@ -55,7 +55,7 @@ function RepairBanner({ message, onSettings }) {
   </div>`;
 }
 
-export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings, onCancelRun }) {
+export function Inspector({ id, entry, onRename, onDelete, onSettings, onCancelRun }) {
   const snapshot = useSnapshot(id);
   const activeTab = useActiveTab();
   useSessionStream(id);
@@ -68,7 +68,6 @@ export function Inspector({ id, entry, isDesktop, onRename, onDelete, onSettings
     <${InspectorHeader}
       snapshot=${snapshot}
       entry=${entry}
-      isDesktop=${isDesktop}
       onRename=${onRename}
       onDelete=${onDelete}
       onSettings=${onSettings}

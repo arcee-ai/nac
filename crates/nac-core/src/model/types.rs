@@ -254,6 +254,30 @@ impl TokenUsage {
         self.orchestrator_context_tokens = context_tokens;
     }
 
+    /// Roll up per-response usage entries. Input/output/cache fields are summed
+    /// across all recorded entries, while `orchestrator_context_tokens` is a
+    /// context-window gauge and therefore takes the last recorded value instead.
+    /// Returns `None` when nothing was ever recorded.
+    pub fn aggregate(entries: &[Option<Self>]) -> Option<Self> {
+        let recorded: Vec<&Self> = entries.iter().flatten().collect();
+        let last = recorded.last()?;
+        let mut cumulative = Self::default();
+        for usage in &recorded {
+            cumulative.add_cost_saturating(usage);
+        }
+        cumulative.orchestrator_context_tokens = last.orchestrator_context_tokens;
+        Some(cumulative)
+    }
+
+    /// Tokens actually billed for the session: everything that was sent to and
+    /// returned by the model, excluding the context-window gauge.
+    pub fn billable_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_read_tokens)
+            .saturating_add(self.cache_write_tokens)
+    }
+
     /// Accept a provider context total only when all represented usage fields
     /// fit in the supported range and the total covers their full sum. Zero
     /// means unavailable.

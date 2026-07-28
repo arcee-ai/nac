@@ -12,7 +12,7 @@
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  cursor: pointer;
+  cursor: auto;
   text-overflow: ellipsis;
   white-space: nowrap;
   border: none;
@@ -166,10 +166,10 @@
   outline-offset: -2px;
 }
 .input::placeholder { color: var(--color-text-input-placeholder); }
-.input:focus, .input:focus-visible { outline: 2px solid var(--color-bg-btn-primary); outline-offset: -2px; }
+.input:focus, .input:focus-visible { outline: 2px solid var(--color-bg-accent-inverse); outline-offset: -2px; }
 .input:disabled { color: var(--color-text-input-disabled); background-color: var(--color-bg-input-disabled); opacity: 0.75; }
 .input-validation, .input-validation:hover { outline: 2px solid var(--color-border-error-primary); outline-offset: -2px; }
-.input-validation:focus { outline: 2px solid var(--color-bg-btn-primary); outline-offset: -2px; }
+.input-validation:focus { outline: 2px solid var(--color-bg-accent-inverse); outline-offset: -2px; }
 .input-small { height: 24px; font-size: 0.75rem; }
 .input-medium { height: 36px; font-size: 0.875rem; }
 .input-large { height: 48px; font-size: 1rem; }

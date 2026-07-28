@@ -143,6 +143,9 @@ pub struct SessionSummary {
     pub presentation_version: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// Billable tokens accumulated over the whole session, or `None` when no
+    /// response ever reported usage.
+    pub total_tokens: Option<u64>,
 }
 
 #[derive(Debug)]

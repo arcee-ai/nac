@@ -39,7 +39,7 @@ const loaderSizeFor = {
 };
 
 const loaderVariantFor = {
-  "btn-primary": LoaderVariant.Brand,
+  "btn-primary": LoaderVariant.OnPrimary,
   "btn-secondary": LoaderVariant.Neutral,
   "btn-secondary-highlighted": LoaderVariant.Neutral,
   "btn-secondary-destructive": LoaderVariant.Destructive,

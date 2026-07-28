@@ -61,7 +61,7 @@ export function RenameModal({ open, onClose, entry }) {
         onInput=${(e) => setTitle(e.target.value)}
         onKeyDown=${(e) => e.key === "Enter" && submit()}
       />
-      <label class="flex items-center gap-2 label-small text-basic-secondary cursor-pointer select-none">
+      <label class="flex items-center gap-2 label-small text-basic-secondary cursor-auto select-none">
         <input type="checkbox" checked=${pinned} onChange=${(e) => setPinned(e.target.checked)} class="accent-[var(--color-fill-accent-primary)]" />
         Pin to top of the list
       </label>

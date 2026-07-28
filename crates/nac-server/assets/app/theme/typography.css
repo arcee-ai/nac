@@ -7,6 +7,9 @@
 .subtitle { font-family: Inter; font-weight: 500; font-size: 22px; line-height: 1.75rem; }
 @media (min-width: 768px) { .subtitle { font-size: 24px; line-height: 32px; } }
 
+/* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
+.header-md { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
+
 .header-big { font-family: Inter; font-size: 1.25rem; line-height: 1.75rem; font-weight: 700; }
 .header-medium { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 700; }
 .header-small { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
@@ -37,6 +40,7 @@
     "Courier New", monospace;
   line-height: 1.5; letter-spacing: -0.01em;
 }
+.code-micro { font-size: 10px; line-height: 12px; font-weight: 500; letter-spacing: 0; }
 .code-small { font-size: 12px; }
 .code-medium { font-size: 13px; }
 .code-large { font-size: 14px; }

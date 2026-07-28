@@ -1,12 +1,7 @@
 import { React } from "../lib/html.js";
-import {
-  selectSession,
-  setActiveTab,
-  setMobileDetailOpen,
-  toggleInspectorFullscreen,
-  TABS,
-} from "../store/selectionStore.js";
-import { loadSnapshot, clearAttention } from "../store/sessionsStore.js";
+import { selectSession, setActiveTab, TABS } from "../store/selectionStore.js";
+import { routeStore, ROUTE_SESSION, openList, openSession } from "../store/routeStore.js";
+import { clearAttention } from "../store/sessionsStore.js";
 
 const { useEffect, useRef } = React;
 
@@ -25,18 +20,24 @@ export function useKeyboardShortcuts(ctx) {
   useEffect(() => {
     const idsOf = () => ref.current.sessions.map((e) => (e.summary || e).session_id);
 
+    // On the list, j/k only moves the highlight; on a session screen it also
+    // navigates, so the shortcut means "next session" in both places.
     const move = (delta) => {
       const ids = idsOf();
       if (ids.length === 0) return;
       const cur = ids.indexOf(ref.current.selectedId);
-      const next = cur < 0 ? 0 : (cur + delta + ids.length) % ids.length;
-      clearAttention(ids[next]);
-      selectSession(ids[next]);
-      loadSnapshot(ids[next]);
+      const next = ids[cur < 0 ? 0 : (cur + delta + ids.length) % ids.length];
+      if (routeStore.getState().name === ROUTE_SESSION) {
+        openSession(next);
+      } else {
+        clearAttention(next);
+        selectSession(next);
+      }
     };
 
     const onKeyDown = (e) => {
-      const { modal, selectedId, closeModal, openLaunch } = ref.current;
+      const { modal, closeModal, openLaunch } = ref.current;
+      const onSession = routeStore.getState().name === ROUTE_SESSION;
       const typing = isTypingTarget(e.target);
 
       // Escape works everywhere (also unfocuses inputs).
@@ -45,8 +46,9 @@ export function useKeyboardShortcuts(ctx) {
         if (modal) {
           closeModal();
           e.preventDefault();
-        } else if (selectedId) {
-          setMobileDetailOpen(false);
+        } else if (onSession) {
+          e.preventDefault();
+          openList();
         }
         return;
       }
@@ -68,14 +70,14 @@ export function useKeyboardShortcuts(ctx) {
           e.preventDefault();
           move(-1);
           break;
-        case "f":
-          if (selectedId) {
+        case "Enter":
+          if (!onSession && ref.current.selectedId) {
             e.preventDefault();
-            toggleInspectorFullscreen();
+            openSession(ref.current.selectedId);
           }
           break;
         case "/":
-          if (selectedId) {
+          if (onSession) {
             const el = document.querySelector('[data-prompt-input="true"]');
             if (el) {
               e.preventDefault();
@@ -89,12 +91,11 @@ export function useKeyboardShortcuts(ctx) {
         case "3":
         case "4":
         case "5": {
-          if (!selectedId) break;
+          if (!onSession) break;
           const tab = TABS[Number(e.key) - 1];
           if (tab) {
             e.preventDefault();
             setActiveTab(tab);
-            setMobileDetailOpen(true);
           }
           break;
         }

@@ -3,11 +3,6 @@ import { Icon } from "../../atoms/icon.js";
 import { Button, ButtonVariant, ButtonSize, ButtonContent } from "../../atoms/button.js";
 import { Tooltip } from "../../atoms/tooltip.js";
 import { displaySessionTitle, shortId, isActiveRun } from "../../lib/format.js";
-import {
-  useInspectorFullscreen,
-  toggleInspectorFullscreen,
-  setMobileDetailOpen,
-} from "../../store/selectionStore.js";
 
 function ActionButton({ title, icon, onClick, variant = ButtonVariant.Ghost, disabled = false }) {
   return html`<${Tooltip} title=${title} position="bottom-center">
@@ -24,26 +19,15 @@ function ActionButton({ title, icon, onClick, variant = ButtonVariant.Ghost, dis
   </${Tooltip}>`;
 }
 
-export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete, onSettings, onCancelRun }) {
+export function InspectorHeader({ snapshot, entry, onRename, onDelete, onSettings, onCancelRun }) {
   // Presentation (title/prompt) lives on the list summary; cwd/id/ssh_host also
   // live on the snapshot's `metadata`. Merge with summary taking precedence.
   const s = { ...((snapshot && snapshot.metadata) || {}), ...((entry && entry.summary) || {}) };
-  const fullscreen = useInspectorFullscreen();
   const activeRun = (snapshot && snapshot.active_run) || (entry && entry.active_run);
   const active = isActiveRun(activeRun);
   const title = displaySessionTitle(s);
 
   return html`<header class="flex items-center gap-3 px-3 h-14 border-b border-primary shrink-0">
-    ${!isDesktop
-      ? html`<${Button}
-          variant=${ButtonVariant.Ghost}
-          size=${ButtonSize.Small}
-          content=${ButtonContent.IconLeft}
-          onClick=${() => setMobileDetailOpen(false)}
-        >
-          <${Icon} name="arrowLeft" /> Sessions
-        </${Button}>`
-      : null}
     <div class="min-w-0 flex-grow">
       <div class="tag-label text-basic-muted">Inspector</div>
       <div class="header-small text-basic-primary truncate">${title}</div>
@@ -61,11 +45,6 @@ export function InspectorHeader({ snapshot, entry, isDesktop, onRename, onDelete
           />`
         : null}
       <${ActionButton} title="Rename" icon="edit" onClick=${onRename} />
-      <${ActionButton}
-        title=${fullscreen ? "Exit fullscreen" : "Fullscreen"}
-        icon=${fullscreen ? "fullScreenExit" : "fullScreen"}
-        onClick=${toggleInspectorFullscreen}
-      />
       <${ActionButton} title="Session settings" icon="gear" onClick=${onSettings} />
       <${ActionButton} title="Delete session" icon="trash" variant=${ButtonVariant.GhostDestructive} onClick=${onDelete} />
     </div>

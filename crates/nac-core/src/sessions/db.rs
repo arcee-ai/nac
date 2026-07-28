@@ -506,7 +506,7 @@ fn query_session_summary(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -526,7 +526,7 @@ fn query_session_summaries(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE COALESCE(p.pinned, 0) = ?1
@@ -539,7 +539,7 @@ fn query_session_summaries(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0)
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              ORDER BY COALESCE(p.pinned, 0) DESC,
@@ -579,6 +579,7 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         pinned: row.get::<_, i64>(12)? != 0,
         sort_order: row.get(13)?,
         presentation_version: row.get(14)?,
+        token_usages_json: row.get(15)?,
     })
 }
 
@@ -598,6 +599,7 @@ struct SessionSummaryRow {
     pinned: bool,
     sort_order: i64,
     presentation_version: i64,
+    token_usages_json: Option<String>,
 }
 
 impl SessionSummaryRow {
@@ -621,6 +623,10 @@ impl SessionSummaryRow {
         };
         let messages: Vec<Message> = serde_json::from_str(&self.messages_json)
             .context("failed to parse stored session messages")?;
+        let total_tokens = parse_token_usages(self.token_usages_json.as_deref())?
+            .as_deref()
+            .and_then(crate::model::TokenUsage::aggregate)
+            .map(|usage| usage.billable_tokens());
         Ok(SessionSummary {
             session_id: self.session_id,
             cwd,
@@ -638,8 +644,20 @@ impl SessionSummaryRow {
             presentation_version: self.presentation_version,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            total_tokens,
         })
     }
+}
+
+/// Shared by the snapshot and summary readers; legacy rows store NULL or an
+/// empty string and must load as "no usage recorded".
+fn parse_token_usages(json: Option<&str>) -> Result<Option<Vec<Option<crate::model::TokenUsage>>>> {
+    json.filter(|json| !json.is_empty())
+        .map(|json| {
+            serde_json::from_str::<Vec<Option<crate::model::TokenUsage>>>(json)
+                .context("failed to parse stored session token usages")
+        })
+        .transpose()
 }
 
 fn insert_or_replace_session(
@@ -757,16 +775,8 @@ impl SessionRow {
         let base_url = self.base_url;
         let backend = parse_backend(self.backend)?;
         let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
-        let token_usages = self
-            .token_usages_json
-            .as_deref()
-            .filter(|json| !json.is_empty())
-            .map(|json| {
-                serde_json::from_str::<Vec<Option<crate::model::TokenUsage>>>(json)
-                    .context("failed to parse stored session token usages")
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let token_usages =
+            parse_token_usages(self.token_usages_json.as_deref())?.unwrap_or_default();
         Ok(SessionSnapshot {
             session_id: self.session_id,
             cwd: PathBuf::from(self.cwd),

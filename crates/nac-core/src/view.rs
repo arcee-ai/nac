@@ -42,6 +42,10 @@ pub struct SessionSummarySnapshot {
     pub presentation_version: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// Billable tokens accumulated over the session. Omitted when unknown, so
+    /// older stored snapshots keep deserializing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,6 +165,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             presentation_version: summary.presentation_version,
             created_at: summary.created_at,
             updated_at: summary.updated_at,
+            total_tokens: summary.total_tokens,
         }
     }
 }

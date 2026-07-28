@@ -50,6 +50,37 @@ export function formatTokens(n) {
   return String(v);
 }
 
+// Clock for a running session card: MM:SS, widening to H:MM:SS past an hour.
+export function formatClock(ms) {
+  if (ms == null || !isFinite(ms)) return "--:--";
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  const h = Math.floor(total / 3600);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${s}`;
+  return `${String(m).padStart(2, "0")}:${s}`;
+}
+
+export const ENV_LOCAL = "Local";
+export const ENV_SSH = "SSH";
+export const ENV_SANDBOX = "Sandbox";
+export const SESSION_ENVS = [ENV_LOCAL, ENV_SSH, ENV_SANDBOX];
+
+// Where the session runs: sandbox and ssh are mutually exclusive in practice,
+// and sandbox wins because it is the more specific isolation.
+export function sessionEnvLabel(summary) {
+  if (!summary) return ENV_LOCAL;
+  if (summary.sandboxed) return ENV_SANDBOX;
+  if (summary.ssh_host) return ENV_SSH;
+  return ENV_LOCAL;
+}
+
+// Compact id for the card badge; the full id stays available for copying.
+export function sessionIdShort(id) {
+  if (!id) return "--";
+  return id.length > 11 ? id.slice(0, 11) : id;
+}
+
 export function formatRuntime(ms) {
   if (ms == null || !isFinite(ms)) return "--:--:--";
   const total = Math.max(0, Math.floor(ms / 1000));

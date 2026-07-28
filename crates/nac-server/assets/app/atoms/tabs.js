@@ -57,7 +57,7 @@ export function HorizontalTabsItem({
     "horizontal-tab-item btn btn-medium rounded-b-none border-solid rounded-t-lg border-b-2 border-t-0 border-l-0 border-r-0",
     iconName ? "btn-icon-left" : "btn-text",
     active ? "btn-ghost-accent border-accent-primary" : "border-transparent btn-ghost",
-    disabled ? "btn-disabled" : "cursor-pointer",
+    disabled ? "btn-disabled" : "cursor-auto",
     className,
   );
   return html`<button type=${type} class=${classes} disabled=${disabled} ...${rest}>

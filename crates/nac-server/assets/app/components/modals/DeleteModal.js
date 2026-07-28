@@ -3,6 +3,7 @@ import { Modal, ModalSize } from "../../atoms/modal.js";
 import { Button, ButtonVariant, ButtonContent } from "../../atoms/button.js";
 import { deleteSession } from "../../store/sessionsStore.js";
 import { clearSelection } from "../../store/selectionStore.js";
+import { routeStore, ROUTE_SESSION, openList } from "../../store/routeStore.js";
 import { useToast } from "../../providers/ToastProvider.js";
 import { displaySessionTitle, shortId } from "../../lib/format.js";
 
@@ -19,6 +20,9 @@ export function DeleteModal({ open, onClose, entry }) {
     try {
       await deleteSession(summary.session_id);
       clearSelection();
+      // A deleted session cannot stay on screen; fall back to the list.
+      const route = routeStore.getState();
+      if (route.name === ROUTE_SESSION && route.sessionId === summary.session_id) openList();
       toast.success("Session deleted");
       onClose();
     } catch (e) {
