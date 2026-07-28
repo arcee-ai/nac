@@ -2821,22 +2821,11 @@ function renderEvidenceField(label, value, unavailable) {
 function renderOrchestratorChatRail(snapshot) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
-  const durations = responseDurationAssignments(snapshot, messages);
-  const ordinalBase = Number.isSafeInteger(Number(snapshot?.message_page?.start))
-    ? Number(snapshot.message_page.start)
-    : 0;
   const transcriptEntries = [
-    ...messages.map((message, index) => ({
-      message,
-      ordinal: ordinalBase + index + 1,
-      durationMs: durations.get(index) ?? null,
-    })),
-    ...pending.map((message) => ({ message, ordinal: null, durationMs: null })),
+    ...messages.map((message) => ({ message })),
+    ...pending.map((message) => ({ message })),
   ].filter(({ message }) => message?.role !== "system" && message?.role !== "tool");
-  const transcript = transcriptEntries.map(({ message, ordinal, durationMs }) => renderFocusMessage(message, {
-    ordinal,
-    durationMs,
-  })).join("");
+  const transcript = transcriptEntries.map(({ message }) => renderFocusMessage(message)).join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
@@ -3199,52 +3188,43 @@ function focusToolTarget(argumentsValue, ...keys) {
   return "";
 }
 
-function orchestratorToolSummaries(toolCalls) {
-  const calls = toolCalls || [];
-  const dispatched = calls
-    .filter((call) => call?.function?.name === "thread")
-    .map((call) => focusToolTarget(focusToolArguments(call), "name"))
-    .filter(Boolean);
-  const summaries = [];
-  let emittedDispatches = false;
-  for (const call of calls) {
-    const name = call?.function?.name || "tool";
-    const argumentsValue = focusToolArguments(call);
-    if (name === "thread") {
-      if (!emittedDispatches) {
-        summaries.push({ operation: "threads dispatched", target: dispatched.join(", ") });
-        emittedDispatches = true;
-      }
-      continue;
-    }
-    if (name.startsWith("workset_")) {
-      summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "id", "name") });
-      continue;
-    }
-    if (name === "threads") {
-      summaries.push({ operation: "threads listed", target: "" });
-      continue;
-    }
-    summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "name", "id") });
+function formatToolCall(toolCall) {
+  const name = toolCall?.function?.name || "tool";
+  const args = focusToolArguments(toolCall);
+  let argsLabel = "";
+  if (name === "thread" || name === "threads") {
+    argsLabel = focusToolTarget(args, "name");
+  } else if (name === "workset_define" || name === "workset_update") {
+    argsLabel = focusToolTarget(args, "id", "name");
+  } else if (name === "read") {
+    argsLabel = focusToolTarget(args, "path", "file");
+  } else if (name === "bash" || name === "command") {
+    argsLabel = focusToolTarget(args, "command", "cmd");
+  } else if (name === "write" || name === "edit") {
+    argsLabel = focusToolTarget(args, "path", "file");
+  } else if (name === "grep" || name === "search") {
+    argsLabel = focusToolTarget(args, "pattern", "query");
+  } else {
+    argsLabel = focusToolTarget(args, "name", "id");
   }
-  return summaries;
+  return { name, args: argsLabel, result: "" };
 }
 
-function renderOrchestratorToolTurn(message, { ordinal = null } = {}) {
-  const summaries = orchestratorToolSummaries(message?.tool_calls);
-  const body = summaries.map(({ operation, target }) => `<div class="focus-tool-summary"><span>${escapeHtml(operation)}</span>${target ? `<strong>${escapeHtml(target)}</strong>` : ""}</div>`).join("");
-  const ordinalLabel = ordinal === null
-    ? ""
-    : `<span class="focus-message-ordinal" title="Position in conversation">#${escapeHtml(ordinal)}</span>`;
-  const meta = ordinalLabel ? `<div class="focus-message-meta">${ordinalLabel}</div>` : "";
-  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span>${meta}</div><div class="focus-message-body"><div class="focus-tool-summaries">${body}</div></div></article>`;
+function renderOrchestratorToolTurn(message) {
+  const calls = message?.tool_calls || [];
+  const blocks = calls.map((call) => {
+    const { name, args } = formatToolCall(call);
+    const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
+    return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
+  }).join("");
+  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span></div><div class="focus-message-body">${blocks}</div></article>`;
 }
 
-function renderFocusMessage(message, { ordinal = null, durationMs = null } = {}) {
+function renderFocusMessage(message) {
   if (message?.role === "system" || message?.role === "tool") return "";
   const role = message?.role || "message";
   if (role === "assistant" && message?.tool_calls?.length) {
-    return renderOrchestratorToolTurn(message, { ordinal });
+    return renderOrchestratorToolTurn(message);
   }
   const label = focusMessageRoleLabel(role);
   const content = message?.content !== null && message?.content !== undefined
@@ -3256,24 +3236,16 @@ function renderFocusMessage(message, { ordinal = null, durationMs = null } = {})
     ? String(message.reasoning_text)
     : "";
   const reasoningBlock = reasoning
-    ? `<div class="focus-message-copy is-reasoning"><span class="focus-message-content-kind">reasoning</span>${renderFocusMarkdown(reasoning)}</div>`
+    ? `<details class="focus-reasoning"><summary>Reasoning</summary><div class="focus-reasoning-content">${renderFocusMarkdown(reasoning)}</div></details>`
     : "";
   const copy = content
     ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
     : "";
-  const body = reasoningBlock || copy
-    ? `${reasoningBlock}${copy}`
-    : `<div class="focus-message-copy is-empty"><span class="focus-message-content-kind">empty message</span>${renderFocusMarkdown("[empty]")}</div>`;
-  const ordinalLabel = message?.pending
-    ? `<span class="focus-message-ordinal is-submitted" title="Pending message — will be sent when the session is available">Sending…</span>`
-    : ordinal === null ? "" : `<span class="focus-message-ordinal" title="Position in conversation">#${escapeHtml(ordinal)}</span>`;
-  const duration = durationMs !== null && durationMs !== undefined && Number.isFinite(Number(durationMs))
-    ? `<span class="focus-message-duration" title="Response duration: ${escapeAttr(Number(durationMs).toLocaleString())} ms">response ${escapeHtml(formatDuration(Number(durationMs)))}</span>`
+  if (!reasoningBlock && !copy) return "";
+  const pendingBadge = message?.pending
+    ? `<span class="focus-pending-badge">Sending…</span>`
     : "";
-  const meta = ordinalLabel || duration
-    ? `<div class="focus-message-meta">${ordinalLabel}${duration}</div>`
-    : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-label"><span class="focus-message-role">${escapeHtml(label)}</span>${meta}</div><div class="focus-message-body">${body}</div></article>`;
+  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-label"><span class="focus-message-role">${escapeHtml(label)}</span>${pendingBadge}</div><div class="focus-message-body">${reasoningBlock}${copy}</div></article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
@@ -3367,7 +3339,7 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
     const argumentsDetail = formatToolArguments(event.args_preview);
     return {
       name: toolDisplayName(event.name), result: "Running", state: "live",
-      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, ...evidence,
+      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, resultText: "", ...evidence,
     };
   }
   if (event.type === "tool_call_finished") {
@@ -3377,12 +3349,14 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
       result: event.is_error ? "Failed" : "Done",
       state: event.is_error ? "error" : "done",
       callId: event.call_id || matchedStart?.callId || null,
-      argumentsDetail, detail: toolCompletionDetail(argumentsDetail, event), ...evidence,
+      argumentsDetail, detail: toolCompletionDetail(argumentsDetail, event),
+      resultText: compactActionDetail(event.content_preview, 160), ...evidence,
     };
   }
   if (event.type === "assistant_message") {
-    const detail = combineActionDetail(event.content, event.usage ? usageDetail(event.usage) : "");
-    return detail ? { name: "response", result: "returned", state: "done", detail, ...evidence } : null;
+    const content = compactActionDetail(event.content, 200);
+    const usage = event.usage || null;
+    return content ? { name: "response", result: "returned", state: "done", detail: content, resultText: content, usage, ...evidence } : null;
   }
   if (event.type === "error") {
     return { name: "error", result: "failed", state: "error", detail: compactActionDetail(event.message), ...evidence };
@@ -3551,12 +3525,40 @@ function renderThreadEpisodes(episodes) {
   }).join("");
 }
 
+function isToolAction(action) {
+  if (action?.callId) return true;
+  if (action?.argumentsDetail && String(action.argumentsDetail).trim() && action.argumentsDetail !== "—") return true;
+  if (String(action?.name || "").toLowerCase() === "response") return true;
+  return false;
+}
+
+function renderActionResult(resultText) {
+  const text = String(resultText || "").trim();
+  if (!text) return "";
+  const lines = text.split("\n");
+  if (text.length <= 200 && lines.length <= 5) {
+    return `<span class="focus-action-result">${escapeHtml(text)}</span>`;
+  }
+  const hiddenCount = Math.max(0, lines.length - 5);
+  const summary = hiddenCount > 0 ? `${hiddenCount} more line${hiddenCount === 1 ? "" : "s"}` : "expand";
+  return `<details class="focus-action-output"><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(text)}</pre></details>`;
+}
+
 function renderFocusActions(actions) {
   if (!actions.length) return `<div class="focus-empty">No activity yet.</div>`;
-  return `<ol class="focus-action-list">${actions.map((action) => {
-    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
-    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : ""}</li>`;
-  }).join("")}</ol>`;
+  return `<ol class="focus-action-list">${actions.map(renderFocusActionItem).join("")}</ol>`;
+}
+
+function renderFocusActionItem(action) {
+  const state = escapeAttr(action.state || "recorded");
+  if (isToolAction(action)) {
+    const toolName = String(action.name || "tool").toLowerCase();
+    const args = formatActionArgs(action);
+    const resultText = action.state === "live" ? action.result : (action.resultText || action.result || "");
+    return `<li class="focus-action" data-state="${state}"><span class="tool-block-name">${escapeHtml(toolName)}</span><span class="tool-block-args">${escapeHtml(args)}</span>${renderActionResult(resultText)}</li>`;
+  }
+  const detail = formatActionArgs(action);
+  return `<li class="focus-action focus-action-event" data-state="${state}"><span class="focus-action-name">${escapeHtml(action.name)}</span>${detail ? `<span class="focus-action-detail">${escapeHtml(detail)}</span>` : ""}</li>`;
 }
 function renderMarkdownImageToken(tokens, index, options, env, renderer) {
   const token = tokens[index];
@@ -3842,9 +3844,8 @@ function renderActionRows(actions, emptyLabel) {
   });
   const rows = visible.map((action) => {
     const rowClass = action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : "";
-    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
     const detail = action.detail ? `<span class="action-detail" title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</span>` : "";
-    return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}"><span class="action-mark">${marker}</span><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
+    return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}" data-state="${escapeAttr(action.state || "recorded")}"><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
   });
   return placeholders.concat(rows).join("");
 }
@@ -3866,6 +3867,44 @@ function toolDisplayName(value) {
 
 function formatToolArguments(argsPreview) {
   return compactActionDetail(argsPreview, 280) || "—";
+}
+
+function parseArgumentsDetail(raw) {
+  const text = String(raw || "").trim();
+  if (!text || text === "—") return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch (_) {}
+  return {};
+}
+
+function formatActionArgs(action) {
+  const name = String(action?.name || "").toLowerCase();
+  const raw = String(action?.argumentsDetail || "").trim();
+  const parsed = parseArgumentsDetail(raw);
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return null;
+  };
+
+  if (name === "read") return pick("path", "file") || raw;
+  if (name === "bash" || name === "command" || name === "exec_command" || name === "shell" || name === "exec") return pick("cmd", "command", "workdir") || raw;
+  if (name === "write" || name === "edit") return pick("path", "file") || raw;
+  if (name === "grep" || name === "search" || name === "searchgithub") return pick("pattern", "query") || raw;
+  if (name === "thread" || name === "dispatch") return pick("name", "thread") || (action?.sourceThreads?.length ? action.sourceThreads.join(", ") : "") || raw;
+  if (name.startsWith("workset_")) return pick("id", "name") || raw;
+  if (name === "response") {
+    const usage = action?.usage;
+    if (usage) return `↑${Number(usage.input_tokens || 0)} ↓${Number(usage.output_tokens || 0)}`;
+    return compactActionDetail(action?.detail, 200);
+  }
+  if (name === "guidance") return action?.result || compactActionDetail(action?.detail, 200);
+  if (name === "agent run") return action?.result || compactActionDetail(action?.detail, 200);
+  return compactActionDetail(raw || action?.detail, 200);
 }
 
 function toolCompletionDetail(argumentsDetail, event) {
@@ -3910,6 +3949,7 @@ function completeThreadToolAction(action, event, entry = {}) {
   action.finishSequenceId = entry.sequenceId ?? null;
   action.finishEventId = entry.eventId ?? null;
   action.detail = toolCompletionDetail(action.argumentsDetail, event);
+  action.resultText = compactActionDetail(event?.content_preview, 160);
   return action;
 }
 

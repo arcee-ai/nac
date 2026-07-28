@@ -45,6 +45,7 @@ function loadApp(overrides = {}) {
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
+      renderFocusActions, formatActionArgs, isToolAction,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
@@ -621,11 +622,11 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /build the feature/);
   assert.match(html, /The feature is complete\./);
-  assert.match(html, /focus-tool-summary/);
+  assert.match(html, /tool-block/);
   assert.match(html, /workset_define/);
   assert.match(html, /ui-refresh/);
-  assert.match(html, /threads dispatched/);
-  assert.match(html, /impl\/shell, verify\/ui/);
+  assert.match(html, /impl\/shell/);
+  assert.match(html, /verify\/ui/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
   assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL|RAW_THREAD_ACTION/);
 });
@@ -707,24 +708,23 @@ scenario("SSE", "compaction replay retains correlated activity and reconciles ma
 });
 
 scenario("Transcript privacy", "shared transcript message rendering excludes system rows without dropping supported message fields", () => {
-  const system = ui.renderFocusMessage({ role: "system", content: "policy <root>" }, { ordinal: 25 });
+  const system = ui.renderFocusMessage({ role: "system", content: "policy <root>" });
   assert.equal(system, "");
   const assistant = ui.renderFocusMessage({ role: "assistant",
     reasoning_text: "reason <carefully>", content: "answer <safely>",
     tool_calls: [{ id: "call-<42>",
       function: { name: "thread", arguments: '{"name":"review/<unsafe>","action":"RAW_TOOL_ARGUMENT_CANARY"}' },
-    }], }, { ordinal: 26, durationMs: 2_500 });
+    }], });
   assert.match(assistant, /focus-message is-tool-turn/);
-  assert.match(assistant, /threads dispatched/);
+  assert.match(assistant, /tool-block/);
+  assert.match(assistant, /thread/);
   assert.match(assistant, /review\/&lt;unsafe&gt;/);
-  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;|response 00:00:02/);
+  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;/);
   assert.doesNotMatch(assistant, /<unsafe>|<carefully>|<safely>/);
-  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" }, { ordinal: 27 });
+  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" });
   assert.equal(tool, "");
-  const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] }, { ordinal: 28 });
-  assert.match(empty, /focus-message-copy is-empty/);
-  assert.match(empty, /empty message/);
-  assert.match(empty, /\[empty\]/);
+  const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] });
+  assert.equal(empty, "");
   const pending = ui.renderFocusMessage({
     role: "user", content: "just accepted", pending: true, pendingSource: "accepted response <client>",
   });
@@ -738,12 +738,12 @@ scenario("Transcript privacy", "unfiltered post-create transcripts hide system a
   const message = { role: "assistant", content: null,
     reasoning_text: "reason <carefully> & ignore <img src=x onerror=alert(1)>",
     tool_calls: [], };
-  const row = ui.renderFocusMessage(message, { ordinal: 7 });
+  const row = ui.renderFocusMessage(message);
   assert.match(row, /data-role="assistant"/);
-  assert.match(row, /focus-message-copy is-reasoning/);
-  assert.match(row, />reasoning</);
+  assert.match(row, /focus-reasoning/);
+  assert.match(row, /<summary>Reasoning</);
   assert.match(row, /reason &lt;carefully&gt; &amp; ignore &lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(row, /<img|empty message/);
+  assert.doesNotMatch(row, /<img/);
   ui.el.orchestratorChatContent = fakeElement();
   ui.renderOrchestratorChatRail(sessionSnapshot("reasoning-session", {
     messages: [
@@ -751,10 +751,9 @@ scenario("Transcript privacy", "unfiltered post-create transcripts hide system a
       { role: "user", content: "visible user prompt" }, message, ],
     message_page: { start: 0, end: 3, total: 3, has_older: false }, }));
   const transcript = ui.el.orchestratorChatContent.innerHTML;
-  assert.equal(occurrences(transcript, /focus-message-copy is-reasoning/g), 1);
+  assert.equal(occurrences(transcript, /<details class="focus-reasoning"/g), 1);
   assert.match(transcript, /visible user prompt/);
-  assert.match(transcript, />#2</);
-  assert.match(transcript, />#3</);
+  assert.match(transcript, /reason &lt;carefully&gt;/);
   assert.doesNotMatch(transcript, /private system prompt|AGENTS\.md|never-show|data-role="system"|>System</);
   assert.doesNotMatch(transcript, /No conversation messages|<img/);
 });
@@ -1786,9 +1785,7 @@ test("orchestrator conversation keeps pagination available while filtering syste
   const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /data-history-loader/);
   assert.match(html, /scroll up for earlier messages/);
-  assert.match(html, />#26</);
   assert.match(html, /paged visible user prompt/);
-  assert.doesNotMatch(html, />#25</);
   assert.doesNotMatch(html, /paged private AGENTS prompt|data-role="system"/);
   ui.state.messageWindows.set("loader-session", {
     start: 0, end: 48, total: 48, hasOlder: false, loading: false, messages: [],
@@ -1867,6 +1864,50 @@ test("tile selection protects the latest response, error, and terminal row", () 
   assert.equal(selected.length, 5);
   assert.deepEqual(plain(selected.map((action) => action.name)), ["response", "error", "thread", "ordinary 3", "ordinary 4"]);
   assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('title="src/full/path.js"'), true);
+  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes("action-mark"), false);
+  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('data-state="done"'), true);
+});
+
+test("renderFocusActions renders tool blocks for tool calls and one-liners for events", () => {
+  const html = ui.renderFocusActions([
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"operation":"read","path":"src/lib.rs"}', resultText: "248 lines" },
+    { name: "exec_command", result: "Done", state: "done", callId: "c2", argumentsDetail: '{"operation":"execute","workdir":"/repo"}', resultText: "all tests passed" },
+    { name: "dispatch", result: "started", state: "live", detail: "worker-1", sourceThreads: ["main"] },
+    { name: "guidance", result: "delivered", state: "done", detail: "guidance #3: do the thing" },
+    { name: "agent run", result: "started", state: "live", detail: "build the feature" },
+  ]);
+  assert.match(html, /tool-block-name/);
+  assert.match(html, /tool-block-args/);
+  assert.match(html, /focus-action-result/);
+  assert.match(html, /focus-action-event/);
+  assert.match(html, /focus-action-name/);
+  assert.match(html, /focus-action-detail/);
+  assert.doesNotMatch(html, /action-mark/);
+  assert.doesNotMatch(html, /[›×✓·]/);
+  assert.match(html, /data-state="done"/);
+  assert.match(html, /data-state="live"/);
+});
+
+test("formatActionArgs extracts the relevant argument per tool type", () => {
+  assert.equal(ui.formatActionArgs({ name: "read", argumentsDetail: '{"operation":"read","path":"src/lib.rs"}' }), "src/lib.rs");
+  assert.equal(ui.formatActionArgs({ name: "write", argumentsDetail: '{"operation":"write","path":"out.txt"}' }), "out.txt");
+  assert.equal(ui.formatActionArgs({ name: "edit", argumentsDetail: '{"operation":"edit","path":"mod.rs"}' }), "mod.rs");
+  assert.equal(ui.formatActionArgs({ name: "exec_command", argumentsDetail: '{"operation":"execute","cmd":"cargo test"}' }), "cargo test");
+  assert.equal(ui.formatActionArgs({ name: "thread", argumentsDetail: '{"operation":"dispatch","name":"worker-1"}' }), "worker-1");
+  assert.equal(ui.formatActionArgs({ name: "workset_define", argumentsDetail: '{"id":"ws-1","goal":"x"}' }), "ws-1");
+  assert.equal(ui.formatActionArgs({ name: "response", usage: { input_tokens: 160, output_tokens: 32 } }), "↑160 ↓32");
+  assert.equal(ui.formatActionArgs({ name: "guidance", result: "queued" }), "queued");
+  assert.equal(ui.formatActionArgs({ name: "agent run", result: "started" }), "started");
+});
+
+test("renderFocusActions tail-truncates long output with a details element", () => {
+  const longText = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
+  const html = ui.renderFocusActions([
+    { name: "exec_command", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"operation":"execute","cmd":"npm test"}', resultText: longText },
+  ]);
+  assert.match(html, /focus-action-output/);
+  assert.match(html, /<summary>5 more lines<\/summary>/);
+  assert.match(html, /<pre>/);
 });
 
 test("terminal run events clear only matching active-run caches", () => {
