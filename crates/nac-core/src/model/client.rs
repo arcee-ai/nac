@@ -454,17 +454,12 @@ impl ModelClient {
             message: "No attempts made".to_string(),
         };
 
-        for attempt in 0..3 {
-            if attempt > 0 {
-                let delay_secs = 1u64 << (attempt - 1);
-                sleep(Duration::from_secs(delay_secs)).await;
-            }
-
+        for attempt in 0..5 {
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
             }
-            let response = self
+            let response = match self
                 .apply_extra_headers(apply_headers(request))
                 .map_err(|error| ModelHttpError {
                     status: None,
@@ -473,12 +468,26 @@ impl ModelClient {
                 .json(body)
                 .send()
                 .await
-                .map_err(|e| ModelHttpError {
-                    status: None,
-                    message: format!("HTTP request failed for {}: {}", url, e),
-                })?;
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = ModelHttpError {
+                        status: None,
+                        message: format!("HTTP request failed for {}: {}", url, e),
+                    };
+                    if attempt < 4 {
+                        sleep(super::backoff_duration(attempt)).await;
+                    }
+                    continue;
+                }
+            };
 
             let status = response.status();
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok());
             let redirect_location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
@@ -531,6 +540,16 @@ impl ModelClient {
 
             if status.as_u16() == 429 || status.is_server_error() {
                 last_error = error;
+                if attempt < 4 {
+                    let delay = if status.as_u16() == 429 {
+                        retry_after
+                            .map(Duration::from_secs)
+                            .unwrap_or_else(|| super::backoff_duration(attempt))
+                    } else {
+                        super::backoff_duration(attempt)
+                    };
+                    sleep(delay).await;
+                }
                 continue;
             }
 

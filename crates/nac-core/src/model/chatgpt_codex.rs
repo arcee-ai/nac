@@ -557,13 +557,8 @@ async fn post_codex_json_with_retry(
         message: "No attempts made".to_string(),
     };
 
-    for attempt in 0..3 {
-        if attempt > 0 {
-            let delay_secs = 1u64 << (attempt - 1);
-            sleep(Duration::from_secs(delay_secs)).await;
-        }
-
-        let response = client
+    for attempt in 0..5 {
+        let response = match client
             .post(url)
             .header("Authorization", format!("Bearer {}", auth.access))
             .header("ChatGPT-Account-Id", auth.account_id.as_str())
@@ -575,12 +570,26 @@ async fn post_codex_json_with_retry(
             .json(body)
             .send()
             .await
-            .map_err(|error| CodexRequestError {
-                status: None,
-                message: format!("HTTP request failed for {url}: {error}"),
-            })?;
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                last_error = CodexRequestError {
+                    status: None,
+                    message: format!("HTTP request failed for {url}: {e}"),
+                };
+                if attempt < 4 {
+                    sleep(super::backoff_duration(attempt)).await;
+                }
+                continue;
+            }
+        };
 
         let status = response.status();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
@@ -608,6 +617,16 @@ async fn post_codex_json_with_retry(
         }
         if status.as_u16() == 429 || status.is_server_error() {
             last_error = error;
+            if attempt < 4 {
+                let delay = if status.as_u16() == 429 {
+                    retry_after
+                        .map(Duration::from_secs)
+                        .unwrap_or_else(|| super::backoff_duration(attempt))
+                } else {
+                    super::backoff_duration(attempt)
+                };
+                sleep(delay).await;
+            }
             continue;
         }
         return Err(error);

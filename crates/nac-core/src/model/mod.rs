@@ -8,6 +8,17 @@ use url::Url;
 
 use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
+fn backoff_duration(attempt: usize) -> Duration {
+    let base_ms = 200u64;
+    let delay_ms = std::cmp::min(base_ms.saturating_mul(1 << attempt), 30_000);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let jitter = 0.9 + (nanos as f64 / u32::MAX as f64) * 0.2;
+    Duration::from_millis((delay_ms as f64 * jitter) as u64)
+}
+
 mod anthropic;
 mod arcee;
 mod auth_store;
