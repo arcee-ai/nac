@@ -557,7 +557,7 @@ async fn post_codex_json_with_retry(
         message: "No attempts made".to_string(),
     };
 
-    for attempt in 0..5 {
+    for attempt in 0..20 {
         let response = match client
             .post(url)
             .header("Authorization", format!("Bearer {}", auth.access))

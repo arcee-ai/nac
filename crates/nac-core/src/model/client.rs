@@ -454,7 +454,7 @@ impl ModelClient {
             message: "No attempts made".to_string(),
         };
 
-        for attempt in 0..5 {
+        for attempt in 0..20 {
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
