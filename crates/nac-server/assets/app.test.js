@@ -259,6 +259,7 @@ function fakeElement() {
     setAttribute(name, value) { attributes.set(name, String(value)); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     removeAttribute(name) { attributes.delete(name); },
+    querySelectorAll() { return []; },
     textContent: "", title: "", };
 }
 
@@ -312,7 +313,7 @@ test("session opening renders the workspace and starts snapshot and SSE without 
   assert.doesNotThrow(() => isolated.openSession("release-session"));
   assert.equal(isolated.el.sessionWorkspace.hidden, false);
   assert.equal(isolated.el.promptInput.style.height, "50px");
-  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=24&include_sessions=false"]);
+  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=50&include_sessions=false"]);
   assert.equal(instances[0].url, "/sessions/release-session/events/stream?limit=512");
 });
 
@@ -734,16 +735,12 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   assert.doesNotMatch(pending, />#\d+</);
 });
 
-scenario("Transcript privacy", "unfiltered post-create transcripts hide system and AGENTS content while retaining user and reasoning-only assistant rows", () => {
+scenario("Transcript privacy", "unfiltered post-create transcripts hide system and AGENTS content while retaining user rows", () => {
   const message = { role: "assistant", content: null,
     reasoning_text: "reason <carefully> & ignore <img src=x onerror=alert(1)>",
     tool_calls: [], };
   const row = ui.renderFocusMessage(message);
-  assert.match(row, /data-role="assistant"/);
-  assert.match(row, /focus-reasoning/);
-  assert.match(row, /<summary>Reasoning</);
-  assert.match(row, /reason &lt;carefully&gt; &amp; ignore &lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(row, /<img/);
+  assert.equal(row, "");
   ui.el.orchestratorChatContent = fakeElement();
   ui.renderOrchestratorChatRail(sessionSnapshot("reasoning-session", {
     messages: [
@@ -751,11 +748,10 @@ scenario("Transcript privacy", "unfiltered post-create transcripts hide system a
       { role: "user", content: "visible user prompt" }, message, ],
     message_page: { start: 0, end: 3, total: 3, has_older: false }, }));
   const transcript = ui.el.orchestratorChatContent.innerHTML;
-  assert.equal(occurrences(transcript, /<details class="focus-reasoning"/g), 1);
   assert.match(transcript, /visible user prompt/);
-  assert.match(transcript, /reason &lt;carefully&gt;/);
   assert.doesNotMatch(transcript, /private system prompt|AGENTS\.md|never-show|data-role="system"|>System</);
   assert.doesNotMatch(transcript, /No conversation messages|<img/);
+  assert.doesNotMatch(transcript, /focus-reasoning|reason &lt;carefully&gt;/);
 });
 
 scenario("Transcript privacy", "transcript image rendering stays textual and markdown output stays sanitizer-guarded", () => {
@@ -800,7 +796,7 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
   isolated = loadApp({ fetch });
   const snapshot = await isolated.loadSnapshot("page/session");
   assert.equal(snapshot.messages[0].reasoning_text, "retained reasoning");
-  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=24&include_sessions=false");
+  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=50&include_sessions=false");
   isolated.state.currentId = "page/session";
   isolated.el.orchestratorChatContent = fakeElement();
   isolated.state.snapshots.set("page/session", {
@@ -1143,7 +1139,7 @@ test("snapshot refreshes coalesce bursts, carry dirty state through trailing req
   assert.equal(isolated.state.snapshots.get("snapshot-session").metadata.model, "fresh-final");
   assert.equal(isolated.el.sessionNavStatus.textContent, "Session refreshed", "queued announce intent reaches the final accepted request");
   assert.equal(isolated.state.snapshotRefreshCoordinators.has("snapshot-session"), false);
-  assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=24&include_sessions=false"));
+  assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=50&include_sessions=false"));
 });
 
 test("a failed invalidated snapshot GET yields to its successful trailing refresh while terminal errors remain visible", async () => {
@@ -1215,9 +1211,9 @@ test("snapshot coordinators remain independent across navigation and retain resp
   assert.equal(isolated.state.snapshots.has("session-A"), false);
   assert.match(isolated.el.sessionNavStatus.textContent, /Snapshot identity mismatch: requested session-A, received different-session/);
   assert.deepEqual(requests, [
-    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
-    "/sessions/session-B?message_limit=24&thread_event_limit=24&include_sessions=false",
-    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/session-A?message_limit=24&thread_event_limit=50&include_sessions=false",
+    "/sessions/session-B?message_limit=24&thread_event_limit=50&include_sessions=false",
+    "/sessions/session-A?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
 });
 
@@ -1840,7 +1836,8 @@ test("the canonical thread projector omits internal and metric rows while keepin
   const actions = ui.projectThreadActions(entries);
   assert.deepEqual(plain(actions.map((action) => action.name)), ["response", "response", "Read", "thread"]);
   assert.deepEqual(plain(actions.filter((action) => action.name === "response").map((action) => action.detail)), ["first answer", "second answer"]);
-  assert.match(actions[2].detail, /src\/app\.js.*succeeded/);
+  assert.match(actions[2].detail, /src\/app\.js/);
+  assert.match(actions[2].resultText, /succeeded/);
   assert.doesNotMatch(JSON.stringify(actions), /RAW_ARGUMENT_CANARY|raw log|iteration/);
   const snapshot = sessionSnapshot("episodes-only", { threads: [{ name: "worker" }],
     thread_episodes: { worker: [{ id: 1, action: "Retained", content: "episode-only content" }] },
@@ -1850,25 +1847,27 @@ test("the canonical thread projector omits internal and metric rows while keepin
   assert.match(ui.renderThreadEpisodes(snapshot.thread_episodes.worker), /episode-only content/);
 });
 
-test("tile selection protects the latest response, error, and terminal row", () => {
+test("tile selection filters to tool calls, dispatch, and thread completion", () => {
   const actions = [
     { name: "response", kind: "assistant_message", detail: "final answer" },
-    { name: "ordinary 1", kind: "tool_call_started" },
+    { name: "ordinary 1", kind: "tool_call_started", callId: "c1" },
     { name: "error", kind: "error", state: "error" },
-    { name: "ordinary 2", kind: "tool_call_started" },
-    { name: "thread", kind: "thread_finished", state: "done" },
+    { name: "ordinary 2", kind: "tool_call_started", callId: "c2" },
+    { name: "thread", kind: "thread_finished", state: "done", result: "finished" },
     { name: "ordinary 3", kind: "guidance" },
     { name: "ordinary 4", kind: "guidance" },
   ];
   const selected = ui.selectTileActions(actions);
-  assert.equal(selected.length, 5);
-  assert.deepEqual(plain(selected.map((action) => action.name)), ["response", "error", "thread", "ordinary 3", "ordinary 4"]);
-  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('title="src/full/path.js"'), true);
-  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes("action-mark"), false);
-  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('data-state="done"'), true);
+  assert.deepEqual(plain(selected.map((action) => action.name)), ["ordinary 1", "ordinary 2", "thread"]);
+  const html = ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done", callId: "c1" }], "");
+  assert.equal(html.includes('title="src/full/path.js"'), true);
+  assert.equal(html.includes("action-name"), false);
+  assert.equal(html.includes("action-result"), false);
+  assert.equal(html.includes('data-state="done"'), true);
+  assert.equal(html.includes("action-icon"), true);
 });
 
-test("renderFocusActions renders tool blocks for tool calls and one-liners for events", () => {
+test("renderFocusActions renders compact icon rows matching tile format", () => {
   const html = ui.renderFocusActions([
     { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"operation":"read","path":"src/lib.rs"}', resultText: "248 lines" },
     { name: "exec_command", result: "Done", state: "done", callId: "c2", argumentsDetail: '{"operation":"execute","workdir":"/repo"}', resultText: "all tests passed" },
@@ -1876,14 +1875,12 @@ test("renderFocusActions renders tool blocks for tool calls and one-liners for e
     { name: "guidance", result: "delivered", state: "done", detail: "guidance #3: do the thing" },
     { name: "agent run", result: "started", state: "live", detail: "build the feature" },
   ]);
-  assert.match(html, /tool-block-name/);
-  assert.match(html, /tool-block-args/);
-  assert.match(html, /focus-action-result/);
-  assert.match(html, /focus-action-event/);
-  assert.match(html, /focus-action-name/);
-  assert.match(html, /focus-action-detail/);
-  assert.doesNotMatch(html, /action-mark/);
-  assert.doesNotMatch(html, /[›×✓·]/);
+  assert.match(html, /action-row/);
+  assert.match(html, /action-icon/);
+  assert.match(html, /action-args/);
+  assert.doesNotMatch(html, /focus-action-result/);
+  assert.doesNotMatch(html, /focus-action-event/);
+  assert.doesNotMatch(html, /tool-block-name/);
   assert.match(html, /data-state="done"/);
   assert.match(html, /data-state="live"/);
 });
@@ -1900,14 +1897,10 @@ test("formatActionArgs extracts the relevant argument per tool type", () => {
   assert.equal(ui.formatActionArgs({ name: "agent run", result: "started" }), "started");
 });
 
-test("renderFocusActions tail-truncates long output with a details element", () => {
-  const longText = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
-  const html = ui.renderFocusActions([
-    { name: "exec_command", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"operation":"execute","cmd":"npm test"}', resultText: longText },
-  ]);
-  assert.match(html, /focus-action-output/);
-  assert.match(html, /<summary>5 more lines<\/summary>/);
-  assert.match(html, /<pre>/);
+test("formatActionArgs prefers keyArgPreview over JSON parsing", () => {
+  assert.equal(ui.formatActionArgs({ name: "read", keyArgPreview: "crates/nac-server/src/lib.rs", argumentsDetail: '{"path":"src/lib.rs"}' }), "crates/nac-server/src/lib.rs");
+  assert.equal(ui.formatActionArgs({ name: "exec_command", keyArgPreview: "cargo build", argumentsDetail: '{"cmd":"npm test"}' }), "cargo build");
+  assert.equal(ui.formatActionArgs({ name: "read", keyArgPreview: null, argumentsDetail: '{"path":"src/lib.rs"}' }), "src/lib.rs");
 });
 
 test("terminal run events clear only matching active-run caches", () => {
@@ -2405,7 +2398,7 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   assert.equal(requests.filter(([, options]) => options.method === "PATCH").length, 1);
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsSubmission, null);
   assert.equal(isolated.state.settingsFocus.config.model, "authoritative-model");
@@ -2453,7 +2446,7 @@ test("empty PATCH responses reload config and reconcile snapshot and session sta
   assert.deepEqual(JSON.parse(requests[0][1].body), { model: "gpt-5.1" });
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsFocus.config.model, "gpt-5.1");
   assert.equal(isolated.state.snapshots.get("settings-session").metadata.session_id, "settings-session");

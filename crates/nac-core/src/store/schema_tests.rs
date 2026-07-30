@@ -356,7 +356,7 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
                   'created-13', NULL, NULL);
              INSERT INTO thread_events VALUES
                  (20, 'owned', 'worker-without-thread-row',
-                  '{\"type\":\"tool_call_started\",\"thread_name\":\"worker-without-thread-row\",\"call_id\":\"call-20\",\"name\":\"exec_command\",\"args_preview\":\"CANARY_COMMAND\",\"args_detail\":\"{\\\"cmd\\\":\\\"CANARY_COMMAND\\\",\\\"workdir\\\":\\\"/safe/work\\\"}\"}',
+                  '{\"type\":\"tool_call_started\",\"thread_name\":\"worker-without-thread-row\",\"call_id\":\"call-20\",\"name\":\"exec_command\",\"args_preview\":\"CANARY_COMMAND\",\"args_detail\":\"{\\\"cmd\\\":\\\"echo safe_cmd\\\",\\\"workdir\\\":\\\"/safe/work\\\"}\"}',
                   'created-20');
              INSERT INTO thread_events VALUES
                  (21, 'owned', 'worker-without-thread-row',
@@ -433,10 +433,12 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
             call_id,
             args_preview,
             args_detail: None,
+            key_arg_preview,
             ..
         } if call_id == "call-20"
             && args_preview.contains("/safe/work")
             && args_preview.contains("execute")
+            && key_arg_preview.as_deref() == Some("echo safe_cmd")
     ));
     let migrated_event_count: i64 = migrated
         .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))

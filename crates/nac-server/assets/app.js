@@ -48,9 +48,9 @@ const state = {
   focusOpener: null,
 };
 
-const ACTION_LEDGER_LIMIT = 5;
+const ACTION_LEDGER_LIMIT = 10;
 const ORCHESTRATOR_MESSAGE_PAGE_LIMIT = 24;
-const THREAD_EVENT_PAGE_LIMIT = 24;
+const THREAD_EVENT_PAGE_LIMIT = 50;
 const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const REORDER_DRAG_THRESHOLD_PX = 6;
 const ORCHESTRATOR_STEERING_TARGET = "__orchestrator__";
@@ -2295,6 +2295,7 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
         state: "live",
         callId: event.call_id || null,
         argumentsDetail,
+        keyArgPreview: event.key_arg_preview || null,
         detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : null, argumentsDetail),
         ...evidence,
       };
@@ -3191,8 +3192,8 @@ function formatToolCall(toolCall) {
     argsLabel = focusToolTarget(args, "id", "name");
   } else if (name === "read") {
     argsLabel = focusToolTarget(args, "path", "file");
-  } else if (name === "bash" || name === "command") {
-    argsLabel = focusToolTarget(args, "command", "cmd");
+  } else if (name === "bash" || name === "command" || name === "exec_command" || name === "exec" || name === "shell") {
+    argsLabel = focusToolTarget(args, "cmd", "command", "workdir");
   } else if (name === "write" || name === "edit") {
     argsLabel = focusToolTarget(args, "path", "file");
   } else if (name === "grep" || name === "search") {
@@ -3222,22 +3223,14 @@ function renderFocusMessage(message) {
   const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)
     : "";
-  const reasoning = role === "assistant"
-    && message?.reasoning_text !== null
-    && message?.reasoning_text !== undefined
-    ? String(message.reasoning_text)
-    : "";
-  const reasoningBlock = reasoning
-    ? `<details class="focus-reasoning"><summary>Reasoning</summary><div class="focus-reasoning-content">${renderFocusMarkdown(reasoning)}</div></details>`
-    : "";
   const copy = content
     ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
     : "";
-  if (!reasoningBlock && !copy) return "";
+  if (!copy) return "";
   const pendingBadge = message?.pending
     ? `<span class="focus-pending-badge">Sending…</span>`
     : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}>${pendingBadge}<div class="focus-message-body">${reasoningBlock}${copy}</div></article>`;
+  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}>${pendingBadge}<div class="focus-message-body">${copy}</div></article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
@@ -3306,11 +3299,12 @@ function threadFocusEvidenceEntries(name, snapshot, windowState) {
 }
 
 function threadFinishDetail(event) {
-  const exit = event.exit_code === null || event.exit_code === undefined ? "exit unavailable" : `exit ${event.exit_code}`;
-  const timeout = event.timed_out
-    ? `timed out${event.timeout_reason ? `: ${event.timeout_reason}` : " (reason unavailable)"}`
-    : "not timed out";
-  return combineActionDetail(exit, timeout);
+  const exit = event.exit_code === null || event.exit_code === undefined ? "" : `exit ${event.exit_code}`;
+  if (event.timed_out) {
+    const reason = event.timeout_reason ? `: ${event.timeout_reason}` : "";
+    return combineActionDetail(exit, `timed out${reason}`);
+  }
+  return exit || "finished";
 }
 
 function threadEventAction(event, entry = {}, matchedStart = null) {
@@ -3331,7 +3325,9 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
     const argumentsDetail = formatToolArguments(event.args_preview);
     return {
       name: toolDisplayName(event.name), result: "Running", state: "live",
-      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, resultText: "", ...evidence,
+      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, resultText: "",
+      keyArgPreview: event.key_arg_preview || null,
+      ...evidence,
     };
   }
   if (event.type === "tool_call_finished") {
@@ -3341,8 +3337,10 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
       result: event.is_error ? "Failed" : "Done",
       state: event.is_error ? "error" : "done",
       callId: event.call_id || matchedStart?.callId || null,
-      argumentsDetail, detail: toolCompletionDetail(argumentsDetail, event),
-      resultText: compactActionDetail(event.content_preview, 160), ...evidence,
+      argumentsDetail, detail: toolCompletionDetail(argumentsDetail),
+      resultText: compactActionDetail(event.content_preview, 160),
+      keyArgPreview: matchedStart?.keyArgPreview || null,
+      ...evidence,
     };
   }
   if (event.type === "assistant_message") {
@@ -3493,7 +3491,8 @@ function renderThreadFocus(name, model, snapshot) {
     : "";
   const episodes = snapshot?.thread_episodes?.[name] || [];
   const episodeHtml = renderThreadEpisodes(episodes);
-  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${actions.length}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+  const visibleActionCount = actions.filter(isTileVisibleAction).length;
+  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
 }
 
 function renderThreadEpisodes(episodes) {
@@ -3520,37 +3519,40 @@ function renderThreadEpisodes(episodes) {
 function isToolAction(action) {
   if (action?.callId) return true;
   if (action?.argumentsDetail && String(action.argumentsDetail).trim() && action.argumentsDetail !== "—") return true;
-  if (String(action?.name || "").toLowerCase() === "response") return true;
   return false;
 }
 
-function renderActionResult(resultText) {
-  const text = String(resultText || "").trim();
-  if (!text) return "";
-  const lines = text.split("\n");
-  if (text.length <= 200 && lines.length <= 5) {
-    return `<span class="focus-action-result">${escapeHtml(text)}</span>`;
+function isTileVisibleAction(action) {
+  if (isToolAction(action)) return true;
+  if (action.name === "dispatch") return true;
+  if (action.name === "thread") {
+    const result = String(action.result || "");
+    if (result === "finished" || result.startsWith("failed") || result.startsWith("timed out")) return true;
   }
-  const hiddenCount = Math.max(0, lines.length - 5);
-  const summary = hiddenCount > 0 ? `${hiddenCount} more line${hiddenCount === 1 ? "" : "s"}` : "expand";
-  return `<details class="focus-action-output"><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(text)}</pre></details>`;
+  return false;
+}
+
+function actionIcon(action) {
+  if (action.name === "dispatch") return "→";
+  if (action.name === "thread") {
+    const result = String(action.result || "");
+    if (result === "finished") return "✓";
+    if (result.startsWith("failed") || result.startsWith("timed out")) return "✕";
+  }
+  const tool = String(action.name || "").toLowerCase();
+  if (tool === "command" || tool === "exec_command" || tool === "bash" || tool === "shell" || tool === "exec") return "$";
+  if (tool === "read" || tool === "thread_read") return "▾";
+  if (tool === "write") return "✎";
+  if (tool === "edit") return "✸";
+  if (tool === "grep" || tool === "search" || tool === "searchgithub") return "?";
+  if (tool === "thread_delete") return "✕";
+  if (tool.startsWith("workset")) return "□";
+  return "·";
 }
 
 function renderFocusActions(actions) {
   if (!actions.length) return `<div class="focus-empty">No activity yet.</div>`;
-  return `<ol class="focus-action-list">${actions.map(renderFocusActionItem).join("")}</ol>`;
-}
-
-function renderFocusActionItem(action) {
-  const state = escapeAttr(action.state || "recorded");
-  if (isToolAction(action)) {
-    const toolName = String(action.name || "tool").toLowerCase();
-    const args = formatActionArgs(action);
-    const resultText = action.state === "live" ? action.result : (action.resultText || action.result || "");
-    return `<li class="focus-action" data-state="${state}"><span class="tool-block-name">${escapeHtml(toolName)}</span><span class="tool-block-args">${escapeHtml(args)}</span>${renderActionResult(resultText)}</li>`;
-  }
-  const detail = formatActionArgs(action);
-  return `<li class="focus-action focus-action-event" data-state="${state}"><span class="focus-action-name">${escapeHtml(action.name)}</span>${detail ? `<span class="focus-action-detail">${escapeHtml(detail)}</span>` : ""}</li>`;
+  return `<ol class="focus-action-list">${renderFocusActionRows(actions)}</ol>`;
 }
 function renderMarkdownImageToken(tokens, index, options, env, renderer) {
   const token = tokens[index];
@@ -3812,34 +3814,59 @@ function renderThreadTile(thread) {
 }
 
 function selectTileActions(actions, limit = ACTION_LEDGER_LIMIT) {
-  if (actions.length <= limit) return [...actions];
+  const visible = actions.filter(isTileVisibleAction);
+  if (visible.length <= limit) return visible;
   const protectedIndexes = new Set();
-  for (const predicate of [
-    (action) => action.name === "response",
-    (action) => action.kind === "error" || action.name === "error",
-    (action) => ["thread_finished", "run_finished"].includes(action.kind),
-  ]) {
-    const index = actions.findLastIndex(predicate);
-    if (index >= 0) protectedIndexes.add(index);
-  }
-  for (let index = actions.length - 1; index >= 0 && protectedIndexes.size < limit; index -= 1) {
+  const failIndex = visible.findLastIndex(
+    (action) => action.name === "thread" && String(action.result || "").startsWith("failed"),
+  );
+  if (failIndex >= 0) protectedIndexes.add(failIndex);
+  for (let index = visible.length - 1; index >= 0 && protectedIndexes.size < limit; index -= 1) {
     protectedIndexes.add(index);
   }
-  return [...protectedIndexes].sort((left, right) => left - right).map((index) => actions[index]);
+  return [...protectedIndexes].sort((left, right) => left - right).map((index) => visible[index]);
+}
+
+function renderFocusActionRows(actions) {
+  const visible = actions.filter(isTileVisibleAction);
+  if (!visible.length) {
+    return `<li class="action-row is-placeholder" aria-hidden="true"><span class="action-args">No activity.</span></li>`;
+  }
+  return visible.map((action) => {
+    const state = escapeAttr(action.state || "recorded");
+    if (action.name === "thread" && !isToolAction(action)) {
+      const result = String(action.result || "");
+      const icon = result === "finished" ? "✓" : "✕";
+      const text = result === "finished" ? "thread complete"
+        : result.startsWith("timed out") ? "thread timed out"
+        : "thread failed";
+      return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
+    }
+    const icon = actionIcon(action);
+    const args = formatActionArgs(action);
+    return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+  }).join("");
 }
 
 function renderActionRows(actions, emptyLabel) {
   const visible = selectTileActions(actions);
-  const placeholders = Array.from({ length: ACTION_LEDGER_LIMIT - visible.length }, (_, index) => {
-    const label = !visible.length && index === ACTION_LEDGER_LIMIT - 1 ? emptyLabel : "";
-    return `<li class="action-row is-placeholder" aria-hidden="true">${label ? `<span class="action-detail">${escapeHtml(label)}</span>` : ""}</li>`;
-  });
-  const rows = visible.map((action) => {
-    const rowClass = action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : "";
-    const detail = action.detail ? `<span class="action-detail" title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</span>` : "";
-    return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}" data-state="${escapeAttr(action.state || "recorded")}"><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
-  });
-  return placeholders.concat(rows).join("");
+  if (!visible.length) {
+    return `<li class="action-row is-placeholder" aria-hidden="true"><span class="action-args">${escapeHtml(emptyLabel)}</span></li>`;
+  }
+  return visible.slice().reverse().map((action) => {
+    const state = escapeAttr(action.state || "recorded");
+    if (action.name === "thread" && !isToolAction(action)) {
+      const result = String(action.result || "");
+      const icon = result === "finished" ? "✓" : "✕";
+      const text = result === "finished" ? "thread complete"
+        : result.startsWith("timed out") ? "thread timed out"
+        : "thread failed";
+      return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
+    }
+    const icon = actionIcon(action);
+    const args = formatActionArgs(action);
+    return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+  }).join("");
 }
 
 function toolDisplayName(value) {
@@ -3872,9 +3899,16 @@ function parseArgumentsDetail(raw) {
 }
 
 function formatActionArgs(action) {
+  if (action?.keyArgPreview) {
+    const preview = String(action.keyArgPreview).trim();
+    if (preview && !preview.startsWith("{") && !preview.startsWith("[") && !preview.startsWith("(in ")) return preview;
+  }
   const name = String(action?.name || "").toLowerCase();
-  const raw = String(action?.argumentsDetail || "").trim();
+  const argsDetail = String(action?.argumentsDetail || "").trim();
+  const detailStr = String(action?.detail || "").trim();
+  const raw = argsDetail || (detailStr && !detailStr.startsWith("{") && !detailStr.startsWith("[") ? detailStr : "");
   const parsed = parseArgumentsDetail(raw);
+  const plainDetail = detailStr && !detailStr.startsWith("{") && !detailStr.startsWith("[") ? detailStr : "";
   const pick = (...keys) => {
     for (const key of keys) {
       const value = parsed[key];
@@ -3883,12 +3917,21 @@ function formatActionArgs(action) {
     return null;
   };
 
-  if (name === "read") return pick("path", "file") || raw;
-  if (name === "bash" || name === "command" || name === "exec_command" || name === "shell" || name === "exec") return pick("cmd", "command", "workdir") || raw;
-  if (name === "write" || name === "edit") return pick("path", "file") || raw;
-  if (name === "grep" || name === "search" || name === "searchgithub") return pick("pattern", "query") || raw;
-  if (name === "thread" || name === "dispatch") return pick("name", "thread") || (action?.sourceThreads?.length ? action.sourceThreads.join(", ") : "") || raw;
-  if (name.startsWith("workset_")) return pick("id", "name") || raw;
+  if (name === "read") return pick("path", "file") || plainDetail || "";
+  if (name === "bash" || name === "command" || name === "exec_command" || name === "shell" || name === "exec") {
+    const cmd = pick("cmd", "command");
+    if (cmd) return cmd;
+    const workdir = pick("workdir");
+    if (workdir) {
+      const parts = workdir.split("/").filter(Boolean);
+      return `in ${parts[parts.length - 1] || workdir}`;
+    }
+    return plainDetail || "";
+  }
+  if (name === "write" || name === "edit") return pick("path", "file") || plainDetail || "";
+  if (name === "grep" || name === "search" || name === "searchgithub") return pick("pattern", "query") || plainDetail || "";
+  if (name === "thread" || name === "dispatch") return pick("name", "thread") || (action?.sourceThreads?.length ? action.sourceThreads.join(", ") : "") || plainDetail || "";
+  if (name.startsWith("workset_")) return pick("id", "name") || plainDetail || "";
   if (name === "response") {
     const usage = action?.usage;
     if (usage) return `↑${Number(usage.input_tokens || 0)} ↓${Number(usage.output_tokens || 0)}`;
@@ -3896,12 +3939,20 @@ function formatActionArgs(action) {
   }
   if (name === "guidance") return action?.result || compactActionDetail(action?.detail, 200);
   if (name === "agent run") return action?.result || compactActionDetail(action?.detail, 200);
-  return compactActionDetail(raw || action?.detail, 200);
+  const detailRaw = String(action?.detail || "").trim();
+  if (detailRaw.startsWith("{") || detailRaw.startsWith("[")) {
+    const detailParsed = parseArgumentsDetail(detailRaw);
+    for (const key of ["cmd", "command", "path", "file", "query", "pattern", "name", "workdir", "operation"]) {
+      const value = detailParsed[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  }
+  return compactActionDetail(action?.detail, 200);
 }
 
-function toolCompletionDetail(argumentsDetail, event) {
-  const result = compactActionDetail(event?.content_preview, 160);
-  return combineActionDetail(argumentsDetail, result ? `result: ${result}` : "");
+function toolCompletionDetail(argumentsDetail) {
+  return argumentsDetail;
 }
 
 function threadToolCallKey(event) {
@@ -3940,7 +3991,7 @@ function completeThreadToolAction(action, event, entry = {}) {
   action.callId = action.callId || event.call_id || null;
   action.finishSequenceId = entry.sequenceId ?? null;
   action.finishEventId = entry.eventId ?? null;
-  action.detail = toolCompletionDetail(action.argumentsDetail, event);
+  action.detail = toolCompletionDetail(action.argumentsDetail);
   action.resultText = compactActionDetail(event?.content_preview, 160);
   return action;
 }

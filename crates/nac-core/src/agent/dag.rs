@@ -227,6 +227,7 @@ pub(crate) fn collect_parse_errors(
             call_id: tool_call_id.clone(),
             name: "thread".to_string(),
             args_preview: preview_tool_args("thread", &args_str),
+            key_arg_preview: None,
             args_detail: Some(tool_args_detail(&args_str)),
         });
         event_sink.emit(AgentEvent::ToolCallFinished {
@@ -272,6 +273,7 @@ pub(crate) fn spawn_non_thread_into(
             call_id: tool_call_id.clone(),
             name: tool_name.clone(),
             args_preview: preview_tool_args(&tool_name, &args_str),
+            key_arg_preview: None,
             args_detail: Some(tool_args_detail(&args_str)),
         });
 
@@ -370,6 +372,7 @@ pub(crate) async fn execute_with_dag(
                 call_id: dispatch.tool_call_id.clone(),
                 name: "thread".to_string(),
                 args_preview: preview_tool_args("thread", &dispatch.args_str),
+                key_arg_preview: None,
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
             });
             event_sink.emit(AgentEvent::ToolCallFinished {
@@ -455,6 +458,7 @@ pub(crate) async fn execute_with_dag(
                     call_id: dispatch.tool_call_id.clone(),
                     name: "thread".to_string(),
                     args_preview: preview_tool_args("thread", &dispatch.args_str),
+                    key_arg_preview: None,
                     args_detail: Some(tool_args_detail(&dispatch.args_str)),
                 });
                 event_sink.emit(AgentEvent::ToolCallFinished {
@@ -482,6 +486,7 @@ pub(crate) async fn execute_with_dag(
                 call_id: dispatch.tool_call_id.clone(),
                 name: "thread".to_string(),
                 args_preview: preview_tool_args("thread", &dispatch.args_str),
+                key_arg_preview: None,
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
             });
 

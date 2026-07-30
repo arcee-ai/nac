@@ -33,6 +33,7 @@ pub(crate) use compaction::{
 };
 use compaction::{CompactionState, PreparedProviderView};
 use preview::*;
+pub(crate) use preview::key_arg_preview;
 use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;

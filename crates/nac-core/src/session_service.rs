@@ -2400,7 +2400,7 @@ pub(super) mod tests {
             ),
             (
                 "worker-d",
-                r#"{"type":"tool_call_started","thread_name":"worker-d","call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"CANARY_COMMAND\",\"workdir\":\"/safe/api\"}"}"#,
+                r#"{"type":"tool_call_started","thread_name":"worker-d","call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"echo safe_cmd\",\"workdir\":\"/safe/api\"}"}"#,
             ),
         ] {
             crate::store::append_thread_event(
@@ -2467,6 +2467,7 @@ pub(super) mod tests {
                 call_id: "call-1".to_string(),
                 name: "read".to_string(),
                 args_preview: r#"{"path":"index.html"}"#.to_string(),
+                key_arg_preview: None,
                 args_detail: None,
             });
         parts
