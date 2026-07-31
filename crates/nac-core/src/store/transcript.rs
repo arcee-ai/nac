@@ -1,8 +1,8 @@
-//! Orchestrator transcript log primitives — step 1 of the DB-direct
-//! transcript workset (research/guidance-persistence). Everything here except
-//! [`is_transcript_log_payload`] is dead code until step 2 wires the agent
-//! loop to it, so the writer and payload codecs are gated behind
-//! `test`/`test-support`, matching the `append_thread_event` precedent.
+//! Orchestrator transcript log — the DB-direct transcript workset
+//! (research/guidance-persistence). Step 1 landed these primitives plus the
+//! guards below; step 2 wired the agent loop to them (dual-write: every
+//! orchestrator message is appended here when it enters `Agent.messages`,
+//! while the snapshot blob rewrite at run end continues unchanged).
 //!
 //! # Storage
 //!
@@ -45,11 +45,25 @@
 //! - Single writer per session (the session operation lease serializes runs).
 //! - Append-only except `TranscriptLogWriter::delete_from`, which truncates a
 //!   tail range (`idx >= from_idx`) for crash/cancel normalization.
-//! - `idx` values are contiguous from 0 and increase by one per append.
-//!   Enforcement lives in the step-2 Transcript abstraction, not in these
-//!   primitives.
+//! - `idx` values are contiguous and increase by one per append. The agent
+//!   maintains this by construction (`idx` = `messages.len()` at push time,
+//!   log-first so the vec never holds an undurable message); the restore
+//!   merge verifies the tail is contiguous with the snapshot blob and fails
+//!   loudly otherwise. The log's first row is NOT necessarily idx 0: the
+//!   initial system prompt(s) enter the vec at construction, before any
+//!   logging, and are carried by the snapshot blob.
 //!
-//! # Guards (landed with this step)
+//! # Load path (step 2)
+//!
+//! Session restore is blob ++ log: the snapshot blob is authoritative for
+//! `[0, blob_len)`, log rows with `idx >= blob_len` are the tail a crashed
+//! run appended after the last snapshot save. An empty tail is exactly the
+//! pre-log behavior. After the merge, `truncate_incomplete_tool_turn` trims
+//! a dangling tool turn from the restored transcript and `delete_from`
+//! removes the matching log tail (crash normalization). The session cancel
+//! path performs the same normalization before appending its marker.
+//!
+//! # Guards (landed with step 1)
 //!
 //! 1. `load_all_thread_events` / `load_thread_events_page` exclude
 //!    `__orchestrator__` rows in SQL (thread_events.rs), so transcript rows
@@ -62,7 +76,6 @@
 //!    (threads.rs), so a model-callable `thread_delete("__orchestrator__")`
 //!    cannot wipe the transcript tail.
 
-#[cfg(any(test, feature = "test-support"))]
 use super::*;
 
 /// Top-level JSON key identifying a transcript log row in `thread_events`.
@@ -85,14 +98,11 @@ pub fn is_transcript_log_payload(event_json: &str) -> bool {
         })
 }
 
-#[cfg(any(test, feature = "test-support"))]
 use crate::types::Message;
-#[cfg(any(test, feature = "test-support"))]
 use std::sync::Mutex;
 
 /// Role tag stored beside the canonical message bytes so future prefix-digest
 /// streaming can skip System rows without parsing them.
-#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscriptMessageKind {
@@ -102,7 +112,6 @@ pub enum TranscriptMessageKind {
     Tool,
 }
 
-#[cfg(any(test, feature = "test-support"))]
 impl TranscriptMessageKind {
     fn of(message: &Message) -> Self {
         match message {
@@ -117,7 +126,6 @@ impl TranscriptMessageKind {
 /// Decoded transcript log entry. `message_json` is byte-identical to
 /// `serde_json::to_vec(&Message)` — see the module docs for why that is
 /// load-bearing. The wire field name is `message`.
-#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptLogEntry {
     pub idx: u64,
@@ -126,7 +134,6 @@ pub struct TranscriptLogEntry {
     pub message_json: String,
 }
 
-#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TranscriptLogPayload {
     nac_transcript_message: TranscriptLogEntry,
@@ -134,7 +141,6 @@ struct TranscriptLogPayload {
 
 /// Encode one transcript log row payload (see the module docs for the exact
 /// wire format).
-#[cfg(any(test, feature = "test-support"))]
 pub fn encode_transcript_log_entry(idx: u64, message: &Message) -> Result<String> {
     let canonical =
         serde_json::to_vec(message).context("failed to serialize transcript message")?;
@@ -152,7 +158,6 @@ pub fn encode_transcript_log_entry(idx: u64, message: &Message) -> Result<String
 
 /// Fully decode a transcript log row payload. Returns `None` when the payload
 /// is not a transcript row (e.g. a regular `AgentEvent` row).
-#[cfg(any(test, feature = "test-support"))]
 pub fn decode_transcript_log_entry(event_json: &str) -> Option<TranscriptLogEntry> {
     serde_json::from_str::<TranscriptLogPayload>(event_json)
         .ok()
@@ -165,12 +170,10 @@ pub fn decode_transcript_log_entry(event_json: &str) -> Option<TranscriptLogEntr
 ///
 /// Callers must uphold the module-level invariants: one writer per session,
 /// `idx` contiguous and increasing per append.
-#[cfg(any(test, feature = "test-support"))]
 pub struct TranscriptLogWriter {
     connection: Mutex<Connection>,
 }
 
-#[cfg(any(test, feature = "test-support"))]
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -180,21 +183,44 @@ impl TranscriptLogWriter {
 
     /// Append `message` at absolute transcript position `idx`.
     pub fn append(&self, session_id: &str, idx: u64, message: &Message) -> Result<()> {
-        let event_json = encode_transcript_log_entry(idx, message)?;
-        let connection = self
+        self.append_batch(session_id, idx, std::slice::from_ref(message))
+    }
+
+    /// Append `messages` at absolute transcript positions
+    /// `start_idx..start_idx + messages.len()`, atomically: the whole batch
+    /// commits in one IMMEDIATE transaction, so a crash mid-batch is
+    /// all-or-nothing. Used for the parallel tool-result batch, whose
+    /// provider-view invariant requires the complete batch to be durable
+    /// together.
+    pub fn append_batch(
+        &self,
+        session_id: &str,
+        start_idx: u64,
+        messages: &[Message],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let mut connection = self
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        connection.execute(
-            "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                session_id,
-                ORCHESTRATOR_STEERING_TARGET,
-                event_json,
-                now_utc()
-            ],
-        )?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for (offset, message) in messages.iter().enumerate() {
+            let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
+            transaction.execute(
+                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    session_id,
+                    ORCHESTRATOR_STEERING_TARGET,
+                    event_json,
+                    now_utc()
+                ],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -434,6 +460,42 @@ mod tests {
 
         assert!(writer.read_from("session-a", 4).unwrap().is_empty());
         assert_eq!(writer.read_from("session-b", 0).unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_append_batch_assigns_contiguous_indices_and_is_empty_noop() {
+        let path = temp_store_path("append_batch");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer.append_batch("session-a", 0, &[]).unwrap();
+        assert!(writer.read_from("session-a", 0).unwrap().is_empty());
+
+        let messages = sample_messages();
+        writer.append_batch("session-a", 4, &messages).unwrap();
+        let all = writer.read_from("session-a", 0).unwrap();
+        assert_eq!(all.len(), messages.len());
+        for (position, ((idx, read), expected)) in all.iter().zip(messages.iter()).enumerate() {
+            assert_eq!(*idx as usize, 4 + position);
+            assert_eq!(canonical(read), canonical(expected));
+        }
+
+        // A follow-up batch continues from the end of the previous one.
+        writer
+            .append_batch(
+                "session-a",
+                8,
+                &[Message::User {
+                    content: "tail".to_string(),
+                }],
+            )
+            .unwrap();
+        let tail = writer.read_from("session-a", 8).unwrap();
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].0, 8);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

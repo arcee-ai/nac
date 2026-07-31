@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1594,13 +1594,13 @@ impl SessionService {
 
     async fn append_cancellation_message(&self) -> Option<crate::model::TokenUsage> {
         let mut agent = self.agent.lock().await;
-        truncate_incomplete_tool_turn(&mut agent.messages);
-        agent.messages.push(Message::Assistant {
-            content: Some("[run cancelled by user]".to_string()),
-            reasoning_text: None,
-            reasoning_details: None,
-            tool_calls: None,
-        });
+        // Trims any dangling tool turn from the transcript AND the transcript
+        // log tail, then appends and logs the cancellation marker. A log
+        // failure must not fail the cancel; the next restore re-normalizes
+        // the stale tail (see Agent::append_cancellation_marker).
+        if let Err(error) = agent.append_cancellation_marker().await {
+            eprintln!("nac: failed to normalize transcript log for cancellation: {error:#}");
+        }
         agent.invalidate_context_sample();
         // Return partial usage so the caller can persist it. Because `send()`
         // updates `last_usage` mid-loop, this captures all token usage from
@@ -1772,41 +1772,6 @@ fn count_user_messages(messages: &[Message]) -> usize {
         .iter()
         .filter(|message| matches!(message, Message::User { .. }))
         .count()
-}
-
-fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
-    let Some(index) = messages.iter().rposition(|message| {
-        matches!(
-            message,
-            Message::Assistant {
-                tool_calls: Some(tool_calls),
-                ..
-            } if !tool_calls.is_empty()
-        )
-    }) else {
-        return;
-    };
-    let Message::Assistant {
-        tool_calls: Some(tool_calls),
-        ..
-    } = &messages[index]
-    else {
-        return;
-    };
-    let expected = tool_calls
-        .iter()
-        .map(|tool_call| tool_call.id.as_str())
-        .collect::<HashSet<_>>();
-    let observed = messages[index + 1..]
-        .iter()
-        .filter_map(|message| match message {
-            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
-            _ => None,
-        })
-        .collect::<HashSet<_>>();
-    if !expected.is_subset(&observed) {
-        messages.truncate(index);
-    }
 }
 
 fn now_epoch_ms() -> u64 {
@@ -3161,7 +3126,10 @@ pub(super) mod tests {
     async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
         let store_path = test_store_path("active_persist_failure");
         let store_parent = store_path.parent().unwrap().to_path_buf();
-        std::fs::write(&store_parent, "not a directory").unwrap();
+        // The store must be usable at agent construction time (the transcript
+        // log writer opens it eagerly); break the path afterwards so only the
+        // snapshot save at run end fails.
+        crate::store::initialize(&store_path).unwrap();
         let client = ModelClient::new_for_test();
         let session_id = "session-persist-failure".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -3192,6 +3160,11 @@ pub(super) mod tests {
             workspace_host_path: Some(PathBuf::from("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
+
+        // Inject the persistence failure: replace the store directory with a
+        // plain file so `save_session` can no longer open the database.
+        std::fs::remove_dir_all(&store_parent).unwrap();
+        std::fs::write(&store_parent, "not a directory").unwrap();
 
         let mut events = parts.service.subscribe_events();
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
