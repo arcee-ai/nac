@@ -68,6 +68,20 @@ export function formatTokens(n: number | null | undefined): string {
   return String(v);
 }
 
+/** Token counts for the chat input bar, e.g. 185000 -> "185K", 14.3e6 -> "14.3M". */
+export function formatTokensCompact(n: number | null | undefined): string {
+  if (n == null) return "--";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "--";
+  const scale = (divisor: number, suffix: string) => {
+    const scaled = v / divisor;
+    return `${scaled.toFixed(Math.abs(scaled) >= 100 || v % divisor === 0 ? 0 : 1)}${suffix}`;
+  };
+  if (Math.abs(v) >= 1_000_000) return scale(1_000_000, "M");
+  if (Math.abs(v) >= 1_000) return scale(1_000, "K");
+  return String(v);
+}
+
 /** Clock for a running session card: MM:SS, widening to H:MM:SS past an hour. */
 export function formatClock(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return "--:--";
@@ -157,52 +171,32 @@ export function tokenUsage(
   return timing.cumulative_token_usage ?? timing.last_token_usage ?? null;
 }
 
-export interface SessionMetrics {
+export interface SessionRunMetrics {
   model: string;
-  backend: string;
-  messages: number;
-  run: "running" | "idle";
+  /** Where the run executes, shown as the small uppercase label. */
+  env: string;
   active: boolean;
   startedAt: number | null;
   lastResponseMs: number | null;
-  tokens: string;
-  context: string;
+  usage: TokenUsage | null;
 }
 
-/** The six metrics shown in the inspector summary grid. */
-export function metricsFromSnapshot(
+/** The values the chat input bar reports underneath the message field. */
+export function runMetrics(
   snapshot: SessionSnapshotResponse | null | undefined,
   entry: ManagedSessionSummary | null | undefined,
-): SessionMetrics {
+): SessionRunMetrics {
   const meta = snapshot?.metadata;
   const summary = entry?.summary;
   const activeRun = snapshot?.active_run ?? entry?.active_run ?? null;
   const active = isActiveRun(activeRun);
-  const usage = tokenUsage(snapshot);
-
-  let tokens = "--";
-  let context = "--";
-  if (usage) {
-    const cache =
-      usage.cache_read_tokens > 0
-        ? ` R${formatTokens(usage.cache_read_tokens)}`
-        : "";
-    tokens = `↑${formatTokens(usage.input_tokens)}${cache} ↓${formatTokens(usage.output_tokens)}`;
-    context = formatTokens(usage.total_tokens);
-  }
-
-  const messages =
-    snapshot?.messages.length ?? summary?.visible_message_count ?? 0;
 
   return {
     model: meta?.model ?? summary?.model ?? "--",
-    backend: meta?.backend ?? summary?.backend ?? "--",
-    messages,
-    run: active ? "running" : "idle",
+    env: sessionEnvLabel(summary).toUpperCase(),
     active,
     startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
     lastResponseMs: snapshot?.response_timing.last_response_duration_ms ?? null,
-    tokens,
-    context,
+    usage: tokenUsage(snapshot),
   };
 }

@@ -11,7 +11,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { PromptForm } from "@/app/components/inspector/PromptForm";
+import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
@@ -146,7 +146,7 @@ export default function SessionPage() {
             ) : null}
             <Transcript snapshot={snapshot} />
             <div className="shrink-0 py-2">
-              <PromptForm sessionId={id} />
+              <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
             </div>
           </div>
         </div>
