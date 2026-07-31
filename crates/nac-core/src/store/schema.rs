@@ -301,14 +301,24 @@ fn migrate_thread_events(conn: &Connection) -> Result<()> {
     let mut copied = 0_i64;
     let mut unsafe_events = 0_i64;
     for (id, session_id, thread_name, event_json, created_at) in records {
-        let sanitized = serde_json::from_str::<crate::events::AgentEvent>(&event_json)
-            .ok()
-            .and_then(crate::events::sanitize_external_agent_event);
-        let Some(event) = sanitized else {
-            unsafe_events += 1;
-            continue;
+        // Transcript log rows (store/transcript.rs) are NOT AgentEvents: they
+        // are the orchestrator's durable transcript and must be carried
+        // through verbatim. Running them through AgentEvent sanitize-drop
+        // would silently destroy the transcript. Any FUTURE rebuild-migration
+        // of thread_events MUST preserve transcript log rows the same way —
+        // detect them with is_transcript_log_payload, never via AgentEvent.
+        let event_json = if is_transcript_log_payload(&event_json) {
+            event_json
+        } else {
+            let sanitized = serde_json::from_str::<crate::events::AgentEvent>(&event_json)
+                .ok()
+                .and_then(crate::events::sanitize_external_agent_event);
+            let Some(event) = sanitized else {
+                unsafe_events += 1;
+                continue;
+            };
+            serde_json::to_string(&event)?
         };
-        let event_json = serde_json::to_string(&event)?;
         conn.execute(
             "INSERT INTO thread_events_v2
                  (id, session_id, thread_name, event_json, created_at)

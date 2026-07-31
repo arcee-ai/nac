@@ -469,6 +469,102 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
 }
 
 #[test]
+fn transcript_log_rows_survive_thread_events_rebuild_migration() {
+    // Pins the invariant that the thread_events sanitize-drop rebuild (and any
+    // future rebuild-migration) carries transcript log rows through verbatim.
+    // Current v3 DBs never re-run this migration, but the assertion keeps the
+    // pattern honest for future rebuilds.
+    let path = temp_store_path("transcript_survival");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    create_legacy_base(&legacy);
+    insert_legacy_session(&legacy, "owned");
+    let transcript_zero = crate::store::encode_transcript_log_entry(
+        0,
+        &crate::types::Message::User {
+            content: "prompt".to_string(),
+        },
+    )
+    .unwrap();
+    let transcript_one = crate::store::encode_transcript_log_entry(
+        1,
+        &crate::types::Message::Assistant {
+            content: Some("answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        },
+    )
+    .unwrap();
+    legacy
+        .execute_batch(
+            "PRAGMA user_version = 1;
+             CREATE TABLE thread_events (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 session_id TEXT NOT NULL,
+                 thread_name TEXT NOT NULL,
+                 event_json TEXT NOT NULL,
+                 created_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+    for (id, thread_name, event_json) in [
+        (30, "__orchestrator__", transcript_zero.as_str()),
+        (31, "__orchestrator__", transcript_one.as_str()),
+        (
+            32,
+            "worker",
+            "{\"type\":\"thread_started\",\"name\":\"worker\",\"action\":\"legacy action\",\"source_threads\":[]}",
+        ),
+        (33, "worker", "{malformed"),
+    ] {
+        legacy
+            .execute(
+                "INSERT INTO thread_events
+                     (id, session_id, thread_name, event_json, created_at)
+                 VALUES (?1, 'owned', ?2, ?3, 'created')",
+                params![id, thread_name, event_json],
+            )
+            .unwrap();
+    }
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    let rows = migrated
+        .prepare("SELECT id, thread_name, event_json FROM thread_events ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    // Transcript rows survive byte-identical; the valid AgentEvent row is
+    // sanitized and kept; the malformed row is dropped.
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        (30, "__orchestrator__".to_string(), transcript_zero)
+    );
+    assert_eq!(
+        rows[1],
+        (31, "__orchestrator__".to_string(), transcript_one)
+    );
+    assert_eq!(rows[2].0, 32);
+    assert_eq!(rows[2].1, "worker");
+    assert!(serde_json::from_str::<crate::events::AgentEvent>(&rows[2].2).is_ok());
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn v2_to_v3_adds_threshold_and_empty_checkpoint_storage() {
     let path = temp_store_path("v2");
     initialize(&path).unwrap();
