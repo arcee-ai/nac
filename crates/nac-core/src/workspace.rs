@@ -1,16 +1,22 @@
-//! Branch operations on a session's checkout.
+//! Everything nac writes to the user's repository on its own initiative.
 //!
-//! This is the one place where nac writes to the user's repository on its own
-//! initiative, so every call is deliberately narrow: list the local branches,
-//! create one, or switch to an existing one. Whether such a write is allowed at
-//! all — no run in flight, nothing uncommitted — is decided by the caller,
-//! because only it can see the other sessions sharing this checkout.
+//! Two kinds of write live here and they carry very different weight. The
+//! branch operations below change what the user's checkout is, so each one is
+//! deliberately narrow, and whether it is allowed at all — no run in flight,
+//! nothing uncommitted — is decided by the caller, because only it can see the
+//! other sessions sharing this checkout. The revision captures in the submodule
+//! change nothing the user can observe: they only add objects and one ref under
+//! `refs/nac/`.
 
 use std::path::Path;
 use std::process::Command as StdCommand;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+
+mod revisions;
+
+pub use revisions::{capture, forget, RevisionCapture};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Branch {

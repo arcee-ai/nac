@@ -25,6 +25,8 @@ import type {
   WorkspaceFileContent,
   WorkspaceFileDiff,
   WorkspaceFileList,
+  WorkspaceRevision,
+  WorkspaceRevisionChanges,
 } from "@/app/types/api";
 
 /** How often the session list is refreshed; the list has no event stream. */
@@ -43,11 +45,17 @@ export const queryKeys = {
     path: string,
     stage: WorkspaceDiffStage | "all",
     context: number,
-  ) => ["session", id, "workspace-diff", { path, stage, context }] as const,
+    revision: number | null,
+  ) =>
+    ["session", id, "workspace-diff", { path, stage, context, revision }] as const,
   branches: (id: string) => ["session", id, "branches"] as const,
-  workspaceFiles: (id: string) => ["session", id, "workspace-files"] as const,
-  workspaceFile: (id: string, path: string) =>
-    ["session", id, "workspace-file", path] as const,
+  workspaceFiles: (id: string, revision: number | null) =>
+    ["session", id, "workspace-files", { revision }] as const,
+  workspaceFile: (id: string, path: string, revision: number | null) =>
+    ["session", id, "workspace-file", { path, revision }] as const,
+  workspaceRevisions: (id: string) => ["session", id, "revisions"] as const,
+  workspaceRevisionChanges: (id: string, revision: number) =>
+    ["session", id, "revisions", revision, "changes"] as const,
 };
 
 export function useStoreInfo() {
@@ -108,32 +116,75 @@ export function useWorkspaceDiff(
   path: string | null,
   stage: WorkspaceDiffStage | "all" = "all",
   context = 3,
+  revision: number | null = null,
 ) {
   return useQuery<WorkspaceFileDiff>({
-    queryKey: queryKeys.workspaceDiff(id ?? "", path ?? "", stage, context),
+    queryKey: queryKeys.workspaceDiff(
+      id ?? "",
+      path ?? "",
+      stage,
+      context,
+      revision,
+    ),
     queryFn: ({ signal }) =>
-      api.getWorkspaceDiff(id!, path!, { stage, context, signal }),
+      api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
     enabled: Boolean(id && path),
   });
 }
 
-/** Every file git considers part of the project, for the Files tree. */
-export function useWorkspaceFiles(id: string | null) {
+/**
+ * Every file git considers part of the project, for the Files tree. With a
+ * revision it is the project as it stood at the end of that run instead, which
+ * is frozen and therefore never goes stale.
+ */
+export function useWorkspaceFiles(
+  id: string | null,
+  revision: number | null = null,
+) {
   return useQuery<WorkspaceFileList>({
-    queryKey: queryKeys.workspaceFiles(id ?? ""),
-    queryFn: ({ signal }) => api.getWorkspaceFiles(id!, signal),
+    queryKey: queryKeys.workspaceFiles(id ?? "", revision),
+    queryFn: ({ signal }) => api.getWorkspaceFiles(id!, revision, signal),
     enabled: Boolean(id),
-    staleTime: 10_000,
+    staleTime: revision == null ? 10_000 : Infinity,
   });
 }
 
-/** Working-tree contents of one file, shown when it has no diff to display. */
-export function useWorkspaceFile(id: string | null, path: string | null) {
+/** Contents of one file, shown when it has no diff to display. */
+export function useWorkspaceFile(
+  id: string | null,
+  path: string | null,
+  revision: number | null = null,
+) {
   return useQuery<WorkspaceFileContent>({
-    queryKey: queryKeys.workspaceFile(id ?? "", path ?? ""),
-    queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, signal),
+    queryKey: queryKeys.workspaceFile(id ?? "", path ?? "", revision),
+    queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, revision, signal),
     enabled: Boolean(id && path),
-    staleTime: 10_000,
+    staleTime: revision == null ? 10_000 : Infinity,
+  });
+}
+
+/** Revisions captured for this session, newest first. */
+export function useWorkspaceRevisions(id: string | null) {
+  return useQuery<WorkspaceRevision[]>({
+    queryKey: queryKeys.workspaceRevisions(id ?? ""),
+    queryFn: ({ signal }) => api.getWorkspaceRevisions(id!, signal),
+    enabled: Boolean(id),
+    staleTime: 5000,
+    retry: false,
+  });
+}
+
+/** What the run behind a revision changed. Frozen, so it is cached for good. */
+export function useWorkspaceRevisionChanges(
+  id: string | null,
+  revision: number | null,
+) {
+  return useQuery<WorkspaceRevisionChanges>({
+    queryKey: queryKeys.workspaceRevisionChanges(id ?? "", revision ?? 0),
+    queryFn: ({ signal }) =>
+      api.getWorkspaceRevisionChanges(id!, revision!, signal),
+    enabled: Boolean(id && revision != null),
+    staleTime: Infinity,
   });
 }
 

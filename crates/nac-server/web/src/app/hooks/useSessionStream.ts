@@ -42,6 +42,13 @@ export function useSessionStream(sessionId: string | null): void {
     const dispose = subscribeToSessionEvents(sessionId, {
       onEnvelope: (envelope) => {
         if (applyEnvelope(envelope)) scheduleReload();
+        // A finished run leaves a new revision behind, and it is the only
+        // moment one ever appears.
+        if (envelope.event.type === "run_completed") {
+          void client.invalidateQueries({
+            queryKey: queryKeys.workspaceRevisions(sessionId),
+          });
+        }
       },
       onStatus: setStreamStatus,
       // A gap or a lagged subscriber means events were dropped, so the

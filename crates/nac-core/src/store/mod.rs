@@ -12,6 +12,7 @@ mod steering;
 mod thread_events;
 mod threads;
 mod time;
+mod workspace_revisions;
 mod worksets;
 
 pub use render::*;
@@ -20,6 +21,7 @@ pub use session_overviews::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
+pub use workspace_revisions::*;
 pub use worksets::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};

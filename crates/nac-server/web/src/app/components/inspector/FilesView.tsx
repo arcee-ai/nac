@@ -26,6 +26,7 @@ import {
   useWorkspaceDiff,
   useWorkspaceFile,
   useWorkspaceFiles,
+  useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
 import type {
   ChangedFileStat,
@@ -276,11 +277,17 @@ function Scroller({ children }: { children: React.ReactNode }) {
 function DiffPane({
   sessionId,
   file,
+  revision,
 }: {
   sessionId: string;
   file: ChangedFileStat;
+  revision: number | null;
 }) {
-  const { data: diff, isFetching, error } = useWorkspaceDiff(sessionId, file.path);
+  const {
+    data: diff,
+    isFetching,
+    error,
+  } = useWorkspaceDiff(sessionId, file.path, "all", 3, revision);
 
   return (
     <>
@@ -338,9 +345,17 @@ function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
 const formatBytes = (size: number) =>
   size < 1024 ? `${size} B` : `${Math.round(size / 1024)} KB`;
 
-/** A file with nothing to diff, shown as its working-tree contents. */
-function FilePane({ sessionId, path }: { sessionId: string; path: string }) {
-  const { data, isFetching, error } = useWorkspaceFile(sessionId, path);
+/** A file with nothing to diff, shown as its contents. */
+function FilePane({
+  sessionId,
+  path,
+  revision,
+}: {
+  sessionId: string;
+  path: string;
+  revision: number | null;
+}) {
+  const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
   // Kept next to the text it describes, so a refetch that changes the file
   // cannot pair the new lines with the old colours.
   const [highlighted, setHighlighted] = useState<{
@@ -404,30 +419,41 @@ function FilePane({ sessionId, path }: { sessionId: string; path: string }) {
 /**
  * Every project file as a folder tree, with the selected one shown beside it:
  * its diff when it has changed, its contents when it has not.
+ *
+ * With a revision selected the same tree describes the checkout as it stood at
+ * the end of that run, and "changed" means what that run changed.
  */
 export function FilesView({
   sessionId,
   snapshot,
+  revision = null,
 }: {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
+  revision?: number | null;
 }) {
   const client = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
   const [toggled, setToggled] = useState<Set<string>>(() => new Set());
 
-  const { data: listing, isLoading, error } = useWorkspaceFiles(sessionId);
+  const { data: listing, isLoading, error } = useWorkspaceFiles(sessionId, revision);
+  const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
 
   // Workspace stats are computed when the snapshot is built, so entering the
-  // panel has to refetch it to show changes made since the last event.
+  // panel has to refetch it to show changes made since the last event. A
+  // revision is frozen, so it never needs this.
   useEffect(() => {
+    if (revision != null) return;
     void client.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-  }, [client, sessionId]);
+  }, [client, sessionId, revision]);
 
   const workspace = snapshot?.workspace ?? null;
   const changed = useMemo(
-    () => workspace?.changed_files ?? [],
-    [workspace],
+    () =>
+      revision == null
+        ? (workspace?.changed_files ?? [])
+        : (revisionChanges.data?.changed_files ?? []),
+    [revision, workspace, revisionChanges.data],
   );
 
   const nodes = useMemo(
@@ -455,13 +481,18 @@ export function FilesView({
   const current = selected ?? changed[0]?.path ?? null;
   const currentChange = current ? changedByPath.get(current) : undefined;
 
-  if (workspace?.error) {
+  const failure = error ?? (revision != null ? revisionChanges.error : null);
+  if (revision == null && workspace?.error) {
     return (
       <div className="p-6 label-small text-error-primary">{workspace.error}</div>
     );
   }
-  if (error) {
-    return <div className="p-6 label-small text-error-primary">{errorMessage(error)}</div>;
+  if (failure) {
+    return (
+      <div className="p-6 label-small text-error-primary">
+        {errorMessage(failure)}
+      </div>
+    );
   }
   if (isLoading || !listing) {
     return <PanelEmpty>Loading…</PanelEmpty>;
@@ -500,9 +531,19 @@ export function FilesView({
       {!current ? (
         <PanelEmpty>Select a file to see it.</PanelEmpty>
       ) : currentChange ? (
-        <DiffPane key={current} sessionId={sessionId} file={currentChange} />
+        <DiffPane
+          key={current}
+          sessionId={sessionId}
+          file={currentChange}
+          revision={revision}
+        />
       ) : (
-        <FilePane key={current} sessionId={sessionId} path={current} />
+        <FilePane
+          key={current}
+          sessionId={sessionId}
+          path={current}
+          revision={revision}
+        />
       )}
     </PanelSplit>
   );

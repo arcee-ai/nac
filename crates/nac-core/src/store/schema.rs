@@ -107,6 +107,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         ),
     )?;
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
+    create_workspace_revisions_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -499,6 +500,32 @@ fn create_orchestrator_compaction_checkpoints_table(conn: &Connection) -> Result
     Ok(())
 }
 
+fn create_workspace_revisions_table(conn: &Connection) -> Result<()> {
+    // The tree itself lives in the repository as a git commit, so the widest
+    // column here is the prompt kept for labelling; a revision costs the store
+    // almost nothing no matter how large the checkout is.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS workspace_revisions (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             run_id TEXT NOT NULL,
+             commit_sha TEXT NOT NULL CHECK (length(trim(commit_sha)) > 0),
+             base_sha TEXT,
+             branch TEXT,
+             label TEXT NOT NULL,
+             additions INTEGER NOT NULL DEFAULT 0 CHECK (additions >= 0),
+             deletions INTEGER NOT NULL DEFAULT 0 CHECK (deletions >= 0),
+             changed_files INTEGER NOT NULL DEFAULT 0 CHECK (changed_files >= 0),
+             created_at TEXT NOT NULL,
+             UNIQUE (session_id, run_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_workspace_revisions_session
+             ON workspace_revisions(session_id, id DESC);",
+    )?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(
@@ -599,6 +626,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "thread_steering",
         "thread_events",
         "orchestrator_compaction_checkpoints",
+        "workspace_revisions",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

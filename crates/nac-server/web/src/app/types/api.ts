@@ -223,6 +223,30 @@ export interface SwitchBranchRequest {
   create?: boolean;
 }
 
+/** The checkout as it stood when one run finished. */
+export interface WorkspaceRevision {
+  id: number;
+  session_id: string;
+  run_id: string;
+  commit_sha: string;
+  /** What this revision is shown as a change against. */
+  base_sha: string | null;
+  branch: string | null;
+  /** Prompt that started the run, for telling revisions apart. */
+  label: string;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  created_at: string;
+}
+
+export interface WorkspaceRevisionChanges {
+  changed_files: ChangedFileStat[];
+  total_additions: number;
+  total_deletions: number;
+  error: string | null;
+}
+
 export interface WorkspaceDiffTotals {
   total_additions: number;
   total_deletions: number;

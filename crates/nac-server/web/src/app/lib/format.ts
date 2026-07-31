@@ -93,6 +93,22 @@ export function formatClock(ms: number | null | undefined): string {
   return `${String(m).padStart(2, "0")}:${s}`;
 }
 
+/**
+ * A store timestamp as a short local date and time. The store writes UTC as
+ * "YYYY-MM-DD HH:MM:SS" with no zone marker, which JavaScript would otherwise
+ * read as local time and shift by the offset.
+ */
+export function formatStoreTime(value: string): string {
+  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function formatRuntime(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return "--:--:--";
   const total = Math.max(0, Math.floor(ms / 1000));

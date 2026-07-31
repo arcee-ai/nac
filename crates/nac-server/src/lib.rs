@@ -442,11 +442,19 @@ pub struct WorkspaceDiffQuery {
     pub path: String,
     pub stage: Option<String>,
     pub context: Option<usize>,
+    /// Look at a captured revision instead of the working tree.
+    pub revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorkspaceFileQuery {
     pub path: String,
+    pub revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WorkspaceRevisionQuery {
+    pub revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -923,8 +931,16 @@ impl SessionManager {
             anyhow!("workspace diff is not supported for remote/sandbox-only sessions")
         })?;
 
-        tokio::task::spawn_blocking(move || {
-            view::workspace_file_diff(&host_root, &path, stage, context)
+        let revision = self.resolve_revision(session_id, query.revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::revision_file_diff(
+                &host_root,
+                revision.base_sha.as_deref(),
+                &revision.commit_sha,
+                &path,
+                context,
+            ),
+            None => view::workspace_file_diff(&host_root, &path, stage, context),
         })
         .await
         .context("workspace diff task failed")?
@@ -974,22 +990,76 @@ impl SessionManager {
             })
     }
 
-    pub async fn workspace_files(&self, session_id: &str) -> Result<view::WorkspaceFileList> {
+    pub async fn workspace_files(
+        &self,
+        session_id: &str,
+        revision: Option<i64>,
+    ) -> Result<view::WorkspaceFileList> {
         let root = self.workspace_root(session_id).await?;
-        tokio::task::spawn_blocking(move || view::list_files(&root))
-            .await
-            .context("workspace file listing task failed")?
+        let revision = self.resolve_revision(session_id, revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::list_revision_files(&root, &revision.commit_sha),
+            None => view::list_files(&root),
+        })
+        .await
+        .context("workspace file listing task failed")?
     }
 
     pub async fn workspace_file(
         &self,
         session_id: &str,
         path: String,
+        revision: Option<i64>,
     ) -> Result<view::WorkspaceFileContent> {
         let root = self.workspace_root(session_id).await?;
-        tokio::task::spawn_blocking(move || view::read_file(&root, &path))
-            .await
-            .context("workspace file read task failed")?
+        let revision = self.resolve_revision(session_id, revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::read_revision_file(&root, &revision.commit_sha, &path),
+            None => view::read_file(&root, &path),
+        })
+        .await
+        .context("workspace file read task failed")?
+    }
+
+    pub fn workspace_revisions(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<view::WorkspaceRevisionRecord>> {
+        view::list_workspace_revisions(&self.inner.store_path, session_id)
+    }
+
+    /// What the run behind a revision changed, in the shape the live workspace
+    /// reports, so the files panel can render either one the same way.
+    pub async fn workspace_revision_changes(
+        &self,
+        session_id: &str,
+        revision_id: i64,
+    ) -> Result<view::WorkspaceRevisionChanges> {
+        let root = self.workspace_root(session_id).await?;
+        let revision = self
+            .resolve_revision(session_id, Some(revision_id))?
+            .ok_or_else(|| anyhow!("revision '{}' was not found", revision_id))?;
+
+        tokio::task::spawn_blocking(move || {
+            view::revision_changes(&root, revision.base_sha.as_deref(), &revision.commit_sha)
+        })
+        .await
+        .context("workspace revision task failed")
+    }
+
+    /// Revisions are addressed by their store id rather than by commit, so a
+    /// request can only ever reach an object this session actually recorded.
+    fn resolve_revision(
+        &self,
+        session_id: &str,
+        revision: Option<i64>,
+    ) -> Result<Option<view::WorkspaceRevisionRecord>> {
+        let Some(revision) = revision else {
+            return Ok(None);
+        };
+        view::read_workspace_revision(&self.inner.store_path, session_id, revision)?
+            .ok_or_else(|| anyhow!("revision '{}' was not found", revision))
+            .map(Some)
     }
 
     pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
@@ -1182,6 +1252,14 @@ impl SessionManager {
             service.destroy_sandbox().await;
         }
 
+        // The revision rows cascade with the session, but the git objects they
+        // pinned only become collectable once the ref is gone.
+        if let Ok(root) = self.workspace_root(session_id).await {
+            if let Err(error) = workspace::forget(&root, session_id) {
+                eprintln!("nac: failed to drop workspace revisions: {error:#}");
+            }
+        }
+
         // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
@@ -1365,6 +1443,14 @@ fn api_router(manager: SessionManager) -> Router {
         .route(
             "/sessions/{session_id}/workspace/branches",
             get(workspace_branches).post(switch_workspace_branch),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/revisions",
+            get(workspace_revisions),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
+            get(workspace_revision_changes),
         )
         .route(
             "/sessions/{session_id}",
@@ -1621,8 +1707,11 @@ async fn workspace_diff(
 async fn workspace_files(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<WorkspaceRevisionQuery>,
 ) -> std::result::Result<Json<view::WorkspaceFileList>, ApiError> {
-    Ok(Json(manager.workspace_files(&session_id).await?))
+    Ok(Json(
+        manager.workspace_files(&session_id, query.revision).await?,
+    ))
 }
 
 async fn workspace_file(
@@ -1630,7 +1719,29 @@ async fn workspace_file(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<WorkspaceFileQuery>,
 ) -> std::result::Result<Json<view::WorkspaceFileContent>, ApiError> {
-    Ok(Json(manager.workspace_file(&session_id, query.path).await?))
+    Ok(Json(
+        manager
+            .workspace_file(&session_id, query.path, query.revision)
+            .await?,
+    ))
+}
+
+async fn workspace_revisions(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<view::WorkspaceRevisionRecord>>, ApiError> {
+    Ok(Json(manager.workspace_revisions(&session_id)?))
+}
+
+async fn workspace_revision_changes(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, revision_id)): AxumPath<(String, i64)>,
+) -> std::result::Result<Json<view::WorkspaceRevisionChanges>, ApiError> {
+    Ok(Json(
+        manager
+            .workspace_revision_changes(&session_id, revision_id)
+            .await?,
+    ))
 }
 
 async fn workspace_branches(

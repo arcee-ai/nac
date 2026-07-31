@@ -12,14 +12,18 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
+import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
+  selectRevision,
   selectThread,
   selectWorkset,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
+  useSelectedRevision,
   useSelectedThread,
   useSelectedWorkset,
   useSidePanelLayout,
@@ -54,24 +58,37 @@ function FooterChip({
   );
 }
 
-/** Repo, branch and the running diff total, mirroring the Figma box footer. */
+/** Repo, branch, snapshot and the diff total, mirroring the Figma box footer. */
 function SideBoxFooter({
   sessionId,
   workspace,
+  revision,
 }: {
   sessionId: string;
   workspace: WorkspaceSnapshot | null;
+  revision: number | null;
 }) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
-  const additions = workspace?.total_additions ?? 0;
-  const deletions = workspace?.total_deletions ?? 0;
+  // A revision reports its own totals, which the panel has already fetched.
+  const changes = useWorkspaceRevisionChanges(sessionId, revision);
+  const totals =
+    revision == null
+      ? workspace
+      : (changes.data ?? { total_additions: 0, total_deletions: 0 });
+  const additions = totals?.total_additions ?? 0;
+  const deletions = totals?.total_deletions ?? 0;
 
   return (
     <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-2">
       <div className="flex flex-1 min-w-0 items-center gap-[10px]">
         {repo ? <FooterChip iconName={IconName.Folder} label={repo} /> : null}
         {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
+        <RevisionPicker
+          sessionId={sessionId}
+          selected={revision}
+          onSelect={selectRevision}
+        />
       </div>
       {additions || deletions ? (
         <div className="flex items-center gap-2 shrink-0 code code-small">
@@ -97,6 +114,7 @@ export function SessionSideBox({
   const expanded = layout === "expanded";
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
+  const selectedRevision = useSelectedRevision();
 
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1">
@@ -148,7 +166,11 @@ export function SessionSideBox({
 
       <div className="flex-1 min-h-0 flex flex-col">
         {panel === "files" ? (
-          <FilesView sessionId={sessionId} snapshot={snapshot} />
+          <FilesView
+            sessionId={sessionId}
+            snapshot={snapshot}
+            revision={selectedRevision}
+          />
         ) : null}
         {panel === "worksets" ? (
           <WorksetsView
@@ -166,7 +188,11 @@ export function SessionSideBox({
         ) : null}
       </div>
 
-      <SideBoxFooter sessionId={sessionId} workspace={snapshot?.workspace ?? null} />
+      <SideBoxFooter
+        sessionId={sessionId}
+        workspace={snapshot?.workspace ?? null}
+        revision={selectedRevision}
+      />
     </div>
   );
 }

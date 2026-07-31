@@ -29,6 +29,8 @@ import type {
   WorkspaceFileContent,
   WorkspaceFileDiff,
   WorkspaceFileList,
+  WorkspaceRevision,
+  WorkspaceRevisionChanges,
 } from "@/app/types/api";
 
 export class ApiError extends Error {
@@ -106,6 +108,8 @@ const sessionPath = (id: string) => `/sessions/${encodeURIComponent(id)}`;
 export interface WorkspaceDiffOptions {
   stage?: WorkspaceDiffStage | "all";
   context?: number;
+  /** Diff a captured revision instead of the working tree. */
+  revision?: number | null;
   signal?: AbortSignal;
 }
 
@@ -202,13 +206,14 @@ export const api = {
   getWorkspaceDiff: (
     id: string,
     path: string,
-    { stage = "all", context = 3, signal }: WorkspaceDiffOptions = {},
+    { stage = "all", context = 3, revision, signal }: WorkspaceDiffOptions = {},
   ) => {
     const params = new URLSearchParams({
       path,
       stage,
       context: String(context),
     });
+    if (revision != null) params.set("revision", String(revision));
     return request<WorkspaceFileDiff>(
       "GET",
       `${sessionPath(id)}/workspace/diff?${params.toString()}`,
@@ -216,19 +221,51 @@ export const api = {
     );
   },
 
-  getWorkspaceFiles: (id: string, signal?: AbortSignal) =>
-    request<WorkspaceFileList>("GET", `${sessionPath(id)}/workspace/files`, {
-      signal,
-    }),
+  getWorkspaceFiles: (
+    id: string,
+    revision: number | null,
+    signal?: AbortSignal,
+  ) => {
+    const query = revision == null ? "" : `?revision=${revision}`;
+    return request<WorkspaceFileList>(
+      "GET",
+      `${sessionPath(id)}/workspace/files${query}`,
+      { signal },
+    );
+  },
 
-  getWorkspaceFile: (id: string, path: string, signal?: AbortSignal) => {
+  getWorkspaceFile: (
+    id: string,
+    path: string,
+    revision: number | null,
+    signal?: AbortSignal,
+  ) => {
     const params = new URLSearchParams({ path });
+    if (revision != null) params.set("revision", String(revision));
     return request<WorkspaceFileContent>(
       "GET",
       `${sessionPath(id)}/workspace/file?${params.toString()}`,
       { signal },
     );
   },
+
+  getWorkspaceRevisions: (id: string, signal?: AbortSignal) =>
+    request<WorkspaceRevision[]>(
+      "GET",
+      `${sessionPath(id)}/workspace/revisions`,
+      { signal },
+    ),
+
+  getWorkspaceRevisionChanges: (
+    id: string,
+    revision: number,
+    signal?: AbortSignal,
+  ) =>
+    request<WorkspaceRevisionChanges>(
+      "GET",
+      `${sessionPath(id)}/workspace/revisions/${revision}/changes`,
+      { signal },
+    ),
 
   getBranches: (id: string, signal?: AbortSignal) =>
     request<BranchList>("GET", `${sessionPath(id)}/workspace/branches`, {

@@ -12,12 +12,15 @@ interface SessionLayoutState {
   selectedThread: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
+  /** Revision the panels are looking at, or null for the live working tree. */
+  selectedRevision: number | null;
 }
 
 export const sessionLayoutStore = createStore<SessionLayoutState>({
   layout: "split",
   selectedThread: null,
   selectedWorkset: null,
+  selectedRevision: null,
 });
 
 const { getState, setState, useStore } = sessionLayoutStore;
@@ -45,6 +48,12 @@ export function selectWorkset(selectedWorkset: string | null): void {
   setState({ selectedWorkset });
 }
 
+/** Point the panels at a captured revision, or back at the working tree. */
+export function selectRevision(selectedRevision: number | null): void {
+  setState({ selectedRevision });
+}
+
 export const useSidePanelLayout = () => useStore((s) => s.layout);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
+export const useSelectedRevision = () => useStore((s) => s.selectedRevision);

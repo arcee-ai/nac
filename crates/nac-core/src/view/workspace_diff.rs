@@ -162,6 +162,47 @@ pub fn workspace_file_diff(
     })
 }
 
+/// What one file looked like before and after a captured revision.
+///
+/// Unlike the working-tree diff there is nothing staged or untracked to
+/// separate here: a revision is a single frozen tree, so the answer is always
+/// at most one section.
+pub fn revision_file_diff(
+    host_root: &Path,
+    base: Option<&str>,
+    commit: &str,
+    path: &str,
+    context: usize,
+) -> Result<WorkspaceFileDiff> {
+    let relpath = validate_workspace_relpath(path)?;
+    let repo_root = resolve_git_root(host_root)?;
+    let old_blob = match base {
+        Some(base) => git_tree_blob(&repo_root, base, &relpath)?,
+        None => None,
+    };
+    let new_blob = git_tree_blob(&repo_root, commit, &relpath)?;
+
+    let mut sections = Vec::new();
+    if blob_changed(old_blob.as_ref(), new_blob.as_ref()) {
+        sections.push(build_diff_section(
+            &repo_root,
+            &relpath,
+            "revision",
+            staged_status(old_blob.as_ref(), new_blob.as_ref()),
+            blob_side(old_blob),
+            blob_side(new_blob),
+            context,
+        ));
+    }
+
+    Ok(WorkspaceFileDiff {
+        path: relpath,
+        old_path: None,
+        sections,
+        error: None,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct GitBlobRef {
     oid: String,
@@ -261,6 +302,14 @@ fn git_head_blob(repo_root: &Path, relpath: &str) -> Result<Option<GitBlobRef>> 
     else {
         return Ok(None);
     };
+    parse_ls_tree_blob(&raw)
+}
+
+fn git_tree_blob(repo_root: &Path, rev: &str, relpath: &str) -> Result<Option<GitBlobRef>> {
+    let raw = run_git_bytes(
+        repo_root,
+        &["--literal-pathspecs", "ls-tree", "-z", rev, "--", relpath],
+    )?;
     parse_ls_tree_blob(&raw)
 }
 

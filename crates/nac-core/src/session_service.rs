@@ -1417,6 +1417,8 @@ impl SessionService {
             }
         };
 
+        self.capture_workspace_revision(&finishing_run.snapshot).await;
+
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
@@ -1438,6 +1440,56 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    /// Freeze the checkout as it stands now, so the run can be revisited later.
+    ///
+    /// A revision is a convenience, never a precondition for anything, so every
+    /// failure here is reported and swallowed: a repository nac cannot capture
+    /// still gets its run finished normally.
+    async fn capture_workspace_revision(&self, run: &ActiveRunSnapshot) {
+        let (Some(session_id), Some(root)) = (
+            self.metadata.session_id.clone(),
+            self.metadata.workspace_host_path.clone(),
+        ) else {
+            return;
+        };
+        let store_path = self.metadata.store_path.clone();
+        let run_id = run.run_id.to_string();
+        let label = run.prompt_preview.clone();
+
+        let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
+            let previous =
+                crate::store::latest_workspace_revision(&store_path, &session_id)?
+                    .map(|revision| revision.commit_sha);
+            let captured = crate::workspace::capture(&root, &session_id, previous.as_deref())?;
+            crate::store::append_workspace_revision(
+                &store_path,
+                &session_id,
+                crate::store::NewWorkspaceRevision {
+                    run_id,
+                    commit_sha: captured.commit,
+                    base_sha: captured.base,
+                    branch: captured.branch,
+                    label,
+                    additions: captured.additions,
+                    deletions: captured.deletions,
+                    changed_files: captured.changed_files,
+                },
+            )?;
+            Ok(())
+        })
+        .await;
+
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("nac: failed to capture workspace revision: {error:#}");
+            }
+            Err(error) => {
+                eprintln!("nac: workspace revision task failed: {error}");
+            }
+        }
     }
 
     fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {

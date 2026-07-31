@@ -28,6 +28,7 @@ import { useSessions, useSessionSnapshot } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
   revealSidePanel,
+  selectRevision,
   toggleSidePanelCollapsed,
   useSidePanelLayout,
 } from "@/app/store/sessionLayoutStore";
@@ -71,6 +72,9 @@ export default function SessionPage() {
 
   useEffect(() => {
     if (id) clearAttention(id);
+    // Revisions belong to one session, so carrying a selection into another
+    // would point the panels at something that is not theirs.
+    selectRevision(null);
   }, [id]);
 
   if (!id) return <Navigate to={routes.list()} replace />;

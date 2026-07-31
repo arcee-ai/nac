@@ -7,15 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::{sessions, store};
 
+pub use store::WorkspaceRevisionRecord;
+
 mod workspace_diff;
 mod workspace_files;
 
 pub use workspace_diff::{
-    workspace_file_diff, WorkspaceDiffHunk, WorkspaceDiffLine, WorkspaceDiffSection,
-    WorkspaceDiffStage, WorkspaceFileDiff,
+    revision_file_diff, workspace_file_diff, WorkspaceDiffHunk, WorkspaceDiffLine,
+    WorkspaceDiffSection, WorkspaceDiffStage, WorkspaceFileDiff,
 };
 pub use workspace_files::{
-    list_files, read_file, WorkspaceFileContent, WorkspaceFileList,
+    list_files, list_revision_files, read_file, read_revision_file, WorkspaceFileContent,
+    WorkspaceFileList,
 };
 
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
@@ -138,6 +141,14 @@ pub struct WorkspaceDiffTotals {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceRevisionChanges {
+    pub changed_files: Vec<ChangedFileStat>,
+    pub total_additions: u64,
+    pub total_deletions: u64,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceSnapshot {
     pub host_root: Option<PathBuf>,
@@ -251,6 +262,22 @@ pub fn list_sessions(store_path: &Path) -> Result<Vec<SessionSummarySnapshot>> {
 
 pub fn delete_session(store_path: &Path, session_id: &str) -> Result<bool> {
     sessions::delete_session(store_path, session_id)
+}
+
+/// Captured states of a session's checkout, newest first.
+pub fn list_workspace_revisions(
+    store_path: &Path,
+    session_id: &str,
+) -> Result<Vec<WorkspaceRevisionRecord>> {
+    store::list_workspace_revisions(store_path, session_id)
+}
+
+pub fn read_workspace_revision(
+    store_path: &Path,
+    session_id: &str,
+    id: i64,
+) -> Result<Option<WorkspaceRevisionRecord>> {
+    store::read_workspace_revision(store_path, session_id, id)
 }
 
 pub fn list_threads(store_path: &Path, session_id: Option<&str>) -> Result<Vec<ThreadSnapshot>> {
@@ -472,6 +499,91 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
         total_deletions,
         error: None,
     }
+}
+
+/// Which files a captured revision changed, in the same shape the live
+/// workspace reports, so the panel can render either without knowing which it
+/// is looking at.
+pub fn revision_changes(
+    host_root: &Path,
+    base: Option<&str>,
+    commit: &str,
+) -> WorkspaceRevisionChanges {
+    // Without a baseline there is nothing to compare against. This only happens
+    // for the first revision of a repository that had no commits at the time.
+    let Some(base) = base else {
+        return WorkspaceRevisionChanges::default();
+    };
+
+    let Some(status_raw) = run_git(host_root, &["diff", "--name-status", base, commit]) else {
+        return WorkspaceRevisionChanges {
+            error: Some("git diff unavailable".to_string()),
+            ..WorkspaceRevisionChanges::default()
+        };
+    };
+    let numstat_raw = run_git(host_root, &["diff", "--numstat", base, commit]).unwrap_or_default();
+
+    let mut file_map = parse_name_status(&status_raw);
+    let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&numstat_raw, "");
+    for (path, (additions, deletions)) in diff_map {
+        let entry = file_map
+            .entry(path.clone())
+            .or_insert_with(|| ChangedFileStat {
+                status: "M".to_string(),
+                path,
+                additions: None,
+                deletions: None,
+            });
+        entry.additions = additions;
+        entry.deletions = deletions;
+    }
+
+    let mut changed_files: Vec<ChangedFileStat> = file_map.into_values().collect();
+    changed_files.sort_by(|left, right| left.path.cmp(&right.path));
+
+    WorkspaceRevisionChanges {
+        changed_files,
+        total_additions,
+        total_deletions,
+        error: None,
+    }
+}
+
+/// `diff --name-status` lines are `<letter>[score] TAB <path>`, and for a rename
+/// or copy a second tab-separated path follows, which is the one that exists
+/// afterwards and therefore the one worth showing.
+fn parse_name_status(raw: &str) -> HashMap<String, ChangedFileStat> {
+    let mut file_map = HashMap::new();
+    for line in raw.lines() {
+        let mut columns = line.split('\t');
+        let Some(code) = columns.next().map(str::trim) else {
+            continue;
+        };
+        let Some(first) = columns.next() else {
+            continue;
+        };
+        let path = columns.next().unwrap_or(first).trim().to_string();
+        if path.is_empty() {
+            continue;
+        }
+
+        let status = match code.chars().next() {
+            Some('A') => "A",
+            Some('D') => "D",
+            Some('R') | Some('C') => "R",
+            _ => "M",
+        };
+        file_map.insert(
+            path.clone(),
+            ChangedFileStat {
+                status: status.to_string(),
+                path,
+                additions: None,
+                deletions: None,
+            },
+        );
+    }
+    file_map
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
