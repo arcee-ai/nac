@@ -1,25 +1,21 @@
 // URL scheme of the app. Routing is hash-based so that deep links work without
 // a server-side catch-all: nac-web only serves the document at `/` and `/app`.
 
-export const INSPECTOR_TABS = [
-  "chat",
-  "events",
-  "threads",
-  "worksets",
-  "workspace",
-] as const;
+// The session screen always shows the chat; the URL only selects which panel
+// the side box has open.
+export const SESSION_PANELS = ["changes", "worksets", "threads"] as const;
 
-export type InspectorTab = (typeof INSPECTOR_TABS)[number];
+export type SessionPanel = (typeof SESSION_PANELS)[number];
 
-export const DEFAULT_INSPECTOR_TAB: InspectorTab = "chat";
+export const DEFAULT_SESSION_PANEL: SessionPanel = "changes";
 
-export function isInspectorTab(value: string | undefined): value is InspectorTab {
-  return (INSPECTOR_TABS as readonly string[]).includes(value ?? "");
+export function isSessionPanel(value: string | undefined): value is SessionPanel {
+  return (SESSION_PANELS as readonly string[]).includes(value ?? "");
 }
 
 export const routes = {
   list: () => "/",
-  session: (sessionId: string, tab: InspectorTab = DEFAULT_INSPECTOR_TAB) =>
-    `/session/${encodeURIComponent(sessionId)}/${tab}`,
+  session: (sessionId: string, panel: SessionPanel = DEFAULT_SESSION_PANEL) =>
+    `/session/${encodeURIComponent(sessionId)}/${panel}`,
   designPreview: () => "/design",
 };

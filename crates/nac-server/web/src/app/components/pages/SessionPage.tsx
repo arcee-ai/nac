@@ -1,82 +1,80 @@
 import { useEffect } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { HorizontalTabsItem, Icon, IconName } from "@/app/atoms";
-import { EventsView } from "@/app/components/inspector/EventsView";
-import { InspectorHeader } from "@/app/components/inspector/InspectorHeader";
-import { MetricsBar } from "@/app/components/inspector/MetricsBar";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Tooltip,
+  TooltipPosition,
+} from "@/app/atoms";
 import { PromptForm } from "@/app/components/inspector/PromptForm";
-import { ThreadsView } from "@/app/components/inspector/ThreadsView";
+import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
-import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { WorkspaceView } from "@/app/components/inspector/WorkspaceView";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
+import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
-  DEFAULT_INSPECTOR_TAB,
-  INSPECTOR_TABS,
-  isInspectorTab,
+  DEFAULT_SESSION_PANEL,
+  isSessionPanel,
   routes,
-  type InspectorTab,
+  type SessionPanel,
 } from "@/app/lib/routes";
 import { useSessions, useSessionSnapshot } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
-import { useRunning } from "@/app/store/runtimeStore";
+import {
+  toggleSidePanelCollapsed,
+  useSidePanelLayout,
+} from "@/app/store/sessionLayoutStore";
 
-const TAB_META: Record<InspectorTab, { label: string; icon: IconName }> = {
-  chat: { label: "Chat", icon: IconName.Chat },
-  events: { label: "Events", icon: IconName.Activity },
-  threads: { label: "Threads", icon: IconName.Flow },
-  worksets: { label: "Worksets", icon: IconName.Layers },
-  workspace: { label: "Workspace", icon: IconName.Folder },
-};
-
-function RepairBanner({
+function Banner({
   message,
-  onSettings,
+  action,
 }: {
   message: string;
-  onSettings: () => void;
+  action?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary shrink-0">
+    <div className="flex items-center gap-3 px-4 py-2 rounded-[8px] border border-error-muted bg-error-tertiary text-error-primary shrink-0">
       <Icon iconName={IconName.Repair} />
-      <div className="flex-grow min-w-0">
-        <div className="label-small">Configuration needs repair</div>
-        <div className="text-micro truncate">{message}</div>
-      </div>
-      <button
-        type="button"
-        className="label-small underline shrink-0 hover:opacity-80"
-        onClick={onSettings}
-      >
-        Open settings
-      </button>
+      <div className="flex-grow min-w-0 label-small truncate">{message}</div>
+      {action ? (
+        <button
+          type="button"
+          className="label-small underline shrink-0 hover:opacity-80"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      ) : null}
     </div>
   );
 }
 
-/** The session screen is the inspector at full width; navigation lives in the breadcrumb. */
+/** Session screen: the Changes/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
-  const { sessionId, tab } = useParams<{ sessionId: string; tab?: string }>();
+  const { sessionId, panel } = useParams<{ sessionId: string; panel?: string }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
 
   const { data: snapshot = null, error } = useSessionSnapshot(id);
   const { data: sessions = [] } = useSessions();
   const actions = useSessionActions();
+  const layout = useSidePanelLayout();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
-  const running = useRunning();
 
   useEffect(() => {
     if (id) clearAttention(id);
   }, [id]);
 
   if (!id) return <Navigate to={routes.list()} replace />;
-  if (!isInspectorTab(tab)) {
-    return <Navigate to={routes.session(id, DEFAULT_INSPECTOR_TAB)} replace />;
+  if (!isSessionPanel(panel)) {
+    return <Navigate to={routes.session(id, DEFAULT_SESSION_PANEL)} replace />;
   }
 
   const entry = sessions.find((item) => item.summary.session_id === id) ?? null;
@@ -85,53 +83,74 @@ export default function SessionPage() {
   // the snapshot request fails, so only report an unexplained fetch failure.
   const fetchError = !configError && !snapshot && error ? errorMessage(error) : null;
 
-  return (
-    <section className="flex flex-col min-h-0 h-full pt-[52px] bg-elevation-level-0-5">
-      <InspectorHeader
-        sessionId={id}
-        summary={entry?.summary ?? null}
-        metadata={snapshot?.metadata ?? null}
-        running={running}
-      />
+  const showSideBox = layout !== "collapsed";
+  const showChat = layout !== "expanded";
 
-      {configError ? (
-        <RepairBanner message={configError} onSettings={() => actions.settings(id)} />
-      ) : null}
-      {fetchError ? (
-        <div className="px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary label-small shrink-0">
-          {fetchError}
+  const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
+
+  return (
+    <section className="flex h-full min-h-0 bg-elevation-ground">
+      {showSideBox ? (
+        <div
+          className={cn(
+            "flex flex-col min-w-0 h-full pt-[72px] pb-2 pl-2",
+            showChat ? "flex-1 max-w-[840px] pr-6" : "flex-1 pr-2",
+          )}
+        >
+          {configError ? (
+            <div className="pb-2">
+              <Banner
+                message={`Configuration needs repair: ${configError}`}
+                action={{ label: "Open settings", onClick: () => actions.settings(id) }}
+              />
+            </div>
+          ) : null}
+          {fetchError ? (
+            <div className="pb-2">
+              <Banner message={fetchError} />
+            </div>
+          ) : null}
+          <div className="flex-1 min-h-0">
+            <SessionSideBox
+              sessionId={id}
+              snapshot={snapshot}
+              panel={panel}
+              onPanelChange={goToPanel}
+            />
+          </div>
         </div>
       ) : null}
 
-      <nav className="flex gap-1 px-2 border-b border-primary shrink-0 overflow-x-auto">
-        {INSPECTOR_TABS.map((name) => (
-          <HorizontalTabsItem
-            key={name}
-            active={tab === name}
-            iconName={TAB_META[name].icon}
-            onClick={() => navigate(routes.session(id, name))}
-          >
-            {TAB_META[name].label}
-          </HorizontalTabsItem>
-        ))}
-      </nav>
-
-      <MetricsBar snapshot={snapshot} entry={entry} />
-
-      <div className="flex-1 min-h-0">
-        {tab === "chat" ? (
-          <div className="flex flex-col h-full min-h-0">
+      {showChat ? (
+        <div
+          className={cn(
+            "flex flex-col items-center min-w-0 h-full pr-2",
+            showSideBox ? "flex-1 pl-6" : "flex-1 pl-2",
+          )}
+        >
+          <div className="relative flex flex-col flex-1 min-h-0 w-full max-w-[840px]">
+            {!showSideBox ? (
+              <div className="absolute left-0 top-[60px] z-10">
+                <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
+                  <Button
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    content={ButtonContent.Icon}
+                    aria-label="Show panel"
+                    onClick={toggleSidePanelCollapsed}
+                  >
+                    <Icon iconName={IconName.OpenSidebar} />
+                  </Button>
+                </Tooltip>
+              </div>
+            ) : null}
             <Transcript snapshot={snapshot} />
-            <PromptForm sessionId={id} />
+            <div className="shrink-0 py-2">
+              <PromptForm sessionId={id} />
+            </div>
           </div>
-        ) : null}
-        {tab === "events" ? <EventsView /> : null}
-        {tab === "threads" ? <ThreadsView snapshot={snapshot} /> : null}
-        {tab === "worksets" ? <WorksetsView snapshot={snapshot} /> : null}
-        {tab === "workspace" ? (
-          <WorkspaceView sessionId={id} snapshot={snapshot} />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }

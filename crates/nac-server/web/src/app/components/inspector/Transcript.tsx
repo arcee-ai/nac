@@ -118,7 +118,9 @@ export function Transcript({ snapshot }: { snapshot: SessionSnapshotResponse | n
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
-      <div className="flex flex-col gap-3 p-4">
+      {/* The top bar is fixed over this scroll region, so the first message
+          needs to clear it. */}
+      <div className="flex flex-col gap-3 pt-[72px] pb-4">
         {!snapshot ? (
           <div className="text-basic-muted label-small">Loading…</div>
         ) : null}

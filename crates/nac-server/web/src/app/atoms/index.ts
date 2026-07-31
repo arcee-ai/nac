@@ -8,7 +8,10 @@ export {
 } from "./button";
 export { default as DropdownContent } from "./dropdown-content";
 export { default as Hint } from "./hint";
-export { default as HorizontalTabsItem } from "./horizontal-tabs-item";
+export {
+  default as HorizontalTabsItem,
+  HorizontalTabsItemVariant,
+} from "./horizontal-tabs-item";
 export { default as Icon, IconName, mapIconName } from "./icon";
 export {
   default as Input,

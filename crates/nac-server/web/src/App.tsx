@@ -16,7 +16,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<SessionsListPage />} />
             <Route path="/session/:sessionId" element={<SessionPage />} />
-            <Route path="/session/:sessionId/:tab" element={<SessionPage />} />
+            <Route path="/session/:sessionId/:panel" element={<SessionPage />} />
           </Route>
           <Route path="/design" element={<DesignPreviewPage />} />
           <Route path="*" element={<Navigate to={routes.list()} replace />} />
