@@ -176,6 +176,12 @@ pub struct SessionFrontendSnapshot {
     pub thread_event_diagnostics: Vec<ThreadEventDecodeDiagnostic>,
     #[serde(default)]
     pub thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    /// Delivered orchestrator steering records whose verbatim user message is
+    /// already present in the transcript source backing this snapshot. The
+    /// frontend hides those records so guidance renders exactly once — as the
+    /// canonical user message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub covered_orchestrator_steering_ids: Vec<i64>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
@@ -903,18 +909,38 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        let (response_timing, loaded_messages) = {
+        let thread_steering = self
+            .metadata
+            .session_id
+            .as_deref()
+            .map(|session_id| {
+                crate::store::list_thread_steering(&self.metadata.store_path, session_id)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let (response_timing, loaded_messages, covered_orchestrator_steering_ids) = {
             let snapshot = self.session_snapshot.lock().await;
             let response_timing = ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref());
             let persisted_messages = snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.messages.as_slice())
                 .unwrap_or_default();
-            let loaded_messages = match self.agent.try_lock() {
-                Ok(agent) => load_frontend_messages(&agent.messages, options.messages),
-                Err(_) => load_frontend_messages(persisted_messages, options.messages),
-            };
-            (response_timing, loaded_messages)
+            // Coverage must come from the same transcript source as the visible
+            // messages: while a run holds the agent lock both fall back to the
+            // persisted copy, so a mid-run delivery keeps rendering as a record
+            // until its canonical message is actually visible.
+            match self.agent.try_lock() {
+                Ok(agent) => (
+                    response_timing,
+                    load_frontend_messages(&agent.messages, options.messages),
+                    covered_orchestrator_steering_ids(&thread_steering, &agent.messages),
+                ),
+                Err(_) => (
+                    response_timing,
+                    load_frontend_messages(persisted_messages, options.messages),
+                    covered_orchestrator_steering_ids(&thread_steering, persisted_messages),
+                ),
+            }
         };
 
         let (thread_event_boundary, decoded_thread_events) =
@@ -940,15 +966,8 @@ impl SessionService {
             thread_events: decoded_thread_events.events,
             thread_event_boundary,
             thread_event_diagnostics: decoded_thread_events.diagnostics,
-            thread_steering: self
-                .metadata
-                .session_id
-                .as_deref()
-                .map(|session_id| {
-                    crate::store::list_thread_steering(&self.metadata.store_path, session_id)
-                })
-                .transpose()?
-                .unwrap_or_default(),
+            thread_steering,
+            covered_orchestrator_steering_ids,
             worksets: self.worksets_snapshot(),
             workspace: self.workspace_snapshot(),
         };
@@ -1594,6 +1613,42 @@ struct LoadedFrontendMessages {
     messages: Vec<Message>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
+}
+
+/// Flags delivered orchestrator steering records whose verbatim user message
+/// is present in `transcript`. Steering is injected into the agent as an exact
+/// `Message::User`, so coverage is an exact-content match; only `delivered`
+/// records can ever have a canonical message. Transcript copies pair with the
+/// newest matching records first: messages are append-only (compaction rewrites
+/// the provider view, never the transcript), so the copies present are always
+/// the most recent deliveries of that instruction — relevant when a crash lost
+/// an earlier delivery of a duplicate instruction.
+fn covered_orchestrator_steering_ids(
+    records: &[crate::store::ThreadSteeringRecord],
+    transcript: &[Message],
+) -> Vec<i64> {
+    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
+        .iter()
+        .filter(|record| {
+            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
+                && record.status == "delivered"
+        })
+        .collect();
+    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
+    let mut consumed = vec![false; transcript.len()];
+    let mut covered = Vec::new();
+    for record in delivered {
+        let Some(index) = transcript.iter().enumerate().position(|(index, message)| {
+            !consumed[index]
+                && matches!(message, Message::User { content } if content == &record.instruction)
+        }) else {
+            continue;
+        };
+        consumed[index] = true;
+        covered.push(record.id);
+    }
+    covered.sort_unstable();
+    covered
 }
 
 fn load_frontend_messages(
@@ -2591,6 +2646,117 @@ pub(super) mod tests {
                 .unwrap();
         assert_eq!(steering.len(), 1);
         assert_eq!(steering[0].status, "expired");
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    fn steering_record(id: i64, thread_name: &str, status: &str, instruction: &str) -> crate::store::ThreadSteeringRecord {
+        crate::store::ThreadSteeringRecord {
+            id,
+            session_id: "session".to_string(),
+            thread_name: thread_name.to_string(),
+            dispatch_id: "run".to_string(),
+            instruction: instruction.to_string(),
+            status: status.to_string(),
+            created_at: "2026-07-31T10:00:00Z".to_string(),
+            claimed_at: None,
+            delivered_at: None,
+            expired_at: None,
+        }
+    }
+
+    #[test]
+    fn covered_orchestrator_steering_ids_require_delivery_and_a_verbatim_message() {
+        let orchestrator = crate::store::ORCHESTRATOR_STEERING_TARGET;
+        let user = |content: &str| Message::User {
+            content: content.to_string(),
+        };
+        let records = vec![
+            steering_record(1, orchestrator, "delivered", "covered"),
+            steering_record(2, orchestrator, "delivered", "lost to a crash"),
+            steering_record(3, orchestrator, "queued", "covered"),
+            steering_record(4, orchestrator, "expired", "covered"),
+            steering_record(5, "worker/a", "delivered", "covered"),
+        ];
+        let transcript = vec![user("covered")];
+        assert_eq!(
+            covered_orchestrator_steering_ids(&records, &transcript),
+            vec![1],
+            "only a delivered orchestrator record with a verbatim transcript message is covered"
+        );
+
+        // Duplicate instructions: each surviving transcript copy belongs to the
+        // newest delivery, so a crash-lost earlier copy keeps its record visible.
+        let duplicates = vec![
+            steering_record(6, orchestrator, "delivered", "same"),
+            steering_record(7, orchestrator, "delivered", "same"),
+        ];
+        assert_eq!(
+            covered_orchestrator_steering_ids(&duplicates, &[user("same")]),
+            vec![7]
+        );
+        assert_eq!(
+            covered_orchestrator_steering_ids(&duplicates, &[user("same"), user("same")]),
+            vec![6, 7]
+        );
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_coverage_follows_the_visible_transcript_source() {
+        let (parts, store_path) = test_active_service("steering_coverage", "session-coverage");
+        let service = parts.service;
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session-coverage",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-1",
+            "change direction",
+        )
+        .unwrap();
+        crate::store::claim_thread_steering(&store_path, "session-coverage", "run-1").unwrap();
+        crate::store::acknowledge_thread_steering_batch(
+            &store_path,
+            &[queued.id],
+            "session-coverage",
+            "run-1",
+        )
+        .unwrap();
+
+        // Crash case: the record is delivered but the transcript (restored or
+        // persisted) never gained the message, so the record keeps rendering.
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.covered_orchestrator_steering_ids.is_empty());
+
+        // Persisted case: the agent transcript carries the verbatim guidance
+        // user message, so the record is hidden in favor of the canonical one.
+        service.agent.lock().await.messages.push(Message::User {
+            content: "change direction".to_string(),
+        });
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+
+        // Busy-agent case: while a run holds the agent lock the snapshot falls
+        // back to the persisted transcript for both messages and coverage, so a
+        // mid-run delivery keeps rendering as a record until run-end persist.
+        let agent_guard = service.agent.lock().await;
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert!(
+            snapshot.covered_orchestrator_steering_ids.is_empty(),
+            "coverage must not outrun the visible persisted transcript while the agent is busy"
+        );
+        service
+            .session_snapshot
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .messages
+            .push(Message::User {
+                content: "change direction".to_string(),
+            });
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+        drop(agent_guard);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

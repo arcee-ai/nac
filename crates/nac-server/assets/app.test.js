@@ -45,7 +45,9 @@ function loadApp(overrides = {}) {
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
-      renderFocusActions, formatActionArgs, isToolAction,
+      renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
+      formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
+      orchestratorGuidanceEntries, renderOrchestratorGuidance,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
@@ -628,8 +630,12 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   assert.match(html, /ui-refresh/);
   assert.match(html, /impl\/shell/);
   assert.match(html, /verify\/ui/);
+  // Dispatch turns intentionally show the instruction preview (see the
+  // dedicated thread-tool rendering test); other argument payloads stay hidden.
+  assert.match(html, /tool-block-thread/);
+  assert.match(html, /RAW_THREAD_ACTION/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
-  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL|RAW_THREAD_ACTION/);
+  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL/);
 });
 
 test("compaction activity correlates lifecycle IDs and safely renders every terminal state", () => {
@@ -720,7 +726,10 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   assert.match(assistant, /tool-block/);
   assert.match(assistant, /thread/);
   assert.match(assistant, /review\/&lt;unsafe&gt;/);
-  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;/);
+  // The dispatch instruction renders as an escaped preview by design; call
+  // IDs, reasoning, and assistant content stay hidden.
+  assert.match(assistant, /RAW_TOOL_ARGUMENT_CANARY/);
+  assert.doesNotMatch(assistant, /call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;/);
   assert.doesNotMatch(assistant, /<unsafe>|<carefully>|<safely>/);
   const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" });
   assert.equal(tool, "");
@@ -1847,18 +1856,19 @@ test("the canonical thread projector omits internal and metric rows while keepin
   assert.match(ui.renderThreadEpisodes(snapshot.thread_episodes.worker), /episode-only content/);
 });
 
-test("tile selection filters to tool calls, dispatch, and thread completion", () => {
+test("tile selection filters to tool calls, dispatch, guidance, and thread completion", () => {
   const actions = [
     { name: "response", kind: "assistant_message", detail: "final answer" },
     { name: "ordinary 1", kind: "tool_call_started", callId: "c1" },
     { name: "error", kind: "error", state: "error" },
     { name: "ordinary 2", kind: "tool_call_started", callId: "c2" },
     { name: "thread", kind: "thread_finished", state: "done", result: "finished" },
+    { name: "guidance", kind: "thread_steering_delivered", result: "delivered", state: "done", instruction: "tighten the layout" },
     { name: "ordinary 3", kind: "guidance" },
     { name: "ordinary 4", kind: "guidance" },
   ];
   const selected = ui.selectTileActions(actions);
-  assert.deepEqual(plain(selected.map((action) => action.name)), ["ordinary 1", "ordinary 2", "thread"]);
+  assert.deepEqual(plain(selected.map((action) => action.name)), ["ordinary 1", "ordinary 2", "thread", "guidance"]);
   const html = ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done", callId: "c1" }], "");
   assert.equal(html.includes('title="src/full/path.js"'), true);
   assert.equal(html.includes("action-name"), false);
@@ -1883,6 +1893,275 @@ test("renderFocusActions renders compact icon rows matching tile format", () => 
   assert.doesNotMatch(html, /tool-block-name/);
   assert.match(html, /data-state="done"/);
   assert.match(html, /data-state="live"/);
+});
+
+test("tile action rows render oldest first with a discrete recency color per line", () => {
+  const actions = [
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"path":"a.js"}' },
+    { name: "write", result: "Done", state: "done", callId: "c2", argumentsDetail: '{"path":"b.js"}' },
+    { name: "edit", result: "Done", state: "done", callId: "c3", argumentsDetail: '{"path":"c.js"}' },
+  ];
+  const html = ui.renderActionRows(actions, "");
+  const titles = [...html.matchAll(/title="([^"]*)"/g)].map((match) => match[1]);
+  const recencies = [...html.matchAll(/data-recency="(\d+)"/g)].map((match) => match[1]);
+  assert.deepEqual(titles, ["a.js", "b.js", "c.js"], "oldest at the top, most recent at the bottom");
+  assert.deepEqual(recencies, ["2", "1", "0"], "recency counts down toward the most recent line");
+  assert.match(redesignSource, /--ledger-recency-0: #f1f1f1;/);
+  for (let index = 0; index <= 9; index += 1) {
+    assert.match(redesignSource, new RegExp(`\\.action-ledger \\.action-row\\[data-recency="${index}"\\] \\{ color: var\\(--ledger-recency-${index}\\); \\}`),
+      `recency step ${index} maps to one solid token color`);
+  }
+  const leastRecent = Number.parseInt(redesignSource.match(/--ledger-recency-9: #([0-9a-f]{6})/i)[1], 16);
+  const currentEventText = Number.parseInt("b0b0b0", 16);
+  assert.ok(leastRecent < currentEventText, "least recent line is slightly darker than the current event text color");
+});
+
+test("guidance actions render in thread tiles in the newest-step white with instruction text", () => {
+  const html = ui.renderActionRows([
+    { name: "guidance", result: "delivered", state: "done", steeringId: 7, instruction: "tighten the layout" },
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"path":"a.js"}' },
+  ], "");
+  const guidanceRow = html.match(/<li class="action-row is-guidance"[^>]*>.*?<\/li>/s);
+  assert.ok(guidanceRow, "guidance row keeps its marker class");
+  assert.match(guidanceRow[0], /❯/);
+  assert.match(guidanceRow[0], /tighten the layout/);
+  assert.match(guidanceRow[0], /data-recency="1"/, "guidance is the older row here, so the white comes from the class, not recency");
+  const guidanceRule = redesignSource.match(/\.action-ledger \.action-row\.is-guidance,[^{]*\{ color: var\(--ledger-recency-0\); \}/s);
+  assert.ok(guidanceRule, "guidance rows map to the same solid white as the newest recency step");
+  assert.doesNotMatch(guidanceRule[0], /--attention/, "guidance rows are no longer attention-blue");
+  assert.ok(redesignSource.indexOf(guidanceRule[0]) > redesignSource.indexOf('.action-ledger .action-row[data-recency="9"]'),
+    "the guidance rule follows the recency rules so it wins at equal specificity");
+});
+
+test("thread models enrich live guidance actions with durable instruction text", () => {
+  ui.state.currentId = "guidance-enrich";
+  const snapshot = sessionSnapshot("guidance-enrich", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_steering_queued", name: "worker", steering_id: 7, instruction_preview: "steering queued" },
+    ] },
+    thread_steering: [{ id: 7, session_id: "guidance-enrich", thread_name: "worker", dispatch_id: "d1",
+      instruction: "tighten the layout", status: "queued", created_at: "2026-07-31T10:00:00Z",
+      claimed_at: null, delivered_at: null, expired_at: null }],
+  });
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === "worker");
+  const guidance = model.actions.find((action) => action.name === "guidance");
+  assert.equal(guidance.instruction, "tighten the layout");
+  assert.equal(ui.formatActionArgs(guidance), "tighten the layout");
+  const tile = ui.renderThreadTile(model);
+  assert.match(tile, /is-guidance/);
+  assert.match(tile, /tighten the layout/);
+});
+
+test("dedupGuidanceActions keeps one row per steering id, preferring queued over delivered", () => {
+  const deduped = ui.dedupGuidanceActions([
+    { name: "read", callId: "c1" },
+    { name: "guidance", result: "delivered", steeringId: 7, instruction: "x" },
+    { name: "guidance", result: "queued", steeringId: 7, instruction: "x" },
+    { name: "guidance", result: "expired", steeringId: 9, instruction: "y" },
+    { name: "guidance", result: "queued", steeringId: null },
+    { name: "guidance", result: "queued", steeringId: null },
+  ]);
+  assert.deepEqual(plain(deduped.map((action) => ({ name: action.name, steeringId: action.steeringId ?? null, result: action.result ?? null }))), [
+    { name: "read", steeringId: null, result: null },
+    { name: "guidance", steeringId: 7, result: "queued" },
+    { name: "guidance", steeringId: 9, result: "expired" },
+    { name: "guidance", steeringId: null, result: "queued" },
+    { name: "guidance", steeringId: null, result: "queued" },
+  ], "queued wins its slot regardless of event order; uncorrelatable rows (no id) are kept; expired renders when it is the only event");
+});
+
+test("thread tiles dedup guidance lifecycle events to one row per steering", () => {
+  ui.state.currentId = "guidance-dedup";
+  const snapshot = sessionSnapshot("guidance-dedup", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_steering_queued", name: "worker", steering_id: 7, instruction_preview: "steering queued" },
+      { type: "thread_steering_delivered", name: "worker", steering_id: 7, instruction_preview: "steering delivered" },
+      { type: "thread_steering_delivered", name: "worker", steering_id: 8, instruction_preview: "steering delivered" },
+    ] },
+    thread_steering: [
+      { id: 7, session_id: "guidance-dedup", thread_name: "worker", dispatch_id: "d1",
+        instruction: "tighten the layout", status: "delivered", created_at: "2026-07-31T10:00:00Z",
+        claimed_at: null, delivered_at: "2026-07-31T10:01:00Z", expired_at: null },
+      { id: 8, session_id: "guidance-dedup", thread_name: "worker", dispatch_id: "d2",
+        instruction: "then the tests", status: "delivered", created_at: "2026-07-31T10:02:00Z",
+        claimed_at: null, delivered_at: "2026-07-31T10:03:00Z", expired_at: null },
+    ],
+  });
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === "worker");
+  const guidance = model.actions.filter((action) => action.name === "guidance");
+  assert.equal(guidance.length, 2, "one row per steering id, not one per lifecycle event");
+  assert.equal(guidance[0].steeringId, 7);
+  assert.equal(guidance[0].result, "queued", "the queued event wins over the delivered one");
+  assert.equal(guidance[0].instruction, "tighten the layout", "durable instruction still enriches the kept row");
+  assert.equal(guidance[1].steeringId, 8);
+  assert.equal(guidance[1].result, "delivered", "delivered renders when no queued event is present");
+  const tile = ui.renderThreadTile(model);
+  assert.equal((tile.match(/is-guidance/g) || []).length, 2, "tile renders exactly one row per guidance");
+  assert.ok(tile.indexOf("tighten the layout") < tile.indexOf("then the tests"), "guidance rows stay chronological");
+});
+
+test("orchestrator guidance renders once as a normal user message from queue time", () => {
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.state.currentId = "guidance-chat";
+  const record = { id: 3, session_id: "guidance-chat", thread_name: "__orchestrator__", dispatch_id: "",
+    instruction: "focus on the CSS first", status: "queued", created_at: "2026-07-31T10:00:00Z",
+    claimed_at: null, delivered_at: null, expired_at: null };
+  const threadRecord = { id: 9, session_id: "guidance-chat", thread_name: "worker/a", dispatch_id: "d",
+    instruction: "thread-local guidance stays out of the chat", status: "delivered", created_at: "2026-07-31T10:01:00Z",
+    claimed_at: null, delivered_at: "2026-07-31T10:02:00Z", expired_at: null };
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 2, total: 2, has_older: false },
+    active_run: { run_id: "r1", submitted_user_message: { run_id: "r1", content: "the original prompt" } },
+    thread_steering: [record, threadRecord],
+  }));
+  const first = ui.el.orchestratorChatContent.innerHTML;
+  const guidanceArticle = first.match(/<article class="focus-message is-guidance"[^>]*>.*?<\/article>/s);
+  assert.ok(guidanceArticle, "guidance renders as a chat message article");
+  assert.match(guidanceArticle[0], /data-role="user"/, "guidance renders as a normal user message, not a blue box");
+  assert.match(guidanceArticle[0], /data-guidance-status="queued"/);
+  assert.match(guidanceArticle[0], /focus on the CSS first/);
+  assert.match(guidanceArticle[0], /<span class="focus-guidance-status">queued…<\/span>/,
+    "a queued record carries a subtle status marker");
+  assert.doesNotMatch(first, /data-role="guidance"/, "the blue guidance box is gone");
+  assert.doesNotMatch(first, /thread-local guidance stays out of the chat/);
+  assert.ok(first.indexOf("working on it") < first.indexOf("focus on the CSS first"),
+    "guidance renders after the visible transcript");
+  assert.ok(first.indexOf("focus on the CSS first") < first.indexOf("Sending…"),
+    "guidance renders before the pending run prompt");
+
+  // Delivered but not yet persisted: the status marker drops, the message stays.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 2, total: 2, has_older: false },
+    thread_steering: [{ ...record, status: "delivered", delivered_at: "2026-07-31T10:03:00Z" }],
+  }));
+  const second = ui.el.orchestratorChatContent.innerHTML;
+  assert.match(second, /data-guidance-status="delivered"/);
+  assert.doesNotMatch(second, /focus-guidance-status/, "delivered guidance has no status marker");
+  assert.equal(occurrences(second, /focus on the CSS first/g), 1);
+
+  // Covered by the canonical transcript message: the record hides so the
+  // instruction renders exactly once, as the persisted user message.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "user", content: "focus on the CSS first" },
+      { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 3, total: 3, has_older: false },
+    thread_steering: [{ ...record, status: "delivered", delivered_at: "2026-07-31T10:03:00Z" }],
+    covered_orchestrator_steering_ids: [3],
+  }));
+  const third = ui.el.orchestratorChatContent.innerHTML;
+  assert.equal(occurrences(third, /focus on the CSS first/g), 1, "no double render once the canonical message exists");
+  assert.doesNotMatch(third, /is-guidance/, "the covered record leaves no guidance article behind");
+
+  // Expired guidance never reached the model and never becomes canonical, so
+  // it leaves the chat instead of posing as a sent user message forever.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }],
+    message_page: { start: 0, end: 1, total: 1, has_older: false },
+    thread_steering: [{ ...record, status: "expired", expired_at: "2026-07-31T10:04:00Z" }],
+  }));
+  const fourth = ui.el.orchestratorChatContent.innerHTML;
+  assert.doesNotMatch(fourth, /focus on the CSS first/, "expired guidance drops out of the chat");
+});
+
+test("orchestratorGuidanceEntries filters coverage, expiry, and thread targets", () => {
+  const entries = ui.orchestratorGuidanceEntries(sessionSnapshot("guidance-unit", {
+    thread_steering: [
+      { id: 5, thread_name: "__orchestrator__", status: "delivered", instruction: "newer" },
+      { id: 2, thread_name: "__orchestrator__", status: "queued", instruction: "older" },
+      { id: 3, thread_name: "__orchestrator__", status: "delivered", instruction: "covered" },
+      { id: 4, thread_name: "__orchestrator__", status: "expired", instruction: "expired" },
+      { id: 6, thread_name: "worker/a", status: "queued", instruction: "thread-local" },
+    ],
+    covered_orchestrator_steering_ids: [3],
+  }));
+  assert.deepEqual(plain(entries.map((record) => record.id)), [2, 5],
+    "sorted by id, covered/expired/thread-targeted records excluded");
+});
+
+test("pending messages place the status badge after the body with a calm treatment", () => {
+  const html = ui.renderFocusMessage({ role: "user", content: "just accepted", pending: true });
+  assert.match(html, /class="focus-message is-pending"/);
+  assert.match(html, /Sending…/);
+  assert.ok(html.indexOf("focus-message-body") < html.indexOf("focus-pending-badge"), "badge follows the body");
+  assert.match(redesignSource, /\.focus-pending-badge \{[^}]*align-self: flex-end/);
+  assert.match(redesignSource, /@keyframes pending-badge-pulse/);
+  assert.doesNotMatch(redesignSource, /\.focus-message\.is-pending \{[^}]*dashed/);
+});
+
+test("user messages carry modest vertical breathing room and the blue guidance box is gone", () => {
+  assert.match(redesignSource, /\.focus-message\[data-role="user"\] \{ margin-block: var\(--sp-2\); \}/);
+  assert.doesNotMatch(redesignSource, /data-role="guidance"/, "no guidance-role CSS remains");
+  assert.doesNotMatch(redesignSource, /focus-guidance-label/, "the attention-blue guidance label is gone");
+  assert.match(redesignSource, /\.focus-guidance-status \{[^}]*color: var\(--ink-muted\);[^}]*font: var\(--fs-xs\)\/var\(--lh-none\) var\(--mono\);[^}]*text-transform: uppercase;/s,
+    "the queued marker reuses the calm pending-badge pattern");
+});
+
+test("thread-tool turns render one consistent structure with a truncated same-size instruction preview", () => {
+  const longAction = "implement the retry loop\nwith jittered backoff   and keep\nthe tests green ".repeat(6);
+  const html = ui.renderFocusMessage({ role: "assistant", content: null, tool_calls: [
+    { id: "call-1", function: { name: "thread", arguments: JSON.stringify({ name: "impl/retry", action: longAction }) } },
+    { id: "call-2", function: { name: "thread_read", arguments: '{"name":"impl/retry"}' } },
+    { id: "call-3", function: { name: "thread_delete", arguments: '{"name":"impl/old"}' } },
+    { id: "call-4", function: { name: "threads", arguments: "{}" } },
+  ] });
+  assert.match(html, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(html, /<span class="tool-block-name">thread<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/retry<\/span>/);
+  const preview = html.match(/<div class="tool-block-preview" title="([^"]*)">([^<]*)<\/div>/);
+  assert.ok(preview, "dispatch preview line present");
+  assert.equal(preview[1], preview[2], "title carries the same single-line preview");
+  assert.equal(preview[2].length, 320, "preview is truncated to the compact-detail cap");
+  assert.ok(preview[2].endsWith("…"), "truncation ends with an ellipsis");
+  assert.doesNotMatch(preview[2], /\s{2,}/, "preview is whitespace-collapsed to a single line");
+  assert.match(html, /<span class="tool-block-name">thread_read<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/retry<\/span>/);
+  assert.match(html, /<span class="tool-block-name">thread_delete<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/old<\/span>/);
+  assert.ok(html.includes('<div class="tool-block tool-block-thread" data-tool="threads" data-state="done"><div class="tool-block-header"><span class="tool-block-name">threads</span></div></div>'),
+    "threads (no args) renders a bare header with no separator");
+  assert.equal((html.match(/tool-block-preview/g) || []).length, 1, "only the dispatch carries a preview");
+  // Uniform 13px sizing across name, separator, args, and preview.
+  assert.match(redesignSource, /\.tool-block-thread \.tool-block-name \{ font-size: var\(--fs-md\)/);
+  assert.match(redesignSource, /\.tool-block-separator \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*color: var\(--ink-soft\)/s);
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*color: var\(--ink-muted\)/s);
+  // The truncation chain: every level from the grid item down can shrink.
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
+  assert.match(redesignSource, /\.tool-block \{[^}]*min-width: 0/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*min-width: 0/s);
+  assert.match(redesignSource, /\.focus-message-body \{[^}]*min-width: 0/s);
+  // thread without an action: same thread-tool structure, no preview.
+  const bare = ui.renderFocusMessage({ role: "assistant", content: null, tool_calls: [
+    { id: "call-5", function: { name: "thread", arguments: '{"name":"impl/retry"}' } },
+  ] });
+  assert.match(bare, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(bare, /tool-block-separator/);
+  assert.doesNotMatch(bare, /tool-block-preview/);
+  // Key-arg extraction covers every thread tool the backend registers.
+  assert.equal(ui.isThreadToolName("thread"), true);
+  assert.equal(ui.isThreadToolName("threads"), true);
+  assert.equal(ui.isThreadToolName("thread_read"), true);
+  assert.equal(ui.isThreadToolName("thread_delete"), true);
+  assert.equal(ui.isThreadToolName("read"), false);
+  assert.equal(ui.formatToolCall({ function: { name: "thread_read", arguments: '{"name":"w"}' } }).args, "w");
+  assert.equal(ui.formatToolCall({ function: { name: "thread_delete", arguments: '{"name":"w"}' } }).args, "w");
+  assert.equal(ui.formatToolCall({ function: { name: "threads", arguments: "{}" } }).args, "");
+});
+
+test("thread tiles are content-driven and the ledger is capped at ten lines", () => {
+  assert.doesNotMatch(redesignSource, /\.thread-tile \{[^}]*height: 208px/s);
+  assert.doesNotMatch(redesignSource, /\.thread-current-grid \{[^}]*grid-auto-rows: 208px/s);
+  assert.match(redesignSource, /\.thread-current-grid \{[^}]*align-items: start/s);
+  assert.match(redesignSource, /\.action-ledger \{[^}]*max-height: calc\(var\(--ledger-max-rows\) \* var\(--ledger-row-height\) \+ 4px\)/s);
+  assert.match(redesignSource, /--ledger-row-height: 15px;/);
+  assert.match(redesignSource, /--ledger-max-rows: 10;/);
 });
 
 test("formatActionArgs extracts the relevant argument per tool type", () => {

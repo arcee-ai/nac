@@ -1667,7 +1667,8 @@ function eventNeedsSnapshot(envelope) {
   const agent = agentEvent(envelope);
   if (agent?.reason === "manual"
       && (agent.type === COMPACTION_STARTED_EVENT_TYPE || COMPACTION_TERMINAL_EVENT_TYPES.has(agent.type))) return true;
-  return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(agent?.type);
+  return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired",
+    "orchestrator_steering_queued", "orchestrator_steering_delivered", "orchestrator_steering_expired"].includes(agent?.type);
 }
 
 function scheduleSnapshot(sessionId) {
@@ -2807,14 +2808,44 @@ function renderEvidenceField(label, value, unavailable) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${evidenceValue(value, unavailable)}</dd></div>`;
 }
 
+// Orchestrator guidance renders as an ordinary user message from the moment it
+// is queued. The backend flags records whose verbatim user message is already
+// in the visible transcript (covered_orchestrator_steering_ids); those are
+// hidden here so guidance renders exactly once. Expired records never reached
+// the model and never become canonical, so they leave the chat on expiry
+// (their lifecycle stays visible in the event feed).
+function orchestratorGuidanceEntries(snapshot) {
+  const covered = new Set((snapshot?.covered_orchestrator_steering_ids || []).map((id) => Number(id)));
+  return (snapshot?.thread_steering || [])
+    .filter((record) => record?.thread_name === ORCHESTRATOR_STEERING_TARGET
+      && Number.isSafeInteger(Number(record?.id))
+      && String(record?.status || "") !== "expired"
+      && !covered.has(Number(record.id)))
+    .sort((left, right) => Number(left.id) - Number(right.id));
+}
+
+function renderOrchestratorGuidance(record) {
+  const status = String(record?.status || "queued").trim() || "queued";
+  const instruction = String(record?.instruction || "").trim() || "Instruction unavailable";
+  const statusBadge = status !== "delivered"
+    ? `<span class="focus-guidance-status">queued…</span>`
+    : "";
+  return `<article class="focus-message is-guidance" data-role="user" data-guidance-status="${escapeAttr(status)}"><div class="focus-message-body"><div class="focus-message-copy">${renderFocusMarkdown(instruction)}</div></div>${statusBadge}</article>`;
+}
+
 function renderOrchestratorChatRail(snapshot) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
+  const guidance = orchestratorGuidanceEntries(snapshot);
   const transcriptEntries = [
     ...messages.map((message) => ({ message })),
+    ...guidance.map((record) => ({ guidance: record })),
     ...pending.map((message) => ({ message })),
-  ].filter(({ message }) => message?.role !== "system" && message?.role !== "tool");
-  const transcript = transcriptEntries.map(({ message }) => renderFocusMessage(message)).join("");
+  ];
+  const transcript = transcriptEntries
+    .filter((entry) => entry.guidance || (entry.message?.role !== "system" && entry.message?.role !== "tool"))
+    .map((entry) => entry.guidance ? renderOrchestratorGuidance(entry.guidance) : renderFocusMessage(entry.message))
+    .join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
@@ -3170,12 +3201,19 @@ function focusToolTarget(argumentsValue, ...keys) {
   return "";
 }
 
+function isThreadToolName(name) {
+  return name === "thread" || name === "threads" || String(name || "").startsWith("thread_");
+}
+
 function formatToolCall(toolCall) {
   const name = toolCall?.function?.name || "tool";
   const args = focusToolArguments(toolCall);
   let argsLabel = "";
-  if (name === "thread" || name === "threads") {
+  let dispatchAction = "";
+  if (isThreadToolName(name)) {
+    // Every thread tool (thread, threads, thread_read, thread_delete, …) keys on `name`.
     argsLabel = focusToolTarget(args, "name");
+    if (name === "thread") dispatchAction = focusToolTarget(args, "action");
   } else if (name === "workset_define" || name === "workset_update") {
     argsLabel = focusToolTarget(args, "id", "name");
   } else if (name === "read") {
@@ -3189,13 +3227,25 @@ function formatToolCall(toolCall) {
   } else {
     argsLabel = focusToolTarget(args, "name", "id");
   }
-  return { name, args: argsLabel, result: "" };
+  return { name, args: argsLabel, action: dispatchAction, result: "" };
 }
 
 function renderOrchestratorToolTurn(message) {
   const calls = message?.tool_calls || [];
   const blocks = calls.map((call) => {
-    const { name, args } = formatToolCall(call);
+    const { name, args, action } = formatToolCall(call);
+    if (isThreadToolName(name)) {
+      // One consistent structure for every thread-tool block: `tool · key-arg`
+      // header at --fs-md, plus a same-size single-line instruction preview
+      // for dispatches. Truncation relies on min-width: 0 up the chain.
+      const separator = args ? `<span class="tool-block-separator" aria-hidden="true">·</span>` : "";
+      const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
+      const previewText = name === "thread" && action ? compactActionDetail(action, 320) : "";
+      const preview = previewText
+        ? `<div class="tool-block-preview" title="${escapeAttr(previewText)}">${escapeHtml(previewText)}</div>`
+        : "";
+      return `<div class="tool-block tool-block-thread" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${separator}${argsSpan}</div>${preview}</div>`;
+    }
     const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
     return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
   }).join("");
@@ -3218,7 +3268,7 @@ function renderFocusMessage(message) {
   const pendingBadge = message?.pending
     ? `<span class="focus-pending-badge">Sending…</span>`
     : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}>${pendingBadge}<div class="focus-message-body">${copy}</div></article>`;
+  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-body">${copy}</div>${pendingBadge}</article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
@@ -3399,7 +3449,7 @@ function threadFocusActions(name, snapshot, windowState) {
   const durable = (snapshot?.thread_steering || [])
     .filter((record) => record.thread_name === name && !observedSteering.has(record.id))
     .map(steeringRecordAction).reverse();
-  return [...actions, ...durable];
+  return dedupGuidanceActions(guidanceInstructionsFromRecords([...actions, ...durable], snapshot?.thread_steering || []));
 }
 
 function latestThreadEvidence(entries, type) {
@@ -3513,6 +3563,7 @@ function isToolAction(action) {
 function isTileVisibleAction(action) {
   if (isToolAction(action)) return true;
   if (action.name === "dispatch") return true;
+  if (action.name === "guidance") return true;
   if (action.name === "thread") {
     const result = String(action.result || "");
     if (result === "finished" || result.startsWith("failed") || result.startsWith("timed out")) return true;
@@ -3522,6 +3573,7 @@ function isTileVisibleAction(action) {
 
 function actionIcon(action) {
   if (action.name === "dispatch") return "→";
+  if (action.name === "guidance") return "❯";
   if (action.name === "thread") {
     const result = String(action.result || "");
     if (result === "finished") return "✓";
@@ -3705,11 +3757,13 @@ function buildThreadModels(snapshot = currentSnapshot()) {
     const observedSteering = new Set(entries.map((entry) => entry.event)
       .filter((event) => event?.type?.startsWith("thread_steering_")).map((event) => event.steering_id));
     for (const durable of steering) if (!observedSteering.has(durable.id)) actions.push(steeringRecordAction(durable));
+    guidanceInstructionsFromRecords(actions, steering);
+    const dedupedActions = dedupGuidanceActions(actions);
     if (record || (snapshot?.thread_episodes?.[name] || []).length || steering.length
         || (snapshot?.message_cycle?.thread_names || []).includes(name)) {
       if (!lifecycle.provenance.includes("persisted")) lifecycle.provenance.unshift("persisted");
     }
-    return { name, ...lifecycle, record, entries, actions };
+    return { name, ...lifecycle, record, entries, actions: dedupedActions };
   });
   const currentCycle = currentCycleThreadNames(snapshot);
   return models.map((thread) => ({
@@ -3757,6 +3811,49 @@ function eventThreadName(event) {
   return null;
 }
 
+function guidanceInstructionsFromRecords(actions, records) {
+  const byId = new Map((records || []).map((record) => [Number(record?.id), record]));
+  for (const action of actions || []) {
+    if (action?.name !== "guidance" || action.instruction) continue;
+    const record = action.steeringId === null || action.steeringId === undefined
+      ? null
+      : byId.get(Number(action.steeringId));
+    if (record?.instruction) action.instruction = record.instruction;
+  }
+  return actions;
+}
+
+const GUIDANCE_STATUS_PRIORITY = { queued: 0, delivered: 1, expired: 2 };
+
+function guidanceStatusPriority(action) {
+  return GUIDANCE_STATUS_PRIORITY[String(action?.result || "")] ?? 1;
+}
+
+function dedupGuidanceActions(actions) {
+  // One row per steering id: lifecycle events (queued → delivered/expired) for
+  // the same guidance must not stack as separate rows. The earliest lifecycle
+  // state wins (queued, then delivered, then expired) and keeps the first
+  // occurrence's chronological slot. Actions without a steering id can't be
+  // correlated and are always kept.
+  const keptIndexById = new Map();
+  const output = [];
+  for (const action of actions || []) {
+    if (action?.name !== "guidance" || action.steeringId === null || action.steeringId === undefined) {
+      output.push(action);
+      continue;
+    }
+    const key = String(action.steeringId);
+    const keptIndex = keptIndexById.get(key);
+    if (keptIndex === undefined) {
+      keptIndexById.set(key, output.length);
+      output.push(action);
+      continue;
+    }
+    if (guidanceStatusPriority(action) < guidanceStatusPriority(output[keptIndex])) output[keptIndex] = action;
+  }
+  return output;
+}
+
 function steeringRecordAction(record) {
   const result = record?.status || "status unavailable";
   const transitionTime = result === "delivered" ? record.delivered_at : result === "expired" ? record.expired_at : null;
@@ -3767,6 +3864,7 @@ function steeringRecordAction(record) {
     provenance: "persisted",
     kind: "steering_record",
     steeringId: record?.id ?? null,
+    instruction: record?.instruction || null,
     timestamp: transitionTime || record?.created_at || null,
     detail: combineActionDetail(
       record?.id == null ? null : `guidance #${record.id}`,
@@ -3822,6 +3920,7 @@ function renderFocusActionRows(actions) {
   }
   return visible.map((action) => {
     const state = escapeAttr(action.state || "recorded");
+    const guidance = action.name === "guidance" ? " is-guidance" : "";
     if (action.name === "thread" && !isToolAction(action)) {
       const result = String(action.result || "");
       const icon = result === "finished" ? "✓" : "✕";
@@ -3832,7 +3931,7 @@ function renderFocusActionRows(actions) {
     }
     const icon = actionIcon(action);
     const args = formatActionArgs(action);
-    return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+    return `<li class="action-row${guidance}" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
   }).join("");
 }
 
@@ -3841,19 +3940,21 @@ function renderActionRows(actions, emptyLabel) {
   if (!visible.length) {
     return `<li class="action-row is-placeholder" aria-hidden="true"><span class="action-args">${escapeHtml(emptyLabel)}</span></li>`;
   }
-  return visible.slice().reverse().map((action) => {
+  return visible.map((action, index) => {
     const state = escapeAttr(action.state || "recorded");
+    const recency = visible.length - 1 - index;
+    const guidance = action.name === "guidance" ? " is-guidance" : "";
     if (action.name === "thread" && !isToolAction(action)) {
       const result = String(action.result || "");
       const icon = result === "finished" ? "✓" : "✕";
       const text = result === "finished" ? "thread complete"
         : result.startsWith("timed out") ? "thread timed out"
         : "thread failed";
-      return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
+      return `<li class="action-row" data-state="${state}" data-recency="${recency}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
     }
     const icon = actionIcon(action);
     const args = formatActionArgs(action);
-    return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+    return `<li class="action-row${guidance}" data-state="${state}" data-recency="${recency}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
   }).join("");
 }
 
@@ -3925,7 +4026,7 @@ function formatActionArgs(action) {
     if (usage) return `↑${Number(usage.input_tokens || 0)} ↓${Number(usage.output_tokens || 0)}`;
     return compactActionDetail(action?.detail, 200);
   }
-  if (name === "guidance") return action?.result || compactActionDetail(action?.detail, 200);
+  if (name === "guidance") return compactActionDetail(action?.instruction, 200) || action?.result || compactActionDetail(action?.detail, 200);
   if (name === "agent run") return action?.result || compactActionDetail(action?.detail, 200);
   const detailRaw = String(action?.detail || "").trim();
   if (detailRaw.startsWith("{") || detailRaw.startsWith("[")) {
