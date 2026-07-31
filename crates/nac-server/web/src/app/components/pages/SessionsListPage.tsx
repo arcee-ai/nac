@@ -64,6 +64,7 @@ function GridCard({
 export default function SessionsListPage() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
+  const actions = useSessionActions();
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { data, isLoading, isFetching, error } = useSessions();
@@ -91,11 +92,25 @@ export default function SessionsListPage() {
     />
   );
 
+  const newButton = (
+    <Button
+      variant={ButtonVariant.Primary}
+      size={ButtonSize.Medium}
+      content={ButtonContent.IconLeft}
+      onClick={actions.launch}
+    >
+      <Icon iconName={IconName.Add} size={16} /> New
+    </Button>
+  );
+
   const rail = (
     <BoxSurface
       title={countLabel}
       headerContent={
-        isFetching ? <Loader size={LoaderSize.Micro} /> : null
+        <div className="flex items-center gap-2 shrink-0">
+          {isFetching ? <Loader size={LoaderSize.Micro} /> : null}
+          {newButton}
+        </div>
       }
       className="h-full"
       bodyClassName="overflow-auto"
@@ -133,6 +148,7 @@ export default function SessionsListPage() {
                     )}
                   />
                 </Button>
+                {newButton}
               </div>
               {filtersOpen ? (
                 <BoxSurface>

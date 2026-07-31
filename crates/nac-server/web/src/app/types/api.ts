@@ -147,23 +147,24 @@ export interface EpisodeSnapshot {
 export interface WorksetItemSnapshot {
   position: number;
   title: string;
-  scope: string | null;
-  description: string | null;
-  role: string | null;
-  depends_on: string | null;
-  acceptance: string | null;
+  scope: string;
+  description: string;
+  role: string;
+  depends_on: string[];
+  acceptance: string;
   notes: string | null;
   updated_at: string;
 }
 
 export interface WorksetSnapshot {
   id: string;
+  session_id: string;
+  goal: string;
   status: string;
-  summary: string | null;
-  item_count: number;
-  updated_at: string;
-  goal: string | null;
+  summary: string;
   verification_recipe: string | null;
+  created_at: string;
+  updated_at: string;
   items: WorksetItemSnapshot[];
 }
 
@@ -172,14 +173,12 @@ export interface WorksetsSnapshot {
   error: string | null;
 }
 
-/** Git status letter as produced by nac-core: `?` `R` `A` `D` `M`. */
-export type ChangedFileStatus = "?" | "R" | "A" | "D" | "M";
-
 export interface ChangedFileStat {
-  status: ChangedFileStatus;
+  /** Raw git status code, e.g. `M`, `??`, `A `, `R100`. */
+  status: string;
   path: string;
-  additions?: number;
-  deletions?: number;
+  additions: number | null;
+  deletions: number | null;
 }
 
 export interface WorkspaceSnapshot {
@@ -200,18 +199,26 @@ export interface WorkspaceDiffTotals {
 }
 
 export type WorkspaceDiffStage = "staged" | "unstaged" | "untracked";
+
+// The backend serialises these as plain strings; the unions document the known
+// values without rejecting anything new the server may start sending.
 export type WorkspaceDiffStatus =
   | "added"
   | "deleted"
   | "modified"
-  | "untracked";
+  | "untracked"
+  | (string & {});
 /** Beware: the backend says insert/delete, not addition/deletion. */
-export type WorkspaceDiffLineKind = "context" | "delete" | "insert";
+export type WorkspaceDiffLineKind =
+  | "context"
+  | "delete"
+  | "insert"
+  | (string & {});
 
 export interface WorkspaceDiffLine {
   kind: WorkspaceDiffLineKind;
-  old_lineno?: number;
-  new_lineno?: number;
+  old_lineno: number | null;
+  new_lineno: number | null;
   content: string;
   has_trailing_newline: boolean;
 }
@@ -226,7 +233,7 @@ export interface WorkspaceDiffHunk {
 }
 
 export interface WorkspaceDiffSection {
-  stage: WorkspaceDiffStage;
+  stage: WorkspaceDiffStage | (string & {});
   status: WorkspaceDiffStatus;
   binary: boolean;
   too_large: boolean;

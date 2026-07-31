@@ -1,154 +1,137 @@
 import { useEffect } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { Badge, BadgeColor, BoxSurface, Loader } from "@/app/atoms";
+import { HorizontalTabsItem, Icon, IconName } from "@/app/atoms";
+import { EventsView } from "@/app/components/inspector/EventsView";
+import { InspectorHeader } from "@/app/components/inspector/InspectorHeader";
+import { MetricsBar } from "@/app/components/inspector/MetricsBar";
+import { PromptForm } from "@/app/components/inspector/PromptForm";
+import { ThreadsView } from "@/app/components/inspector/ThreadsView";
+import { Transcript } from "@/app/components/inspector/Transcript";
+import { WorksetsView } from "@/app/components/inspector/WorksetsView";
+import { WorkspaceView } from "@/app/components/inspector/WorkspaceView";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
-import { formatDurationShort, metricsFromSnapshot, shortId } from "@/app/lib/format";
+import { errorMessage } from "@/app/providers/ToastProvider";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   DEFAULT_INSPECTOR_TAB,
   INSPECTOR_TABS,
   isInspectorTab,
   routes,
+  type InspectorTab,
 } from "@/app/lib/routes";
-import { useSessionSnapshot } from "@/app/services/queries";
+import { useSessions, useSessionSnapshot } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
-import {
-  useActivity,
-  useLiveEvents,
-  useRunning,
-  useStreamStatus,
-} from "@/app/store/runtimeStore";
-import type { StreamStatus } from "@/app/services/eventStream";
+import { useRunning } from "@/app/store/runtimeStore";
 
-const STREAM_LABEL: Record<StreamStatus, { text: string; color: BadgeColor }> = {
-  live: { text: "Live", color: BadgeColor.Green },
-  connecting: { text: "Connecting…", color: BadgeColor.Yellow },
-  reconnecting: { text: "Reconnecting…", color: BadgeColor.Yellow },
-  error: { text: "Stream unavailable", color: BadgeColor.Red },
-  idle: { text: "Idle", color: BadgeColor.Neutral },
+const TAB_META: Record<InspectorTab, { label: string; icon: IconName }> = {
+  chat: { label: "Chat", icon: IconName.Chat },
+  events: { label: "Events", icon: IconName.Activity },
+  threads: { label: "Threads", icon: IconName.Flow },
+  worksets: { label: "Worksets", icon: IconName.Layers },
+  workspace: { label: "Workspace", icon: IconName.Folder },
 };
 
-/**
- * Placeholder inspector. The transcript, events, threads, worksets and
- * workspace panes land with the inspector stage; for now this proves the
- * stream, the snapshot query and the runtime store are wired together.
- */
+function RepairBanner({
+  message,
+  onSettings,
+}: {
+  message: string;
+  onSettings: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary shrink-0">
+      <Icon iconName={IconName.Repair} />
+      <div className="flex-grow min-w-0">
+        <div className="label-small">Configuration needs repair</div>
+        <div className="text-micro truncate">{message}</div>
+      </div>
+      <button
+        type="button"
+        className="label-small underline shrink-0 hover:opacity-80"
+        onClick={onSettings}
+      >
+        Open settings
+      </button>
+    </div>
+  );
+}
+
+/** The session screen is the inspector at full width; navigation lives in the breadcrumb. */
 export default function SessionPage() {
   const { sessionId, tab } = useParams<{ sessionId: string; tab?: string }>();
+  const navigate = useNavigate();
   const id = sessionId ?? null;
 
-  const { data: snapshot, isLoading, error } = useSessionSnapshot(id);
+  const { data: snapshot = null, error } = useSessionSnapshot(id);
+  const { data: sessions = [] } = useSessions();
+  const actions = useSessionActions();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
-
-  const streamStatus = useStreamStatus();
   const running = useRunning();
-  const activity = useActivity();
-  const events = useLiveEvents();
 
   useEffect(() => {
     if (id) clearAttention(id);
   }, [id]);
 
   if (!id) return <Navigate to={routes.list()} replace />;
-  if (tab !== undefined && !isInspectorTab(tab)) {
+  if (!isInspectorTab(tab)) {
     return <Navigate to={routes.session(id, DEFAULT_INSPECTOR_TAB)} replace />;
   }
 
-  const stream = STREAM_LABEL[streamStatus];
-  const metrics = metricsFromSnapshot(snapshot, null);
+  const entry = sessions.find((item) => item.summary.session_id === id) ?? null;
+  const configError = entry?.summary.model_config_error;
+  // The repair banner already explains a broken config, and that is exactly why
+  // the snapshot request fails, so only report an unexplained fetch failure.
+  const fetchError = !configError && !snapshot && error ? errorMessage(error) : null;
 
   return (
-    <div className="p-6 flex flex-col gap-4 max-w-[900px]">
-      <div className="flex items-center gap-3">
-        <Link to={routes.list()} className="text-basic-muted label-small hover:underline">
-          ← Sessions
-        </Link>
-        <span className="code code-small text-basic-muted">{shortId(id)}</span>
-        <Badge text={stream.text} color={stream.color} />
-        {running && <Badge text="Running" color={BadgeColor.Green} />}
-      </div>
+    <section className="flex flex-col min-h-0 h-full pt-[52px] bg-elevation-level-0-5">
+      <InspectorHeader
+        sessionId={id}
+        summary={entry?.summary ?? null}
+        metadata={snapshot?.metadata ?? null}
+        running={running}
+      />
 
-      <nav className="flex items-center gap-1">
+      {configError ? (
+        <RepairBanner message={configError} onSettings={() => actions.settings(id)} />
+      ) : null}
+      {fetchError ? (
+        <div className="px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary label-small shrink-0">
+          {fetchError}
+        </div>
+      ) : null}
+
+      <nav className="flex gap-1 px-2 border-b border-primary shrink-0 overflow-x-auto">
         {INSPECTOR_TABS.map((name) => (
-          <Link
+          <HorizontalTabsItem
             key={name}
-            to={routes.session(id, name)}
-            className={
-              name === (tab ?? DEFAULT_INSPECTOR_TAB)
-                ? "px-3 py-1.5 rounded-md bg-elevation-level-2 text-basic-primary label-small"
-                : "px-3 py-1.5 rounded-md text-basic-muted label-small hover:text-basic-primary"
-            }
+            active={tab === name}
+            iconName={TAB_META[name].icon}
+            onClick={() => navigate(routes.session(id, name))}
           >
-            {name}
-          </Link>
+            {TAB_META[name].label}
+          </HorizontalTabsItem>
         ))}
       </nav>
 
-      {isLoading && (
-        <div className="flex items-center gap-3 text-basic-muted">
-          <Loader />
-          Loading snapshot…
-        </div>
-      )}
+      <MetricsBar snapshot={snapshot} entry={entry} />
 
-      {error && (
-        <div className="text-error-primary paragraph-medium">
-          {error instanceof Error ? error.message : "Failed to load session"}
-        </div>
-      )}
-
-      {snapshot && (
-        <>
-          <BoxSurface title="Metrics">
-            <dl className="p-4 grid grid-cols-3 gap-4">
-              <Metric label="Model" value={metrics.model} />
-              <Metric label="Backend" value={metrics.backend} />
-              <Metric label="Messages" value={String(metrics.messages)} />
-              <Metric label="Run" value={metrics.run} />
-              <Metric label="Tokens" value={metrics.tokens} />
-              <Metric
-                label="Last response"
-                value={formatDurationShort(metrics.lastResponseMs)}
-              />
-            </dl>
-          </BoxSurface>
-
-          <BoxSurface title={`Live events (${events.length})`}>
-            <div className="p-4 flex flex-col gap-1 max-h-[320px] overflow-y-auto [&>*]:shrink-0">
-              {activity && (
-                <span className="code code-small text-info-primary">{activity}</span>
-              )}
-              {events.map((event, index) => (
-                <span
-                  key={`${event.seq ?? "local"}-${index}`}
-                  className={
-                    event.isError
-                      ? "code code-small text-error-primary"
-                      : "code code-small text-basic-muted"
-                  }
-                >
-                  {event.text}
-                </span>
-              ))}
-              {events.length === 0 && (
-                <span className="code code-small text-basic-muted">
-                  Waiting for events…
-                </span>
-              )}
-            </div>
-          </BoxSurface>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-micro text-basic-muted">{label}</dt>
-      <dd className="label-small text-basic-primary truncate">{value}</dd>
-    </div>
+      <div className="flex-1 min-h-0">
+        {tab === "chat" ? (
+          <div className="flex flex-col h-full min-h-0">
+            <Transcript snapshot={snapshot} />
+            <PromptForm sessionId={id} />
+          </div>
+        ) : null}
+        {tab === "events" ? <EventsView /> : null}
+        {tab === "threads" ? <ThreadsView snapshot={snapshot} /> : null}
+        {tab === "worksets" ? <WorksetsView snapshot={snapshot} /> : null}
+        {tab === "workspace" ? (
+          <WorkspaceView sessionId={id} snapshot={snapshot} />
+        ) : null}
+      </div>
+    </section>
   );
 }

@@ -11,6 +11,8 @@ import {
 import { api } from "@/app/services/api";
 import type {
   CreateSessionRequest,
+  LaunchModelDefaults,
+  LaunchModelDefaultsRequest,
   ManagedSessionSummary,
   RawSessionConfig,
   SessionSnapshotResponse,
@@ -30,6 +32,8 @@ export const queryKeys = {
   sessionsAll: ["sessions"] as const,
   session: (id: string) => ["session", id] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
+  launchDefaults: (cwd: string, sshHost: string) =>
+    ["launch-defaults", { cwd, sshHost }] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -52,6 +56,20 @@ export function useSessions(workspaceStats = true) {
     queryFn: ({ signal }) => api.listSessions(workspaceStats, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
+  });
+}
+
+/**
+ * Model defaults configured for a launch location. Failures are non-fatal: the
+ * modal simply cannot pre-resolve a managed backend.
+ */
+export function useLaunchDefaults(location: LaunchModelDefaultsRequest, enabled = true) {
+  return useQuery<LaunchModelDefaults>({
+    queryKey: queryKeys.launchDefaults(location.cwd ?? "", location.ssh_host ?? ""),
+    queryFn: ({ signal }) => api.launchDefaults(location, signal),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
   });
 }
 
