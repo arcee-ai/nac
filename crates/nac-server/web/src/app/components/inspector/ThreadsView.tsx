@@ -1,110 +1,84 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo } from "react";
 
-import { Badge, BadgeColor, Icon, IconName, Loader, LoaderSize } from "@/app/atoms";
+import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
+import {
+  PanelEmpty,
+  PanelRow,
+  PanelSplit,
+} from "@/app/components/inspector/PanelSplit";
 import { cn } from "@/app/lib/cn";
-import { Markdown } from "@/app/lib/markdown";
 import { useLiveThreads } from "@/app/store/runtimeStore";
-import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   EpisodeSnapshot,
   SessionSnapshotResponse,
   ThreadSnapshot,
 } from "@/app/types/api";
 
-function Episode({ episode }: { episode: EpisodeSnapshot }) {
-  return (
-    <div className="rounded-lg border border-secondary bg-elevation-level-0-5 p-3">
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="label-small text-basic-primary truncate">
-          {episode.action || "(action)"}
-        </span>
-        <span className="text-micro text-basic-muted font-mono shrink-0">
-          #{episode.id} · {episode.created_at}
-        </span>
-      </div>
-      <div className="markdown paragraph-medium text-basic-secondary">
-        <Markdown>{episode.content}</Markdown>
-      </div>
-    </div>
-  );
-}
-
-function ThreadRow({
+function Detail({
   thread,
   episodes,
-  live,
   running,
+  currentAction,
 }: {
   thread: ThreadSnapshot;
   episodes: EpisodeSnapshot[];
-  live: RuntimeThread | undefined;
   running: boolean;
+  currentAction: string;
 }) {
-  const [open, setOpen] = useState(false);
-  // The current operation prefers the live SSE action over the persisted one.
-  const currentOp = live?.action || thread.latest_action || "";
-  const exitCode = live?.exitCode;
-
   return (
-    <div
-      className={cn(
-        "rounded-xl border bg-elevation-level-1",
-        running ? "border-success-muted" : "border-secondary",
-      )}
-    >
-      <button
-        type="button"
-        className="w-full flex items-center gap-2 p-3 text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Icon
-          iconName={IconName.Down}
-          className={cn("transition-transform", open ? "rotate-0" : "-rotate-90")}
-        />
-        <span className="label-small text-basic-primary truncate flex-grow">
-          {thread.name}
-        </span>
-        {running ? <Loader size={LoaderSize.Small} /> : null}
-        {running ? <Badge text="running" color={BadgeColor.Green} /> : null}
-        {exitCode != null ? (
-          <Badge
-            text={`exit ${exitCode}`}
-            color={live?.isError ? BadgeColor.Red : BadgeColor.Gray}
-          />
+    <>
+      <div className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
+        <span className="label-micro text-btn-secondary truncate">{thread.name}</span>
+        {running ? (
+          <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
         ) : null}
-        <Badge text={`${thread.episode_count} ep`} color={BadgeColor.Gray} />
-      </button>
+        <span className="flex-1 min-w-0 code code-small text-basic-muted truncate">
+          {thread.updated_at}
+        </span>
+        <span className="shrink-0 code code-small text-basic-muted">
+          {thread.episode_count} ep
+        </span>
+      </div>
 
-      {currentOp && !open ? (
-        <div className="px-3 pb-3 -mt-1 text-micro text-basic-muted truncate font-mono">
-          {currentOp}
-        </div>
-      ) : null}
-
-      {open ? (
-        <div className="px-3 pb-3 flex flex-col gap-2">
-          {live?.action ? (
-            <div className="text-micro text-basic-muted font-mono">▸ {live.action}</div>
-          ) : null}
-          {episodes.length === 0 ? (
-            <div className="text-basic-muted text-micro">No episodes retained.</div>
-          ) : (
-            episodes.map((episode) => <Episode key={episode.id} episode={episode} />)
-          )}
-        </div>
-      ) : null}
-    </div>
+      <div className="flex flex-col flex-1 min-h-0 overflow-auto p-4 code code-small text-basic-secondary whitespace-pre-wrap [&>*]:shrink-0">
+        <p className="text-basic-primary">
+          {`Thread "${thread.name}" retained episodes (${episodes.length} total):`}
+        </p>
+        {running && currentAction ? (
+          <p className="pt-4 text-shimmer-basic">{`▸ ${currentAction}`}</p>
+        ) : null}
+        {episodes.length === 0 && !running ? (
+          <p className="pt-4 text-basic-muted">No episodes retained.</p>
+        ) : null}
+        {episodes.map((episode, index) => (
+          <div key={episode.id} className="pt-4">
+            <p className="text-basic-tertiary">
+              {`=== Episode ${index + 1} | ${episode.created_at} | action: ${episode.action} ===`}
+            </p>
+            <p>{episode.content}</p>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
 /**
- * Retained workstreams and their episodes, merged with live SSE state (running
- * status, current operation, exit code). Running threads are shown first.
+ * Retained workstreams and their episodes, merged with the live SSE state so a
+ * running thread shows its current operation before any episode is persisted.
  */
-export function ThreadsView({ snapshot }: { snapshot: SessionSnapshotResponse | null }) {
+export function ThreadsView({
+  snapshot,
+  selected,
+  onSelect,
+}: {
+  snapshot: SessionSnapshotResponse | null;
+  /** Thread the chat pointed at, if any. */
+  selected: string | null;
+  onSelect: (name: string) => void;
+}) {
   const liveThreads = useLiveThreads();
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
-  const episodes = snapshot?.thread_episodes ?? {};
   const activeThreads = snapshot?.active_threads;
 
   const runningNames = useMemo(() => {
@@ -127,43 +101,51 @@ export function ThreadsView({ snapshot }: { snapshot: SessionSnapshotResponse | 
     [threads, runningNames],
   );
 
-  if (!snapshot) {
-    return <div className="p-6 text-basic-muted label-small">Loading…</div>;
-  }
-  if (threads.length === 0) {
-    return (
-      <div className="p-6 text-basic-muted label-small">
-        No threads yet for this session.
-      </div>
-    );
+  if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
+  if (ordered.length === 0) {
+    return <PanelEmpty>No threads yet for this session.</PanelEmpty>;
   }
 
-  const runningCount = ordered.filter((t) => runningNames.has(t.name)).length;
+  const current = ordered.find((thread) => thread.name === selected) ?? ordered[0];
+  const live = liveThreads[current.name];
 
   return (
-    <div className="h-full overflow-auto p-4 flex flex-col gap-3 [&>*]:shrink-0">
-      {runningCount > 0 ? (
-        <div className="tag-label text-basic-muted">Running ({runningCount})</div>
-      ) : null}
-      {ordered.map((thread, index) => {
+    <PanelSplit
+      list={ordered.map((thread) => {
         const running = runningNames.has(thread.name);
-        const showFinishedHeader = runningCount > 0 && index === runningCount;
-        // A fragment keeps the rows as direct flex children, which the
-        // `[&>*]:shrink-0` guard on the scroll container depends on.
+        const errored = liveThreads[thread.name]?.isError;
         return (
-          <Fragment key={thread.name}>
-            {showFinishedHeader ? (
-              <div className="tag-label text-basic-muted pt-1">Finished</div>
-            ) : null}
-            <ThreadRow
-              thread={thread}
-              episodes={episodes[thread.name] ?? []}
-              live={liveThreads[thread.name]}
-              running={running}
-            />
-          </Fragment>
+          <PanelRow
+            key={thread.name}
+            label={thread.name}
+            active={thread.name === current.name}
+            icon={
+              running ? (
+                <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+              ) : (
+                <Icon
+                  iconName={errored ? IconName.Danger : IconName.CheckCircle}
+                  size={16}
+                  className={cn("shrink-0", errored && "text-error-primary")}
+                />
+              )
+            }
+            trailing={
+              <span className="code code-micro text-basic-muted shrink-0">
+                {thread.episode_count}
+              </span>
+            }
+            onClick={() => onSelect(thread.name)}
+          />
         );
       })}
-    </div>
+    >
+      <Detail
+        thread={current}
+        episodes={snapshot.thread_episodes?.[current.name] ?? []}
+        running={runningNames.has(current.name)}
+        currentAction={live?.action || current.latest_action || ""}
+      />
+    </PanelSplit>
   );
 }

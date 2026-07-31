@@ -1,100 +1,52 @@
 import { useEffect, useMemo, useRef } from "react";
 
-import { cn } from "@/app/lib/cn";
-import { displayPromptFromMessageText, formatDurationShort } from "@/app/lib/format";
-import { Markdown } from "@/app/lib/markdown";
-import { useActivity, useRunError, useRunning } from "@/app/store/runtimeStore";
-import type { Message, MessageRole, SessionSnapshotResponse } from "@/app/types/api";
+import { ModelPill } from "@/app/atoms";
+import { ChatBadge, CodeChangesBadge } from "@/app/components/inspector/ChatBadge";
+import { ModelMessage } from "@/app/components/inspector/ModelMessage";
+import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { displayPromptFromMessageText } from "@/app/lib/format";
+import type { SessionPanel } from "@/app/lib/routes";
+import { buildTranscript } from "@/app/lib/transcript";
+import {
+  selectThread,
+  selectWorkset,
+  useSelectedThread,
+} from "@/app/store/sessionLayoutStore";
+import {
+  useActivity,
+  useLiveThreads,
+  useRunError,
+  useRunning,
+} from "@/app/store/runtimeStore";
+import type { SessionSnapshotResponse } from "@/app/types/api";
 
-// Long sessions would otherwise render thousands of markdown blocks.
-const MAX_MESSAGES = 80;
-
-interface TranscriptMessage {
-  key: string;
-  index: number;
-  role: MessageRole;
-  content: string;
-  rawContent: string;
-  durationMs: number | null;
-}
-
-function mapMessages(snapshot: SessionSnapshotResponse | null): TranscriptMessage[] {
-  const raw: Message[] = snapshot?.messages ?? [];
-  const durations = snapshot?.response_timing.response_durations_ms ?? [];
-  let assistantIndex = -1;
-
-  const mapped = raw.map((message, index): TranscriptMessage => {
-    const role = message.role;
-    const rawContent = typeof message.content === "string" ? message.content : "";
-    let content = rawContent;
-
-    if (role === "user") content = displayPromptFromMessageText(rawContent);
-    if (role === "assistant" && !content && message.tool_calls?.length) {
-      const names = message.tool_calls
-        .map((call) => call.function?.name ?? "tool")
-        .join(", ");
-      content = `_(tool calls: ${names})_`;
-    }
-    if (role === "tool") content = "```\n" + rawContent + "\n```";
-
-    let durationMs: number | null = null;
-    if (role === "assistant") {
-      assistantIndex += 1;
-      durationMs = durations[assistantIndex] ?? null;
-    }
-
-    return { key: `${role}-${index}`, index, role, content, rawContent, durationMs };
-  });
-
-  return mapped.length > MAX_MESSAGES ? mapped.slice(-MAX_MESSAGES) : mapped;
-}
-
-const ROLE_STYLE: Record<MessageRole, string> = {
-  user: "border-accent-primary bg-elevation-level-1",
-  assistant: "border-secondary bg-elevation-level-1",
-  system: "border-secondary bg-elevation-level-0-5",
-  tool: "border-secondary bg-elevation-level-0-5",
-};
-
-function MessageRow({
-  role,
-  content,
-  index,
-  durationMs = null,
-  pending = false,
-}: {
-  role: MessageRole;
-  content: string;
-  index?: number;
-  durationMs?: number | null;
-  pending?: boolean;
-}) {
-  return (
-    <div className={cn("rounded-xl p-3 border", ROLE_STYLE[role])}>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="tag-label text-basic-muted">{role}</span>
-        <span className="text-micro text-basic-muted font-mono">
-          {pending ? "submitted" : `#${index}`}
-          {durationMs != null ? ` · ${formatDurationShort(durationMs)}` : ""}
-        </span>
-      </div>
-      <div className="markdown paragraph-medium text-basic-secondary">
-        <Markdown>{content}</Markdown>
-      </div>
-    </div>
-  );
+interface TranscriptProps {
+  snapshot: SessionSnapshotResponse | null;
+  /** Brings the matching side panel forward when the chat points at a row. */
+  onFocusPanel: (panel: SessionPanel) => void;
 }
 
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
  * fed by the SSE runtime store. Auto-scrolls to the bottom on new content.
  */
-export function Transcript({ snapshot }: { snapshot: SessionSnapshotResponse | null }) {
+export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   const running = useRunning();
   const activity = useActivity();
   const error = useRunError();
-  const messages = useMemo(() => mapMessages(snapshot), [snapshot]);
+  const liveThreads = useLiveThreads();
+  const selectedThread = useSelectedThread();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const turns = useMemo(
+    () => buildTranscript(snapshot, liveThreads),
+    [snapshot, liveThreads],
+  );
+
+  const model = snapshot?.metadata.model ?? "";
+  const workspace = snapshot?.workspace ?? null;
+  const additions = workspace?.total_additions ?? 0;
+  const deletions = workspace?.total_deletions ?? 0;
 
   // While a run is in flight the just-submitted user message may not be in the
   // persisted snapshot yet; surface it from active_run so the chat feels live.
@@ -102,57 +54,83 @@ export function Transcript({ snapshot }: { snapshot: SessionSnapshotResponse | n
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
     : "";
-  const last = messages[messages.length - 1];
+  const last = turns[turns.length - 1];
   const showPending = Boolean(
-    pendingText &&
-      !(
-        last?.role === "user" &&
-        displayPromptFromMessageText(last.rawContent) === pendingText
-      ),
+    pendingText && !(last?.kind === "user" && last.text === pendingText),
   );
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, running, activity, showPending]);
+    if (!el) return;
+    // Markdown blocks settle their height after this effect runs, so measuring
+    // on the next frame is what actually lands on the newest message.
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [turns, running, activity, showPending]);
+
+  const focusThread = (name: string) => {
+    selectThread(name);
+    onFocusPanel("threads");
+  };
+  const focusWorkset = (id: string) => {
+    selectWorkset(id);
+    onFocusPanel("worksets");
+  };
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
       {/* The top bar is fixed over this scroll region, so the first message
           needs to clear it. */}
-      <div className="flex flex-col gap-3 pt-[72px] pb-4">
+      <div className="flex flex-col gap-6 pt-[72px] pb-4 [&>*]:shrink-0">
         {!snapshot ? (
           <div className="text-basic-muted label-small">Loading…</div>
         ) : null}
 
-        {snapshot && messages.length === 0 && !running && !showPending ? (
+        {snapshot && turns.length === 0 && !running && !showPending ? (
           <div className="text-basic-muted label-small">
             No messages yet. Type something below.
           </div>
         ) : null}
 
-        {messages.map((message) => (
-          <MessageRow
-            key={message.key}
-            role={message.role}
-            content={message.content}
-            index={message.index}
-            durationMs={message.durationMs}
-          />
-        ))}
+        {turns.map((turn, index) =>
+          turn.kind === "user" ? (
+            <UserMessage key={turn.key} text={turn.text} />
+          ) : (
+            <ModelMessage
+              key={turn.key}
+              turn={turn}
+              model={model}
+              active={running && index === turns.length - 1}
+              selectedThread={selectedThread}
+              onSelectThread={focusThread}
+              onSelectWorkset={focusWorkset}
+            />
+          ),
+        )}
 
-        {showPending ? (
-          <MessageRow role="user" content={pendingText} pending />
-        ) : null}
+        {showPending ? <UserMessage text={pendingText} pending /> : null}
 
         {running ? (
-          <div className="rounded-xl p-3 border border-secondary bg-elevation-level-1">
-            <div className="tag-label text-basic-muted mb-1">assistant</div>
-            <div className="flex items-center gap-2 paragraph-medium text-basic-tertiary">
-              <span className="text-shimmer-accent">{activity || "Working…"}</span>
-              <span className="stream-caret" />
-            </div>
+          <div className="flex items-center gap-3">
+            <ModelPill active />
+            <span className="paragraph-medium text-shimmer-basic">
+              {activity || "Working…"}
+            </span>
           </div>
+        ) : null}
+
+        {/* The backend keeps one running diff for the workspace rather than a
+            snapshot per turn, so it belongs after the last message. */}
+        {!running && (additions || deletions) ? (
+          <ChatBadge
+            label="Snapshot"
+            trailing={
+              <CodeChangesBadge additions={additions} deletions={deletions} />
+            }
+            onClick={() => onFocusPanel("changes")}
+          />
         ) : null}
 
         {error && !running ? (

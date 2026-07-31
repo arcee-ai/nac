@@ -27,6 +27,7 @@ import {
 import { useSessions, useSessionSnapshot } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
+  revealSidePanel,
   toggleSidePanelCollapsed,
   useSidePanelLayout,
 } from "@/app/store/sessionLayoutStore";
@@ -88,6 +89,11 @@ export default function SessionPage() {
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
+  const focusPanel = (next: SessionPanel) => {
+    revealSidePanel();
+    goToPanel(next);
+  };
+
   return (
     <section className="flex h-full min-h-0 bg-elevation-ground">
       {showSideBox ? (
@@ -144,7 +150,7 @@ export default function SessionPage() {
                 </Tooltip>
               </div>
             ) : null}
-            <Transcript snapshot={snapshot} />
+            <Transcript snapshot={snapshot} onFocusPanel={focusPanel} />
             <div className="shrink-0 py-2">
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
             </div>

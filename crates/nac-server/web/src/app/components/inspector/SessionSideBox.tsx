@@ -10,13 +10,17 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ChangesView } from "@/app/components/inspector/ChangesView";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { WorkspaceView } from "@/app/components/inspector/WorkspaceView";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 import {
+  selectThread,
+  selectWorkset,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
+  useSelectedThread,
+  useSelectedWorkset,
   useSidePanelLayout,
 } from "@/app/store/sessionLayoutStore";
 import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
@@ -84,6 +88,8 @@ export function SessionSideBox({
 }: SessionSideBoxProps) {
   const layout = useSidePanelLayout();
   const expanded = layout === "expanded";
+  const selectedThread = useSelectedThread();
+  const selectedWorkset = useSelectedWorkset();
 
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1">
@@ -133,12 +139,24 @@ export function SessionSideBox({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col [&>*]:shrink-0">
+      <div className="flex-1 min-h-0 flex flex-col">
         {panel === "changes" ? (
-          <WorkspaceView sessionId={sessionId} snapshot={snapshot} />
+          <ChangesView sessionId={sessionId} snapshot={snapshot} />
         ) : null}
-        {panel === "worksets" ? <WorksetsView snapshot={snapshot} /> : null}
-        {panel === "threads" ? <ThreadsView snapshot={snapshot} /> : null}
+        {panel === "worksets" ? (
+          <WorksetsView
+            snapshot={snapshot}
+            selected={selectedWorkset}
+            onSelect={selectWorkset}
+          />
+        ) : null}
+        {panel === "threads" ? (
+          <ThreadsView
+            snapshot={snapshot}
+            selected={selectedThread}
+            onSelect={selectThread}
+          />
+        ) : null}
       </div>
 
       <SideBoxFooter workspace={snapshot?.workspace ?? null} />

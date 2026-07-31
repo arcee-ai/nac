@@ -1,5 +1,6 @@
-// How the session screen splits between the side box and the chat. Kept outside
-// the URL because it is a viewing preference, not a location.
+// How the session screen splits between the side box and the chat, and which
+// row the side box points at. Kept outside the URL because both are viewing
+// preferences, not locations.
 
 import { createStore } from "@/app/lib/store";
 
@@ -7,10 +8,16 @@ export type SidePanelLayout = "split" | "expanded" | "collapsed";
 
 interface SessionLayoutState {
   layout: SidePanelLayout;
+  /** Thread the chat last pointed the Threads panel at. */
+  selectedThread: string | null;
+  /** Workset the chat last pointed the Worksets panel at. */
+  selectedWorkset: string | null;
 }
 
 export const sessionLayoutStore = createStore<SessionLayoutState>({
   layout: "split",
+  selectedThread: null,
+  selectedWorkset: null,
 });
 
 const { getState, setState, useStore } = sessionLayoutStore;
@@ -25,4 +32,19 @@ export function toggleSidePanelCollapsed(): void {
   setState({ layout: getState().layout === "collapsed" ? "split" : "collapsed" });
 }
 
+/** Bring the side box back on screen when the chat points at one of its rows. */
+export function revealSidePanel(): void {
+  if (getState().layout === "collapsed") setState({ layout: "split" });
+}
+
+export function selectThread(selectedThread: string | null): void {
+  setState({ selectedThread });
+}
+
+export function selectWorkset(selectedWorkset: string | null): void {
+  setState({ selectedWorkset });
+}
+
 export const useSidePanelLayout = () => useStore((s) => s.layout);
+export const useSelectedThread = () => useStore((s) => s.selectedThread);
+export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);

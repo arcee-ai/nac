@@ -22,6 +22,7 @@ export {
 export { default as Loader, LoaderSize, LoaderVariant } from "./loader";
 export { default as Logo } from "./logo";
 export { default as Modal, ModalSize } from "./modal";
+export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as Select, type SelectItem } from "./select";
 export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
 export { default as Separator } from "./separator";
