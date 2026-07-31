@@ -1324,13 +1324,22 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-// The frontend is a buildless React + htm app under `assets/`. It is embedded
-// into the binary at compile time so `nac-web` stays a single self-contained
-// executable with no runtime filesystem dependency on the asset tree.
+// The frontend is a Vite/React app built from `web/` into `assets/dist/`. That
+// output is committed, so building this crate never needs Node, and the whole
+// `assets/` tree is embedded at compile time to keep `nac-web` a single
+// self-contained executable with no runtime filesystem dependency.
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
-async fn index_html() -> Html<&'static str> {
-    Html(include_str!("../assets/next.html"))
+async fn index_html() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // The entry document names the hashed bundles, so it must never be
+            // cached or a client would keep loading a stale build forever.
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../assets/dist/index.html"),
+    )
 }
 
 async fn legacy_index_html() -> Html<&'static str> {
@@ -1360,12 +1369,25 @@ async fn redesign_css() -> impl IntoResponse {
     )
 }
 
+// Everything Vite emits under `dist/assets/` carries a content hash in its
+// filename, so those responses can be cached indefinitely.
+pub(crate) fn asset_cache_control(path: &str) -> &'static str {
+    if path.starts_with("dist/assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
 // Serve any embedded asset by its path relative to the `assets/` root (the
 // `/assets/` prefix is stripped by the route). Returns 404 for unknown paths.
 async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
     match ASSETS.get_file(&path) {
         Some(file) => (
-            [(header::CONTENT_TYPE, asset_content_type(&path))],
+            [
+                (header::CONTENT_TYPE, asset_content_type(&path)),
+                (header::CACHE_CONTROL, asset_cache_control(&path)),
+            ],
             file.contents(),
         )
             .into_response(),

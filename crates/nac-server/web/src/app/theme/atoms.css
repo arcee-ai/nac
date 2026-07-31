@@ -1,0 +1,185 @@
+/* Atom styles ported from ArceeFM (button/index.css, input/index.css) with
+   @apply resolved to concrete values. Colours use design tokens directly.
+   The size matrix is generalized to size+content (variant-agnostic) since the
+   values are identical across variants (plus a secondary large-icon override). */
+
+/* ============================ ICON ============================ */
+.icon { display: block; }
+.icon path { transition: fill 0.2s ease-out; }
+
+/* ============================ BUTTON ============================ */
+.btn {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  cursor: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  border-radius: 4px;
+  box-shadow: none;
+  transition: color 0.2s ease-out, background-color 0.2s ease-out,
+    border-color 0.2s ease-out;
+  transition-property: color, background-color, border-color;
+}
+.btn:focus-visible { outline: 2px solid var(--blue-500); outline-offset: -2px; }
+.btn-disabled { cursor: not-allowed; }
+
+.btn-small { gap: 0.25rem; font-size: 0.75rem; line-height: 1rem; font-weight: 500; font-family: Inter; }
+.btn-medium { gap: 0.375rem; font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; font-family: Inter; }
+.btn-large { gap: 0.5rem; font-size: 1rem; line-height: 1.5rem; font-weight: 500; font-family: Inter; }
+
+/* size + content sizing */
+.btn-small.btn-icon { height: 24px; padding: 0 4px; }
+.btn-small.btn-icon-left { height: 24px; padding-left: 4px; padding-right: 8px; }
+.btn-small.btn-icon-right { height: 24px; padding-left: 8px; padding-right: 4px; }
+.btn-small.btn-text { height: 24px; padding: 0 8px; }
+.btn-medium.btn-icon { height: 36px; padding: 0 8px; }
+.btn-medium.btn-icon-left { height: 36px; padding-left: 8px; padding-right: 16px; }
+.btn-medium.btn-icon-right { height: 36px; padding-left: 16px; padding-right: 8px; }
+.btn-medium.btn-text { height: 36px; padding: 0 16px; }
+.btn-large.btn-icon { height: 48px; padding: 0 12px; }
+.btn-large.btn-icon-left { height: 48px; padding-left: 12px; padding-right: 24px; }
+.btn-large.btn-icon-right { height: 48px; padding-left: 24px; padding-right: 12px; }
+.btn-large.btn-text { height: 48px; padding: 0 24px; }
+/* secondary-family large icon square override (11px) */
+.btn-secondary.btn-large.btn-icon,
+.btn-secondary-highlighted.btn-large.btn-icon,
+.btn-secondary-accent.btn-large.btn-icon,
+.btn-secondary-accent-highlighted.btn-large.btn-icon,
+.btn-secondary-destructive.btn-large.btn-icon { padding: 0 11px; }
+
+/* ---- colour variants ---- */
+.btn-primary { color: var(--color-text-btn-primary); background-color: var(--color-bg-btn-primary); box-shadow: var(--shadow-convex); }
+.btn-primary:hover { background-color: var(--color-bg-btn-primary-hovered); }
+.btn-primary:active { background-color: var(--color-bg-btn-primary-pressed); }
+.btn-primary.btn-disabled { box-shadow: none; color: var(--color-text-btn-primary-disabled); background-color: var(--color-bg-btn-primary-disabled); }
+.btn-primary.btn-disabled:hover, .btn-primary.btn-disabled:active { color: var(--color-text-btn-primary-disabled); background-color: var(--color-bg-btn-primary-disabled); }
+
+.btn-secondary { color: var(--color-text-btn-secondary); background-color: var(--color-bg-btn-secondary); box-shadow: var(--shadow-convex); }
+.btn-secondary:hover { color: var(--color-text-btn-secondary-hovered); background-color: var(--color-bg-btn-secondary-hovered); }
+.btn-secondary:active { color: var(--color-text-btn-secondary-pressed); background-color: var(--color-bg-btn-secondary-pressed); }
+.btn-secondary.btn-disabled { box-shadow: none; color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-disabled); }
+.btn-secondary.btn-disabled:hover, .btn-secondary.btn-disabled:active { color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-disabled); }
+
+.btn-secondary-destructive { color: var(--color-text-btn-destructive); background-color: var(--color-bg-btn-secondary-destructive); box-shadow: var(--shadow-convex); }
+.btn-secondary-destructive:hover { color: var(--color-text-btn-destructive-hovered); background-color: var(--color-bg-btn-secondary-destructive-hovered); }
+.btn-secondary-destructive:active { color: var(--color-text-btn-destructive-pressed); background-color: var(--color-bg-btn-secondary-destructive-pressed); }
+.btn-secondary-destructive.btn-disabled { box-shadow: none; color: var(--color-text-btn-destructive-disabled); background-color: var(--color-bg-btn-secondary-destructive-disabled); }
+.btn-secondary-destructive.btn-disabled:hover, .btn-secondary-destructive.btn-disabled:active { color: var(--color-text-btn-destructive-disabled); background-color: var(--color-bg-btn-secondary-destructive-disabled); }
+
+.btn-secondary-accent { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-secondary-accent); box-shadow: var(--shadow-convex); }
+.btn-secondary-accent:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-secondary-accent-hovered); }
+.btn-secondary-accent:active { color: var(--color-text-btn-accent-pressed); background-color: var(--color-bg-btn-secondary-accent-pressed); }
+.btn-secondary-accent.btn-disabled { box-shadow: none; color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-disabled); }
+.btn-secondary-accent.btn-disabled:hover, .btn-secondary-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-disabled); }
+
+.btn-secondary-highlighted { color: var(--color-text-btn-secondary); background-color: var(--color-bg-btn-secondary-highlighted); box-shadow: var(--shadow-convex); }
+.btn-secondary-highlighted:hover { color: var(--color-text-btn-secondary-hovered); background-color: var(--color-bg-btn-secondary-highlighted-hovered); }
+.btn-secondary-highlighted:active { color: var(--color-text-btn-secondary-pressed); background-color: var(--color-bg-btn-secondary-highlighted-pressed); }
+.btn-secondary-highlighted.btn-disabled { box-shadow: none; color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
+.btn-secondary-highlighted.btn-disabled:hover, .btn-secondary-highlighted.btn-disabled:active { color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
+
+.btn-secondary-accent-highlighted { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-secondary-accent-highlighted); box-shadow: var(--shadow-convex); }
+.btn-secondary-accent-highlighted:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered); }
+.btn-secondary-accent-highlighted:active { color: var(--color-text-btn-accent-pressed); background-color: var(--color-bg-btn-secondary-accent-highlighted-pressed); }
+.btn-secondary-accent-highlighted.btn-disabled { box-shadow: none; color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled); }
+.btn-secondary-accent-highlighted.btn-disabled:hover, .btn-secondary-accent-highlighted.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled); }
+
+.btn-ghost { color: var(--color-text-btn-ghost); background-color: var(--color-bg-btn-ghost); }
+.btn-ghost:hover { color: var(--color-text-btn-ghost-hovered); background-color: var(--color-bg-btn-ghost-hovered); }
+.btn-ghost:active { color: var(--color-text-btn-ghost-pressed); background-color: var(--color-bg-btn-ghost-pressed); }
+.btn-ghost.btn-disabled { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-disabled); }
+.btn-ghost.btn-disabled:hover, .btn-ghost.btn-disabled:active { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-disabled); }
+
+.btn-ghost-destructive { color: var(--color-text-btn-destructive); background-color: var(--color-bg-btn-ghost-destructive); }
+.btn-ghost-destructive:hover { color: var(--color-text-btn-destructive-hovered); background-color: var(--color-bg-btn-ghost-destructive-hovered); }
+.btn-ghost-destructive:active { color: var(--color-text-btn-destructive-pressed); background-color: var(--color-bg-btn-ghost-destructive-pressed); }
+.btn-ghost-destructive.btn-disabled { color: var(--color-text-btn-destructive-disabled); background-color: var(--color-bg-btn-ghost-destructive-disabled); }
+.btn-ghost-destructive.btn-disabled:hover, .btn-ghost-destructive.btn-disabled:active { color: var(--color-text-btn-destructive-disabled); background-color: var(--color-bg-btn-ghost-destructive-disabled); }
+
+.btn-ghost-accent { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-ghost-accent); }
+.btn-ghost-accent:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-ghost-accent-hovered); }
+.btn-ghost-accent:active { color: var(--color-text-btn-accent-pressed); background-color: var(--color-bg-btn-ghost-accent-pressed); }
+.btn-ghost-accent.btn-disabled { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-disabled); }
+.btn-ghost-accent.btn-disabled:hover, .btn-ghost-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-disabled); }
+
+.btn-ghost-highlighted { color: var(--color-text-btn-ghost); background-color: var(--color-bg-btn-ghost-highlighted); }
+.btn-ghost-highlighted:hover { color: var(--color-text-btn-ghost-hovered); background-color: var(--color-bg-btn-ghost-highlighted-hovered); }
+.btn-ghost-highlighted:active { color: var(--color-text-btn-ghost-pressed); background-color: var(--color-bg-btn-ghost-highlighted-pressed); }
+.btn-ghost-highlighted.btn-disabled { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
+.btn-ghost-highlighted.btn-disabled:hover, .btn-ghost-highlighted.btn-disabled:active { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
+
+.btn-ghost-highlighted-accent { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-ghost-accent-highlighted); }
+.btn-ghost-highlighted-accent:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-ghost-accent-highlighted-hovered); }
+.btn-ghost-highlighted-accent:active { color: var(--color-text-btn-accent-pressed); background-color: var(--color-bg-btn-ghost-accent-highlighted-pressed); }
+.btn-ghost-highlighted-accent.btn-disabled { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-highlighted-disabled); }
+.btn-ghost-highlighted-accent.btn-disabled:hover, .btn-ghost-highlighted-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-highlighted-disabled); }
+
+.btn-tertiary { color: var(--color-text-btn-secondary); }
+.btn-tertiary:hover { color: var(--color-text-btn-secondary-hovered); }
+.btn-tertiary:active { color: var(--color-text-btn-secondary-pressed); }
+.btn-tertiary.btn-disabled, .btn-tertiary.btn-disabled:hover, .btn-tertiary.btn-disabled:active { color: var(--color-text-btn-secondary-disabled); }
+
+.btn-tertiary-destructive { color: var(--color-text-btn-destructive); }
+.btn-tertiary-destructive:hover { color: var(--color-text-btn-destructive-hovered); }
+.btn-tertiary-destructive:active { color: var(--color-text-btn-destructive-pressed); }
+.btn-tertiary-destructive.btn-disabled, .btn-tertiary-destructive.btn-disabled:hover, .btn-tertiary-destructive.btn-disabled:active { color: var(--color-text-btn-destructive-disabled); }
+
+.btn-tertiary-accent { color: var(--color-text-btn-accent); }
+.btn-tertiary-accent:hover { color: var(--color-text-btn-accent-hovered); }
+.btn-tertiary-accent:active { color: var(--color-text-btn-accent-pressed); }
+.btn-tertiary-accent.btn-disabled, .btn-tertiary-accent.btn-disabled:hover, .btn-tertiary-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); }
+
+/* icon rotate helper */
+.btn.btn-icon-rotate .icon { transition: transform 0.2s ease-out; }
+.btn.btn-icon-rotate:hover .icon { transform: rotate(180deg); }
+
+/* icon sizing per button size */
+.btn-small .icon, .btn-small .icon > svg { width: 16px; height: 16px; min-width: 16px; min-height: 16px; }
+.btn-medium .icon, .btn-medium .icon > svg { width: 20px; height: 20px; min-width: 20px; min-height: 20px; }
+.btn-large .icon, .btn-large .icon > svg { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+
+/* icon fill per variant/state */
+.btn-primary .icon path { fill: var(--color-fill-btn-primary); }
+.btn-primary.btn-disabled .icon path { fill: var(--color-fill-btn-primary-disabled); }
+.btn-secondary .icon path, .btn-secondary-highlighted .icon path, .btn-ghost .icon path, .btn-tertiary .icon path, .btn-ghost-highlighted .icon path { fill: var(--color-fill-btn-secondary); }
+.btn-secondary:hover .icon path, .btn-secondary-highlighted:hover .icon path, .btn-ghost:hover .icon path, .btn-tertiary:hover .icon path, .btn-ghost-highlighted:hover .icon path { fill: var(--color-fill-btn-secondary-hovered); }
+.btn-secondary:active .icon path, .btn-secondary-highlighted:active .icon path, .btn-ghost:active .icon path, .btn-tertiary:active .icon path, .btn-ghost-highlighted:active .icon path { fill: var(--color-fill-btn-secondary-pressed); }
+.btn-secondary.btn-disabled .icon path, .btn-secondary-highlighted.btn-disabled .icon path, .btn-ghost.btn-disabled .icon path, .btn-tertiary.btn-disabled .icon path, .btn-ghost-highlighted.btn-disabled .icon path { fill: var(--color-fill-btn-secondary-disabled); }
+.btn-secondary-accent .icon path, .btn-secondary-accent-highlighted .icon path, .btn-ghost-accent .icon path, .btn-tertiary-accent .icon path, .btn-ghost-highlighted-accent .icon path { fill: var(--color-fill-btn-accent); }
+.btn-secondary-accent:hover .icon path, .btn-secondary-accent-highlighted:hover .icon path, .btn-ghost-accent:hover .icon path, .btn-tertiary-accent:hover .icon path, .btn-ghost-highlighted-accent:hover .icon path { fill: var(--color-fill-btn-accent-hovered); }
+.btn-secondary-accent:active .icon path, .btn-secondary-accent-highlighted:active .icon path, .btn-ghost-accent:active .icon path, .btn-tertiary-accent:active .icon path, .btn-ghost-highlighted-accent:active .icon path { fill: var(--color-fill-btn-accent-pressed); }
+.btn-secondary-destructive .icon path, .btn-ghost-destructive .icon path, .btn-tertiary-destructive .icon path { fill: var(--color-fill-btn-destructive); }
+.btn-secondary-destructive:hover .icon path, .btn-ghost-destructive:hover .icon path, .btn-tertiary-destructive:hover .icon path { fill: var(--color-fill-btn-destructive-hovered); }
+.btn-secondary-destructive:active .icon path, .btn-ghost-destructive:active .icon path, .btn-tertiary-destructive:active .icon path { fill: var(--color-fill-btn-destructive-pressed); }
+
+/* ============================ INPUT ============================ */
+.input {
+  width: 100%;
+  border: none;
+  color: var(--color-text-input);
+  background-color: var(--color-bg-input);
+  box-shadow: var(--shadow-concave);
+  transition: color 0.3s ease-out, background-color 0.3s ease-out, outline 0.3s ease-out;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.input::placeholder { color: var(--color-text-input-placeholder); }
+.input:focus, .input:focus-visible { outline: 2px solid var(--color-bg-accent-inverse); outline-offset: -2px; }
+.input:disabled { color: var(--color-text-input-disabled); background-color: var(--color-bg-input-disabled); opacity: 0.75; }
+.input-validation, .input-validation:hover { outline: 2px solid var(--color-border-error-primary); outline-offset: -2px; }
+.input-validation:focus { outline: 2px solid var(--color-bg-accent-inverse); outline-offset: -2px; }
+.input-small { height: 24px; font-size: 0.75rem; }
+.input-medium { height: 36px; font-size: 0.875rem; }
+.input-large { height: 48px; font-size: 1rem; }
+.input-wrapper .btn { position: absolute; top: 0; }
+.input-wrapper .input-btn-leading { left: 0; }
+.input-wrapper .input-btn-trailing { right: 0; }
+
+/* ============================ TABS ============================ */
+.tab-btn { justify-content: flex-start; }
+
+/* ============================ TOOLTIP ============================ */
+.tooltip-box { pointer-events: none; }
+.group:hover .tooltip-box { pointer-events: auto; }

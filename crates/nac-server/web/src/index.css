@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@import "./app-theme.css";
+@config "../tailwind.config.js";
+
+@layer utilities, components;
+
+/* Font subset shared with ArceeFM. These live here rather than in a theme file
+   because `@import` is inlined before URL rebasing, so relative paths have to
+   be written from this file's location to survive the build. */
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-Italic.woff2") format("woff2");
+  font-weight: 400; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-Medium.woff2") format("woff2");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-MediumItalic.woff2") format("woff2");
+  font-weight: 500; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-SemiBold.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-SemiBoldItalic.woff2") format("woff2");
+  font-weight: 600; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-Bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./app/assets/fonts/Inter24pt-BoldItalic.woff2") format("woff2");
+  font-weight: 700; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "IBMPlexMono";
+  src: url("./app/assets/fonts/IBMPlexMono-Medium.woff") format("woff"),
+    url("./app/assets/fonts/IBMPlexMono-Medium.ttf") format("truetype");
+  font-weight: 500; font-style: normal;
+}
+@font-face {
+  font-family: "Asap";
+  src: url("./app/assets/fonts/Asap-Bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--color-bg-elevation-ground);
+  color: var(--color-text-basic-primary);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-bg-scrollbar);
+  border-radius: 4px;
+}
