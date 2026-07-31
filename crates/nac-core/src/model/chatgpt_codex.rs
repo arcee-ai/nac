@@ -557,7 +557,7 @@ async fn post_codex_json_with_retry(
         message: "No attempts made".to_string(),
     };
 
-    for attempt in 0..20 {
+    for attempt in 0..10 {
         let response = match client
             .post(url)
             .header("Authorization", format!("Bearer {}", auth.access))
@@ -577,7 +577,7 @@ async fn post_codex_json_with_retry(
                     status: None,
                     message: format!("HTTP request failed for {url}: {e}"),
                 };
-                if attempt < 4 {
+                if attempt < 9 {
                     sleep(super::backoff_duration(attempt)).await;
                 }
                 continue;
@@ -617,7 +617,7 @@ async fn post_codex_json_with_retry(
         }
         if status.as_u16() == 429 || status.is_server_error() {
             last_error = error;
-            if attempt < 4 {
+            if attempt < 9 {
                 let delay = if status.as_u16() == 429 {
                     retry_after
                         .map(Duration::from_secs)

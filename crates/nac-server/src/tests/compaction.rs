@@ -469,7 +469,9 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
     assert!(service.active_compaction().is_some());
 
     endpoint.abort();
-    let result = tokio::time::timeout(Duration::from_secs(2), compact)
+    // The failed model request is retried up to 10 times with jittered
+    // 200ms*2^n backoff capped at 30s, so natural exhaustion can take ~90s.
+    let result = tokio::time::timeout(Duration::from_secs(120), compact)
         .await
         .expect("failed model request should resolve compaction")
         .unwrap();

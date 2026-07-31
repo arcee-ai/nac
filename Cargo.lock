@@ -1150,6 +1150,7 @@ dependencies = [
  "fs2",
  "libc",
  "portable-pty",
+ "rand",
  "reqwest",
  "rmcp",
  "rusqlite",

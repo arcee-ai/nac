@@ -454,7 +454,7 @@ impl ModelClient {
             message: "No attempts made".to_string(),
         };
 
-        for attempt in 0..20 {
+        for attempt in 0..10 {
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
@@ -475,7 +475,7 @@ impl ModelClient {
                         status: None,
                         message: format!("HTTP request failed for {}: {}", url, e),
                     };
-                    if attempt < 4 {
+                    if attempt < 9 {
                         sleep(super::backoff_duration(attempt)).await;
                     }
                     continue;
@@ -540,7 +540,7 @@ impl ModelClient {
 
             if status.as_u16() == 429 || status.is_server_error() {
                 last_error = error;
-                if attempt < 4 {
+                if attempt < 9 {
                     let delay = if status.as_u16() == 429 {
                         retry_after
                             .map(Duration::from_secs)
