@@ -192,6 +192,23 @@ export interface WorkspaceSnapshot {
   error: string | null;
 }
 
+export interface Branch {
+  name: string;
+  is_current: boolean;
+}
+
+export interface BranchList {
+  current: string | null;
+  branches: Branch[];
+  /** Tracked files differ from HEAD, so switching away is refused. */
+  dirty: boolean;
+}
+
+export interface SwitchBranchRequest {
+  name: string;
+  create?: boolean;
+}
+
 export interface WorkspaceDiffTotals {
   total_additions: number;
   total_deletions: number;

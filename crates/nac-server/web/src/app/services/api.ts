@@ -4,6 +4,7 @@
 // itself, and in development the Vite proxy forwards the API routes to it.
 
 import type {
+  BranchList,
   CompactSessionResponse,
   CreateSessionRequest,
   LaunchModelDefaults,
@@ -19,6 +20,7 @@ import type {
   SessionSummarySnapshot,
   StoreInfo,
   SubmitPromptResponse,
+  SwitchBranchRequest,
   ThreadEventPage,
   ThreadSteeringResponse,
   UpdateConfigRequest,
@@ -211,6 +213,16 @@ export const api = {
       { signal },
     );
   },
+
+  getBranches: (id: string, signal?: AbortSignal) =>
+    request<BranchList>("GET", `${sessionPath(id)}/workspace/branches`, {
+      signal,
+    }),
+
+  switchBranch: (id: string, body: SwitchBranchRequest) =>
+    request<BranchList>("POST", `${sessionPath(id)}/workspace/branches`, {
+      body,
+    }),
 
   generateOverview: (id: string) =>
     request<{ session_id: string; summary: string }>(

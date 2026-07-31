@@ -44,6 +44,7 @@ use nac_core::{
     sessions,
     types::Message,
     view::{self, SessionSummarySnapshot},
+    workspace,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -301,6 +302,14 @@ pub struct ReorderSessionsResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SwitchBranchRequest {
+    pub name: String,
+    /// Make the branch first, off the current HEAD.
+    #[serde(default)]
+    pub create: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -916,6 +925,77 @@ impl SessionManager {
         .context("workspace diff task failed")?
     }
 
+    /// Host checkout of a session, refusing when an agent could be working in
+    /// it. Several sessions may share one directory, so every one of them has
+    /// to be quiet, not just this one.
+    async fn idle_workspace_root(&self, session_id: &str) -> Result<PathBuf> {
+        let sessions = self.list_sessions(false).await?;
+        let summary = sessions
+            .iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let root = summary
+            .summary
+            .workspace_host_path
+            .clone()
+            .ok_or_else(|| {
+                anyhow!("branch operations are not supported for remote/sandbox-only sessions")
+            })?;
+
+        if let Some(busy) = sessions.iter().find(|entry| {
+            entry.active_run.is_some()
+                && entry.summary.workspace_host_path.as_deref() == Some(root.as_path())
+        }) {
+            return Err(anyhow!(
+                "workspace is busy: session '{}' has a run in flight",
+                busy.summary.session_id
+            ));
+        }
+
+        Ok(root)
+    }
+
+    pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
+        let summary = self
+            .list_sessions(false)
+            .await?
+            .into_iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .map(|entry| entry.summary)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let root = summary.workspace_host_path.ok_or_else(|| {
+            anyhow!("branch operations are not supported for remote/sandbox-only sessions")
+        })?;
+
+        tokio::task::spawn_blocking(move || workspace::list_branches(&root))
+            .await
+            .context("branch listing task failed")?
+    }
+
+    pub async fn switch_workspace_branch(
+        &self,
+        session_id: &str,
+        request: SwitchBranchRequest,
+    ) -> Result<workspace::BranchList> {
+        let root = self.idle_workspace_root(session_id).await?;
+
+        tokio::task::spawn_blocking(move || {
+            if request.create {
+                // A new branch takes the uncommitted work with it, which is
+                // usually the point of making one, so a dirty tree is fine.
+                return workspace::create_branch(&root, &request.name);
+            }
+            if workspace::list_branches(&root)?.dirty {
+                return Err(anyhow!(
+                    "workspace has uncommitted changes; commit or stash them before switching"
+                ));
+            }
+            workspace::switch_branch(&root, &request.name)
+        })
+        .await
+        .context("branch switch task failed")?
+    }
+
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -1254,6 +1334,10 @@ fn api_router(manager: SessionManager) -> Router {
         )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route(
+            "/sessions/{session_id}/workspace/branches",
+            get(workspace_branches).post(switch_workspace_branch),
+        )
+        .route(
             "/sessions/{session_id}",
             get(session_snapshot).delete(delete_session_handler),
         )
@@ -1503,6 +1587,24 @@ async fn workspace_diff(
     Query(query): Query<WorkspaceDiffQuery>,
 ) -> std::result::Result<Json<view::WorkspaceFileDiff>, ApiError> {
     Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
+}
+
+async fn workspace_branches(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
+    Ok(Json(manager.workspace_branches(&session_id).await?))
+}
+
+async fn switch_workspace_branch(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<SwitchBranchRequest>, JsonRejection>,
+) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager.switch_workspace_branch(&session_id, request).await?,
+    ))
 }
 
 async fn submit_prompt(
@@ -2105,6 +2207,7 @@ impl From<anyhow::Error> for ApiError {
         {
             StatusCode::NOT_FOUND
         } else if message.contains("busy")
+            || message.contains("uncommitted changes")
             || message.contains("no active run")
             || message.contains("not active")
             || message.contains("active run is finishing")

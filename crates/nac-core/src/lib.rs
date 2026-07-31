@@ -21,6 +21,7 @@ pub mod types;
 pub mod upgrade;
 pub mod view;
 mod worker;
+pub mod workspace;
 
 /// Largest token count that can be persisted exactly and transported through
 /// JavaScript-backed public settings without precision loss.

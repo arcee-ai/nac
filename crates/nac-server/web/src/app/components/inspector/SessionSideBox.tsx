@@ -10,6 +10,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChangesView } from "@/app/components/inspector/ChangesView";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
@@ -54,7 +55,13 @@ function FooterChip({
 }
 
 /** Repo, branch and the running diff total, mirroring the Figma box footer. */
-function SideBoxFooter({ workspace }: { workspace: WorkspaceSnapshot | null }) {
+function SideBoxFooter({
+  sessionId,
+  workspace,
+}: {
+  sessionId: string;
+  workspace: WorkspaceSnapshot | null;
+}) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
   const additions = workspace?.total_additions ?? 0;
@@ -64,7 +71,7 @@ function SideBoxFooter({ workspace }: { workspace: WorkspaceSnapshot | null }) {
     <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-2">
       <div className="flex flex-1 min-w-0 items-center gap-[10px]">
         {repo ? <FooterChip iconName={IconName.Folder} label={repo} /> : null}
-        {branch ? <FooterChip iconName={IconName.Scheme} label={branch} /> : null}
+        {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
       </div>
       {additions || deletions ? (
         <div className="flex items-center gap-2 shrink-0 code code-small">
@@ -159,7 +166,7 @@ export function SessionSideBox({
         ) : null}
       </div>
 
-      <SideBoxFooter workspace={snapshot?.workspace ?? null} />
+      <SideBoxFooter sessionId={sessionId} workspace={snapshot?.workspace ?? null} />
     </div>
   );
 }

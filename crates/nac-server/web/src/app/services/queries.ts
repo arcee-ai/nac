@@ -10,6 +10,7 @@ import {
 
 import { api } from "@/app/services/api";
 import type {
+  BranchList,
   CreateSessionRequest,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
@@ -18,6 +19,7 @@ import type {
   SessionSnapshotResponse,
   SessionSummarySnapshot,
   StoreInfo,
+  SwitchBranchRequest,
   UpdateConfigRequest,
   WorkspaceDiffStage,
   WorkspaceFileDiff,
@@ -40,6 +42,7 @@ export const queryKeys = {
     stage: WorkspaceDiffStage | "all",
     context: number,
   ) => ["session", id, "workspace-diff", { path, stage, context }] as const,
+  branches: (id: string) => ["session", id, "branches"] as const,
 };
 
 export function useStoreInfo() {
@@ -106,6 +109,34 @@ export function useWorkspaceDiff(
     queryFn: ({ signal }) =>
       api.getWorkspaceDiff(id!, path!, { stage, context, signal }),
     enabled: Boolean(id && path),
+  });
+}
+
+/**
+ * Local branches of the session's checkout. Only fetched while the picker is
+ * open, since it shells out to git on the host.
+ */
+export function useBranches(id: string | null, enabled: boolean) {
+  return useQuery<BranchList>({
+    queryKey: queryKeys.branches(id ?? ""),
+    queryFn: ({ signal }) => api.getBranches(id!, signal),
+    enabled: Boolean(id) && enabled,
+    staleTime: 5000,
+    retry: false,
+  });
+}
+
+export function useSwitchBranch(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SwitchBranchRequest) => api.switchBranch(id, payload),
+    onSuccess: () => {
+      // The checkout moved, so the branch label, the changed files and every
+      // cached diff under this session are all stale.
+      void client.invalidateQueries({ queryKey: queryKeys.branches(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
+    },
   });
 }
 
