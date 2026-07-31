@@ -120,26 +120,19 @@ export function useDeleteSession() {
 
 export interface RenameSessionVariables {
   id: string;
-  title: string | null;
+  /** Empty string restores the automatic title (the last prompt). */
+  title: string;
   pinned: boolean;
-  sortOrder?: number | null;
   expectedVersion: number;
 }
 
 export function useUpdatePresentation() {
   const invalidate = useInvalidators();
   return useMutation({
-    mutationFn: ({
-      id,
-      title,
-      pinned,
-      sortOrder = null,
-      expectedVersion,
-    }: RenameSessionVariables) =>
+    mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
       api.updatePresentation(id, {
         title,
         pinned,
-        sort_order: sortOrder,
         expected_version: expectedVersion,
       }),
     onSuccess: () => invalidate.sessions(),
@@ -154,7 +147,7 @@ export function useTogglePin() {
     toggle: (summary: SessionSummarySnapshot) =>
       update.mutateAsync({
         id: summary.session_id,
-        title: summary.title ?? null,
+        title: summary.title ?? "",
         pinned: !summary.pinned,
         expectedVersion: summary.presentation_version ?? 0,
       }),

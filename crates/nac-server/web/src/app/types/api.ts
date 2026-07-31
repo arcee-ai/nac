@@ -560,9 +560,9 @@ export interface UpdateConfigRequest {
 }
 
 export interface UpdateSessionPresentationRequest {
-  title: string | null;
+  /** Empty string restores the automatic title; the backend rejects null. */
+  title: string;
   pinned: boolean;
-  sort_order: number | null;
   expected_version: number;
 }
 

@@ -1,97 +1,165 @@
-import { useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { Badge, BadgeColor, BoxSurface, Loader, SessionAvatar } from "@/app/atoms";
 import {
-  displaySessionTitle,
-  isActiveRun,
-  sessionEnvLabel,
-  sessionIdShort,
-} from "@/app/lib/format";
+  BoxSurface,
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Loader,
+  LoaderSize,
+} from "@/app/atoms";
+import { SessionCard } from "@/app/components/sessions/SessionCard";
+import { SessionFilters } from "@/app/components/sessions/SessionFilters";
+import { useIsDesktop } from "@/app/hooks/useMediaQuery";
+import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
+import { errorMessage } from "@/app/providers/ToastProvider";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useSessions } from "@/app/services/queries";
-import { trackAttention, useAttention } from "@/app/store/attentionStore";
+import { clearAttention, trackAttention, useAttention } from "@/app/store/attentionStore";
 import { useVisibleSessions } from "@/app/store/sessionFiltersStore";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
-/**
- * Placeholder board. The real card grid, filters and launch flow arrive with
- * the app shell; this exists so the data layer can be exercised end to end.
- */
+// Columns are 360px at minimum and stretch to fill the row, so the design's
+// 3-up layout falls out naturally at the 1520px reference width and wider
+// viewports gain columns instead of empty space.
+function CardGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
+      {children}
+    </div>
+  );
+}
+
+/** Wrapper so each card can subscribe to its own attention flag. */
+function GridCard({
+  entry,
+  onOpen,
+}: {
+  entry: ManagedSessionSummary;
+  onOpen: (id: string) => void;
+}) {
+  const actions = useSessionActions();
+  const attention = useAttention(entry.summary.session_id);
+
+  return (
+    <SessionCard
+      entry={entry}
+      selected={false}
+      attention={attention}
+      onOpen={onOpen}
+      onTogglePin={(e) => void actions.togglePin(e.summary)}
+      onRename={(e) => actions.rename(e.summary)}
+      onDelete={(e) => actions.remove(e.summary)}
+      onStop={(e) => void actions.stopRun(e.summary)}
+      onCopyId={(id) => void actions.copyId(id)}
+    />
+  );
+}
+
 export default function SessionsListPage() {
-  const { data, isLoading, error } = useSessions();
-  const sessions = useVisibleSessions(data ?? []);
+  const navigate = useNavigate();
+  const isDesktop = useIsDesktop();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const { data, isLoading, isFetching, error } = useSessions();
+  const all = data ?? [];
+  const sessions = useVisibleSessions(all);
 
   useEffect(() => {
     if (data) trackAttention(data, null);
   }, [data]);
 
-  if (isLoading) {
-    return (
-      <div className="p-6 flex items-center gap-3 text-basic-muted">
-        <Loader />
-        Loading sessions…
-      </div>
-    );
-  }
+  const openSession = (id: string) => {
+    clearAttention(id);
+    navigate(routes.session(id));
+  };
 
-  if (error) {
-    return (
-      <div className="p-6 text-error-primary paragraph-medium">
-        {error instanceof Error ? error.message : "Failed to load sessions"}
-      </div>
-    );
-  }
+  const pinned = sessions.filter((entry) => entry.summary.pinned);
+  const unpinned = sessions.filter((entry) => !entry.summary.pinned);
+  const countLabel = `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}`;
 
-  return (
-    <div className="p-6 flex flex-col gap-4 max-w-[900px]">
-      <h1 className="header-medium text-basic-primary">
-        Sessions ({sessions.length})
-      </h1>
-      <BoxSurface title="All sessions">
-        <div className="flex flex-col [&>*]:shrink-0">
-          {sessions.map((entry) => (
-            <SessionRow key={entry.summary.session_id} entry={entry} />
-          ))}
-          {sessions.length === 0 && (
-            <div className="p-4 text-basic-muted paragraph-medium">
-              No sessions yet.
-            </div>
-          )}
-        </div>
-      </BoxSurface>
-    </div>
+  const renderCard = (entry: ManagedSessionSummary) => (
+    <GridCard
+      key={entry.summary.session_id}
+      entry={entry}
+      onOpen={openSession}
+    />
   );
-}
 
-function SessionRow({ entry }: { entry: ManagedSessionSummary }) {
-  const { summary } = entry;
-  const running = isActiveRun(entry.active_run);
-  const needsAttention = useAttention(summary.session_id);
+  const rail = (
+    <BoxSurface
+      title={countLabel}
+      headerContent={
+        isFetching ? <Loader size={LoaderSize.Micro} /> : null
+      }
+      className="h-full"
+      bodyClassName="overflow-auto"
+    >
+      <SessionFilters sessions={all} />
+    </BoxSurface>
+  );
 
   return (
-    <Link
-      to={routes.session(summary.session_id)}
-      className="flex items-center gap-3 px-4 py-3 border-b border-secondary last:border-b-0 hover:bg-elevation-level-1"
-    >
-      <SessionAvatar id={summary.session_id} size={32} />
-      <div className="flex flex-col min-w-0">
-        <span className="label-small text-basic-primary truncate">
-          {displaySessionTitle(summary)}
-        </span>
-        <span className="code code-small text-basic-muted truncate">
-          {sessionIdShort(summary.session_id)} · {summary.cwd}
-        </span>
+    <div className="flex h-full min-h-0">
+      {isDesktop ? (
+        <aside className="w-[360px] shrink-0 p-2 pt-16 min-h-0">{rail}</aside>
+      ) : null}
+
+      <div className="flex-1 min-h-0 overflow-auto px-4">
+        <div className="pb-2 pt-16 flex flex-col gap-6 [&>*]:shrink-0">
+          {!isDesktop ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <div className="header-md text-basic-primary flex-1 min-w-0">
+                  {countLabel}
+                </div>
+                <Button
+                  variant={ButtonVariant.Secondary}
+                  size={ButtonSize.Medium}
+                  content={ButtonContent.IconRight}
+                  onClick={() => setFiltersOpen((v) => !v)}
+                >
+                  Filters
+                  <Icon
+                    iconName={IconName.Down}
+                    className={cn(
+                      "transition-transform",
+                      filtersOpen && "rotate-180",
+                    )}
+                  />
+                </Button>
+              </div>
+              {filtersOpen ? (
+                <BoxSurface>
+                  <SessionFilters sessions={all} />
+                </BoxSurface>
+              ) : null}
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="label-small text-error-primary">
+              {errorMessage(error)}
+            </div>
+          ) : null}
+
+          {!isLoading && sessions.length === 0 ? (
+            <div className="label-small text-basic-muted text-center py-16">
+              No sessions match the current filters.
+            </div>
+          ) : null}
+
+          {pinned.length > 0 ? <CardGrid>{pinned.map(renderCard)}</CardGrid> : null}
+          {unpinned.length > 0 ? (
+            <CardGrid>{unpinned.map(renderCard)}</CardGrid>
+          ) : null}
+        </div>
       </div>
-      <div className="flex-1" />
-      {needsAttention && (
-        <span className="size-2 rounded-full bg-info-primary" aria-hidden />
-      )}
-      <Badge text={sessionEnvLabel(summary)} color={BadgeColor.Gray} />
-      <Badge
-        text={running ? "Running" : "Idle"}
-        color={running ? BadgeColor.Green : BadgeColor.Neutral}
-      />
-    </Link>
+    </div>
   );
 }
