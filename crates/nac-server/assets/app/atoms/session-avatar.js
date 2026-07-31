@@ -36,33 +36,92 @@ export function sessionAvatarColor(id) {
   return `hsl(${hashId(id) % 360} 75% 50%)`;
 }
 
-// One draw per cell out of eight buckets: 1 empty, 4 outline, 3 filled. Tuning
-// these thresholds is the single knob for how dense the pattern looks.
+function neighbours(cell) {
+  const col = cell % GRID;
+  const row = (cell - col) / GRID;
+  const out = [];
+  if (row > 0) out.push(cell - GRID);
+  if (row < GRID - 1) out.push(cell + GRID);
+  if (col > 0) out.push(cell - 1);
+  if (col < GRID - 1) out.push(cell + 1);
+  return out;
+}
+
+// Holes are eroded from the outside in: the frontier starts as the border ring,
+// and an inner cell only becomes eligible once one of its neighbours is already
+// gone. That keeps every hole connected to the outside, so the avatar reads as
+// one solid silhouette with bitten-off edges instead of random speckle.
+function emptyCells(next) {
+  const empty = new Array(CELLS).fill(false);
+  const frontier = [];
+  for (let i = 0; i < CELLS; i += 1) {
+    const col = i % GRID;
+    const row = (i - col) / GRID;
+    if (row === 0 || col === 0 || row === GRID - 1 || col === GRID - 1) frontier.push(i);
+  }
+
+  const target = 4 + (next() % 5);
+  let count = 0;
+  while (count < target && frontier.length > 0) {
+    // Half the time keep eating next to the previous hole, half the time bite
+    // somewhere else on the frontier — a mix of chunks and single nibbles.
+    const at = next() % 2 === 0 ? frontier.length - 1 : next() % frontier.length;
+    const cell = frontier.splice(at, 1)[0];
+    if (empty[cell]) continue;
+    empty[cell] = true;
+    count += 1;
+    for (const n of neighbours(cell)) {
+      if (!empty[n] && !frontier.includes(n)) frontier.push(n);
+    }
+  }
+  return empty;
+}
+
+// Surviving cells split 4:3 between outline and filled. Tuning that ratio and
+// the erosion target above are the two knobs for how the pattern looks.
 function cellStates(id) {
   const next = xorshift32(hashId(id));
+  const empty = emptyCells(next);
   const states = new Array(CELLS);
   for (let i = 0; i < CELLS; i += 1) {
-    const draw = next() % 8;
-    states[i] = draw === 0 ? EMPTY : draw < 5 ? OUTLINE : FILLED;
+    if (empty[i]) {
+      states[i] = EMPTY;
+      continue;
+    }
+    states[i] = next() % 7 < 4 ? OUTLINE : FILLED;
   }
   return states;
 }
 
-// Deterministic 6x6 identicon for a session. Strokes are inset by half their
-// width so they stay inside the cell (matching a CSS border) and never get
-// clipped by the viewBox.
+// Cell borders scale with the avatar instead of being a fixed pixel count:
+// 1.5px at the 40px size used on session cards, proportionally more when the
+// avatar is rendered larger. One pixel is the floor, otherwise the 20px avatars
+// in the breadcrumbs would land on a blurry sub-pixel stroke.
+const CARD_SIZE = 40;
+const CARD_STROKE = 1.5;
+
+// Returned in viewBox units; the divisor accounts for the half-stroke padding
+// the viewBox carries, so the on-screen width lands exactly on the target.
+function strokeWidth(size) {
+  const px = Math.max(1, (CARD_STROKE * size) / CARD_SIZE);
+  return (px * GRID) / (size - px);
+}
+
+// Deterministic 6x6 identicon for a session. Strokes sit centred on the cell
+// boundary, matching the Figma component, so neighbouring cells share one line
+// rather than stacking two; the viewBox is padded by half a stroke so the outer
+// ring is not clipped.
 export function SessionAvatar({ id, size = 40, className = "", ...rest }) {
   const color = sessionAvatarColor(id);
   const states = cellStates(id);
-  const stroke = GRID / size; // one device pixel expressed in viewBox units
-  const inset = stroke / 2;
-  const side = 1 - stroke;
+  const stroke = strokeWidth(size);
+  const half = stroke / 2;
 
   return html`<svg
     class=${cn("block shrink-0", className)}
     width=${size}
     height=${size}
-    viewBox=${`0 0 ${GRID} ${GRID}`}
+    viewBox=${`${-half} ${-half} ${GRID + stroke} ${GRID + stroke}`}
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
@@ -73,10 +132,10 @@ export function SessionAvatar({ id, size = 40, className = "", ...rest }) {
         ? null
         : html`<rect
             key=${i}
-            x=${(i % GRID) + inset}
-            y=${Math.floor(i / GRID) + inset}
-            width=${side}
-            height=${side}
+            x=${i % GRID}
+            y=${Math.floor(i / GRID)}
+            width="1"
+            height="1"
             fill=${state === FILLED ? color : "none"}
             stroke=${color}
             stroke-width=${stroke}

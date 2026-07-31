@@ -1,6 +1,8 @@
 mod compaction;
+pub mod dev;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
+pub use dev::DevMode;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -1221,6 +1223,22 @@ fn validate_bind_address(addr: SocketAddr) -> Result<()> {
 }
 
 pub fn router(manager: SessionManager) -> Router {
+    router_with_dev(manager, None)
+}
+
+/// Same API surface as [`router`], with the frontend either embedded (`None`) or
+/// served from disk in dev mode. See [`dev`].
+pub fn router_with_dev(manager: SessionManager, dev_mode: Option<DevMode>) -> Router {
+    let frontend = match dev_mode {
+        Some(mode) => dev::ui_router(mode),
+        None => embedded_frontend_router(),
+    };
+    api_router(manager)
+        .merge(frontend)
+        .layer(response_compression_layer())
+}
+
+fn embedded_frontend_router() -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
@@ -1231,6 +1249,10 @@ pub fn router(manager: SessionManager) -> Router {
         // an explicit route ahead of the embedded-asset wildcard.
         .route("/assets/app.css", get(redesign_css))
         .route("/assets/{*path}", get(serve_asset))
+}
+
+fn api_router(manager: SessionManager) -> Router {
+    Router::new()
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route(
@@ -1277,16 +1299,23 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(response_compression_layer())
         .with_state(manager)
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    serve_with_dev(addr, manager, None).await
+}
+
+pub async fn serve_with_dev(
+    addr: SocketAddr,
+    manager: SessionManager,
+    dev_mode: Option<DevMode>,
+) -> Result<()> {
     validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, router(manager))
+    axum::serve(listener, router_with_dev(manager, dev_mode))
         .await
         .context("server stopped unexpectedly")
 }
@@ -1308,7 +1337,7 @@ async fn legacy_index_html() -> Html<&'static str> {
     Html(include_str!("../assets/index.html"))
 }
 
-fn asset_content_type(path: &str) -> &'static str {
+pub(crate) fn asset_content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
         Some("js") | Some("mjs") => "application/javascript; charset=utf-8",

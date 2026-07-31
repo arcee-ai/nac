@@ -9,13 +9,21 @@ export const sessionsStore = createStore({
   storeInfo: null,
   sessions: [], // ManagedSessionSummary[]
   snapshots: {}, // id -> SessionSummarySnapshot (full snapshot)
+  snapshotErrors: {}, // id -> last snapshot fetch failure for that session
   attention: {}, // id -> true when a run finished while unfocused
   loading: false,
-  error: null,
+  error: null, // store/list level failures only
 });
 
 const { getState, setState, useStore } = sessionsStore;
 const summaryOf = (entry) => entry.summary || entry;
+
+function clearKey(map, key) {
+  if (!map || !(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+}
 
 // Track prior run activity across polls so we can flag "attention" (a run that
 // finished for a session the user isn't currently viewing).
@@ -64,7 +72,9 @@ export async function loadSessions({ workspaceStats = false, silent = false } = 
   try {
     const raw = await api.listSessions(workspaceStats);
     const list = Array.isArray(raw) ? raw : [];
-    setState({ sessions: list, loading: false, attention: trackAttention(list) });
+    // A successful poll must clear a previous failure, otherwise a single
+    // transient error stays on screen until a full page reload.
+    setState({ sessions: list, loading: false, error: null, attention: trackAttention(list) });
     return list;
   } catch (e) {
     setState({ loading: false, error: `sessions: ${e.message}` });
@@ -72,14 +82,20 @@ export async function loadSessions({ workspaceStats = false, silent = false } = 
   }
 }
 
+// Snapshot failures are per session (a broken model config makes
+// GET /sessions/{id} answer 400 for that one session), so they are kept out of
+// the store-level `error` slot that the sessions list renders.
 export async function loadSnapshot(id) {
   if (!id) return null;
   try {
     const snap = await api.getSession(id);
-    setState((s) => ({ snapshots: { ...s.snapshots, [id]: snap } }));
+    setState((s) => ({
+      snapshots: { ...s.snapshots, [id]: snap },
+      snapshotErrors: clearKey(s.snapshotErrors, id),
+    }));
     return snap;
   } catch (e) {
-    setState({ error: `snapshot: ${e.message}` });
+    setState((s) => ({ snapshotErrors: { ...s.snapshotErrors, [id]: e.message } }));
     return null;
   }
 }
@@ -99,11 +115,10 @@ export async function renameSession(id, payload) {
 
 export async function deleteSession(id) {
   await api.deleteSession(id);
-  setState((s) => {
-    const snapshots = { ...s.snapshots };
-    delete snapshots[id];
-    return { snapshots };
-  });
+  setState((s) => ({
+    snapshots: clearKey(s.snapshots, id),
+    snapshotErrors: clearKey(s.snapshotErrors, id),
+  }));
   await loadSessions({ silent: true });
 }
 
@@ -186,6 +201,7 @@ export const useSessions = () => useStore((s) => s.sessions);
 export const useSessionsLoading = () => useStore((s) => s.loading);
 export const useSessionsError = () => useStore((s) => s.error);
 export const useSnapshot = (id) => useStore((s) => (id ? s.snapshots[id] : undefined));
+export const useSnapshotError = (id) => useStore((s) => (id ? s.snapshotErrors[id] || null : null));
 export const useAttention = (id) => useStore((s) => (id ? !!s.attention[id] : false));
 
 export { getState as getSessionsState };

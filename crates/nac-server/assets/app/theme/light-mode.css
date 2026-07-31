@@ -77,6 +77,7 @@
 
   /* Background / Elevation */
   --color-bg-elevation-ground: var(--gray-50);
+  --color-bg-elevation-ground-transparent: var(--transparent);
 
   --color-bg-elevation-ground-inverse: var(--black);
 

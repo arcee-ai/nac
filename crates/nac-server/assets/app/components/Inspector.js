@@ -8,7 +8,7 @@ import { EventsView } from "./inspector/EventsView.js";
 import { ThreadsView } from "./inspector/ThreadsView.js";
 import { WorksetsView } from "./inspector/WorksetsView.js";
 import { WorkspaceView } from "./inspector/WorkspaceView.js";
-import { useSnapshot } from "../store/sessionsStore.js";
+import { useSnapshot, useSnapshotError } from "../store/sessionsStore.js";
 import { useActiveTab, setActiveTab, TABS } from "../store/selectionStore.js";
 import { useSessionStream } from "../hooks/useSessionStream.js";
 
@@ -57,12 +57,16 @@ function RepairBanner({ message, onSettings }) {
 
 export function Inspector({ id, entry, onRename, onDelete, onSettings, onCancelRun }) {
   const snapshot = useSnapshot(id);
+  const snapshotError = useSnapshotError(id);
   const activeTab = useActiveTab();
   useSessionStream(id);
 
   if (!id) return EmptyState();
 
   const configError = entry && entry.summary && entry.summary.model_config_error;
+  // The repair banner already explains a broken config, and that is exactly why
+  // the snapshot request fails, so only report an unexplained fetch failure.
+  const fetchError = !configError && !snapshot && snapshotError;
 
   return html`<section class="inspector flex flex-col min-h-0 h-full bg-elevation-level-0-5">
     <${InspectorHeader}
@@ -74,6 +78,13 @@ export function Inspector({ id, entry, onRename, onDelete, onSettings, onCancelR
       onCancelRun=${onCancelRun}
     />
     ${configError ? html`<${RepairBanner} message=${configError} onSettings=${onSettings} />` : null}
+    ${fetchError
+      ? html`<div
+          class="px-4 py-2 border-b border-error-muted bg-error-tertiary text-error-primary label-small shrink-0"
+        >
+          ${fetchError}
+        </div>`
+      : null}
     <nav class="flex gap-1 px-2 border-b border-primary shrink-0 overflow-x-auto">
       ${TABS.map(
         (t) => html`<${HorizontalTabsItem}

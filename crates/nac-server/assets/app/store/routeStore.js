@@ -1,5 +1,5 @@
 import { createStore } from "../lib/store.js";
-import { selectSession } from "./selectionStore.js";
+import { clearSelection, selectSession } from "./selectionStore.js";
 import { loadSnapshot, clearAttention } from "./sessionsStore.js";
 
 export const ROUTE_LIST = "list";
@@ -29,6 +29,9 @@ function applyHash() {
   if (route.name === ROUTE_SESSION) {
     selectSession(route.sessionId);
     loadSnapshot(route.sessionId);
+  } else {
+    // Otherwise the last opened card keeps its selected outline on the list.
+    clearSelection();
   }
 }
 
@@ -57,6 +60,7 @@ export function openSession(id) {
 }
 
 export function openList() {
+  clearSelection();
   navigate(listUrl(), { name: ROUTE_LIST, sessionId: null });
 }
 
