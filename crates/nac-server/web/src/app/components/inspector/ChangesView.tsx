@@ -14,6 +14,7 @@ import {
   fileLabel,
   type FileTreeDir,
 } from "@/app/lib/fileTree";
+import { highlightDiff, type CodeToken } from "@/app/lib/highlight";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { queryKeys, useWorkspaceDiff } from "@/app/services/queries";
 import type {
@@ -112,7 +113,13 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
   );
 }
 
-function CodeLine({ line }: { line: WorkspaceDiffLine }) {
+function CodeLine({
+  line,
+  tokens,
+}: {
+  line: WorkspaceDiffLine;
+  tokens: CodeToken[] | undefined;
+}) {
   const isAdd = line.kind === "insert";
   const isDel = line.kind === "delete";
   // A deleted line still belongs to the old file, so it keeps the old number.
@@ -133,7 +140,13 @@ function CodeLine({ line }: { line: WorkspaceDiffLine }) {
         {lineNo ?? ""}
       </span>
       <span className="flex-1 min-w-0 px-2 code code-small text-basic-primary whitespace-pre-wrap break-words">
-        {line.content}
+        {tokens
+          ? tokens.map((token, index) => (
+              <span key={index} className={token.className ?? undefined}>
+                {token.text}
+              </span>
+            ))
+          : line.content}
         {line.has_trailing_newline === false ? (
           <span className="italic text-basic-muted"> No newline at end of file</span>
         ) : null}
@@ -157,7 +170,13 @@ function Notice({ tone, children }: { tone?: "error"; children: React.ReactNode 
   );
 }
 
-function Section({ section }: { section: WorkspaceDiffSection }) {
+function Section({
+  section,
+  highlighted,
+}: {
+  section: WorkspaceDiffSection;
+  highlighted: Map<WorkspaceDiffLine, CodeToken[]>;
+}) {
   if (section.error) return <Notice tone="error">Error: {section.error}</Notice>;
   if (section.binary) {
     return <Notice>Binary or non-UTF-8 content; inline hunks are unavailable.</Notice>;
@@ -181,7 +200,7 @@ function Section({ section }: { section: WorkspaceDiffSection }) {
             </span>
           </div>
           {hunk.lines.map((line, lineIndex) => (
-            <CodeLine key={lineIndex} line={line} />
+            <CodeLine key={lineIndex} line={line} tokens={highlighted.get(line)} />
           ))}
         </div>
       ))}
@@ -241,12 +260,29 @@ function DiffPane({
 }
 
 function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
+  const [highlighted, setHighlighted] = useState<Map<WorkspaceDiffLine, CodeToken[]>>(
+    () => new Map(),
+  );
+
+  // The highlighter is loaded on demand, so the diff renders as plain text
+  // first and gains its colours a frame later. A map left over from another
+  // file is keyed by that file's line objects, so it simply never matches.
+  useEffect(() => {
+    let active = true;
+    void highlightDiff(diff.path, diff.sections).then((result) => {
+      if (active) setHighlighted(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [diff]);
+
   if (diff.error) return <Notice tone="error">{diff.error}</Notice>;
   if (diff.sections.length === 0) return <Notice>No diff sections returned.</Notice>;
   return (
     <>
       {diff.sections.map((section, index) => (
-        <Section key={index} section={section} />
+        <Section key={index} section={section} highlighted={highlighted} />
       ))}
     </>
   );
