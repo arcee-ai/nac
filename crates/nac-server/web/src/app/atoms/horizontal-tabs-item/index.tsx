@@ -14,9 +14,8 @@ interface HorizontalTabsItemProps extends React.ButtonHTMLAttributes<HTMLButtonE
 }
 
 const ACTIVE_CLASS: Record<HorizontalTabsItemVariant, string> = {
-  [HorizontalTabsItemVariant.Accent]: "btn-ghost-accent border-primary",
-  [HorizontalTabsItemVariant.Neutral]:
-    "btn-ghost-highlighted border-primary text-basic-primary",
+  [HorizontalTabsItemVariant.Accent]: "horizontal-tab-item-active btn-ghost-accent",
+  [HorizontalTabsItemVariant.Neutral]: "horizontal-tab-item-active btn-ghost-highlighted",
 };
 
 /** Horizontal tab item with an underline for the active state. */
@@ -36,9 +35,9 @@ const HorizontalTabsItem: React.FC<HorizontalTabsItemProps> & {
     type={type}
     disabled={disabled}
     className={cn(
-      "horizontal-tab-item btn btn-medium rounded-b-none border-solid rounded-t-lg border-b-2 border-t-0 border-l-0 border-r-0",
+      "horizontal-tab-item btn btn-medium",
       iconName ? "btn-icon-left" : "btn-text",
-      active ? ACTIVE_CLASS[variant] : "border-transparent btn-ghost",
+      active ? ACTIVE_CLASS[variant] : "btn-ghost",
       disabled ? "btn-disabled" : "cursor-auto",
       className,
     )}

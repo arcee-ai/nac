@@ -180,6 +180,20 @@
 /* ============================ TABS ============================ */
 .tab-btn { justify-content: flex-start; }
 
+/* The underline, the corners and the active label colour have to be declared
+   here rather than as utility classes on the element. This file is imported
+   outside any cascade layer while Tailwind's utilities sit in `@layer
+   utilities`, and unlayered rules beat layered ones no matter how specific the
+   layered one is — so `.btn`'s `border: none`, its 4px radius and each
+   variant's `color` silently win over `border-primary`, `rounded-t-lg` and
+   `text-basic-primary`. */
+.horizontal-tab-item {
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+}
+.horizontal-tab-item-active { border-bottom-color: var(--color-border-primary); }
+.horizontal-tab-item-active.btn-ghost-highlighted { color: var(--color-text-basic-primary); }
+
 /* ============================ TOOLTIP ============================ */
 .tooltip-box { pointer-events: none; }
 .group:hover .tooltip-box { pointer-events: auto; }
