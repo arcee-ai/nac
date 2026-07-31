@@ -7,15 +7,14 @@ export enum HorizontalTabsItemVariant {
   Neutral = "neutral",
 }
 
-interface HorizontalTabsItemProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface HorizontalTabsItemProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   active?: boolean;
   iconName?: IconName;
   variant?: HorizontalTabsItemVariant;
 }
 
 const ACTIVE_CLASS: Record<HorizontalTabsItemVariant, string> = {
-  [HorizontalTabsItemVariant.Accent]: "btn-ghost-accent border-accent-primary",
+  [HorizontalTabsItemVariant.Accent]: "btn-ghost-accent border-primary",
   [HorizontalTabsItemVariant.Neutral]:
     "btn-ghost-highlighted border-primary text-basic-primary",
 };

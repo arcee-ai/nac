@@ -56,7 +56,7 @@ function Banner({
   );
 }
 
-/** Session screen: the Changes/Worksets/Threads box beside a permanent chat. */
+/** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
   const { sessionId, panel } = useParams<{ sessionId: string; panel?: string }>();
   const navigate = useNavigate();

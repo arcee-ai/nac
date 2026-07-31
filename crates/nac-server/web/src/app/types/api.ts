@@ -192,6 +192,20 @@ export interface WorkspaceSnapshot {
   error: string | null;
 }
 
+export interface WorkspaceFileList {
+  files: string[];
+  truncated: boolean;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  /** Null when the file is binary or too large to show. */
+  content: string | null;
+  size: number;
+  binary: boolean;
+  too_large: boolean;
+}
+
 export interface Branch {
   name: string;
   is_current: boolean;

@@ -1,8 +1,15 @@
-// Groups the flat list of changed paths into the folder tree the Changes panel
+// Groups the flat list of project paths into the folder tree the Files panel
 // shows. Directories with a single child and no files of their own are merged
 // into one row, the way editors collapse `a/b/c` when nothing branches.
 
-import type { ChangedFileStat } from "@/app/types/api";
+/** A row in the tree: every project file, with its git status when it has one. */
+export interface FileNode {
+  path: string;
+  /** Porcelain status letter, or null for a file that matches HEAD. */
+  status: string | null;
+  additions: number | null;
+  deletions: number | null;
+}
 
 export interface FileTreeDir {
   /** Segment(s) shown on the row; a merged chain keeps its slashes. */
@@ -10,14 +17,16 @@ export interface FileTreeDir {
   /** Full path of the deepest merged directory, used as the collapse key. */
   path: string;
   dirs: FileTreeDir[];
-  files: ChangedFileStat[];
+  files: FileNode[];
+  /** Something below this directory has changed, so it is worth opening. */
+  hasChanges: boolean;
 }
 
 interface MutableDir {
   name: string;
   path: string;
   dirs: Map<string, MutableDir>;
-  files: ChangedFileStat[];
+  files: FileNode[];
 }
 
 /** git reports an untracked directory as one entry with a trailing slash. */
@@ -48,15 +57,21 @@ function freeze(dir: MutableDir): FileTreeDir {
     name = `${name}/${child.name}`;
     current = child;
   }
+  const dirs = [...current.dirs.values()].map(freeze).sort(byName);
+  const files = current.files
+    .slice()
+    .sort((a, b) => a.path.localeCompare(b.path));
   return {
     name,
     path: current.path,
-    dirs: [...current.dirs.values()].map(freeze).sort(byName),
-    files: current.files.slice().sort((a, b) => a.path.localeCompare(b.path)),
+    dirs,
+    files,
+    hasChanges:
+      files.some((file) => file.status) || dirs.some((child) => child.hasChanges),
   };
 }
 
-export function buildFileTree(files: ChangedFileStat[]): FileTreeDir {
+export function buildFileTree(files: FileNode[]): FileTreeDir {
   const root = emptyDir("", "");
 
   for (const file of files) {
@@ -78,19 +93,25 @@ export function buildFileTree(files: ChangedFileStat[]): FileTreeDir {
 
   // The root is never rendered, so merging it away would hide the shared
   // prefix; only its children collapse.
+  const dirs = [...root.dirs.values()].map(freeze).sort(byName);
+  const rootFiles = root.files.slice().sort((a, b) => a.path.localeCompare(b.path));
   return {
     name: "",
     path: "",
-    dirs: [...root.dirs.values()].map(freeze).sort(byName),
-    files: root.files.slice().sort((a, b) => a.path.localeCompare(b.path)),
+    dirs,
+    files: rootFiles,
+    hasChanges:
+      rootFiles.some((file) => file.status) ||
+      dirs.some((child) => child.hasChanges),
   };
 }
 
-/** Every directory path in the tree, for expanding everything by default. */
-export function allDirPaths(dir: FileTreeDir, into: string[] = []): string[] {
+/** Directories worth opening on arrival: the ones leading to a change. */
+export function changedDirPaths(dir: FileTreeDir, into: string[] = []): string[] {
   for (const child of dir.dirs) {
+    if (!child.hasChanges) continue;
     into.push(child.path);
-    allDirPaths(child, into);
+    changedDirPaths(child, into);
   }
   return into;
 }

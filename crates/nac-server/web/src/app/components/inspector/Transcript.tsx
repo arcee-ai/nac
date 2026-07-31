@@ -129,7 +129,7 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
             trailing={
               <CodeChangesBadge additions={additions} deletions={deletions} />
             }
-            onClick={() => onFocusPanel("changes")}
+            onClick={() => onFocusPanel("files")}
           />
         ) : null}
 

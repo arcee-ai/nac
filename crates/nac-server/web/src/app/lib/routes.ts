@@ -3,11 +3,11 @@
 
 // The session screen always shows the chat; the URL only selects which panel
 // the side box has open.
-export const SESSION_PANELS = ["changes", "worksets", "threads"] as const;
+export const SESSION_PANELS = ["files", "worksets", "threads"] as const;
 
 export type SessionPanel = (typeof SESSION_PANELS)[number];
 
-export const DEFAULT_SESSION_PANEL: SessionPanel = "changes";
+export const DEFAULT_SESSION_PANEL: SessionPanel = "files";
 
 export function isSessionPanel(value: string | undefined): value is SessionPanel {
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");

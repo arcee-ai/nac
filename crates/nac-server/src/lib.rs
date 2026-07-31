@@ -444,6 +444,11 @@ pub struct WorkspaceDiffQuery {
     pub context: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceFileQuery {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayBoundaryEvent {
     pub epoch_id: String,
@@ -955,18 +960,40 @@ impl SessionManager {
         Ok(root)
     }
 
-    pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
-        let summary = self
-            .list_sessions(false)
+    /// Host checkout of a session, for read-only inspection.
+    async fn workspace_root(&self, session_id: &str) -> Result<PathBuf> {
+        self.list_sessions(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let root = summary.workspace_host_path.ok_or_else(|| {
-            anyhow!("branch operations are not supported for remote/sandbox-only sessions")
-        })?;
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?
+            .workspace_host_path
+            .ok_or_else(|| {
+                anyhow!("workspace inspection is not supported for remote/sandbox-only sessions")
+            })
+    }
 
+    pub async fn workspace_files(&self, session_id: &str) -> Result<view::WorkspaceFileList> {
+        let root = self.workspace_root(session_id).await?;
+        tokio::task::spawn_blocking(move || view::list_files(&root))
+            .await
+            .context("workspace file listing task failed")?
+    }
+
+    pub async fn workspace_file(
+        &self,
+        session_id: &str,
+        path: String,
+    ) -> Result<view::WorkspaceFileContent> {
+        let root = self.workspace_root(session_id).await?;
+        tokio::task::spawn_blocking(move || view::read_file(&root, &path))
+            .await
+            .context("workspace file read task failed")?
+    }
+
+    pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
+        let root = self.workspace_root(session_id).await?;
         tokio::task::spawn_blocking(move || workspace::list_branches(&root))
             .await
             .context("branch listing task failed")?
@@ -1333,6 +1360,8 @@ fn api_router(manager: SessionManager) -> Router {
             get(thread_events),
         )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
+        .route("/sessions/{session_id}/workspace/files", get(workspace_files))
+        .route("/sessions/{session_id}/workspace/file", get(workspace_file))
         .route(
             "/sessions/{session_id}/workspace/branches",
             get(workspace_branches).post(switch_workspace_branch),
@@ -1587,6 +1616,21 @@ async fn workspace_diff(
     Query(query): Query<WorkspaceDiffQuery>,
 ) -> std::result::Result<Json<view::WorkspaceFileDiff>, ApiError> {
     Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
+}
+
+async fn workspace_files(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<view::WorkspaceFileList>, ApiError> {
+    Ok(Json(manager.workspace_files(&session_id).await?))
+}
+
+async fn workspace_file(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<WorkspaceFileQuery>,
+) -> std::result::Result<Json<view::WorkspaceFileContent>, ApiError> {
+    Ok(Json(manager.workspace_file(&session_id, query.path).await?))
 }
 
 async fn workspace_branches(

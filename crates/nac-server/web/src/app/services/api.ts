@@ -26,7 +26,9 @@ import type {
   UpdateConfigRequest,
   UpdateSessionPresentationRequest,
   WorkspaceDiffStage,
+  WorkspaceFileContent,
   WorkspaceFileDiff,
+  WorkspaceFileList,
 } from "@/app/types/api";
 
 export class ApiError extends Error {
@@ -210,6 +212,20 @@ export const api = {
     return request<WorkspaceFileDiff>(
       "GET",
       `${sessionPath(id)}/workspace/diff?${params.toString()}`,
+      { signal },
+    );
+  },
+
+  getWorkspaceFiles: (id: string, signal?: AbortSignal) =>
+    request<WorkspaceFileList>("GET", `${sessionPath(id)}/workspace/files`, {
+      signal,
+    }),
+
+  getWorkspaceFile: (id: string, path: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ path });
+    return request<WorkspaceFileContent>(
+      "GET",
+      `${sessionPath(id)}/workspace/file?${params.toString()}`,
       { signal },
     );
   },

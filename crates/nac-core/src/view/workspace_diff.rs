@@ -76,7 +76,7 @@ pub fn workspace_file_diff(
     stage: WorkspaceDiffStage,
     context: usize,
 ) -> Result<WorkspaceFileDiff> {
-    let relpath = validate_workspace_diff_path(path)?;
+    let relpath = validate_workspace_relpath(path)?;
     let repo_root = resolve_git_root(host_root)?;
     let head_blob = git_head_blob(&repo_root, &relpath)?;
     let index_blob = git_index_blob(&repo_root, &relpath)?;
@@ -189,7 +189,7 @@ struct DiffHunksResult {
     truncated: bool,
 }
 
-fn validate_workspace_diff_path(path: &str) -> Result<String> {
+pub(super) fn validate_workspace_relpath(path: &str) -> Result<String> {
     if path.is_empty() {
         bail!("invalid path: path is empty");
     }
@@ -232,7 +232,7 @@ fn validate_workspace_diff_path(path: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("invalid path: path must be UTF-8"))
 }
 
-fn resolve_git_root(cwd: &Path) -> Result<PathBuf> {
+pub(super) fn resolve_git_root(cwd: &Path) -> Result<PathBuf> {
     let raw = run_git_bytes(cwd, &["rev-parse", "--show-toplevel"])?;
     let path = String::from_utf8(raw)
         .map_err(|_| anyhow!("git repository path is not valid UTF-8"))?
@@ -699,14 +699,14 @@ mod tests {
     #[test]
     fn workspace_diff_path_validation_rejects_unsafe_paths() {
         assert_eq!(
-            validate_workspace_diff_path("src/lib.rs").unwrap(),
+            validate_workspace_relpath("src/lib.rs").unwrap(),
             "src/lib.rs"
         );
-        assert!(validate_workspace_diff_path("").is_err());
-        assert!(validate_workspace_diff_path("/tmp/file").is_err());
-        assert!(validate_workspace_diff_path("../file").is_err());
-        assert!(validate_workspace_diff_path("src/../file").is_err());
-        assert!(validate_workspace_diff_path("src\0file").is_err());
+        assert!(validate_workspace_relpath("").is_err());
+        assert!(validate_workspace_relpath("/tmp/file").is_err());
+        assert!(validate_workspace_relpath("../file").is_err());
+        assert!(validate_workspace_relpath("src/../file").is_err());
+        assert!(validate_workspace_relpath("src\0file").is_err());
     }
 
     #[test]

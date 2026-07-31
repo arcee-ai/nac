@@ -31,12 +31,17 @@ export function PanelRow({
   active = false,
   icon,
   trailing,
+  labelClassName,
+  title,
   onClick,
 }: {
   label: string;
   active?: boolean;
   icon?: ReactNode;
   trailing?: ReactNode;
+  /** Overrides the label colour, e.g. to mark a file's git status. */
+  labelClassName?: string;
+  title?: string;
   onClick?: () => void;
 }) {
   return (
@@ -47,10 +52,16 @@ export function PanelRow({
         active ? "btn-ghost-highlighted" : "btn-ghost",
       )}
       aria-pressed={active}
+      title={title}
       onClick={onClick}
     >
       {icon}
-      <span className="flex-1 min-w-0 truncate label-micro text-btn-secondary">
+      <span
+        className={cn(
+          "flex-1 min-w-0 truncate label-micro",
+          labelClassName ?? "text-btn-secondary",
+        )}
+      >
         {label}
       </span>
       {trailing}

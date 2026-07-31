@@ -11,7 +11,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
-import { ChangesView } from "@/app/components/inspector/ChangesView";
+import { FilesView } from "@/app/components/inspector/FilesView";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
@@ -27,7 +27,7 @@ import {
 import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
 
 const PANEL_LABEL: Record<SessionPanel, string> = {
-  changes: "Changes",
+  files: "Files",
   worksets: "Worksets",
   threads: "Threads",
 };
@@ -84,7 +84,7 @@ function SideBoxFooter({
 }
 
 /**
- * The left half of the session screen: one box with the Changes / Worksets /
+ * The left half of the session screen: one box with the Files / Worksets /
  * Threads panels, sized by the shared layout store.
  */
 export function SessionSideBox({
@@ -147,8 +147,8 @@ export function SessionSideBox({
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
-        {panel === "changes" ? (
-          <ChangesView sessionId={sessionId} snapshot={snapshot} />
+        {panel === "files" ? (
+          <FilesView sessionId={sessionId} snapshot={snapshot} />
         ) : null}
         {panel === "worksets" ? (
           <WorksetsView

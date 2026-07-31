@@ -146,6 +146,20 @@ async function highlightBlock(
   return splitLines(tokens);
 }
 
+/**
+ * Tokens per line for a whole file. Unlike a diff this is a real document, so
+ * the tokenizer sees everything it needs and only an unknown language or the
+ * integrity check above can turn the colours off.
+ */
+export async function highlightCode(
+  path: string,
+  text: string,
+): Promise<CodeToken[][] | null> {
+  const language = languageFromPath(path);
+  if (!language) return null;
+  return highlightBlock(language, text);
+}
+
 const OLD_SIDE = new Set(["delete", "context"]);
 const NEW_SIDE = new Set(["insert", "context"]);
 

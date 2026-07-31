@@ -8,10 +8,14 @@ use serde::{Deserialize, Serialize};
 use crate::{sessions, store};
 
 mod workspace_diff;
+mod workspace_files;
 
 pub use workspace_diff::{
     workspace_file_diff, WorkspaceDiffHunk, WorkspaceDiffLine, WorkspaceDiffSection,
     WorkspaceDiffStage, WorkspaceFileDiff,
+};
+pub use workspace_files::{
+    list_files, read_file, WorkspaceFileContent, WorkspaceFileList,
 };
 
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
@@ -512,6 +516,29 @@ pub fn parse_remote_label(remote: &str) -> Option<String> {
     ))
 }
 
+/// Path a change ends up at. git spells a rename two ways — `old -> new` in
+/// porcelain status and `dir/{old => new}` in numstat — and both should resolve
+/// to the file that exists now, so the two sources agree on one tree row.
+pub fn rename_target(raw: &str) -> String {
+    if let Some((_, new)) = raw.split_once(" -> ") {
+        return new.trim().to_string();
+    }
+    if let Some(open) = raw.find('{') {
+        if let Some(close) = raw[open..].find('}').map(|offset| open + offset) {
+            if let Some((_, new)) = raw[open + 1..close].split_once(" => ") {
+                let rebuilt = format!("{}{}{}", &raw[..open], new.trim(), &raw[close + 1..]);
+                // `a/{ => b}/c` moves a file into a new directory and leaves a
+                // doubled separator behind.
+                return rebuilt.replace("//", "/");
+            }
+        }
+    }
+    if let Some((_, new)) = raw.split_once(" => ") {
+        return new.trim().to_string();
+    }
+    raw.to_string()
+}
+
 pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, ChangedFileStat>) {
     let mut counts = GitStatusCounts::default();
     let mut file_map = HashMap::new();
@@ -522,7 +549,7 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
         }
 
         let status = &line[..2];
-        let path = line[3..].trim();
+        let path = rename_target(line[3..].trim());
         if path.is_empty() {
             continue;
         }
@@ -554,10 +581,10 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
         };
 
         file_map.insert(
-            path.to_string(),
+            path.clone(),
             ChangedFileStat {
                 status: normalized_status,
-                path: path.to_string(),
+                path,
                 additions: None,
                 deletions: None,
             },
@@ -586,7 +613,7 @@ pub fn parse_numstat_pairs(raw: &str, cached_raw: &str) -> NumstatSummary {
 
             let additions = additions_raw.parse::<u64>().ok();
             let deletions = deletions_raw.parse::<u64>().ok();
-            let path = path_raw.to_string();
+            let path = rename_target(path_raw);
 
             if let Some(value) = additions {
                 total_additions = total_additions.saturating_add(value);

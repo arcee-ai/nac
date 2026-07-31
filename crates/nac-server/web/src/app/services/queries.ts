@@ -22,7 +22,9 @@ import type {
   SwitchBranchRequest,
   UpdateConfigRequest,
   WorkspaceDiffStage,
+  WorkspaceFileContent,
   WorkspaceFileDiff,
+  WorkspaceFileList,
 } from "@/app/types/api";
 
 /** How often the session list is refreshed; the list has no event stream. */
@@ -43,6 +45,9 @@ export const queryKeys = {
     context: number,
   ) => ["session", id, "workspace-diff", { path, stage, context }] as const,
   branches: (id: string) => ["session", id, "branches"] as const,
+  workspaceFiles: (id: string) => ["session", id, "workspace-files"] as const,
+  workspaceFile: (id: string, path: string) =>
+    ["session", id, "workspace-file", path] as const,
 };
 
 export function useStoreInfo() {
@@ -109,6 +114,26 @@ export function useWorkspaceDiff(
     queryFn: ({ signal }) =>
       api.getWorkspaceDiff(id!, path!, { stage, context, signal }),
     enabled: Boolean(id && path),
+  });
+}
+
+/** Every file git considers part of the project, for the Files tree. */
+export function useWorkspaceFiles(id: string | null) {
+  return useQuery<WorkspaceFileList>({
+    queryKey: queryKeys.workspaceFiles(id ?? ""),
+    queryFn: ({ signal }) => api.getWorkspaceFiles(id!, signal),
+    enabled: Boolean(id),
+    staleTime: 10_000,
+  });
+}
+
+/** Working-tree contents of one file, shown when it has no diff to display. */
+export function useWorkspaceFile(id: string | null, path: string | null) {
+  return useQuery<WorkspaceFileContent>({
+    queryKey: queryKeys.workspaceFile(id ?? "", path ?? ""),
+    queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, signal),
+    enabled: Boolean(id && path),
+    staleTime: 10_000,
   });
 }
 
