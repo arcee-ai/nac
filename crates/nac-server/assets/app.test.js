@@ -61,7 +61,7 @@ function loadApp(overrides = {}) {
       displayedTokenUsage, usageRunId, orchestratorContextTokens, tokenUsageSummary,
       tokenUsageTitle, effortOptions, escapeHtml, rawHeadersFromConfig, settingsValuesFromConfig,
       serializeSettingsHeaders, buildSettingsPatch, loadFocusSettings, renderFocusSettings,
-      handleDrawerSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
+      handleFocusPanelSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
       captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
       restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
@@ -2306,7 +2306,7 @@ test("settings controller reports No changes without issuing PATCH", async () =>
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 4, status: "ready", config: persistedConfig(),
   };
-  await isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requestCount, 0);
   assert.equal(form.status.textContent, "No changes");
   assert.equal(form.inert, false);
@@ -2325,8 +2325,8 @@ test("settings controller suppresses duplicate submissions while a save is pendi
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 5, status: "ready", config: persistedConfig(),
   };
-  const first = isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
-  const duplicate = isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  const first = isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
+  const duplicate = isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requestCount, 1);
   assert.equal(form.inert, true);
   assert.equal(form.submit.disabled, true);
@@ -2375,7 +2375,7 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   isolated.state.settingsFocus = {
     sessionId: "settings-session", requestGeneration: 1, status: "ready", config: persistedConfig(),
   };
-  const first = isolated.handleDrawerSubmit({ target: originalForm, preventDefault() {} });
+  const first = isolated.handleFocusPanelSubmit({ target: originalForm, preventDefault() {} });
   assert.equal(requests.length, 1);
   const submission = isolated.state.settingsSubmission;
   assert.ok(submission);
@@ -2391,7 +2391,7 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   assert.equal(isolated.state.settingsSubmission, submission);
   assert.match(isolated.renderFocusSettings(), /<form[^>]* inert aria-busy="true"/);
   assert.match(isolated.renderFocusSettings(), /data-settings-submit type="submit" disabled/);
-  await isolated.handleDrawerSubmit({ target: reopenedForm, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: reopenedForm, preventDefault() {} });
   assert.equal(requests.length, 1, "the reopened view must not start a second PATCH");
   patch.resolve({ ok: true, status: 200, statusText: "OK", async text() { return ""; } });
   await first;
@@ -2439,7 +2439,7 @@ test("empty PATCH responses reload config and reconcile snapshot and session sta
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 6, status: "ready", config: persistedConfig(),
   };
-  await isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requests.length, 4);
   assert.equal(requests[0][0], "/sessions/settings-session/config");
   assert.equal(requests[0][1].method, "PATCH");

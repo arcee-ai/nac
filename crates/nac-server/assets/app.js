@@ -118,7 +118,7 @@ function bindEvents() {
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
-  el.focusContent.addEventListener("submit", handleDrawerSubmit);
+  el.focusContent.addEventListener("submit", handleFocusPanelSubmit);
   el.threadGrid.addEventListener("click", handleThreadClick);
   el.commandComposer.addEventListener("submit", submitComposer);
   el.promptInput.addEventListener("input", handleComposerInput);
@@ -2149,18 +2149,6 @@ function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
     durationMs: null,
     detail: "No run lifecycle event is available in the current replay window.",
   };
-}
-
-function humanStateLabel(state) {
-  const labels = {
-    "no-run": "Idle",
-    "running": "Running",
-    "completed": "Completed",
-    "failed": "Failed",
-    "loading": "Loading…",
-    "unavailable": "Unavailable",
-  };
-  return labels[state] || state;
 }
 
 function actionEvidence(entry, overrides = {}) {
@@ -4343,7 +4331,7 @@ function setSettingsFormStatus(formElement, message, error = false) {
   status.classList.toggle("is-error", error);
 }
 
-async function handleDrawerSubmit(event) {
+async function handleFocusPanelSubmit(event) {
   if (event.target.id === "renameForm") {
     event.preventDefault();
     await saveSessionRename(event.target);
