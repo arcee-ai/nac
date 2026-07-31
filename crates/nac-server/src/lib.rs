@@ -1,8 +1,6 @@
 mod compaction;
-pub mod dev;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
-pub use dev::DevMode;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -21,7 +19,7 @@ use axum::{
     http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
+        IntoResponse, Response,
     },
     routing::{get, post, put},
     Json, Router,
@@ -1223,18 +1221,8 @@ fn validate_bind_address(addr: SocketAddr) -> Result<()> {
 }
 
 pub fn router(manager: SessionManager) -> Router {
-    router_with_dev(manager, None)
-}
-
-/// Same API surface as [`router`], with the frontend either embedded (`None`) or
-/// served from disk in dev mode. See [`dev`].
-pub fn router_with_dev(manager: SessionManager, dev_mode: Option<DevMode>) -> Router {
-    let frontend = match dev_mode {
-        Some(mode) => dev::ui_router(mode),
-        None => embedded_frontend_router(),
-    };
     api_router(manager)
-        .merge(frontend)
+        .merge(embedded_frontend_router())
         .layer(response_compression_layer())
 }
 
@@ -1242,12 +1230,6 @@ fn embedded_frontend_router() -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
-        // Legacy vanilla-JS UI kept for side-by-side verification during the
-        // migration. Its assets are served by the embedded `/assets/*` handler.
-        .route("/legacy", get(legacy_index_html))
-        // `app.css` no longer exists on disk, so the compatibility alias needs
-        // an explicit route ahead of the embedded-asset wildcard.
-        .route("/assets/app.css", get(redesign_css))
         .route("/assets/{*path}", get(serve_asset))
 }
 
@@ -1303,19 +1285,11 @@ fn api_router(manager: SessionManager) -> Router {
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
-    serve_with_dev(addr, manager, None).await
-}
-
-pub async fn serve_with_dev(
-    addr: SocketAddr,
-    manager: SessionManager,
-    dev_mode: Option<DevMode>,
-) -> Result<()> {
     validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, router_with_dev(manager, dev_mode))
+    axum::serve(listener, router(manager))
         .await
         .context("server stopped unexpectedly")
 }
@@ -1342,10 +1316,6 @@ async fn index_html() -> impl IntoResponse {
     )
 }
 
-async fn legacy_index_html() -> Html<&'static str> {
-    Html(include_str!("../assets/index.html"))
-}
-
 pub(crate) fn asset_content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
@@ -1360,13 +1330,6 @@ pub(crate) fn asset_content_type(path: &str) -> &'static str {
         Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
-}
-
-async fn redesign_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, asset_content_type("redesign.css"))],
-        include_str!("../assets/redesign.css"),
-    )
 }
 
 // Everything Vite emits under `dist/assets/` carries a content hash in its
@@ -2329,23 +2292,47 @@ mod tests {
         }
     }
 
+    // The committed Vite build is what every release serves, so a stale or
+    // partial `assets/dist` has to fail here rather than in a browser.
     #[test]
-    fn production_asset_routes_and_privacy_smoke_contract() {
-        const HTML: &str = include_str!("../assets/index.html");
-        const CSS: &str = include_str!("../assets/redesign.css");
-        const APP: &str = include_str!("../assets/app.js");
+    fn committed_frontend_build_is_embedded_and_self_consistent() {
+        const HTML: &str = include_str!("../assets/dist/index.html");
 
-        for asset in ["/assets/redesign.css", "/assets/app.js"] {
-            assert!(HTML.contains(asset), "missing production asset {asset}");
-        }
-        assert!(!HTML.contains("/assets/app.css"));
-        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
-        assert!(!CSS.trim().is_empty());
-        assert!(!APP.trim().is_empty());
+        let referenced: Vec<&str> = HTML
+            .match_indices("/assets/dist/assets/")
+            .map(|(start, _)| {
+                let tail = &HTML[start + 1..];
+                let end = tail
+                    .find(['"', '\''])
+                    .expect("asset reference must be quoted");
+                &tail[..end]
+            })
+            .collect();
         assert!(
-            !APP.contains("include_system"),
-            "production frontend must not opt into system messages"
+            referenced.iter().any(|path| path.ends_with(".js")),
+            "the entry document must load a bundled script"
         );
+        assert!(
+            referenced.iter().any(|path| path.ends_with(".css")),
+            "the entry document must load a bundled stylesheet"
+        );
+
+        for path in referenced {
+            let embedded = path
+                .strip_prefix("assets/")
+                .expect("references are rooted at the asset directory");
+            let file = ASSETS
+                .get_file(embedded)
+                .unwrap_or_else(|| panic!("{path} is referenced but not embedded"));
+            assert!(!file.contents().is_empty(), "{path} is empty");
+            assert_eq!(
+                asset_cache_control(embedded),
+                "public, max-age=31536000, immutable",
+                "hashed bundles must be cacheable forever"
+            );
+        }
+
+        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
     }
 
     #[tokio::test]
@@ -2434,34 +2421,31 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn legacy_css_route_is_an_exact_alias() {
-        let root = temp_root("css_alias");
-        let app = router(test_manager(&root));
-        let canonical = get_response(app.clone(), "/assets/redesign.css", None).await;
-        let alias = get_response(app, "/assets/app.css", None).await;
-        assert_eq!(canonical.status(), StatusCode::OK);
-        assert_eq!(alias.status(), StatusCode::OK);
-        assert_eq!(
-            canonical.headers().get(header::CONTENT_TYPE),
-            alias.headers().get(header::CONTENT_TYPE)
-        );
-        assert_eq!(response_body(canonical).await, response_body(alias).await);
-        let _ = std::fs::remove_dir_all(root);
+    /// Path of a bundled script, whose name carries a content hash that changes
+    /// on every build.
+    fn bundled_script_path() -> String {
+        let file = ASSETS
+            .get_dir("dist/assets")
+            .expect("the committed build must be embedded")
+            .files()
+            .find(|file| file.path().extension().is_some_and(|ext| ext == "js"))
+            .expect("the build must emit at least one script");
+        format!("/assets/{}", file.path().to_string_lossy())
     }
 
     #[tokio::test]
     async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
         let root = temp_root("route_compression");
         let app = router(test_manager(&root));
+        let script = bundled_script_path();
 
-        let identity = get_response(app.clone(), "/assets/app.js", None).await;
+        let identity = get_response(app.clone(), &script, None).await;
         assert_eq!(identity.status(), StatusCode::OK);
         assert!(identity.headers().get(header::CONTENT_ENCODING).is_none());
         let identity_body = response_body(identity).await;
-        assert_eq!(identity_body.as_ref(), include_bytes!("../assets/app.js"));
+        assert!(!identity_body.is_empty());
 
-        let compressed = get_response(app.clone(), "/assets/app.js", Some("gzip")).await;
+        let compressed = get_response(app.clone(), &script, Some("gzip")).await;
         assert_eq!(compressed.status(), StatusCode::OK);
         assert_eq!(
             compressed.headers().get(header::CONTENT_ENCODING),

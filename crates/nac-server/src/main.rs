@@ -14,7 +14,7 @@ use nac_core::{
         StoreOptions, WorkerDispatchOptions,
     },
 };
-use nac_server::{serve_with_dev, DevMode, ServerOptions, SessionManager};
+use nac_server::{serve, ServerOptions, SessionManager};
 
 #[derive(Parser)]
 #[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
@@ -34,15 +34,6 @@ struct ServerCli {
     /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
-
-    /// Serve the frontend from disk with live reload and the locator overlay
-    /// instead of the copy embedded in this binary. Also enabled by NAC_WEB_DEV.
-    #[arg(long)]
-    dev: bool,
-
-    /// Asset directory to serve in dev mode. Defaults to this crate's `assets/`.
-    #[arg(long, value_name = "PATH")]
-    dev_assets: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -302,11 +293,6 @@ async fn run() -> Result<()> {
 async fn run_server(cli: ServerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_cli_cwd(&launch_cwd, cli.directory.as_deref())?;
-    let dev_mode = if cli.dev || env_flag("NAC_WEB_DEV") {
-        Some(DevMode::resolve(cli.dev_assets)?)
-    } else {
-        None
-    };
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
         store_path: cli.store_path,
@@ -315,18 +301,7 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let info = manager.store_info();
     eprintln!("nac-web listening on http://{}", cli.bind);
     eprintln!("store: {}", info.store_path.display());
-    if let Some(mode) = &dev_mode {
-        eprintln!("dev mode: serving {} from disk", mode.root().display());
-        eprintln!("dev mode: live reload on, hold Alt for the locator overlay");
-    }
-    serve_with_dev(cli.bind, manager, dev_mode).await
-}
-
-fn env_flag(name: &str) -> bool {
-    match std::env::var(name) {
-        Ok(value) => !matches!(value.trim(), "" | "0" | "false" | "no"),
-        Err(_) => false,
-    }
+    serve(cli.bind, manager).await
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
