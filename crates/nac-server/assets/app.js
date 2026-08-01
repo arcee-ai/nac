@@ -3480,7 +3480,48 @@ function renderThreadFocus(name, model, snapshot) {
   const episodes = snapshot?.thread_episodes?.[name] || [];
   const episodeHtml = renderThreadEpisodes(episodes);
   const visibleActionCount = actions.filter(isTileVisibleAction).length;
-  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes">${renderThreadCurrentAction(name, model, snapshot)}<div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+}
+
+function threadInflightDispatch(name, snapshot) {
+  // The `thread` dispatch tool blocks until the worker finishes, so an
+  // assistant tool call with no matching tool-result message later in the
+  // transcript is a dispatch still in flight. Result-arrived is the source of
+  // truth for completion; crash-resume normalization appends a synthetic
+  // result for dangling calls, so interrupted runs resolve the same way. The
+  // latest unanswered call wins, so a re-dispatch shows its own instruction.
+  const messages = snapshot?.messages || [];
+  const answered = new Set();
+  for (const message of messages) {
+    if (message?.role === "tool" && message.tool_call_id !== null && message.tool_call_id !== undefined) {
+      answered.add(String(message.tool_call_id));
+    }
+  }
+  let inflight = null;
+  for (const message of messages) {
+    if (message?.role !== "assistant" || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      if (call?.function?.name !== "thread") continue;
+      const args = focusToolArguments(call);
+      if (focusToolTarget(args, "name") !== name) continue;
+      const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
+      if (callId && answered.has(callId)) continue;
+      inflight = { callId: callId || null, action: focusToolTarget(args, "action") };
+    }
+  }
+  return inflight;
+}
+
+function renderThreadCurrentAction(name, model, snapshot) {
+  const inflight = threadInflightDispatch(name, snapshot);
+  // Lifecycle corroboration: terminal evidence (finish/error after the latest
+  // start) hides the section even if the tool-result message has not landed
+  // in the transcript window yet, so a completed/cancelled/failed dispatch
+  // never leaves a stale "current action" behind.
+  const status = threadStatusPresentation(model?.state);
+  if (!inflight || status.state === "finished") return "";
+  const action = inflight.action || "Action unavailable";
+  return `<section class="focus-current-action" data-state="${escapeAttr(status.state)}"><div class="focus-thread-column-title"><h3>Current action</h3><span class="focus-current-action-status">${escapeHtml(status.label)}</span></div><div class="focus-current-action-card"><section class="focus-episode-prompt"><span>Action</span><p>${escapeHtml(action)}</p></section></div></section>`;
 }
 
 function renderThreadEpisodes(episodes) {

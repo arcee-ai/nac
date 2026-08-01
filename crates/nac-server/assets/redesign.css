@@ -738,7 +738,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .focus-activity { min-width: 0; min-height: 0; overflow: auto; padding: 18px; border-right: 1px solid var(--line); }
 .focus-episodes { min-width: 0; min-height: 0; overflow: auto; padding: 18px; }
 .focus-action-list { display: grid; list-style: none; margin: 0; padding: 0; }
-.focus-episode { overflow: hidden; margin-bottom: 10px; border: 1px solid #292929; border-radius: var(--r-md); background: var(--surface); }
+.focus-episode, .focus-current-action-card { overflow: hidden; margin-bottom: 10px; border: 1px solid #292929; border-radius: var(--r-md); background: var(--surface); }
 .focus-episode summary { display: grid; grid-template-columns: auto minmax(0, 1fr) 14px; align-items: center; gap: 12px; padding: 10px 12px; list-style: none; cursor: pointer; }
 .focus-episode summary::-webkit-details-marker { display: none; }
 .focus-episode summary:hover { background: var(--surface-hover); }
@@ -754,6 +754,14 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 
 .focus-episode-prompt p { margin: 0; overflow-wrap: anywhere; color: #b9b9b9; font: var(--fs-md)/var(--lh-relaxed) var(--mono); white-space: pre-wrap; }
 .focus-episode-copy { overflow-wrap: anywhere; color: #c5c5c5; font: var(--fs-md)/var(--lh-relaxed) var(--mono); }
+
+/* Current action: in-flight dispatch instruction above Episodes. The card
+   reuses the episode card + prompt rendering; the status label inherits the
+   column-title microcopy and pulses gently until the episode commits. */
+.focus-current-action { margin-bottom: var(--sp-5); }
+.focus-current-action .focus-current-action-card { margin-bottom: 0; }
+.focus-current-action-card .focus-episode-prompt { border-bottom: 0; }
+.focus-current-action-status { animation: pending-badge-pulse 2.6s ease-in-out infinite; }
 
 .focus-workspace-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(290px, 380px) minmax(0, 1fr); }
 .focus-files { min-width: 0; min-height: 0; overflow: auto; padding: 12px; border-right: 1px solid var(--line); background: var(--surface); }

@@ -45,6 +45,7 @@ function loadApp(overrides = {}) {
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
+      renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch,
       renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
       formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
@@ -2044,6 +2045,157 @@ test("thread tiles dedup guidance lifecycle events to one row per steering", () 
   const tile = ui.renderThreadTile(model);
   assert.equal((tile.match(/is-guidance/g) || []).length, 2, "tile renders exactly one row per guidance");
   assert.ok(tile.indexOf("tighten the layout") < tile.indexOf("then the tests"), "guidance rows stay chronological");
+});
+
+function threadDispatchMessage(callId, threadName, action) {
+  return { role: "assistant", content: null, tool_calls: [
+    { id: callId, type: "function", function: { name: "thread", arguments: JSON.stringify({ name: threadName, action }) } },
+  ] };
+}
+
+function renderWorkerFocus(snapshot, name = "worker") {
+  ui.state.currentId = snapshot.metadata.session_id;
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === name);
+  return ui.renderThreadFocus(name, model, snapshot);
+}
+
+test("thread focus shows the in-flight dispatch instruction in a Current action section above Episodes", () => {
+  const snapshot = sessionSnapshot("inflight-show", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger\nand keep <tags> intact"),
+    ],
+  });
+  const html = renderWorkerFocus(snapshot);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "Current action section renders while the dispatch is in flight");
+  assert.match(section[0], /data-state="running"/);
+  assert.match(section[0], /<div class="focus-thread-column-title"><h3>Current action<\/h3>/,
+    "section label uses the established column-title microcopy pattern");
+  assert.match(section[0], /<span class="focus-current-action-status">Running<\/span>/,
+    "running indicator sits in the label row");
+  assert.match(section[0], /rewrite the tile ledger\nand keep &lt;tags&gt; intact/,
+    "the full instruction renders escaped, not truncated");
+  assert.match(section[0], /<div class="focus-current-action-card"><section class="focus-episode-prompt"><span>Action<\/span>/,
+    "the instruction renders like an episode's action");
+  assert.ok(html.indexOf("focus-current-action") < html.indexOf("<h3>Episodes</h3>"),
+    "the section sits directly above Episodes");
+});
+
+test("Current action hides once the dispatch result arrives and the episode renders below", () => {
+  const snapshot = sessionSnapshot("inflight-done", {
+    threads: [{ name: "worker" }],
+    active_threads: [],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+    ] },
+    thread_episodes: { worker: [
+      { id: 1, session_id: "inflight-done", thread_name: "worker", action: "rewrite the tile ledger",
+        content: "episode body", created_at: "2026-07-31T11:00:00Z" },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger"),
+      { role: "tool", tool_call_id: "call_1", content: "thread finished" },
+    ],
+  });
+  assert.equal(ui.threadInflightDispatch("worker", snapshot), null, "an answered call is not in flight");
+  const html = renderWorkerFocus(snapshot);
+  assert.doesNotMatch(html, /focus-current-action/, "no stale Current action after completion");
+  assert.match(html, /<h3>Episodes<\/h3>/);
+  assert.match(html, /rewrite the tile ledger/, "the committed episode carries the instruction below");
+});
+
+test("Current action hides on terminal lifecycle evidence even before the result message lands", () => {
+  const snapshot = sessionSnapshot("inflight-terminal", {
+    threads: [{ name: "worker" }],
+    active_threads: [],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 1, timed_out: false },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger"),
+    ],
+  });
+  assert.ok(ui.threadInflightDispatch("worker", snapshot), "the call is still unanswered in the transcript");
+  const html = renderWorkerFocus(snapshot);
+  assert.doesNotMatch(html, /focus-current-action/,
+    "finished lifecycle corroborates hiding while the result message is still in flight");
+});
+
+test("Current action shows the latest instruction when a thread is re-dispatched", () => {
+  const snapshot = sessionSnapshot("inflight-redispatch", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "first instruction"),
+      { role: "tool", tool_call_id: "call_1", content: "thread finished" },
+      { role: "assistant", content: "dispatching again" },
+      threadDispatchMessage("call_2", "worker", "second instruction"),
+    ],
+  });
+  const inflight = ui.threadInflightDispatch("worker", snapshot);
+  assert.equal(inflight.callId, "call_2");
+  assert.equal(inflight.action, "second instruction");
+  const html = renderWorkerFocus(snapshot);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "section renders for the re-dispatch");
+  assert.match(section[0], /second instruction/, "the latest in-flight instruction wins");
+  assert.doesNotMatch(section[0], /first instruction/);
+});
+
+test("Current action is absent for idle threads and labels queued dispatches", () => {
+  const idle = sessionSnapshot("inflight-idle", { threads: [{ name: "worker" }] });
+  assert.equal(ui.threadInflightDispatch("worker", idle), null, "no dispatches means nothing in flight");
+  assert.doesNotMatch(renderWorkerFocus(idle), /focus-current-action/, "idle threads render no section");
+
+  const queued = sessionSnapshot("inflight-queued", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "queued instruction"),
+    ],
+  });
+  const html = renderWorkerFocus(queued);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "a dispatched-but-not-started thread still shows its instruction");
+  assert.match(section[0], /data-state="queued"/);
+  assert.match(section[0], /<span class="focus-current-action-status">Queued<\/span>/);
+  assert.match(section[0], /queued instruction/);
+});
+
+test("Current action styling reuses the episode card and section-label patterns", () => {
+  const cardRule = redesignSource.match(/\.focus-episode, \.focus-current-action-card \{[^}]*\}/);
+  assert.ok(cardRule, "the current-action card shares the episode card rule");
+  assert.match(cardRule[0], /border: 1px solid #292929;/);
+  assert.match(cardRule[0], /border-radius: var\(--r-md\);/);
+  assert.match(cardRule[0], /background: var\(--surface\);/);
+  assert.match(redesignSource, /\.focus-current-action-card \.focus-episode-prompt \{ border-bottom: 0; \}/,
+    "the standalone prompt drops the divider it needs inside an episode");
+  assert.match(redesignSource, /\.focus-current-action-status \{ animation: pending-badge-pulse 2\.6s ease-in-out infinite; \}/,
+    "the running indicator reuses the existing gentle pulse");
+  assert.match(redesignSource, /@keyframes pending-badge-pulse/);
+  const labelRule = redesignSource.match(/\.focus-thread-column-title h3 \{[^}]*\}/);
+  assert.ok(labelRule, "the section label reuses the column-title microcopy rule");
+  assert.match(labelRule[0], /var\(--fs-xs\)/);
+  assert.match(labelRule[0], /var\(--mono\)/);
+  assert.match(labelRule[0], /text-transform: uppercase;/);
+  assert.match(labelRule[0], /color: var\(--ink-muted\);/);
 });
 
 test("orchestrator guidance renders once as a normal user message from queue time", () => {
