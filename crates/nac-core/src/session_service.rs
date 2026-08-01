@@ -472,17 +472,25 @@ struct ActiveRunState {
     started_at: Instant,
     finishing: bool,
     task: Option<JoinHandle<()>>,
+    /// Visible-response count of the store transcript at run start,
+    /// captured by the run task before its first append (step 4,
+    /// never-fold): the diff base for the run-end token/timing bookkeeping.
+    /// `None` until the task captures it — an early cancel then diffs
+    /// against the run-end count, which is exact when nothing was appended.
+    transcript_baseline: Option<usize>,
     _operation_lease: Option<sessions::SessionOperationLease>,
 }
 
 struct FinishingRun {
     snapshot: ActiveRunSnapshot,
     duration_ms: u64,
+    transcript_baseline: Option<usize>,
 }
 
 struct CancellingRun {
     snapshot: ActiveRunSnapshot,
     task: Option<JoinHandle<()>>,
+    transcript_baseline: Option<usize>,
 }
 
 enum RunOutcome {
@@ -501,6 +509,14 @@ enum OperationAdmissionPreparationError {
 /// a scanned position's User-message content never changes: crash/cancel
 /// normalization trims only dangling Assistant/Tool tail messages, and
 /// compaction rewrites the provider view, never the transcript).
+///
+/// The counts survive scan-cursor rewinds (a shrinking merged length) for
+/// the same reason: `truncate_incomplete_tool_turn` trims only
+/// assistant-with-tool-calls and tool-result tails, never User messages and
+/// never visible responses (assistant messages without tool calls). A
+/// straggler row from an aborted append that is scanned in the cancel
+/// window before its `delete_from` would overcount — the same accepted
+/// imprecision class as `user_copies` (step 3).
 #[derive(Default)]
 struct TranscriptScanCache {
     /// Raw merged-transcript length scanned so far.
@@ -510,6 +526,12 @@ struct TranscriptScanCache {
     /// User message content → surviving copy count. Drives steering coverage
     /// with newest-first pairing (see `covered_orchestrator_steering_ids`).
     user_copies: HashMap<String, usize>,
+    /// Assistant messages with no tool calls (user-visible responses).
+    /// Diffed between run start and run end for the run-end token/timing
+    /// bookkeeping (step 4, never-fold): the snapshot blob is never
+    /// rewritten at run end, so the old-vs-new vec diff became a
+    /// store-count diff.
+    visible_response_count: usize,
 }
 
 impl TranscriptScanCache {
@@ -527,6 +549,9 @@ impl TranscriptScanCache {
             self.user_count += 1;
             self.last_user_idx = Some(idx);
             *self.user_copies.entry(content.clone()).or_insert(0) += 1;
+        }
+        if is_visible_response(message) {
+            self.visible_response_count += 1;
         }
     }
 }
@@ -1086,8 +1111,9 @@ impl SessionService {
 
     /// The merged store transcript: the snapshot blob (authoritative legacy
     /// prefix) ++ the transcript log tail (rows with `idx >= blob_len`).
-    /// Mid-run this is exactly the agent's in-memory transcript; post-run the
-    /// blob covers the log and the tail is empty.
+    /// This is exactly the agent's in-memory transcript, mid-run and
+    /// post-run alike — never-fold (step 4): the blob is write-once and the
+    /// tail only grows, run end no longer folds the log into the blob.
     async fn store_backed_transcript(&self) -> Result<Vec<Message>> {
         let (blob_len, mut messages) = {
             let snapshot = self.session_snapshot.lock().await;
@@ -1168,11 +1194,13 @@ impl SessionService {
     }
 
     /// Advance the incremental transcript scan over newly appended rows.
-    /// The delta is read from the store (blob part when a run-end persist
-    /// covered unscanned log rows, log window otherwise); positions already
-    /// consumed by a concurrent update are skipped. A shrinking merged
-    /// length means crash/cancel normalization trimmed a dangling
-    /// (non-User) tail: the scan cursor rewinds, counts are unaffected.
+    /// The delta is read from the store: the log window past the scanned
+    /// cursor, plus the blob part when the blob grew past it — dead in
+    /// production since step 4 (never-fold: the blob is write-once), kept
+    /// for tests that reseed the blob. Positions already consumed by a
+    /// concurrent update are skipped. A shrinking merged length means
+    /// crash/cancel normalization trimmed a dangling (non-User) tail: the
+    /// scan cursor rewinds, counts are unaffected.
     async fn update_transcript_scan(&self) -> Result<()> {
         if self.transcript_log.is_none() {
             return Ok(());
@@ -1410,7 +1438,12 @@ impl SessionService {
 
         let message = "run cancelled by user".to_string();
         let persistence_error = match self
-            .persist_run_snapshot(&cancelling_run.snapshot, None, cancel_usage)
+            .persist_run_snapshot(
+                &cancelling_run.snapshot,
+                cancelling_run.transcript_baseline,
+                None,
+                cancel_usage,
+            )
             .await
         {
             Ok(()) => None,
@@ -1454,6 +1487,19 @@ impl SessionService {
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
+            // Step 4 (never-fold): capture the run-start visible-response
+            // count from the store transcript BEFORE this run's first
+            // append. It is the diff base for the run-end token/timing
+            // bookkeeping, which no longer has an old-vs-new messages vec
+            // to diff. Best-effort: the run-end persist falls back to the
+            // run-end count when this fails.
+            if let Err(error) = service.update_transcript_scan().await {
+                eprintln!(
+                    "nac: failed to capture the transcript baseline for run {task_run_id}: {error:#}"
+                );
+            }
+            let baseline = service.lock_transcript_scan().visible_response_count;
+            service.set_run_transcript_baseline(&task_run_id, baseline);
             let (result, usage) = {
                 let mut agent = service.agent.lock().await;
                 agent.set_event_sink(EventSink::bus_with_context(
@@ -1601,6 +1647,7 @@ impl SessionService {
             started_at: Instant::now(),
             finishing: false,
             task: None,
+            transcript_baseline: None,
             _operation_lease: operation_lease,
         }));
         drop(guard);
@@ -1630,6 +1677,7 @@ impl SessionService {
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
+                finishing_run.transcript_baseline,
                 completed_duration_ms,
                 completed_usage,
             )
@@ -1730,6 +1778,7 @@ impl SessionService {
         Some(FinishingRun {
             snapshot: active_run.snapshot.clone(),
             duration_ms: duration_ms(active_run.started_at.elapsed()),
+            transcript_baseline: active_run.transcript_baseline,
         })
     }
 
@@ -1746,6 +1795,7 @@ impl SessionService {
         Some(CancellingRun {
             snapshot: active_run.snapshot.clone(),
             task: active_run.task.take(),
+            transcript_baseline: active_run.transcript_baseline,
         })
     }
 
@@ -1760,6 +1810,19 @@ impl SessionService {
             return;
         }
         active_run.task = Some(task);
+    }
+
+    /// Store the run-start visible-response count captured by the run task
+    /// (step 4). Dropped when the run is already finishing/cancelling — the
+    /// persist path then falls back to the run-end count (exact when the
+    /// task was cancelled before its first append).
+    fn set_run_transcript_baseline(&self, run_id: &SessionRunId, baseline: usize) {
+        let mut guard = self.lock_active_operation();
+        if let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() {
+            if &active_run.snapshot.run_id == run_id && !active_run.finishing {
+                active_run.transcript_baseline = Some(baseline);
+            }
+        }
     }
 
     fn clear_finished_run(&self, run_id: &SessionRunId) {
@@ -1781,58 +1844,69 @@ impl SessionService {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Run-end snapshot persist. STEP-4 NOTE (DB-direct transcript workset):
-    /// this still clones the agent's full message vec as the old-vs-new diff
-    /// base for `response_timing_after_run`/`token_usages_after_run`, and the
-    /// snapshot blob still carries the whole transcript. Step 4 moves those
-    /// counts to store queries (visible-response counts from the blob ++ log
-    /// read paths landed in step 3) and slims the blob; until then the vec
-    /// clone is deliberate — do not "optimize" it into the store-backed read
-    /// without moving the token/timing diff base at the same time.
+    /// Run-end persist (DB-direct transcript workset, step 4 — never-fold):
+    /// performs NO `messages_json` rewrite. The snapshot blob is write-once
+    /// (system head ++ legacy prefix); the transcript lives in the
+    /// transcript log, appends-only. Token/timing bookkeeping diffs
+    /// store-backed visible-response counts: `transcript_baseline` at run
+    /// start (captured by the run task before its first append) vs the count
+    /// at run end, advanced here over the run's appended log rows. Only
+    /// run-state columns are persisted (`save_session_run_state`) and the
+    /// in-memory snapshot is updated in place — no O(n) transcript clone
+    /// anywhere. The in-memory update deliberately happens before the save:
+    /// the duration/usage vectors are count-indexed histories, not diffs, so
+    /// a failed save leaves both copies re-derivable from the counts at the
+    /// next run end.
     async fn persist_run_snapshot(
         &self,
         active_run: &ActiveRunSnapshot,
+        transcript_baseline: Option<usize>,
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
     ) -> Result<()> {
-        let messages = {
-            let agent = self.agent.lock().await;
-            agent.messages.clone()
-        };
-
-        let refreshed = {
+        {
             let snapshot = self.session_snapshot.lock().await;
-            let Some(snapshot) = snapshot.as_ref() else {
+            if snapshot.is_none() {
+                return Ok(());
+            }
+        }
+        self.update_transcript_scan().await?;
+        let current_response_count = self.lock_transcript_scan().visible_response_count;
+        let update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            let Some(snapshot) = snapshot.as_mut() else {
                 return Ok(());
             };
-            let response_timing =
-                response_timing_after_run(snapshot, &messages, completed_duration_ms);
+            // Fallback when the run task never captured a baseline
+            // (cancelled before its first append, or a capture failure):
+            // diffing against the run-end count is exact in the no-append
+            // case and only affects legacy history padding otherwise.
+            let previous_response_count = transcript_baseline.unwrap_or(current_response_count);
+            let response_timing = response_timing_after_run(
+                snapshot,
+                previous_response_count,
+                current_response_count,
+                completed_duration_ms,
+            );
             let token_usages = token_usages_after_run(
                 &snapshot.token_usages,
-                &snapshot.messages,
-                &messages,
+                previous_response_count,
+                current_response_count,
                 completed_usage,
             );
-            sessions::refresh_snapshot(
-                snapshot,
-                messages,
-                response_timing.last_response_duration_ms,
-                response_timing.previous_response_duration_ms,
-                response_timing.response_durations_ms,
+            snapshot.apply_run_state(sessions::SessionRunState {
+                last_response_duration_ms: response_timing.last_response_duration_ms,
+                previous_response_duration_ms: response_timing.previous_response_duration_ms,
+                response_durations_ms: response_timing.response_durations_ms,
                 token_usages,
-            )
+            })
         };
 
-        let saved_snapshot = refreshed.clone();
+        let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
-        tokio::task::spawn_blocking(move || sessions::save_session(&store_path, &saved_snapshot))
+        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
             .await??;
 
-        let saved_session_id = refreshed.session_id.clone();
-        {
-            let mut snapshot = self.session_snapshot.lock().await;
-            *snapshot = Some(refreshed);
-        }
         self.event_bus.emit_with_context(
             SessionEvent::SnapshotSaved {
                 session_id: saved_session_id,
@@ -2048,18 +2122,34 @@ fn duration_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u64::MAX as u128) as u64
 }
 
+/// User-visible response predicate for the token/timing bookkeeping: an
+/// assistant message with no tool calls. Shared by the transcript scan
+/// cache and the run-end count diff.
+fn is_visible_response(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Assistant { tool_calls, .. }
+            if tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
+    )
+}
+
+/// Run-end response-timing bookkeeping. The diff base is store-backed
+/// visible-response counts (step 4, never-fold): `previous_response_count`
+/// at run START (captured from the store transcript when the run began) and
+/// `current_response_count` at run END. The persisted duration history is
+/// preserved and padded to both counts; a completed run's duration lands on
+/// the final visible response.
 fn response_timing_after_run(
     snapshot: &SessionSnapshot,
-    messages: &[Message],
+    previous_response_count: usize,
+    current_response_count: usize,
     completed_duration_ms: Option<u64>,
 ) -> ResponseTimingSnapshot {
-    let mut durations = response_duration_history_from_snapshot(snapshot);
-    let previous_response_count = visible_response_count(&snapshot.messages);
+    let mut durations = response_duration_history_from_snapshot(snapshot, previous_response_count);
     if durations.len() < previous_response_count {
         durations.resize(previous_response_count, None);
     }
 
-    let current_response_count = visible_response_count(messages);
     if durations.len() < current_response_count {
         durations.resize(current_response_count, None);
     }
@@ -2087,33 +2177,24 @@ fn response_timing_after_run(
     }
 }
 
-fn response_duration_history_from_snapshot(snapshot: &SessionSnapshot) -> Vec<Option<u64>> {
+fn response_duration_history_from_snapshot(
+    snapshot: &SessionSnapshot,
+    previous_response_count: usize,
+) -> Vec<Option<u64>> {
     if let Some(durations) = &snapshot.response_durations_ms {
         return durations.clone();
     }
 
-    let response_count = visible_response_count(&snapshot.messages);
-    let mut durations = vec![None; response_count];
-    if let Some(last_index) = response_count.checked_sub(1) {
+    // Legacy rows without a duration history: reconstruct from the scalar
+    // last/previous columns at the run-START count (the pre-run transcript).
+    let mut durations = vec![None; previous_response_count];
+    if let Some(last_index) = previous_response_count.checked_sub(1) {
         durations[last_index] = snapshot.last_response_duration_ms;
     }
-    if response_count >= 2 {
-        durations[response_count - 2] = snapshot.previous_response_duration_ms;
+    if previous_response_count >= 2 {
+        durations[previous_response_count - 2] = snapshot.previous_response_duration_ms;
     }
     durations
-}
-
-fn visible_response_count(messages: &[Message]) -> usize {
-    messages
-        .iter()
-        .filter(|message| {
-            matches!(
-                message,
-                Message::Assistant { tool_calls, .. }
-                    if tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
-            )
-        })
-        .count()
 }
 
 /// Build the per-response token-usage vector after a run, mirroring the
@@ -2123,17 +2204,15 @@ fn visible_response_count(messages: &[Message]) -> usize {
 /// run completed successfully.
 fn token_usages_after_run(
     existing: &[Option<crate::model::TokenUsage>],
-    old_messages: &[Message],
-    new_messages: &[Message],
+    previous_response_count: usize,
+    current_response_count: usize,
     completed_usage: Option<crate::model::TokenUsage>,
 ) -> Vec<Option<crate::model::TokenUsage>> {
     let mut usages = existing.to_vec();
-    let previous_response_count = visible_response_count(old_messages);
     if usages.len() < previous_response_count {
         usages.resize(previous_response_count, None);
     }
 
-    let current_response_count = visible_response_count(new_messages);
     if usages.len() < current_response_count {
         usages.resize(current_response_count, None);
     }
@@ -3010,6 +3089,7 @@ pub(super) mod tests {
                 started_at: Instant::now(),
                 finishing: false,
                 task: None,
+                transcript_baseline: None,
                 _operation_lease: None,
             }));
         let inactive = service
@@ -3412,15 +3492,21 @@ pub(super) mod tests {
             .unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "prompt".to_string(),
-            });
-            agent.messages.push(Message::Assistant {
-                content: Some("done".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "prompt".to_string(),
+                })
+                .await
+                .unwrap();
+            agent
+                .push_and_log_for_test(Message::Assistant {
+                    content: Some("done".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                })
+                .await
+                .unwrap();
         }
 
         assert!(
@@ -3437,9 +3523,19 @@ pub(super) mod tests {
         assert_eq!(started.sequence_id, 1);
         assert_run_started_event(started, &active, "prompt");
 
+        // The commit-point live signals (step 3) precede the run-end save.
+        for (sequence_id, transcript_len) in [(2, 2), (3, 3)] {
+            let appended = events.recv().await.unwrap();
+            assert_eq!(appended.sequence_id, sequence_id);
+            assert_eq!(
+                appended.event,
+                SessionEvent::TranscriptAppended { transcript_len }
+            );
+        }
+
         let saved_event = events.recv().await.unwrap();
         assert_eq!(saved_event.session_id.as_deref(), Some(session_id.as_str()));
-        assert_eq!(saved_event.sequence_id, 2);
+        assert_eq!(saved_event.sequence_id, 4);
         assert_eq!(saved_event.client_id.as_ref(), active.client_id.as_ref());
         assert_eq!(saved_event.run_id.as_ref(), Some(&active.run_id));
         assert_eq!(
@@ -3450,7 +3546,7 @@ pub(super) mod tests {
         );
 
         let completion = events.recv().await.unwrap();
-        assert_eq!(completion.sequence_id, 3);
+        assert_eq!(completion.sequence_id, 5);
         assert_eq!(completion.client_id.as_ref(), active.client_id.as_ref());
         assert_eq!(completion.run_id.as_ref(), Some(&active.run_id));
         let duration_ms = match completion.event {
@@ -3468,11 +3564,236 @@ pub(super) mod tests {
         assert_eq!(loaded.last_response_duration_ms, Some(duration_ms));
         assert_eq!(loaded.previous_response_duration_ms, None);
         assert_eq!(loaded.response_durations_ms, Some(vec![Some(duration_ms)]));
+        // Never-fold (step 4): the run end did not rewrite the blob...
         assert_eq!(
-            loaded.messages.len(),
-            parts.init.restored_messages.len() + 2
+            serde_json::to_value(&loaded.messages).unwrap(),
+            serde_json::to_value(&parts.init.restored_messages).unwrap()
         );
+        // ...the run's messages are served from the transcript log.
+        let transcript = parts.service.messages_snapshot().await.unwrap();
+        assert_eq!(transcript.len(), parts.init.restored_messages.len() + 2);
+        assert!(matches!(
+            transcript.last(),
+            Some(Message::Assistant { content: Some(text), .. }) if text == "done"
+        ));
         assert!(parts.service.active_run().is_none());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn run_end_persists_run_state_without_rewriting_messages_json() {
+        let (parts, store_path) = test_active_service("never_fold_run_end", "session-never-fold");
+        let session_id = "session-never-fold";
+        let raw_messages_json = || {
+            crate::store::open_connection(&store_path)
+                .unwrap()
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = ?1",
+                    rusqlite::params![session_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let blob_before = raw_messages_json();
+
+        // Two full runs: the blob stays byte-identical (never-fold) while
+        // the run-state bookkeeping accumulates per visible response.
+        for (prompt, response, input_tokens) in [
+            ("first prompt", "first done", 10_u64),
+            ("second prompt", "second done", 20_u64),
+        ] {
+            let active = parts.service.try_begin_run(None, prompt).unwrap();
+            {
+                let mut agent = parts.service.agent.lock().await;
+                agent
+                    .push_and_log_for_test(Message::User {
+                        content: prompt.to_string(),
+                    })
+                    .await
+                    .unwrap();
+                agent
+                    .push_and_log_for_test(Message::Assistant {
+                        content: Some(response.to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+            let usage = crate::model::TokenUsage {
+                input_tokens,
+                output_tokens: 5,
+                ..crate::model::TokenUsage::default()
+            };
+            assert!(
+                parts
+                    .service
+                    .finish_run_once(
+                        &active.run_id,
+                        RunOutcome::Completed(response.to_string(), Some(usage)),
+                    )
+                    .await
+            );
+            assert_eq!(
+                raw_messages_json(),
+                blob_before,
+                "run end must never rewrite messages_json (never-fold)"
+            );
+        }
+
+        let loaded = sessions::load_session(&store_path, session_id).unwrap();
+        let durations = loaded
+            .response_durations_ms
+            .as_ref()
+            .expect("duration history should be persisted");
+        assert_eq!(durations.len(), 2);
+        assert!(durations.iter().all(|entry| entry.is_some()));
+        assert_eq!(loaded.last_response_duration_ms, durations[1]);
+        assert_eq!(loaded.previous_response_duration_ms, durations[0]);
+        assert_eq!(loaded.token_usages.len(), 2);
+        assert_eq!(
+            loaded.token_usages[0].as_ref().unwrap().input_tokens,
+            10,
+            "the first run's usage stays on the first visible response"
+        );
+        assert_eq!(
+            loaded.token_usages[1].as_ref().unwrap().input_tokens,
+            20,
+            "the second run's usage lands on the final visible response"
+        );
+
+        // The full transcript is served from the store: blob ++ log.
+        let transcript = parts.service.messages_snapshot().await.unwrap();
+        assert_eq!(transcript.len(), parts.init.restored_messages.len() + 4);
+        assert!(matches!(
+            transcript.last(),
+            Some(Message::Assistant { content: Some(text), .. }) if text == "second done"
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let store_path = test_store_path("baseline_real_run");
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "new answer"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "baseline-session".to_string();
+        let mut agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        // Legacy-shaped history: the prior transcript lives in the blob and
+        // the row carries scalar last/previous durations but NO duration
+        // history vector (a pre-feature row resumed under this build).
+        agent.messages.push(Message::User {
+            content: "legacy prompt".to_string(),
+        });
+        agent.messages.push(Message::Assistant {
+            content: Some("legacy answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        });
+        let mut snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.last_response_duration_ms = Some(999);
+        snapshot.previous_response_duration_ms = Some(888);
+        snapshot.response_durations_ms = None;
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let blob_json_before: String = crate::store::open_connection(&store_path)
+            .unwrap()
+            .query_row(
+                "SELECT messages_json FROM sessions WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+
+        let handle = parts
+            .service
+            .try_submit_prompt("new prompt".to_string())
+            .unwrap();
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+        drop(handle);
+
+        let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        let durations = loaded
+            .response_durations_ms
+            .as_ref()
+            .expect("the run end persists a duration history");
+        assert_eq!(durations.len(), 2);
+        assert_eq!(
+            durations[0],
+            Some(999),
+            "the legacy last-duration stays on the pre-run response: the \
+             diff base is the visible-response count at run START (1), not \
+             the run-end count"
+        );
+        assert!(
+            durations[1].is_some(),
+            "the completed run's duration lands on the final visible response"
+        );
+        assert_eq!(loaded.last_response_duration_ms, durations[1]);
+        assert_eq!(loaded.previous_response_duration_ms, Some(999));
+        assert_eq!(loaded.token_usages.len(), 2);
+        assert!(loaded.token_usages[0].is_none());
+        assert_eq!(
+            loaded.token_usages[1].as_ref().unwrap().input_tokens,
+            10
+        );
+        let blob_json_after: String = crate::store::open_connection(&store_path)
+            .unwrap()
+            .query_row(
+                "SELECT messages_json FROM sessions WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            blob_json_after, blob_json_before,
+            "a real run end never rewrites messages_json (never-fold)"
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -3515,15 +3836,21 @@ pub(super) mod tests {
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "prompt".to_string(),
-            });
-            agent.messages.push(Message::Assistant {
-                content: Some("done".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "prompt".to_string(),
+                })
+                .await
+                .unwrap();
+            agent
+                .push_and_log_for_test(Message::Assistant {
+                    content: Some("done".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                })
+                .await
+                .unwrap();
         }
 
         let test_usage = crate::model::TokenUsage {
@@ -3621,15 +3948,21 @@ pub(super) mod tests {
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "prompt".to_string(),
-            });
-            agent.messages.push(Message::Assistant {
-                content: Some("partial response".to_string()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "prompt".to_string(),
+                })
+                .await
+                .unwrap();
+            agent
+                .push_and_log_for_test(Message::Assistant {
+                    content: Some("partial response".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                })
+                .await
+                .unwrap();
         }
 
         // Simulate usage that was accumulated during the run (including
@@ -3942,7 +4275,12 @@ pub(super) mod tests {
 
         parts
             .service
-            .persist_run_snapshot(&finishing.snapshot, Some(42), None)
+            .persist_run_snapshot(
+                &finishing.snapshot,
+                finishing.transcript_baseline,
+                Some(42),
+                None,
+            )
             .await
             .unwrap();
 
@@ -4122,9 +4460,12 @@ pub(super) mod tests {
         let active = parts.service.try_begin_run(None, "failed prompt").unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "failed prompt".to_string(),
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "failed prompt".to_string(),
+                })
+                .await
+                .unwrap();
         }
 
         assert!(
@@ -4135,6 +4476,12 @@ pub(super) mod tests {
         );
         let started = events.recv().await.unwrap();
         assert_run_started_event(started, &active, "failed prompt");
+        // The prompt commit point's live signal precedes the run-end save.
+        let appended = events.recv().await.unwrap();
+        assert_eq!(
+            appended.event,
+            SessionEvent::TranscriptAppended { transcript_len: 4 }
+        );
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
@@ -4151,10 +4498,18 @@ pub(super) mod tests {
         assert_eq!(loaded.last_response_duration_ms, Some(123));
         assert_eq!(loaded.previous_response_duration_ms, None);
         assert_eq!(loaded.response_durations_ms, Some(vec![Some(123)]));
+        // Never-fold (step 4): the failed run's prompt persists in the
+        // transcript log, not the blob.
         assert_eq!(
-            loaded.messages.len(),
-            parts.init.restored_messages.len() + 1
+            serde_json::to_value(&loaded.messages).unwrap(),
+            serde_json::to_value(&parts.init.restored_messages).unwrap()
         );
+        let transcript = parts.service.messages_snapshot().await.unwrap();
+        assert_eq!(transcript.len(), parts.init.restored_messages.len() + 1);
+        assert!(matches!(
+            transcript.last(),
+            Some(Message::User { content }) if content == "failed prompt"
+        ));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -4217,15 +4572,24 @@ pub(super) mod tests {
         .unwrap();
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "cancel prompt".to_string(),
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "cancel prompt".to_string(),
+                })
+                .await
+                .unwrap();
         }
 
         parts.service.request_cancel(&active.run_id).await.unwrap();
 
         let started = events.recv().await.unwrap();
         assert_run_started_event(started, &active, "cancel prompt");
+        // The prompt commit point's live signal fires before the cancel.
+        let appended = events.recv().await.unwrap();
+        assert_eq!(
+            appended.event,
+            SessionEvent::TranscriptAppended { transcript_len: 2 }
+        );
         assert!(matches!(
             events.recv().await.unwrap().event,
             SessionEvent::Agent {
@@ -4264,9 +4628,17 @@ pub(super) mod tests {
             .iter()
             .all(|record| record.status == "expired"));
 
+        // Never-fold (step 4): the cancel path persists bookkeeping only —
+        // the blob keeps the system head and the cancellation marker lives
+        // in the transcript log.
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(
+            serde_json::to_value(&loaded.messages).unwrap(),
+            serde_json::to_value(&parts.init.restored_messages).unwrap()
+        );
+        let transcript = parts.service.messages_snapshot().await.unwrap();
         assert!(matches!(
-            loaded.messages.last(),
+            transcript.last(),
             Some(Message::Assistant {
                 content: Some(content),
                 ..

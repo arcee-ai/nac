@@ -1,8 +1,9 @@
 //! Orchestrator transcript log — the DB-direct transcript workset
 //! (research/guidance-persistence). Step 1 landed these primitives plus the
-//! guards below; step 2 wired the agent loop to them (dual-write: every
-//! orchestrator message is appended here when it enters `Agent.messages`,
-//! while the snapshot blob rewrite at run end continues unchanged).
+//! guards below; step 2 wired the agent loop to them (every orchestrator
+//! message is appended here when it enters `Agent.messages`); step 3 made
+//! the read paths store-backed; step 4 made the log the ONLY growing
+//! transcript store (never-fold — see below).
 //!
 //! # Storage
 //!
@@ -56,9 +57,11 @@
 //! # Load path (step 2)
 //!
 //! Session restore is blob ++ log: the snapshot blob is authoritative for
-//! `[0, blob_len)`, log rows with `idx >= blob_len` are the tail a crashed
-//! run appended after the last snapshot save. An empty tail is exactly the
-//! pre-log behavior. After the merge, `truncate_incomplete_tool_turn` trims
+//! `[0, blob_len)`, log rows with `idx >= blob_len` are the tail. Under
+//! step 2-3's dual-write the tail was only a crashed run's rows (run end
+//! folded it into the blob); since step 4 (never-fold) the tail is every
+//! message after the write-once blob. An empty tail is exactly the pre-log
+//! behavior. After the merge, `truncate_incomplete_tool_turn` trims
 //! a dangling tool turn from the restored transcript and `delete_from`
 //! removes the matching log tail (crash normalization). The session cancel
 //! path performs the same normalization before appending its marker.
@@ -74,6 +77,21 @@
 //! construction, before any logging, and no commit point logs one — so every
 //! tail row is a visible message, which keeps the visible↔raw index mapping
 //! a constant offset (`blob_visible = blob_len - system_head_len`).
+//!
+//! # Run end and summaries (step 4 — never-fold)
+//!
+//! Run end performs NO `messages_json` rewrite: the snapshot blob is
+//! write-once (the system head ++ the legacy prefix a resumed session
+//! carried in) and the transcript lives here, appends-only forever. The
+//! run-end token/timing bookkeeping diffs store-backed visible-response
+//! counts (run start vs run end) and `sessions::save_session_run_state`
+//! UPDATEs only run-state columns. Session summaries (visible message
+//! count, last user prompt) are blob stats ++ the SQL log stats below —
+//! the blob alone is no longer the transcript. DOWNGRADE CAVEAT (accepted
+//! by the user): a build older than the transcript-log workset reads only
+//! `messages_json`, so it shows this store's history truncated to the
+//! head/legacy prefix — invisibility, not corruption; the log rows are
+//! untouched and a current build reads the full transcript again.
 //!
 //! # Guards (landed with step 1)
 //!
@@ -174,6 +192,71 @@ pub fn decode_transcript_log_entry(event_json: &str) -> Option<TranscriptLogEntr
     serde_json::from_str::<TranscriptLogPayload>(event_json)
         .ok()
         .map(|payload| payload.nac_transcript_message)
+}
+
+/// Visible-message count over a session's transcript log, for session
+/// summaries (step 4, never-fold: the blob alone is no longer the
+/// transcript). The predicate is exactly `visible_message_count`
+/// (sessions/summary.rs) applied to log rows — User rows, plus Assistant
+/// rows with content and no tool calls — evaluated in SQL over the payload's
+/// kind tag and the canonical message bytes, so listing sessions never
+/// decodes `Message` values. Rows that are not transcript payloads (foreign
+/// rows under the reserved name) extract NULL kind and are not counted.
+/// Runs per session per list query: an indexed (session_id, thread_name)
+/// scan of that session's rows only, no row materialization.
+pub fn count_visible_transcript_log_messages(conn: &Connection, session_id: &str) -> Result<usize> {
+    let count = conn.query_row(
+        "SELECT COUNT(*)
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+           AND (
+               json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
+               OR (
+                   json_extract(event_json, '$.nac_transcript_message.kind') = 'assistant'
+                   AND json_extract(
+                       json_extract(event_json, '$.nac_transcript_message.message'),
+                       '$.content'
+                   ) IS NOT NULL
+                   AND COALESCE(
+                       json_array_length(json_extract(
+                           json_extract(event_json, '$.nac_transcript_message.message'),
+                           '$.tool_calls'
+                       )),
+                       0
+                   ) = 0
+               )
+           )",
+        params![session_id, ORCHESTRATOR_STEERING_TARGET],
+        |row| row.get::<_, i64>(0),
+    )?;
+    usize::try_from(count).context("transcript log visible message count overflowed")
+}
+
+/// Most recent User message content in a session's transcript log, for
+/// session summaries (step 4). `None` when the log holds no User rows — the
+/// caller then falls back to the blob's last user prompt (pre-log sessions).
+/// Rowid order is append order under the module invariants, so the latest
+/// User row is a bounded backwards scan.
+pub fn last_transcript_log_user_prompt(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT json_extract(
+             json_extract(event_json, '$.nac_transcript_message.message'),
+             '$.content'
+         )
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+           AND json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
+         ORDER BY id DESC
+         LIMIT 1",
+        params![session_id, ORCHESTRATOR_STEERING_TARGET],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(Option::flatten)
+    .map_err(Into::into)
 }
 
 /// Dedicated writer/reader for the transcript log. Owns its connection, same
@@ -789,5 +872,103 @@ mod tests {
     fn transcript_log_writer_is_send_sync_for_spawn_blocking() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<TranscriptLogWriter>();
+    }
+
+    #[test]
+    fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
+        let path = temp_store_path("summary_stats");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        crate::store::insert_test_session(&path, "session-b");
+
+        let tool_call = crate::types::ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            function: crate::types::FunctionCall {
+                name: "read".to_string(),
+                arguments: "{\"path\":\"x\"}".to_string(),
+            },
+        };
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_batch(
+                "session-a",
+                1,
+                &[
+                    Message::User {
+                        content: "first prompt".to_string(),
+                    },
+                    Message::Assistant {
+                        content: Some("visible answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                    },
+                    // Assistant with tool calls: not visible even with content.
+                    Message::Assistant {
+                        content: Some("working".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: Some(vec![tool_call.clone()]),
+                    },
+                    Message::Tool {
+                        tool_call_id: "call-1".to_string(),
+                        content: "tool output".to_string(),
+                    },
+                    // Assistant without content: not visible.
+                    Message::Assistant {
+                        content: None,
+                        reasoning_text: Some("reasoning only".to_string()),
+                        reasoning_details: None,
+                        tool_calls: None,
+                    },
+                    // Assistant with an empty tool-call list: visible.
+                    Message::Assistant {
+                        content: Some("another answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: Some(Vec::new()),
+                    },
+                    Message::User {
+                        content: "latest prompt".to_string(),
+                    },
+                ],
+            )
+            .unwrap();
+        // A foreign (valid JSON, non-transcript) row under the reserved name
+        // extracts a NULL kind and is ignored by both stats.
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            "{\"type\":\"run_started\",\"prompt_preview\":\"run started\"}",
+        )
+        .unwrap();
+
+        let conn = open_connection(&path).unwrap();
+        assert_eq!(
+            count_visible_transcript_log_messages(&conn, "session-a").unwrap(),
+            4,
+            "user rows plus content-bearing, tool-call-free assistant rows"
+        );
+        assert_eq!(
+            last_transcript_log_user_prompt(&conn, "session-a")
+                .unwrap()
+                .as_deref(),
+            Some("latest prompt")
+        );
+
+        // A session with no log rows gets the empty stats (the caller falls
+        // back to the blob's last user prompt).
+        assert_eq!(
+            count_visible_transcript_log_messages(&conn, "session-b").unwrap(),
+            0
+        );
+        assert_eq!(
+            last_transcript_log_user_prompt(&conn, "session-b").unwrap(),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
