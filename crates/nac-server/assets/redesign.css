@@ -327,7 +327,9 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   display: grid;
   grid-template-columns: auto minmax(180px, 1fr) auto auto auto auto;
   align-items: center;
-  gap: 12px;
+  /* One gap rhythm between bar controls at every breakpoint: --sp-4 here,
+     --sp-3 in the 560px block. */
+  gap: var(--sp-4);
   padding: 10px 16px;
 }
 
@@ -365,6 +367,32 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .session-info-button { width: 32px; height: 32px; border-color: var(--line-strong); border-radius: var(--r-md); background: #0f0f0f; color: var(--ink-muted); }
 .session-info-button:hover { border-color: #5a5a5a; color: var(--ink); }
 .session-info-button svg { width: 15px; height: 15px; }
+
+/* Mobile workspace view switch. Hidden on desktop, where the chat rail and
+   thread canvas sit side by side; shown below the 780px mobile breakpoint,
+   where .session-layout swaps between the two panes instead of stacking them
+   (see the max-width: 780px media query). */
+.view-toggle {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-hover);
+  color: var(--ink-muted);
+  cursor: pointer;
+  font: var(--fw-semibold) var(--fs-xs)/var(--lh-none) var(--mono);
+  letter-spacing: var(--ls-wider);
+  text-transform: uppercase;
+}
+.view-toggle:hover { border-color: #626262; color: var(--ink-soft); }
+/* Segment padding matches the 38px icon-button rhythm next to it in the bar:
+   1px border + 3px pill padding + 10px segment padding on each side of the
+   10px/--lh-none label line = 38px total (44px on pointer:coarse, below). */
+.view-toggle-option { padding: 10px; border-radius: var(--r-sm); }
+.view-toggle[data-view="chat"] .view-toggle-option[data-view-option="chat"],
+.view-toggle[data-view="threads"] .view-toggle-option[data-view-option="threads"] { background: var(--paper); color: #111; }
 
 .danger-button { color: var(--danger); border-color: var(--danger-border); background: var(--danger-bg); }
 .danger-button:hover { border-color: #7a4646; background: #2d1a1a; }
@@ -505,11 +533,15 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .thread-tile[data-state="running"] .thread-state::before { border-color: #8aad8a; background: #8aad8a; }
 .thread-tile[data-state="queued"] .thread-state::before { border-style: dashed; }
 
-.action-ledger { display: grid; grid-auto-rows: min-content; margin: 0; padding: 1px 10px 3px; list-style: none; max-height: calc(var(--ledger-max-rows) * var(--ledger-row-height) + 4px); overflow: hidden; }
+/* The ledger is ALWAYS exactly --ledger-max-rows tall: tiles with fewer events
+   show the remaining rows as empty space beneath their entries (intended). */
+.action-ledger { display: grid; grid-auto-rows: min-content; align-content: start; margin: 0; padding: 1px 10px 3px; list-style: none; height: calc(var(--ledger-max-rows) * var(--ledger-row-height) + 4px); overflow: hidden; }
 .action-row { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; font: var(--fs-md)/var(--lh-none) var(--mono); color: var(--ink-muted); }
 .action-icon { color: var(--ink); font: var(--fs-md)/var(--lh-none) var(--mono); width: 14px; text-align: center; flex-shrink: 0; }
 .action-args { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.action-row.is-placeholder { min-height: 0; height: 0; padding: 0; overflow: hidden; }
+/* Empty ledgers stay the full ten lines tall; the placeholder label sits on
+   the first row instead of collapsing the tile to header-only. */
+.action-row.is-placeholder { justify-content: center; }
 .action-row.is-placeholder .action-args { color: var(--ink-muted); text-align: center; }
 
 /* Discrete recency gradient: each ledger line takes one solid color by age */
@@ -975,15 +1007,25 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   body { font-size: var(--fs-base); }
   .picker-bar { position: relative; }
   .session-browser { padding-top: 18px; }
-  .session-layout { height: auto; min-height: calc(100dvh - 112px); grid-template-columns: 1fr; grid-template-rows: auto minmax(400px,1fr) auto; overflow: visible; }
-  .session-layout.is-focused { height: calc(100dvh - 112px); min-height: 0; grid-template-rows: minmax(0,1fr) auto; overflow: hidden; }
+  /* Mobile view switch: below this breakpoint the workspace shows one pane at
+     a time — the orchestrator chat or the thread canvas — toggled by the
+     .view-toggle button in the session bar. .session-layout carries
+     .is-threads-view while the threads pane is active; without it the chat
+     pane is active. The active pane fills the layout height and scrolls
+     internally, so the page itself never scrolls and the composer stays
+     visible at the bottom in both views. */
+  .view-toggle { display: inline-flex; }
+  .session-bar { grid-template-columns: auto minmax(140px,1fr) auto auto auto auto; }
+  .session-layout { height: calc(100dvh - 112px); grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+  .session-layout > .overview-rail, .session-layout > .thread-canvas { grid-row: 1; grid-column: 1; }
+  .session-layout:not(.is-threads-view) > .thread-canvas { display: none; }
+  .session-layout.is-threads-view > .overview-rail { display: none; }
   .session-layout.is-focused > .focus-panel { grid-row: 1; }
   .session-layout.is-focused > .composer { position: relative; grid-row: 2; }
-  .overview-rail { grid-row: 1; max-height: none; display: flex; flex-direction: column; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
+  .overview-rail { border-right: 0; }
   .config-repair-notice { grid-column: 1 / -1; }
   .rail-section { border-right: 1px solid var(--line); }
-  .thread-canvas { min-height: 560px; }
-  .composer { position: sticky; bottom: 0; grid-column: 1; z-index: 15; }
+  .composer { grid-row: 2; grid-column: 1; }
   .focus-panel.is-thread .focus-content { overflow: auto; }
   .focus-panel.is-thread .focus-thread-layout { display: grid; height: auto; min-height: 100%; grid-template-columns: 1fr; grid-template-rows: minmax(260px, auto) auto; }
   .focus-panel.is-thread .focus-activity { min-height: 260px; max-height: 52dvh; display: block; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -992,6 +1034,9 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 
 @media (pointer: coarse) {
   .composer { --composer-control-height: 44px; }
+  /* 13px segment padding grows the pill to exactly 44px, matching the 44px
+     coarse-pointer icon buttons (2px border + 6px pill padding + 36px). */
+  .view-toggle-option { padding-top: 13px; padding-bottom: 13px; }
   #backToSessions { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
   .session-title-button { min-height: 44px; display: inline-flex; align-items: center; }
   .session-select { padding-bottom: 62px; }
@@ -1019,25 +1064,26 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   .session-bar {
     height: 148px;
     min-height: 148px;
-    grid-template-columns: 38px minmax(0, 1fr) 32px 38px;
+    grid-template-columns: 38px minmax(0, 1fr) 32px 38px auto;
     grid-template-rows: 38px 30px minmax(0, 1fr);
     align-items: center;
-    gap: 7px 6px;
-    padding: 9px;
+    /* Tighter but uniform step of the same gap rhythm as the base bar. */
+    gap: var(--sp-3);
+    padding: 10px;
   }
   #backToSessions { grid-column: 1; grid-row: 1; }
   .session-identity { grid-column: 2; grid-row: 1; min-width: 0; overflow: hidden; flex-direction: column; align-items: stretch; gap: 2px; }
   .session-title-button { max-width: 100%; overflow: hidden; }
   .session-info-button { grid-column: 3; grid-row: 1; }
   #stopRun { grid-column: 4; grid-row: 1; }
+  #viewToggle { grid-column: 5; grid-row: 1; }
   .session-location { display: block; font-size: var(--fs-xs); }
   .session-nav-status { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: 100%; justify-content: flex-end; }
   .session-metrics { grid-column: 1 / -1; grid-row: 3; min-width: 0; }
   .session-metrics div { min-width: 0; padding: 7px 6px; }
   .session-metrics dt { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
   .session-metrics dd { font-size: var(--fs-xs); }
-  .session-layout { min-height: calc(100dvh - 148px); }
-  .session-layout.is-focused { height: calc(100dvh - 148px); }
+  .session-layout { height: calc(100dvh - 148px); }
   .overview-rail { display: flex; flex-direction: column; }
   .rail-section { border-right: 0; }
   .thread-board { padding: 9px; }

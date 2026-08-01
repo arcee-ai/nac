@@ -68,6 +68,7 @@ function loadApp(overrides = {}) {
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
       restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
       handleOrchestratorChatScroll,
+      setWorkspaceView, captureWorkspaceViewScroll, restoreWorkspaceViewScroll,
       renderConfigRepairGuidance, recordSessionEnvelope,
       connectEventStream, worksetsPresentation, renderWorksetsFocus,
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
@@ -270,7 +271,7 @@ function installWorkspaceElements(uiInstance) {
     hidden: false, innerHTML: "", querySelector() { return null; }, querySelectorAll() { return []; }, });
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
-    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
+    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun", "viewToggle",
     "orchestratorChatContent",
     "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
@@ -2196,13 +2197,27 @@ test("thread-tool turns render one consistent structure with a truncated same-si
   assert.equal(ui.formatToolCall({ function: { name: "threads", arguments: "{}" } }).args, "");
 });
 
-test("thread tiles are content-driven and the ledger is capped at ten lines", () => {
+test("thread tile ledgers are always exactly ten lines tall", () => {
   assert.doesNotMatch(redesignSource, /\.thread-tile \{[^}]*height: 208px/s);
   assert.doesNotMatch(redesignSource, /\.thread-current-grid \{[^}]*grid-auto-rows: 208px/s);
   assert.match(redesignSource, /\.thread-current-grid \{[^}]*align-items: start/s);
-  assert.match(redesignSource, /\.action-ledger \{[^}]*max-height: calc\(var\(--ledger-max-rows\) \* var\(--ledger-row-height\) \+ 4px\)/s);
+  assert.match(redesignSource, /\.action-ledger \{[^}]*; height: calc\(var\(--ledger-max-rows\) \* var\(--ledger-row-height\) \+ 4px\)/s,
+    "the ledger reserves exactly ten rows whether or not they are filled");
+  assert.doesNotMatch(redesignSource, /\.action-ledger \{[^}]*max-height/s,
+    "the ledger is no longer content-driven up to a cap");
   assert.match(redesignSource, /--ledger-row-height: 15px;/);
   assert.match(redesignSource, /--ledger-max-rows: 10;/);
+  assert.equal(10 * 15 + 4, 154, "ten 15px rows + 4px ledger vertical padding = 154px");
+});
+
+test("empty-tile placeholder rows stay visible inside the fixed-height ledger", () => {
+  assert.doesNotMatch(redesignSource, /\.action-row\.is-placeholder \{[^}]*height: 0/s,
+    "the placeholder row no longer collapses the empty tile to header-only");
+  assert.match(redesignSource, /\.action-row\.is-placeholder \{ justify-content: center; \}/);
+  const html = ui.renderActionRows([], "No activity yet.");
+  assert.match(html, /<li class="action-row is-placeholder">/);
+  assert.match(html, /No activity yet\./);
+  assert.doesNotMatch(html, /aria-hidden/, "the visible label is exposed to assistive tech");
 });
 
 test("formatActionArgs extracts the relevant argument per tool type", () => {
@@ -3829,6 +3844,128 @@ test("late store metadata does not overwrite an already-started launch draft", a
   assert.equal(isolated.el.launchCwd.value, "/typed/before/store");
   assert.deepEqual(plain(isolated.state.launchCwdDrafts), {
     localSandbox: "/typed/before/store", ssh: "~/remote-draft", });
+});
+
+test("session bar includes the mobile view toggle with accessible pressed state", () => {
+  assert.match(indexSource, /<button id="viewToggle" class="view-toggle" type="button" data-view="chat" aria-pressed="false" aria-label="[^"]+"/);
+  assert.match(indexSource, /data-view-option="chat">Chat</);
+  assert.match(indexSource, /data-view-option="threads">Threads</);
+  const barStart = indexSource.indexOf('<header class="session-bar">');
+  const bar = indexSource.slice(barStart, indexSource.indexOf("</header>", barStart));
+  assert.ok(bar.includes('id="viewToggle"'), "toggle lives in the session bar");
+  assert.ok(bar.indexOf('id="stopRun"') < bar.indexOf('id="viewToggle"'), "toggle follows the stop button");
+});
+
+test("mobile view switch CSS: toggle hidden on desktop, panes swap below the 780px breakpoint", () => {
+  assert.match(redesignSource, /\.view-toggle \{[^}]*display: none;/s, "toggle is hidden by default (desktop)");
+  assert.match(redesignSource, /\.view-toggle\[data-view="chat"\] \.view-toggle-option\[data-view-option="chat"\][^{]*\{[^}]*background: var\(--paper\);/s,
+    "the active option is highlighted");
+  const start = redesignSource.indexOf("@media (max-width: 780px)");
+  const mobileBlock = redesignSource.slice(start, redesignSource.indexOf("@media", start + 10));
+  assert.match(mobileBlock, /\.view-toggle \{ display: inline-flex; \}/, "toggle appears below the breakpoint");
+  assert.match(mobileBlock, /\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto auto; \}/,
+    "the session bar gains a track for the toggle only below the breakpoint");
+  assert.match(mobileBlock, /\.session-layout:not\(\.is-threads-view\) > \.thread-canvas \{ display: none; \}/);
+  assert.match(mobileBlock, /\.session-layout\.is-threads-view > \.overview-rail \{ display: none; \}/);
+  assert.match(mobileBlock, /\.session-layout \{[^}]*height: calc\(100dvh - 112px\);[^}]*grid-template-columns: 1fr;[^}]*overflow: hidden;/s,
+    "the layout is fixed-height with internal pane scrolling, not page scroll");
+  assert.doesNotMatch(mobileBlock, /grid-template-rows: auto minmax\(400px,1fr\) auto/, "the old stacked grid rows are gone");
+  assert.doesNotMatch(mobileBlock, /\.overview-rail \{[^}]*overflow: visible/, "the old page-scroll rail is gone");
+  assert.doesNotMatch(mobileBlock, /min-height: 560px/, "the old thread-canvas page-scroll minimum is gone");
+  assert.doesNotMatch(mobileBlock, /position: sticky/, "the composer no longer sticks over a scrolling page");
+  assert.match(redesignSource, /#viewToggle \{ grid-column: 5; grid-row: 1; \}/, "toggle is placed in the 560px session-bar grid");
+  assert.match(redesignSource, /\.session-layout \{ height: calc\(100dvh - 148px\); \}/, "560px layout stays fixed-height");
+});
+
+test("desktop workspace layout rules are unchanged by the mobile view switch", () => {
+  assert.match(redesignSource, /\.session-layout \{\s*height: calc\(100dvh - 72px\);\s*display: grid;\s*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\);\s*grid-template-rows: minmax\(0, 1fr\) auto;\s*overflow: hidden;\s*\}/);
+  assert.match(redesignSource, /@media \(max-width: 1060px\) \{\s*\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto; \}/,
+    "the 1060px session-bar grid keeps its five tracks");
+  assert.doesNotMatch(redesignSource.slice(0, redesignSource.indexOf("@media")), /is-threads-view/,
+    "no view-switch rules exist outside the media queries");
+});
+
+test("session-bar spacing is one token-based rhythm and the toggle matches icon-button height", () => {
+  assert.match(redesignSource, /--sp-3: 8px;/);
+  assert.match(redesignSource, /--sp-4: 12px;/);
+  assert.match(redesignSource, /\.session-bar \{[^}]*gap: var\(--sp-4\);[^}]*padding: 10px 16px;/s,
+    "the base bar spaces controls with the --sp-4 step");
+  const narrow = redesignSource.slice(redesignSource.indexOf("@media (max-width: 560px)"));
+  assert.match(narrow, /\.session-bar \{[^}]*gap: var\(--sp-3\);[^}]*padding: 10px;/s,
+    "the 560px bar uses a uniform --sp-3 step of the same rhythm");
+  assert.doesNotMatch(narrow, /gap: 7px 6px/, "the old off-rhythm 560px gap is gone");
+  assert.match(redesignSource, /\.view-toggle \{[^}]*padding: 3px;/s);
+  assert.match(redesignSource, /\.view-toggle-option \{ padding: 10px;/,
+    "segments pad the pill to the 38px icon-button height");
+  assert.equal(2 + 2 * 3 + (2 * 10 + 10), 38,
+    "pill math: 2px border + 6px pill padding + 30px segments (10px label line)");
+  const coarse = redesignSource.slice(redesignSource.indexOf("@media (pointer: coarse)"));
+  assert.match(coarse, /\.view-toggle-option \{ padding-top: 13px; padding-bottom: 13px; \}/,
+    "coarse pointers grow the pill to the 44px icon-button height");
+  assert.doesNotMatch(coarse, /\.view-toggle \{ min-height: 44px; \}/,
+    "the pill height comes from segment padding, not a loose min-height");
+});
+
+test("workspace view toggle flips layout class and button state, defaulting to chat", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  isolated.setWorkspaceView("threads");
+  assert.equal(isolated.state.workspaceView, "threads");
+  assert.ok(isolated.el.sessionLayout.classList.contains("is-threads-view"));
+  assert.equal(isolated.el.viewToggle.dataset.view, "threads");
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "true");
+  isolated.setWorkspaceView("chat");
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  assert.equal(isolated.el.viewToggle.dataset.view, "chat");
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
+});
+
+test("workspace view switching preserves each pane's scroll position", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "scroll-session";
+  const chat = isolated.el.orchestratorChatContent;
+  const threads = isolated.el.threadGrid;
+  chat.scrollTop = 120;
+  isolated.state.orchestratorViewport = { sessionId: "scroll-session", pinnedToBottom: false, scrollTop: 120 };
+  isolated.setWorkspaceView("threads");
+  chat.scrollTop = 0; // display:none resets the hidden pane's offset
+  threads.scrollTop = 77;
+  isolated.setWorkspaceView("chat");
+  assert.equal(chat.scrollTop, 120, "chat scroll is restored on re-entry");
+  threads.scrollTop = 0;
+  isolated.setWorkspaceView("threads");
+  assert.equal(threads.scrollTop, 77, "threads scroll is restored on re-entry");
+});
+
+test("chat view re-entry pins to bottom when the user never scrolled up", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "pinned-session";
+  const chat = isolated.el.orchestratorChatContent;
+  chat.scrollHeight = 4000;
+  isolated.state.orchestratorViewport = { sessionId: "pinned-session", pinnedToBottom: true, scrollTop: 3960 };
+  isolated.setWorkspaceView("threads");
+  isolated.setWorkspaceView("chat");
+  assert.equal(chat.scrollTop, 4000, "chat jumps to the latest messages instead of a stale offset");
+});
+
+test("opening a session resets the mobile workspace view to chat", () => {
+  const { FakeEventSource } = eventSourceHarness();
+  const isolated = loadApp({ EventSource: FakeEventSource,
+    fetch() { return new Promise(() => {}); }, });
+  installWorkspaceElements(isolated);
+  isolated.state.sessions = [{ summary: { session_id: "view-reset-session", cwd: "/repo", model: "gpt-5" } }];
+  isolated.state.snapshots.set("view-reset-session", sessionSnapshot("view-reset-session"));
+  isolated.setWorkspaceView("threads");
+  assert.ok(isolated.el.sessionLayout.classList.contains("is-threads-view"));
+  assert.doesNotThrow(() => isolated.openSession("view-reset-session"));
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
 });
 
 for (const [group, rows] of scenarioGroups) {

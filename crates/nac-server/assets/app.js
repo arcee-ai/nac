@@ -46,6 +46,8 @@ const state = {
   workspaceRenderSessionId: null,
   workspaceRestoreId: 0,
   focusOpener: null,
+  workspaceView: "chat",
+  workspaceViewScroll: { sessionId: null, chat: Number.NaN, threads: Number.NaN },
 };
 
 const ACTION_LEDGER_LIMIT = 10;
@@ -82,7 +84,7 @@ function bindElements() {
     "app", "pickerTitle", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
-    "metricChanges", "sessionNavStatus", "stopRun",
+    "metricChanges", "sessionNavStatus", "stopRun", "viewToggle",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
     "orchestratorChatContent",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
@@ -114,6 +116,7 @@ function bindEvents() {
   el.sessionInfo.addEventListener("click", () => openFocusView("info"));
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
   el.stopRun.addEventListener("click", stopActiveRun);
+  el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
   el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
@@ -1019,6 +1022,7 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   state.focusView = null;
   state.settingsFocus = null;
   state.settingsRequestGeneration += 1;
+  setWorkspaceView("chat", { preserveScroll: false });
   el.sessionPicker.hidden = true;
   el.sessionWorkspace.hidden = false;
   restoreComposerDraft(sessionId);
@@ -2374,6 +2378,57 @@ function closeFocusView() {
   requestAnimationFrame(() => {
     if (!restoreFocusTarget(openerTarget)) restoreFocusTarget(fallbackTarget);
   });
+}
+
+function workspaceViewScroller(view) {
+  return view === "threads" ? el.threadGrid : el.orchestratorChatContent;
+}
+
+function captureWorkspaceViewScroll(view) {
+  const store = state.workspaceViewScroll;
+  if (store.sessionId !== state.currentId) {
+    store.sessionId = state.currentId;
+    store.chat = Number.NaN;
+    store.threads = Number.NaN;
+  }
+  const scroller = workspaceViewScroller(view);
+  store[view] = scroller ? Number(scroller.scrollTop || 0) : Number.NaN;
+}
+
+function restoreWorkspaceViewScroll(view) {
+  const scroller = workspaceViewScroller(view);
+  if (!scroller) return;
+  const store = state.workspaceViewScroll;
+  const saved = store.sessionId === state.currentId ? store[view] : Number.NaN;
+  // The pane was display:none while inactive, which resets its scroll offset;
+  // restore it once the pane is visible again. The chat follows the same
+  // pin-to-bottom rule as renderOrchestratorChatRail when the user never
+  // scrolled away from the latest messages.
+  requestAnimationFrame(() => {
+    if (view === "chat") {
+      const viewport = state.orchestratorViewport;
+      if (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom || !Number.isFinite(saved)) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else {
+        scroller.scrollTop = saved;
+      }
+    } else if (Number.isFinite(saved)) {
+      scroller.scrollTop = saved;
+    }
+  });
+}
+
+function setWorkspaceView(view, { preserveScroll = true } = {}) {
+  const next = view === "threads" ? "threads" : "chat";
+  const previous = state.workspaceView === "threads" ? "threads" : "chat";
+  if (preserveScroll && previous !== next) captureWorkspaceViewScroll(previous);
+  state.workspaceView = next;
+  if (el.sessionLayout) el.sessionLayout.classList.toggle("is-threads-view", next === "threads");
+  if (el.viewToggle) {
+    el.viewToggle.dataset.view = next;
+    el.viewToggle.setAttribute("aria-pressed", String(next === "threads"));
+  }
+  if (preserveScroll && previous !== next) restoreWorkspaceViewScroll(next);
 }
 
 function renderFocusView(snapshot) {
@@ -3811,7 +3866,7 @@ function selectTileActions(actions, limit = ACTION_LEDGER_LIMIT) {
 function renderFocusActionRows(actions) {
   const visible = actions.filter(isTileVisibleAction);
   if (!visible.length) {
-    return `<li class="action-row is-placeholder" aria-hidden="true"><span class="action-args">No activity.</span></li>`;
+    return `<li class="action-row is-placeholder"><span class="action-args">No activity.</span></li>`;
   }
   return visible.map((action) => {
     const state = escapeAttr(action.state || "recorded");
@@ -3833,7 +3888,7 @@ function renderFocusActionRows(actions) {
 function renderActionRows(actions, emptyLabel) {
   const visible = selectTileActions(actions);
   if (!visible.length) {
-    return `<li class="action-row is-placeholder" aria-hidden="true"><span class="action-args">${escapeHtml(emptyLabel)}</span></li>`;
+    return `<li class="action-row is-placeholder"><span class="action-args">${escapeHtml(emptyLabel)}</span></li>`;
   }
   return visible.map((action, index) => {
     const state = escapeAttr(action.state || "recorded");
