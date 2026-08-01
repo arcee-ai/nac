@@ -256,8 +256,6 @@ pub struct SubmittedUserMessageSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<SessionClientId>,
     pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub baseline_user_message_count: Option<usize>,
     pub submitted_at_epoch_ms: u64,
 }
 
@@ -286,6 +284,14 @@ pub enum SessionEvent {
     },
     SnapshotSaved {
         session_id: String,
+    },
+    /// Live-only signal that the orchestrator transcript log gained rows
+    /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
+    /// merged transcript length after the append. Emitted at each transcript
+    /// commit point so subscribers refetch the store-backed transcript
+    /// mid-run. Never persisted: the bus persists only Agent events.
+    TranscriptAppended {
+        transcript_len: u64,
     },
 }
 
@@ -1096,6 +1102,21 @@ impl EventSink {
         }
         if let Some(channel) = &self.channel {
             let _ = channel.send(event);
+        }
+    }
+
+    /// Live-only transcript growth signal (DB-direct transcript workset,
+    /// step 3). Emitted by the agent at each transcript commit point, after
+    /// the log append commits, so session subscribers refetch the
+    /// store-backed transcript mid-run. A no-op without a bus (workers,
+    /// channel sinks, tests).
+    pub fn emit_transcript_appended(&self, transcript_len: u64) {
+        if let Some(bus) = &self.bus {
+            bus.emit_with_context(
+                SessionEvent::TranscriptAppended { transcript_len },
+                self.run_id.clone(),
+                self.client_id.clone(),
+            );
         }
     }
 }

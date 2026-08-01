@@ -632,9 +632,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .focus-message[data-role="user"] { margin-block: var(--sp-2); }
 .focus-message[data-role="user"] { background: #1a1a1a; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); color: var(--ink); }
 .focus-message[data-role="user"] .focus-message-copy { color: var(--ink); }
-.focus-message.is-pending { border: 1px solid var(--line); border-radius: var(--r-sm); }
-.focus-message.is-pending .focus-message-copy { color: var(--ink-soft); }
-.focus-pending-badge { align-self: flex-end; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wider); text-transform: uppercase; animation: pending-badge-pulse 2.6s ease-in-out infinite; }
 .focus-guidance-status { align-self: flex-end; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wider); text-transform: uppercase; animation: pending-badge-pulse 2.6s ease-in-out infinite; }
 @keyframes pending-badge-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 .focus-message-body { min-width: 0; display: grid; gap: 6px; width: 100%; }

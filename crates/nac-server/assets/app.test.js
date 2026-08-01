@@ -54,8 +54,8 @@ function loadApp(overrides = {}) {
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
       renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
-      normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
-      effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
+      notePendingEcho, displayPromptFromMessage, pendingEchoCoveredByCanonical,
+      reconcilePendingEcho, effectivePendingMessages,
       responseDurationAssignments, runTimingPresentation, updateRuntimeMetric,
       threadCycleSeed, displaySessionTitle, shortId, basename, shortModel, formatNumber,
       formatTokenCount, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
@@ -331,7 +331,7 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   isolated.state.events.set(sessionId, [{ sequence_id: 900, event: { type: "run_completed", response: "old" } }]);
   isolated.state.threadCycles.set(sessionId, { marker: "old", names: new Set(["old-thread"]) });
   isolated.state.threadEventWindows.set(`${sessionId}:old-thread`, { afterSequence: 900, events: [{}] });
-  isolated.state.acceptedRuns.set(sessionId, { run_id: "accepted-old" });
+  isolated.state.pendingEchoes.set(sessionId, { run_id: "accepted-old", content: "old prompt" });
   isolated.noteSessionCompactionEvent(sessionId, {
     type: "orchestrator_compaction_failed", compaction_id: "old-terminal", reason: "manual", failure: "cancelled",
   });
@@ -350,7 +350,7 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   assert.equal(stale.closed, true);
   assert.equal(instances.length, 2);
   assert.doesNotMatch(instances[1].url, /after_sequence_id/);
-  for (const store of [isolated.state.lastSequence, isolated.state.events, isolated.state.threadCycles, isolated.state.acceptedRuns]) {
+  for (const store of [isolated.state.lastSequence, isolated.state.events, isolated.state.threadCycles, isolated.state.pendingEchoes]) {
     assert.equal(store.has(sessionId), false); }
   assert.equal(isolated.state.threadEventWindows.has(`${sessionId}:old-thread`), false);
   assert.equal(isolated.state.sessions[0].active_run, null);
@@ -484,6 +484,44 @@ scenario("SSE", "replay-gap compaction reconciliation retries a snapshot invalid
   assert.equal(isolated.sessionCompactionBusy(sessionId), false,
     "the trailing null snapshot reconciles a terminal missed by replay");
   assert.equal(isolated.state.snapshots.get(sessionId).active_compaction, null);
+});
+
+scenario("SSE", "transcript_appended schedules a debounced refetch that renders mid-run messages", async () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const requests = [];
+  const timers = [];
+  const isolated = loadApp({ EventSource: FakeEventSource,
+    fetch: async (path) => { requests.push(path);
+      return jsonResponse(sessionSnapshot("live-session", {
+        messages: [{ role: "user", content: "prompt" }, { role: "assistant", content: "mid-run answer" }],
+        active_run: { run_id: "run-live", started_at_epoch_ms: 1 },
+      })); },
+    window: { setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+      clearTimeout() {}, }, });
+  const sessionId = "live-session";
+  isolated.state.currentId = sessionId;
+  isolated.connectEventStream(sessionId);
+  const source = instances[0];
+  source.emit("replay_boundary", { replay_boundary_sequence_id: 1 });
+  // A historical (replayed) transcript_appended must not refetch.
+  source.emit("session_event", { session_id: sessionId, sequence_id: 1,
+    event: { type: "transcript_appended", transcript_len: 2 } });
+  assert.equal(timers.filter(({ delay }) => delay === 120).length, 0);
+  // The live signal schedules the debounced snapshot refetch.
+  source.emit("session_event", { session_id: sessionId, sequence_id: 2,
+    event: { type: "transcript_appended", transcript_len: 3 } });
+  const snapshotTimers = timers.filter(({ delay }) => delay === 120);
+  assert.equal(snapshotTimers.length, 1, "transcript_appended reuses the 120ms snapshot debounce");
+  snapshotTimers[0].callback();
+  const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
+  assert.ok(refreshDrain);
+  await refreshDrain;
+  assert.ok(requests.some((path) => path.startsWith(`/sessions/${sessionId}?`)),
+    "the live signal refetches the store-backed snapshot");
+  assert.deepEqual(
+    plain(isolated.state.snapshots.get(sessionId).messages.map((message) => message.role)),
+    ["user", "assistant"],
+    "mid-run messages from the refetched snapshot are the live transcript");
 });
 
 scenario("SSE", "initial replay hydrates chronology without replaying stale run-attention side effects", () => {
@@ -735,13 +773,13 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   assert.equal(tool, "");
   const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] });
   assert.equal(empty, "");
-  const pending = ui.renderFocusMessage({
-    role: "user", content: "just accepted", pending: true, pendingSource: "accepted response <client>",
-  });
-  assert.match(pending, /class="focus-message is-pending"/);
-  assert.match(pending, /Sending…/);
-  assert.match(pending, /data-pending-source="accepted response &lt;client&gt;"/);
-  assert.doesNotMatch(pending, />#\d+</);
+  // The optimistic submit echo renders as a plain user message — the
+  // "Sending…" badge and its data attributes are gone with the baseline
+  // pending machinery.
+  const echo = ui.renderFocusMessage({ role: "user", content: "just accepted", run_id: "run-1" });
+  assert.match(echo, /class="focus-message" data-role="user"/);
+  assert.match(echo, /just accepted/);
+  assert.doesNotMatch(echo, /Sending…|is-pending|data-pending-source/);
 });
 
 scenario("Transcript privacy", "unfiltered post-create transcripts hide system and AGENTS content while retaining user rows", () => {
@@ -1226,42 +1264,51 @@ test("snapshot coordinators remain independent across navigation and retain resp
   ]);
 });
 
-test("pending messages reconcile only against canonical rows after their authoritative baseline", () => {
-  const absentBaselines = ui.normalizedSubmittedMessage({
-    run_id: "run-no-baseline", baseline_message_total: null,
-    submitted_user_message: { content: "new", baseline_user_message_count: null },
-  });
-  assert.equal(absentBaselines.baselineUserCount, null);
-  assert.equal(absentBaselines.baselineMessageTotal, null);
-  const activeRun = { run_id: "run-repeat",
-    started_at_epoch_ms: 1_000, submitted_user_message: {
-      run_id: "run-repeat", content: "repeat prompt",
-      baseline_user_message_count: 1, submitted_at_epoch_ms: 1_000, },
-  };
-  const beforeCanonical = { active_run: activeRun,
-    messages: [{ role: "user", content: "repeat prompt" }],
-    message_page: { start: 0, end: 1, total: 1 },
-    message_cycle: { marker: "history:1:0", thread_names: [] }, };
-  assert.equal(ui.effectivePendingMessages("repeat-session", beforeCanonical).length, 1);
-  const afterCanonical = { ...beforeCanonical, messages: [
-      { role: "user", content: "repeat prompt" },
-      { role: "assistant", content: "earlier response" },
-      { role: "user", content: "expanded canonical prompt that differs" },
-    ], message_page: { start: 0, end: 3, total: 3 },
-    message_cycle: { marker: "history:2:2", thread_names: [] }, };
-  assert.equal(ui.effectivePendingMessages("repeat-session", afterCanonical).length, 0);
-  const acceptedPending = { role: "user",
-    content: "/run compact-name", baselineMessageTotal: 20,
-    baselineUserCount: null, };
-  assert.equal(ui.pendingMessageCoveredByCanonical(acceptedPending, {
+test("the optimistic submit echo clears only when the canonical user message lands", () => {
+  const sessionId = "echo-session";
+  ui.notePendingEcho(sessionId, "run-1", "repeat prompt");
+  const beforeCanonical = { messages: [{ role: "user", content: "something else" }] };
+  assert.equal(ui.effectivePendingMessages(sessionId, beforeCanonical).length, 1);
+  assert.equal(ui.reconcilePendingEcho(sessionId, beforeCanonical), false);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), true);
+
+  // The canonical user message with the same content clears the echo.
+  const afterCanonical = { messages: [
+    { role: "user", content: "something else" },
+    { role: "assistant", content: "working" },
+    { role: "user", content: "repeat prompt" },
+  ] };
+  assert.equal(ui.reconcilePendingEcho(sessionId, afterCanonical), true);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
+  assert.equal(ui.effectivePendingMessages(sessionId, afterCanonical).length, 0);
+
+  // Command expansion: the canonical message is the expanded /run or /plan
+  // prompt, so coverage canonicalizes it back to the display form.
+  assert.equal(ui.displayPromptFromMessage("plain prompt"), "plain prompt");
+  const expandedRun = "# /run: Workset Execution\n\nWorkset id:\ncompact-name\n\nExecute an existing workset.\n\nSteps:\n1. ...";
+  assert.equal(ui.displayPromptFromMessage(expandedRun), "/run compact-name");
+  const expandedPlan = "# /plan: Workset Planning\n\nUser instruction:\nbuild the thing\n\nCreate exactly one durable high-level workset";
+  assert.equal(ui.displayPromptFromMessage(expandedPlan), "/plan build the thing");
+  ui.notePendingEcho(sessionId, "run-2", "/run compact-name");
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
+    messages: [{ role: "user", content: expandedRun }],
+  }), true);
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
     messages: [{ role: "user", content: "/run compact-name" }],
-    message_page: { start: 19 }, }), false);
-  assert.equal(ui.pendingMessageCoveredByCanonical(acceptedPending, {
-    messages: [{ role: "user", content: "expanded command body" }],
-    message_page: { start: 20 }, }), true);
+  }), true, "an unexpanded identical row also covers");
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
+    messages: [{ role: "user", content: expandedPlan }],
+  }), false);
+
+  // A terminal event clears the echo only for the matching run.
+  ui.notePendingEcho(sessionId, "run-3", "never landed");
+  ui.noteSessionRunEvent(sessionId, "run_failed", "other-run");
+  assert.equal(ui.state.pendingEchoes.has(sessionId), true);
+  ui.noteSessionRunEvent(sessionId, "run_failed", "run-3");
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
 });
 
-test("an accepted run immediately supplies pending transcript and active elapsed state", () => {
+test("an accepted run immediately supplies the optimistic echo and run activity", () => {
   const sessionId = "accepted-session";
   const snapshot = sessionSnapshot(sessionId, {
     messages: [{ role: "system", content: "policy" }, { role: "user", content: "older" }],
@@ -1270,31 +1317,23 @@ test("an accepted run immediately supplies pending transcript and active elapsed
   ui.state.currentId = sessionId;
   ui.state.snapshots.set(sessionId, snapshot);
   ui.state.events.set(sessionId, []);
-  const accepted = ui.captureAcceptedRun(sessionId, {
-    run_id: "run-accepted", client_id: "client-7",
-    display_prompt: "/run accepted-workset",
-  }, "expanded input should not be shown yet", snapshot, 10_000);
-  assert.equal(accepted.baseline_message_total, 2);
-  assert.equal(ui.effectiveActiveRun(snapshot, sessionId).accepted_response, true);
+  ui.notePendingEcho(sessionId, "run-accepted", "/run accepted-workset");
+  ui.noteSessionRunEvent(sessionId, "run_started");
   assert.deepEqual(plain(ui.effectivePendingMessages(sessionId, snapshot).map((message) => ({
-    content: message.content, source: message.pendingSource,
-    runId: message.run_id,
-  }))), [{ content: "/run accepted-workset", source: "accepted response", runId: "run-accepted" }]);
-  assert.equal(ui.orchestratorLifecycle(snapshot, sessionId).provenance, "accepted");
-  assert.deepEqual(plain(ui.runTimingPresentation(snapshot, sessionId, 14_500)), {
-    state: "active", label: "00:00:04",
-    title: "Active elapsed runtime: 00:00:04", elapsedMs: 4_500, });
+    content: message.content, runId: message.run_id,
+  }))), [{ content: "/run accepted-workset", runId: "run-accepted" }]);
+  assert.equal(ui.state.sessionRunActivity.get(sessionId), true);
   ui.el.orchestratorChatContent = fakeElement();
   ui.renderOrchestratorChatRail(snapshot);
   const html = ui.el.orchestratorChatContent.innerHTML;
-  assert.match(html, /Sending…/);
-  assert.match(html, /\/run accepted-workset/);
+  assert.match(html, /\/run accepted-workset/, "the echo renders as a plain user message");
+  assert.doesNotMatch(html, /Sending…|is-pending/, "no pending badge remains");
   const reconciled = { ...snapshot,
-    messages: [...snapshot.messages, { role: "user", content: "expanded canonical command body" }],
+    messages: [...snapshot.messages, { role: "user", content: "/run accepted-workset" }],
     message_page: { start: 0, end: 3, total: 3, has_older: false },
     message_cycle: { marker: "history:2:2", thread_names: [] }, };
-  assert.equal(ui.reconcileAcceptedRun(sessionId, reconciled), true);
-  assert.equal(ui.state.acceptedRuns.has(sessionId), false);
+  assert.equal(ui.reconcilePendingEcho(sessionId, reconciled), true);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
   assert.equal(ui.effectivePendingMessages(sessionId, reconciled).length, 0);
 });
 
@@ -1400,7 +1439,7 @@ test("exact /compact posts once without run, steering, transcript, or snapshot s
   assert.equal(isolated.el.promptInput.value, rawDraft, "the exact raw command remains editable while admission is pending");
   assert.equal(isolated.state.composerDrafts.get("compact/session"), rawDraft);
   assert.equal(isolated.sessionCompactionOperation("compact/session").request.draft, rawDraft);
-  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.pendingEchoes.size, 0);
   assert.equal(isolated.state.submittingSessions.size, 0);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
@@ -1446,7 +1485,7 @@ test("/compact rejects arguments, prevents duplicates and ordinary submissions, 
   isolated.el.promptInput.value = "ordinary prompt must wait";
   await isolated.submitComposer({ preventDefault() {} });
   assert.deepEqual(requests, ["/sessions/compact-busy/compact"]);
-  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.pendingEchoes.size, 0);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   completion.resolve(jsonResponse({
     status: "unchanged", compaction_id: "compaction-2", reason: "already_compacted",
@@ -1492,7 +1531,7 @@ test("manual compaction preserves the exact draft across 404, 409, 500, network,
     assert.equal(isolated.el.sessionNavStatus.textContent, failure.notice);
     assert.doesNotMatch(isolated.el.sessionNavStatus.textContent, /SECRET|checkpoint|provider|private|transport/i);
     assert.equal(isolated.sessionCompactionBusy(sessionId), false);
-    assert.equal(isolated.state.acceptedRuns.size, 0);
+    assert.equal(isolated.state.pendingEchoes.size, 0);
     assert.equal(isolated.state.snapshotTimers.size, 0);
   }
 });
@@ -1568,7 +1607,7 @@ test("active_compaction snapshots and manual lifecycle events reconcile composer
   assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true);
   assert.equal(isolated.el.sendPrompt.disabled, true);
   assert.match(isolated.el.promptInput.placeholder, /Compacting orchestrator context/);
-  assert.equal(Boolean(isolated.effectiveActiveRun(active, "reconcile-compact")), false);
+  assert.equal(Boolean(active?.active_run), false);
   assert.equal(isolated.orchestratorLifecycle(active, "reconcile-compact").state, "no-run");
   isolated.renderWorkspace();
   assert.equal(isolated.el.stopRun.disabled, true, "manual compaction never exposes the run-only stop control");
@@ -1658,8 +1697,8 @@ test("composer fallback and accepted-run state stay bound to the originating ses
   await submission;
   assert.deepEqual(requests.map((request) => request.path), ["/sessions/session-A/steering", "/sessions/session-A/runs"]);
   assert.deepEqual(requests[1].body, { prompt: "continue A" });
-  assert.equal(isolated.state.acceptedRuns.get("session-A").run_id, "run-A");
-  assert.equal(isolated.state.acceptedRuns.has("session-B"), false);
+  assert.equal(isolated.state.pendingEchoes.get("session-A").run_id, "run-A");
+  assert.equal(isolated.state.pendingEchoes.has("session-B"), false);
   assert.equal(isolated.state.snapshotTimers.has("session-A"), true);
   assert.equal(isolated.state.snapshotTimers.has("session-B"), false);
   assert.equal(isolated.el.promptInput.value, "draft for B");
@@ -2015,6 +2054,8 @@ test("orchestrator guidance renders once as a normal user message from queue tim
   const threadRecord = { id: 9, session_id: "guidance-chat", thread_name: "worker/a", dispatch_id: "d",
     instruction: "thread-local guidance stays out of the chat", status: "delivered", created_at: "2026-07-31T10:01:00Z",
     claimed_at: null, delivered_at: "2026-07-31T10:02:00Z", expired_at: null };
+  // The optimistic submit echo (set at accept) renders after queued guidance.
+  ui.notePendingEcho("guidance-chat", "r1", "the original prompt");
   ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
     messages: [{ role: "user", content: "build the feature" }, { role: "assistant", content: "working on it" }],
     message_page: { start: 0, end: 2, total: 2, has_older: false },
@@ -2033,8 +2074,8 @@ test("orchestrator guidance renders once as a normal user message from queue tim
   assert.doesNotMatch(first, /thread-local guidance stays out of the chat/);
   assert.ok(first.indexOf("working on it") < first.indexOf("focus on the CSS first"),
     "guidance renders after the visible transcript");
-  assert.ok(first.indexOf("focus on the CSS first") < first.indexOf("Sending…"),
-    "guidance renders before the pending run prompt");
+  assert.ok(first.indexOf("focus on the CSS first") < first.indexOf("the original prompt"),
+    "guidance renders before the optimistic submit echo");
 
   // Delivered but not yet persisted: the status marker drops, the message stays.
   ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
@@ -2086,14 +2127,14 @@ test("orchestratorGuidanceEntries filters coverage, expiry, and thread targets",
     "sorted by id, covered/expired/thread-targeted records excluded");
 });
 
-test("pending messages place the status badge after the body with a calm treatment", () => {
-  const html = ui.renderFocusMessage({ role: "user", content: "just accepted", pending: true });
-  assert.match(html, /class="focus-message is-pending"/);
-  assert.match(html, /Sending…/);
-  assert.ok(html.indexOf("focus-message-body") < html.indexOf("focus-pending-badge"), "badge follows the body");
-  assert.match(redesignSource, /\.focus-pending-badge \{[^}]*align-self: flex-end/);
-  assert.match(redesignSource, /@keyframes pending-badge-pulse/);
-  assert.doesNotMatch(redesignSource, /\.focus-message\.is-pending \{[^}]*dashed/);
+test("the Sending… badge and its CSS are gone with the baseline pending machinery", () => {
+  const html = ui.renderFocusMessage({ role: "user", content: "just accepted", pending: true, pendingSource: "legacy" });
+  assert.match(html, /class="focus-message" data-role="user"/);
+  assert.doesNotMatch(html, /is-pending|focus-pending-badge|Sending…|data-pending-source/);
+  assert.doesNotMatch(redesignSource, /\.focus-pending-badge/, "the badge rule is deleted");
+  assert.doesNotMatch(redesignSource, /\.focus-message\.is-pending/, "the pending message rule is deleted");
+  assert.match(redesignSource, /@keyframes pending-badge-pulse/,
+    "the pulse keyframes stay: the guidance status marker still reuses them");
 });
 
 test("user messages carry modest vertical breathing room and the blue guidance box is gone", () => {
@@ -2186,16 +2227,16 @@ test("terminal run events clear only matching active-run caches", () => {
   const entry = sessionListEntry("terminal", { active_run: { run_id: "new-run" } });
   ui.state.sessions = [entry];
   ui.state.snapshots.set("terminal", sessionSnapshot("terminal", { active_run: { run_id: "new-run" } }));
-  ui.state.acceptedRuns.set("terminal", { run_id: "new-run" });
+  ui.state.pendingEchoes.set("terminal", { run_id: "new-run" });
   ui.state.sessionRunActivity.set("terminal", true);
   ui.noteSessionRunEvent("terminal", "run_completed", "old-run");
   assert.equal(entry.active_run.run_id, "new-run");
   assert.equal(ui.state.snapshots.get("terminal").active_run.run_id, "new-run");
-  assert.equal(ui.state.acceptedRuns.get("terminal").run_id, "new-run");
+  assert.equal(ui.state.pendingEchoes.get("terminal").run_id, "new-run");
   ui.noteSessionRunEvent("terminal", "run_failed", "new-run");
   assert.equal(entry.active_run, null);
   assert.equal(ui.state.snapshots.get("terminal").active_run, null);
-  assert.equal(ui.state.acceptedRuns.has("terminal"), false);
+  assert.equal(ui.state.pendingEchoes.has("terminal"), false);
   assert.equal(ui.state.sessionRunActivity.get("terminal"), false);
 });
 
@@ -2992,9 +3033,8 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   isolated.el.initialPrompt = { value: "start immediately" };
   isolated.el.commandComposer = { requestSubmit() { timeline.push("initial-prompt"); } };
   isolated.state.workspaceDiffs.set("created-session:src/old.js", { status: "ready" });
-  isolated.state.acceptedRuns.set("created-session", {
-    run_id: "preexisting", baseline_message_total: 0,
-    submitted_user_message: { content: "created prompt", baseline_user_message_count: null },
+  isolated.state.pendingEchoes.set("created-session", {
+    run_id: "preexisting", content: "created prompt",
   });
 
   await isolated.createSession({ preventDefault() {} });
@@ -3015,7 +3055,7 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
     messages: snapshot.messages,
   });
   assert.equal(isolated.state.workspaceDiffs.has("created-session:src/old.js"), false);
-  assert.equal(isolated.state.acceptedRuns.has("created-session"), false);
+  assert.equal(isolated.state.pendingEchoes.has("created-session"), false);
   assert.equal(isolated.state.sessions[0].summary.session_id, "created-session");
   assert.equal(isolated.el.promptInput.value, "start immediately");
   assert.equal(isolated.el.launchDialog.closed, true);

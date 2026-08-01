@@ -581,3 +581,63 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let store_path = test_store_path("live_trigger");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    // Queue steering so the run covers all four commit points: prompt,
+    // steering (stage→ack→append), assistant, and the tool-result batch.
+    crate::store::queue_thread_steering(
+        &store_path,
+        "session",
+        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        "run",
+        "steer now",
+    )
+    .unwrap();
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "200 OK",
+            scripted_tool_call_response(&[("call-1", "unknown_alpha", "{}")]),
+        ),
+        ScriptedResponse::json("200 OK", scripted_text_response("done")),
+    ]);
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    let bus = crate::events::SessionEventBus::with_thread_event_store(
+        Some("session".to_string()),
+        store_path.clone(),
+    );
+    let mut events = bus.subscribe();
+    agent.set_event_sink(EventSink::bus(bus));
+
+    assert_eq!(agent.send("current").await.unwrap(), "done");
+    server.finish();
+
+    let mut appended_lens = Vec::new();
+    while let Ok(envelope) = events.try_recv() {
+        if let crate::events::SessionEvent::TranscriptAppended { transcript_len } = envelope.event {
+            appended_lens.push(transcript_len);
+        }
+    }
+    assert_eq!(
+        appended_lens,
+        vec![2, 3, 4, 5, 6],
+        "one live signal per commit point: prompt@1, steering@2, assistant@3, tool batch@4, assistant@5"
+    );
+
+    // Live-only: the bus persists nothing for these events — thread_events
+    // holds exactly the five transcript log rows and no event rows.
+    assert_eq!(read_log(&store_path, "session").len(), 5);
+    assert!(
+        crate::store::load_all_thread_events(&store_path, "session", 100)
+            .unwrap()
+            .is_empty()
+    );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}

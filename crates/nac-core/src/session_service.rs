@@ -433,6 +433,15 @@ pub struct SessionService {
     metadata: Arc<SessionMetadata>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
+    /// Shared transcript log writer (orchestrator sessions only). Read paths
+    /// go through the same connection as the agent's appends, so store-backed
+    /// transcript reads serialize against commit points (step 3).
+    transcript_log: Option<Arc<crate::store::TranscriptLogWriter>>,
+    /// Incremental scan of the merged store transcript (snapshot blob ++ log
+    /// tail), rebuilt from the restored transcript at construction and
+    /// advanced over newly appended rows only. Drives steering coverage and
+    /// message-cycle metadata without rescanning history per snapshot.
+    transcript_scan: Arc<StdMutex<TranscriptScanCache>>,
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
@@ -486,6 +495,42 @@ enum OperationAdmissionPreparationError {
     Coordination { message: SessionCoordinationError },
 }
 
+/// Incremental scan of the merged store transcript (snapshot blob ++
+/// transcript log tail). Rebuilt from the restored transcript at service
+/// construction, then advanced over newly appended rows only (append-only ⇒
+/// a scanned position's User-message content never changes: crash/cancel
+/// normalization trims only dangling Assistant/Tool tail messages, and
+/// compaction rewrites the provider view, never the transcript).
+#[derive(Default)]
+struct TranscriptScanCache {
+    /// Raw merged-transcript length scanned so far.
+    scanned_len: usize,
+    user_count: usize,
+    last_user_idx: Option<usize>,
+    /// User message content → surviving copy count. Drives steering coverage
+    /// with newest-first pairing (see `covered_orchestrator_steering_ids`).
+    user_copies: HashMap<String, usize>,
+}
+
+impl TranscriptScanCache {
+    fn from_transcript(messages: &[Message]) -> Self {
+        let mut cache = Self::default();
+        for (idx, message) in messages.iter().enumerate() {
+            cache.scan_message(idx, message);
+        }
+        cache.scanned_len = messages.len();
+        cache
+    }
+
+    fn scan_message(&mut self, idx: usize, message: &Message) {
+        if let Message::User { content } = message {
+            self.user_count += 1;
+            self.last_user_idx = Some(idx);
+            *self.user_copies.entry(content.clone()).or_insert(0) += 1;
+        }
+    }
+}
+
 impl SessionService {
     pub fn from_orchestrator_run_config(
         mut run_config: OrchestratorRunConfig,
@@ -529,11 +574,22 @@ impl SessionService {
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
+        let transcript_log = run_config.agent.transcript_log_writer();
+        // The restored transcript is exactly the store transcript (blob ++
+        // log tail) at construction, so the initial scan is an in-memory
+        // pass; later scans read only the newly appended tail rows.
+        let transcript_scan = if transcript_log.is_some() {
+            TranscriptScanCache::from_transcript(&restored_messages)
+        } else {
+            TranscriptScanCache::default()
+        };
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
+            transcript_log,
+            transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
@@ -918,28 +974,33 @@ impl SessionService {
             })
             .transpose()?
             .unwrap_or_default();
-        let (response_timing, loaded_messages, covered_orchestrator_steering_ids) = {
+        // Store-backed transcript reads (step 3): the snapshot blob (legacy
+        // prefix) ++ the transcript log tail, ALWAYS. The agent-or-persisted
+        // duality and the stale-during-run fallback are gone — mid-run
+        // appends are visible as they commit to the log.
+        self.update_transcript_scan().await?;
+        let covered_orchestrator_steering_ids = {
+            let scan = self.lock_transcript_scan();
+            covered_ids_from_scan(&thread_steering, &scan)
+        };
+        let response_timing = {
             let snapshot = self.session_snapshot.lock().await;
-            let response_timing = ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref());
-            let persisted_messages = snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.messages.as_slice())
-                .unwrap_or_default();
-            // Coverage must come from the same transcript source as the visible
-            // messages: while a run holds the agent lock both fall back to the
-            // persisted copy, so a mid-run delivery keeps rendering as a record
-            // until its canonical message is actually visible.
-            match self.agent.try_lock() {
-                Ok(agent) => (
-                    response_timing,
-                    load_frontend_messages(&agent.messages, options.messages),
-                    covered_orchestrator_steering_ids(&thread_steering, &agent.messages),
-                ),
-                Err(_) => (
-                    response_timing,
-                    load_frontend_messages(persisted_messages, options.messages),
-                    covered_orchestrator_steering_ids(&thread_steering, persisted_messages),
-                ),
+            ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
+        };
+        let loaded_messages = match options.messages {
+            FrontendSnapshotMessages::All => LoadedFrontendMessages {
+                messages: self.store_backed_transcript().await?,
+                page: None,
+                cycle: None,
+            },
+            FrontendSnapshotMessages::Page(request) => {
+                let page = self.page_store_transcript(request).await?;
+                let cycle = self.message_cycle_from_store().await?;
+                LoadedFrontendMessages {
+                    messages: page.messages,
+                    page: Some(page.page),
+                    cycle: Some(cycle),
+                }
             }
         };
 
@@ -978,35 +1039,234 @@ impl SessionService {
         })
     }
 
-    /// Returns the freshest orchestrator messages available without building
-    /// the considerably larger frontend snapshot. The persisted copy remains
-    /// a safe fallback while an active model turn owns the agent lock.
-    pub async fn messages_snapshot(&self) -> Vec<Message> {
-        let snapshot = self.session_snapshot.lock().await;
-        let persisted_messages = snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.messages.as_slice())
-            .unwrap_or_default();
-        match self.agent.try_lock() {
-            Ok(agent) => agent.messages.clone(),
-            Err(_) => persisted_messages.to_vec(),
-        }
+    fn lock_transcript_scan(&self) -> std::sync::MutexGuard<'_, TranscriptScanCache> {
+        self.transcript_scan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Pages the freshest available transcript without cloning messages outside
-    /// the requested visible window. Callers remain responsible for any
-    /// transport-specific maximum; a zero limit retains the web API's minimum
-    /// page size of one.
-    pub async fn messages_page(&self, request: MessagePageRequest) -> MessagesPageSnapshot {
-        let snapshot = self.session_snapshot.lock().await;
-        let persisted_messages = snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.messages.as_slice())
-            .unwrap_or_default();
-        match self.agent.try_lock() {
-            Ok(agent) => page_messages(&agent.messages, request),
-            Err(_) => page_messages(persisted_messages, request),
+    /// Read a window of the transcript log tail relative to a snapshot blob
+    /// of `blob_len` messages via the shared writer (atomic extent + window
+    /// read, so a concurrent commit-point append cannot shift the window).
+    /// `(0, [])` for services without a transcript log (pickers).
+    async fn read_log_tail_window(
+        &self,
+        blob_len: usize,
+        tail_start: usize,
+        limit: usize,
+    ) -> Result<(usize, Vec<(u64, Message)>)> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok((0, Vec::new()));
+        };
+        tokio::task::spawn_blocking(move || {
+            writer.read_tail_window(&session_id, blob_len as u64, tail_start as u64, limit)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
+        .map(|(tail_len, rows)| (tail_len as usize, rows))
+    }
+
+    /// Read the full transcript log tail relative to a snapshot blob of
+    /// `blob_len` messages via the shared writer. `[]` for services without
+    /// a transcript log (pickers).
+    async fn read_log_tail(&self, blob_len: usize) -> Result<Vec<(u64, Message)>> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(Vec::new());
+        };
+        tokio::task::spawn_blocking(move || writer.read_tail_from(&session_id, blob_len as u64))
+            .await
+            .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
+    }
+
+    /// The merged store transcript: the snapshot blob (authoritative legacy
+    /// prefix) ++ the transcript log tail (rows with `idx >= blob_len`).
+    /// Mid-run this is exactly the agent's in-memory transcript; post-run the
+    /// blob covers the log and the tail is empty.
+    async fn store_backed_transcript(&self) -> Result<Vec<Message>> {
+        let (blob_len, mut messages) = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            (blob.len(), blob.to_vec())
+        };
+        let tail = self.read_log_tail(blob_len).await?;
+        messages.extend(tail.into_iter().map(|(_, message)| message));
+        Ok(messages)
+    }
+
+    /// Page the merged store transcript without decoding rows outside the
+    /// requested visible window. Visible↔raw mapping: the blob contributes
+    /// `blob_visible` visible messages (all but the system head), and every
+    /// log row is visible (no commit point ever logs a System message), so
+    /// visible index `v >= blob_visible` is the tail row with
+    /// `idx = blob_len + (v - blob_visible)`.
+    async fn page_store_transcript(
+        &self,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        let include_system = request.include_system;
+        let is_visible =
+            |message: &&Message| include_system || !matches!(message, Message::System { .. });
+        let (blob_len, blob_visible) = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            (blob.len(), blob.iter().filter(is_visible).count())
+        };
+        let (tail_len, _) = self.read_log_tail_window(blob_len, 0, 0).await?;
+        let total = blob_visible + tail_len;
+        let end = request.before.unwrap_or(total).min(total);
+        let limit = request.limit.max(1);
+        let start = end.saturating_sub(limit);
+
+        let blob_end = end.min(blob_visible);
+        let blob_part: Vec<Message> = if start < blob_end {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            blob.iter()
+                .filter(is_visible)
+                .skip(start)
+                .take(blob_end - start)
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let log_part: Vec<Message> = if end > blob_visible {
+            let tail_start = start.saturating_sub(blob_visible);
+            let (_, rows) = self
+                .read_log_tail_window(blob_len, tail_start, end - blob_visible - tail_start)
+                .await?;
+            rows.into_iter().map(|(_, message)| message).collect()
+        } else {
+            Vec::new()
+        };
+        let mut messages = blob_part;
+        messages.extend(log_part);
+        Ok(MessagesPageSnapshot {
+            messages,
+            page: MessagePageMetadata {
+                start,
+                end,
+                total,
+                has_older: start > 0,
+            },
+        })
+    }
+
+    /// Advance the incremental transcript scan over newly appended rows.
+    /// The delta is read from the store (blob part when a run-end persist
+    /// covered unscanned log rows, log window otherwise); positions already
+    /// consumed by a concurrent update are skipped. A shrinking merged
+    /// length means crash/cancel normalization trimmed a dangling
+    /// (non-User) tail: the scan cursor rewinds, counts are unaffected.
+    async fn update_transcript_scan(&self) -> Result<()> {
+        if self.transcript_log.is_none() {
+            return Ok(());
         }
+        let scanned_len = self.lock_transcript_scan().scanned_len;
+        let (blob_len, blob_delta) = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            let blob_len = blob.len();
+            let delta = if scanned_len < blob_len {
+                blob[scanned_len..blob_len].to_vec()
+            } else {
+                Vec::new()
+            };
+            (blob_len, delta)
+        };
+        let tail_start = scanned_len.saturating_sub(blob_len);
+        let (tail_len, rows) = self
+            .read_log_tail_window(blob_len, tail_start, usize::MAX)
+            .await?;
+        let merged_len = blob_len + tail_len;
+        let mut cache = self.lock_transcript_scan();
+        if merged_len < cache.scanned_len {
+            cache.scanned_len = merged_len;
+            return Ok(());
+        }
+        let mut position = scanned_len;
+        for message in blob_delta
+            .iter()
+            .chain(rows.iter().map(|(_, message)| message))
+        {
+            if position >= cache.scanned_len {
+                cache.scan_message(position, message);
+                cache.scanned_len = position + 1;
+            }
+            position += 1;
+        }
+        Ok(())
+    }
+
+    /// Message-cycle metadata from the store transcript: counts come from
+    /// the incremental scan cache; thread names come from a bounded tail
+    /// scan of the messages after the latest user message (one cycle).
+    async fn message_cycle_from_store(&self) -> Result<MessageCycleMetadata> {
+        let (user_count, last_user_idx) = {
+            let cache = self.lock_transcript_scan();
+            (cache.user_count, cache.last_user_idx)
+        };
+        let Some(last_user_idx) = last_user_idx else {
+            return Ok(MessageCycleMetadata {
+                marker: "none".to_string(),
+                thread_names: Vec::new(),
+            });
+        };
+        let (blob_len, mut after) = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            let blob_len = blob.len();
+            let start = (last_user_idx + 1).min(blob_len);
+            (blob_len, blob[start..blob_len].to_vec())
+        };
+        let (_, rows) = self
+            .read_log_tail_window(
+                blob_len,
+                (last_user_idx + 1).saturating_sub(blob_len),
+                usize::MAX,
+            )
+            .await?;
+        after.extend(rows.into_iter().map(|(_, message)| message));
+        Ok(MessageCycleMetadata {
+            marker: format!("history:{user_count}:{last_user_idx}"),
+            thread_names: thread_tool_call_names(&after),
+        })
+    }
+
+    /// Returns the freshest orchestrator messages available without building
+    /// the considerably larger frontend snapshot: the merged store
+    /// transcript (snapshot blob ++ transcript log tail), live mid-run.
+    pub async fn messages_snapshot(&self) -> Result<Vec<Message>> {
+        self.store_backed_transcript().await
+    }
+
+    /// Pages the merged store transcript without cloning or decoding
+    /// messages outside the requested visible window. Callers remain
+    /// responsible for any transport-specific maximum; a zero limit retains
+    /// the web API's minimum page size of one.
+    pub async fn messages_page(&self, request: MessagePageRequest) -> Result<MessagesPageSnapshot> {
+        self.page_store_transcript(request).await
     }
 
     fn prepare_operation_admission(
@@ -1327,7 +1587,6 @@ impl SessionService {
             run_id: run_id.clone(),
             client_id: client_id.clone(),
             content: expanded_prompt.to_string(),
-            baseline_user_message_count: self.current_user_message_count(),
             submitted_at_epoch_ms,
         };
         let active_run = ActiveRunSnapshot {
@@ -1516,27 +1775,20 @@ impl SessionService {
         }
     }
 
-    fn current_user_message_count(&self) -> Option<usize> {
-        if let Ok(agent) = self.agent.try_lock() {
-            return Some(count_user_messages(&agent.messages));
-        }
-        if let Ok(snapshot) = self.session_snapshot.try_lock() {
-            return Some(
-                snapshot
-                    .as_ref()
-                    .map(|snapshot| count_user_messages(&snapshot.messages))
-                    .unwrap_or_default(),
-            );
-        }
-        None
-    }
-
     fn lock_active_operation(&self) -> std::sync::MutexGuard<'_, Option<ActiveSessionOperation>> {
         self.active_operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Run-end snapshot persist. STEP-4 NOTE (DB-direct transcript workset):
+    /// this still clones the agent's full message vec as the old-vs-new diff
+    /// base for `response_timing_after_run`/`token_usages_after_run`, and the
+    /// snapshot blob still carries the whole transcript. Step 4 moves those
+    /// counts to store queries (visible-response counts from the blob ++ log
+    /// read paths landed in step 3) and slims the blob; until then the vec
+    /// clone is deliberate — do not "optimize" it into the store-backed read
+    /// without moving the token/timing diff base at the same time.
     async fn persist_run_snapshot(
         &self,
         active_run: &ActiveRunSnapshot,
@@ -1623,6 +1875,10 @@ struct LoadedFrontendMessages {
 /// the provider view, never the transcript), so the copies present are always
 /// the most recent deliveries of that instruction — relevant when a crash lost
 /// an earlier delivery of a duplicate instruction.
+///
+/// This is the reference implementation; the snapshot path computes the same
+/// result incrementally via [`covered_ids_from_scan`].
+#[cfg(test)]
 fn covered_orchestrator_steering_ids(
     records: &[crate::store::ThreadSteeringRecord],
     transcript: &[Message],
@@ -1651,28 +1907,41 @@ fn covered_orchestrator_steering_ids(
     covered
 }
 
-fn load_frontend_messages(
-    messages: &[Message],
-    selection: FrontendSnapshotMessages,
-) -> LoadedFrontendMessages {
-    match selection {
-        FrontendSnapshotMessages::All => LoadedFrontendMessages {
-            messages: messages.to_vec(),
-            page: None,
-            cycle: None,
-        },
-        FrontendSnapshotMessages::Page(request) => {
-            let cycle = current_message_cycle(messages);
-            let page = page_messages(messages, request);
-            LoadedFrontendMessages {
-                messages: page.messages,
-                page: Some(page.page),
-                cycle: Some(cycle),
-            }
-        }
+/// Coverage from the incremental scan cache: per instruction, the newest
+/// `min(delivered, surviving transcript copies)` records are covered — the
+/// same newest-first pairing as [`covered_orchestrator_steering_ids`],
+/// computed without rescanning the transcript. The transcript is append-only
+/// for User messages, so once a record is covered it stays covered; guidance
+/// hides the moment its delivery is acked and appended to the log.
+fn covered_ids_from_scan(
+    records: &[crate::store::ThreadSteeringRecord],
+    scan: &TranscriptScanCache,
+) -> Vec<i64> {
+    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
+        .iter()
+        .filter(|record| {
+            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
+                && record.status == "delivered"
+        })
+        .collect();
+    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
+    let mut by_instruction: HashMap<&str, Vec<i64>> = HashMap::new();
+    for record in delivered {
+        by_instruction
+            .entry(record.instruction.as_str())
+            .or_default()
+            .push(record.id);
     }
+    let mut covered = Vec::new();
+    for (instruction, ids) in by_instruction {
+        let copies = scan.user_copies.get(instruction).copied().unwrap_or(0);
+        covered.extend(ids.into_iter().take(copies));
+    }
+    covered.sort_unstable();
+    covered
 }
 
+#[cfg(test)]
 fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesPageSnapshot {
     let is_visible =
         |message: &&Message| request.include_system || !matches!(message, Message::System { .. });
@@ -1698,24 +1967,12 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     }
 }
 
-fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
-    let mut latest_user_index = None;
-    let mut user_count = 0usize;
-    for (index, message) in messages.iter().enumerate() {
-        if matches!(message, Message::User { .. }) {
-            latest_user_index = Some(index);
-            user_count += 1;
-        }
-    }
-
-    let Some(latest_user_index) = latest_user_index else {
-        return MessageCycleMetadata {
-            marker: "none".to_string(),
-            thread_names: Vec::new(),
-        };
-    };
+/// Names of threads dispatched via `thread` tool calls in `messages`
+/// (malformed and empty names ignored). Used for the message-cycle metadata's
+/// bounded tail scan.
+fn thread_tool_call_names(messages: &[Message]) -> Vec<String> {
     let mut thread_names = BTreeMap::<String, ()>::new();
-    for message in &messages[latest_user_index + 1..] {
+    for message in messages {
         let Message::Assistant {
             tool_calls: Some(tool_calls),
             ..
@@ -1743,10 +2000,7 @@ fn current_message_cycle(messages: &[Message]) -> MessageCycleMetadata {
             thread_names.insert(name.to_string(), ());
         }
     }
-    MessageCycleMetadata {
-        marker: format!("history:{user_count}:{latest_user_index}"),
-        thread_names: thread_names.into_keys().collect(),
-    }
+    thread_names.into_keys().collect()
 }
 
 fn decode_thread_event(
@@ -1765,13 +2019,6 @@ fn decode_thread_event(
         });
     }
     decoded
-}
-
-fn count_user_messages(messages: &[Message]) -> usize {
-    messages
-        .iter()
-        .filter(|message| matches!(message, Message::User { .. }))
-        .count()
 }
 
 fn now_epoch_ms() -> u64 {
@@ -2050,37 +2297,20 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn message_cycle_uses_complete_raw_history_and_ignores_malformed_thread_calls() {
+    fn thread_tool_call_names_ignore_malformed_and_non_thread_calls() {
         let messages = mixed_message_history();
-        let loaded = load_frontend_messages(
-            &messages,
-            FrontendSnapshotMessages::Page(MessagePageRequest {
-                before: None,
-                limit: 2,
-                include_system: false,
-            }),
-        );
-
-        assert_eq!(loaded.messages.len(), 2);
+        // Names come from `thread` tool calls only; malformed arguments,
+        // blank names, and non-thread calls are ignored, and names are
+        // sorted and deduplicated.
         assert_eq!(
-            loaded.cycle,
-            Some(MessageCycleMetadata {
-                marker: "history:2:5".to_string(),
-                thread_names: vec!["alpha".to_string(), "zeta".to_string()],
-            })
+            thread_tool_call_names(&messages[6..]),
+            vec!["alpha".to_string(), "zeta".to_string()]
         );
-        assert!(!serde_json::to_string(&loaded.messages)
-            .unwrap()
-            .contains("zeta"));
-        assert_eq!(
-            current_message_cycle(&[Message::System {
-                content: "only system".to_string(),
-            }]),
-            MessageCycleMetadata {
-                marker: "none".to_string(),
-                thread_names: Vec::new(),
-            }
-        );
+        assert!(thread_tool_call_names(&messages[..2]).is_empty());
+        assert!(thread_tool_call_names(&[Message::System {
+            content: "only system".to_string(),
+        }])
+        .is_empty());
     }
 
     pub(super) fn test_store_path(label: &str) -> PathBuf {
@@ -2192,6 +2422,46 @@ pub(super) mod tests {
         (parts, store_path)
     }
 
+    /// Seed the store transcript's legacy prefix: the snapshot blob (what the
+    /// store-backed read paths serve) plus the agent vec, so later log
+    /// appends land at the right absolute idx.
+    pub(super) async fn seed_store_transcript(parts: &SessionServiceParts, messages: Vec<Message>) {
+        parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .messages = messages.clone();
+        parts.service.agent.lock().await.messages = messages;
+    }
+
+    /// Append to the transcript log tail exactly like a commit point (the
+    /// store-backed read paths serve it immediately; the agent vec is not
+    /// required for reads).
+    pub(super) async fn seed_log_tail(parts: &SessionServiceParts, messages: Vec<Message>) {
+        let writer = parts
+            .service
+            .transcript_log
+            .as_ref()
+            .expect("active service has a transcript log")
+            .clone();
+        let session_id = parts.service.metadata.session_id.clone().unwrap();
+        let start_idx = parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map(|snapshot| snapshot.messages.len() as u64)
+            .unwrap_or(0);
+        tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     pub(super) fn compaction_messages() -> Vec<Message> {
         vec![
             Message::System {
@@ -2294,10 +2564,7 @@ pub(super) mod tests {
     async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_contract() {
         let (parts, store_path) = test_active_service("paged_snapshot", "paged-session");
         let messages = mixed_message_history();
-        {
-            let mut agent = parts.service.agent.lock().await;
-            agent.messages = messages.clone();
-        }
+        seed_store_transcript(&parts, messages.clone()).await;
         let request = MessagePageRequest {
             before: None,
             limit: 2,
@@ -2344,17 +2611,10 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn paged_snapshot_and_message_method_use_persisted_history_when_agent_is_busy() {
-        let (parts, store_path) = test_active_service("paged_fallback", "fallback-session");
+    async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
+        let (parts, store_path) = test_active_service("paged_live", "live-session");
         let persisted_messages = mixed_message_history();
-        parts
-            .service
-            .session_snapshot
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .messages = persisted_messages.clone();
+        seed_store_transcript(&parts, persisted_messages.clone()).await;
         let request = MessagePageRequest {
             before: Some(usize::MAX),
             limit: 3,
@@ -2363,12 +2623,15 @@ pub(super) mod tests {
         let expected = page_messages(&persisted_messages, request);
         let agent_guard = parts.service.agent.lock().await;
 
+        // The held agent lock is irrelevant: pages read the store (blob ++
+        // log), never the agent vec, so they never wait for a run.
         let direct = tokio::time::timeout(
             Duration::from_millis(500),
             parts.service.messages_page(request),
         )
         .await
-        .expect("paged messages should not wait for the held agent mutex");
+        .expect("paged messages should not wait for the held agent mutex")
+        .unwrap();
         assert_eq!(direct.page, expected.page);
         assert_eq!(
             serde_json::to_value(&direct.messages).unwrap(),
@@ -2394,7 +2657,200 @@ pub(super) mod tests {
             serde_json::to_value(&expected.messages).unwrap()
         );
 
+        // Mid-run appends to the log are visible immediately — the snapshot
+        // blob is unchanged and the agent lock is still held.
+        seed_log_tail(
+            &parts,
+            vec![
+                Message::User {
+                    content: "mid-run prompt".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("mid-run answer".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+            ],
+        )
+        .await;
+        let mut expected_live = persisted_messages.clone();
+        expected_live.push(Message::User {
+            content: "mid-run prompt".to_string(),
+        });
+        expected_live.push(Message::Assistant {
+            content: Some("mid-run answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        });
+        let expected_live = page_messages(&expected_live, request);
+        let live = parts.service.messages_page(request).await.unwrap();
+        assert_eq!(live.page, expected_live.page);
+        assert_eq!(
+            serde_json::to_value(&live.messages).unwrap(),
+            serde_json::to_value(&expected_live.messages).unwrap()
+        );
+        // The cycle metadata follows the store transcript too: the mid-run
+        // prompt is the latest user message, at its absolute raw index.
+        let loaded = parts
+            .service
+            .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
+                thread_event_limit: 0,
+                include_sessions: false,
+                messages: FrontendSnapshotMessages::Page(request),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            loaded.message_cycle,
+            Some(MessageCycleMetadata {
+                marker: format!("history:3:{}", persisted_messages.len()),
+                thread_names: Vec::new(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&loaded.snapshot.messages).unwrap(),
+            serde_json::to_value(&expected_live.messages).unwrap()
+        );
+
         drop(agent_guard);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn store_backed_snapshot_is_live_during_a_real_run() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let store_path = test_store_path("real_run_live");
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (hit_tx, hit_rx) = std::sync::mpsc::channel::<()>();
+        let server = ScriptedServer::start_observed(
+            vec![
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "unknown_alpha",
+                            "arguments": "{}"
+                        }],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+            ],
+            move |index, _| {
+                if index == 1 {
+                    hit_tx.send(()).unwrap();
+                    // Hold the run mid-flight: the second model response
+                    // stays unserved until the test releases it.
+                    release_rx.recv().unwrap();
+                }
+            },
+        );
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "real-run-session".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        let mut events = parts.service.subscribe_events();
+
+        let handle = parts
+            .service
+            .try_submit_prompt("mid-run prompt".to_string())
+            .unwrap();
+        // The run is blocked on the second model call: the prompt, the
+        // assistant tool call, and the tool result are already committed to
+        // the transcript log, and the run task holds the agent lock. The
+        // channel wait must not block the current-thread runtime.
+        tokio::task::spawn_blocking(move || hit_rx.recv_timeout(Duration::from_secs(5)))
+            .await
+            .unwrap()
+            .expect("the run should reach the second model call");
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.active_run.is_some());
+        let roles: Vec<&str> = snapshot
+            .messages
+            .iter()
+            .map(|message| match message {
+                Message::System { .. } => "system",
+                Message::User { .. } => "user",
+                Message::Assistant { .. } => "assistant",
+                Message::Tool { .. } => "tool",
+            })
+            .collect();
+        assert_eq!(
+            roles,
+            vec!["system", "user", "assistant", "tool"],
+            "the mid-run snapshot reads the live store transcript"
+        );
+        assert!(
+            matches!(&snapshot.messages[1], Message::User { content } if content == "mid-run prompt")
+        );
+
+        release_tx.send(()).unwrap();
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.messages.len(), 5);
+        assert!(
+            matches!(&snapshot.messages[4], Message::Assistant { content: Some(text), .. } if text == "done")
+        );
+
+        // The live trigger fired once per commit point across the run.
+        let mut appended_lens = Vec::new();
+        while let Ok(envelope) = events.try_recv() {
+            if let SessionEvent::TranscriptAppended { transcript_len } = envelope.event {
+                appended_lens.push(transcript_len);
+            }
+        }
+        assert_eq!(appended_lens, vec![2, 3, 4, 5]);
+        drop(handle);
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
@@ -2615,7 +3071,12 @@ pub(super) mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
-    fn steering_record(id: i64, thread_name: &str, status: &str, instruction: &str) -> crate::store::ThreadSteeringRecord {
+    fn steering_record(
+        id: i64,
+        thread_name: &str,
+        status: &str,
+        instruction: &str,
+    ) -> crate::store::ThreadSteeringRecord {
         crate::store::ThreadSteeringRecord {
             id,
             session_id: "session".to_string(),
@@ -2666,10 +3127,69 @@ pub(super) mod tests {
         );
     }
 
+    #[test]
+    fn covered_ids_from_scan_matches_the_reference_pairing() {
+        let orchestrator = crate::store::ORCHESTRATOR_STEERING_TARGET;
+        let user = |content: &str| Message::User {
+            content: content.to_string(),
+        };
+        let assistant = || Message::Assistant {
+            content: Some("answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        };
+        let cases: Vec<(Vec<crate::store::ThreadSteeringRecord>, Vec<Message>)> = vec![
+            (vec![], vec![]),
+            (vec![], vec![user("orphan")]),
+            (
+                vec![
+                    steering_record(1, orchestrator, "delivered", "covered"),
+                    steering_record(2, orchestrator, "delivered", "lost to a crash"),
+                    steering_record(3, orchestrator, "queued", "covered"),
+                    steering_record(4, orchestrator, "expired", "covered"),
+                    steering_record(5, "worker/a", "delivered", "covered"),
+                ],
+                vec![user("covered")],
+            ),
+            // Duplicate instructions pair with the newest deliveries first.
+            (
+                vec![
+                    steering_record(6, orchestrator, "delivered", "same"),
+                    steering_record(7, orchestrator, "delivered", "same"),
+                ],
+                vec![user("same")],
+            ),
+            (
+                vec![
+                    steering_record(6, orchestrator, "delivered", "same"),
+                    steering_record(7, orchestrator, "delivered", "same"),
+                ],
+                vec![user("same"), assistant(), user("same")],
+            ),
+            (
+                vec![
+                    steering_record(8, orchestrator, "delivered", "alpha"),
+                    steering_record(9, orchestrator, "delivered", "beta"),
+                    steering_record(10, orchestrator, "delivered", "alpha"),
+                ],
+                vec![user("beta"), assistant(), user("alpha"), user("alpha")],
+            ),
+        ];
+        for (records, transcript) in cases {
+            let scan = TranscriptScanCache::from_transcript(&transcript);
+            assert_eq!(
+                covered_ids_from_scan(&records, &scan),
+                covered_orchestrator_steering_ids(&records, &transcript),
+                "incremental coverage must match the reference pairing"
+            );
+        }
+    }
+
     #[tokio::test]
-    async fn frontend_snapshot_coverage_follows_the_visible_transcript_source() {
+    async fn frontend_snapshot_coverage_is_immediate_from_the_store_transcript() {
         let (parts, store_path) = test_active_service("steering_coverage", "session-coverage");
-        let service = parts.service;
+        let service = parts.service.clone();
         let queued = crate::store::queue_thread_steering(
             &store_path,
             "session-coverage",
@@ -2687,43 +3207,68 @@ pub(super) mod tests {
         )
         .unwrap();
 
-        // Crash case: the record is delivered but the transcript (restored or
-        // persisted) never gained the message, so the record keeps rendering.
+        // Crash case: the record is delivered but the store transcript never
+        // gained the message, so the record keeps rendering.
         let snapshot = service.frontend_snapshot().await.unwrap();
         assert!(snapshot.covered_orchestrator_steering_ids.is_empty());
 
-        // Persisted case: the agent transcript carries the verbatim guidance
-        // user message, so the record is hidden in favor of the canonical one.
-        service.agent.lock().await.messages.push(Message::User {
-            content: "change direction".to_string(),
-        });
-        let snapshot = service.frontend_snapshot().await.unwrap();
-        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
-
-        // Busy-agent case: while a run holds the agent lock the snapshot falls
-        // back to the persisted transcript for both messages and coverage, so a
-        // mid-run delivery keeps rendering as a record until run-end persist.
+        // Immediate case: the moment the delivery lands in the transcript
+        // log (ack + append at the steering commit point), coverage hides
+        // the record — no run-end persist, and a held agent lock (a busy
+        // run) is irrelevant because coverage reads the store.
         let agent_guard = service.agent.lock().await;
-        let snapshot = service.frontend_snapshot().await.unwrap();
-        assert!(
-            snapshot.covered_orchestrator_steering_ids.is_empty(),
-            "coverage must not outrun the visible persisted transcript while the agent is busy"
-        );
-        service
-            .session_snapshot
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .messages
-            .push(Message::User {
+        seed_log_tail(
+            &parts,
+            vec![Message::User {
                 content: "change direction".to_string(),
-            });
+            }],
+        )
+        .await;
         let snapshot = service.frontend_snapshot().await.unwrap();
         assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+        assert!(
+            matches!(
+                snapshot.messages.last(),
+                Some(Message::User { content }) if content == "change direction"
+            ),
+            "the canonical message is visible in the same snapshot that covers the record"
+        );
         drop(agent_guard);
 
+        // Persisted case: a blob-carried verbatim message (a run-end persist
+        // covered the log row) keeps the record covered across services.
+        let (parts, blob_store_path) =
+            test_active_service("steering_coverage_blob", "session-coverage-blob");
+        let service = parts.service.clone();
+        let queued = crate::store::queue_thread_steering(
+            &blob_store_path,
+            "session-coverage-blob",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-1",
+            "change direction",
+        )
+        .unwrap();
+        crate::store::claim_thread_steering(&blob_store_path, "session-coverage-blob", "run-1")
+            .unwrap();
+        crate::store::acknowledge_thread_steering_batch(
+            &blob_store_path,
+            &[queued.id],
+            "session-coverage-blob",
+            "run-1",
+        )
+        .unwrap();
+        let mut blob = vec![Message::System {
+            content: "system".to_string(),
+        }];
+        blob.push(Message::User {
+            content: "change direction".to_string(),
+        });
+        seed_store_transcript(&parts, blob).await;
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(blob_store_path.parent().unwrap());
     }
 
     #[test]
@@ -3307,7 +3852,6 @@ pub(super) mod tests {
             .expect("active run should expose server-submitted user message");
         assert_eq!(submitted.run_id, active.run_id);
         assert_eq!(submitted.content, "blocked prompt");
-        assert_eq!(submitted.baseline_user_message_count, Some(0));
         assert!(snapshot.messages.is_empty());
 
         drop(agent_guard);
@@ -3366,9 +3910,12 @@ pub(super) mod tests {
         assert_eq!(parts.service.active_run(), Some(active.clone()));
         {
             let mut agent = parts.service.agent.lock().await;
-            agent.messages.push(Message::User {
-                content: "persisted prompt".to_string(),
-            });
+            agent
+                .push_and_log_for_test(Message::User {
+                    content: "persisted prompt".to_string(),
+                })
+                .await
+                .unwrap();
         }
 
         let finishing = parts
@@ -3401,6 +3948,14 @@ pub(super) mod tests {
 
         let started = events.recv().await.unwrap();
         assert_run_started_event(started, &active, "persisted prompt");
+        // The commit-point log append emits the live transcript signal before
+        // the run-end snapshot save. The run id travels only inside send()
+        // (the run-context sink), so this direct append carries none.
+        let appended = events.recv().await.unwrap();
+        assert_eq!(
+            appended.event,
+            SessionEvent::TranscriptAppended { transcript_len: 2 }
+        );
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
@@ -3683,6 +4238,14 @@ pub(super) mod tests {
                 event: AgentEvent::ThreadSteeringExpired { .. }
             }
         ));
+        // The cancellation marker is a transcript commit point: the live
+        // signal fires before the snapshot save (the cancel path runs outside
+        // send(), so it carries no run context).
+        let appended = events.recv().await.unwrap();
+        assert_eq!(
+            appended.event,
+            SessionEvent::TranscriptAppended { transcript_len: 3 }
+        );
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));

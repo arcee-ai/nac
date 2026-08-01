@@ -63,6 +63,18 @@
 //! removes the matching log tail (crash normalization). The session cancel
 //! path performs the same normalization before appending its marker.
 //!
+//! # Store-backed read paths (step 3)
+//!
+//! The session service reads the transcript as blob ++ log ALWAYS (frontend
+//! snapshots, message pages, steering coverage, message-cycle metadata), so
+//! the chat is live mid-run. `read_from` stays the restore reader; the hot
+//! paths use [`TranscriptLogWriter::read_tail_window`], which leverages
+//! rowid order (= append order = `idx` order) to decode only O(page) rows.
+//! Log rows are never `System` messages: the system head enters the vec at
+//! construction, before any logging, and no commit point logs one — so every
+//! tail row is a visible message, which keeps the visible↔raw index mapping
+//! a constant offset (`blob_visible = blob_len - system_head_len`).
+//!
 //! # Guards (landed with step 1)
 //!
 //! 1. `load_all_thread_events` / `load_thread_events_page` exclude
@@ -222,6 +234,116 @@ impl TranscriptLogWriter {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Read the full log tail relative to a snapshot blob of `blob_len`
+    /// messages: every row with `idx >= blob_len`, in log order. This is the
+    /// hot-path equivalent of `read_from` for store-backed transcript reads:
+    /// it decodes only tail rows instead of scanning the whole log. See
+    /// [`TranscriptLogWriter::read_tail_window`] for the atomicity and
+    /// contiguity guarantees.
+    pub fn read_tail_from(&self, session_id: &str, blob_len: u64) -> Result<Vec<(u64, Message)>> {
+        Ok(self
+            .read_tail_window(session_id, blob_len, 0, usize::MAX)?
+            .1)
+    }
+
+    /// Read a window of the log tail relative to a snapshot blob of
+    /// `blob_len` messages: tail position `p` is the row with
+    /// `idx == blob_len + p`. Returns `(tail_len, rows)` where `rows` covers
+    /// tail positions `[tail_start, tail_start + limit)` clamped to the
+    /// tail, in log (append) order.
+    ///
+    /// The extent probe and the window read run under one connection lock,
+    /// so a concurrent append cannot interleave and shift the window. Rowid
+    /// order is append order (= `idx` order) under the module invariants, so
+    /// the window is an `ORDER BY id DESC LIMIT .. OFFSET ..` read that
+    /// decodes only the returned rows — O(page) instead of O(log). The
+    /// returned rows must be contiguous with the blob and with each other;
+    /// anything else is corruption and fails loudly.
+    pub fn read_tail_window(
+        &self,
+        session_id: &str,
+        blob_len: u64,
+        tail_start: u64,
+        limit: usize,
+    ) -> Result<(u64, Vec<(u64, Message)>)> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tail_len = {
+            let mut statement = connection.prepare(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+            )?;
+            let last_row = statement
+                .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .optional()?;
+            match last_row {
+                None => 0,
+                Some((id, event_json)) => {
+                    let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                        anyhow!(
+                            "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                        )
+                    })?;
+                    (entry.idx + 1).saturating_sub(blob_len)
+                }
+            }
+        };
+        if tail_start >= tail_len || limit == 0 {
+            return Ok((tail_len, Vec::new()));
+        }
+        let end = tail_start.saturating_add(limit as u64).min(tail_len);
+        let count = end - tail_start;
+        let skip_from_end = tail_len - end;
+        let mut statement = connection.prepare(
+            "SELECT id, event_json
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2
+             ORDER BY id DESC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id,
+                ORCHESTRATOR_STEERING_TARGET,
+                count as i64,
+                skip_from_end as i64
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let (id, event_json) = row?;
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            let message: Message =
+                serde_json::from_str(&entry.message_json).with_context(|| {
+                    format!("thread_events row {id} holds an undecodable transcript message")
+                })?;
+            entries.push((entry.idx, message));
+        }
+        entries.reverse();
+        let mut expected_idx = blob_len + tail_start;
+        for (idx, _) in &entries {
+            if *idx != expected_idx {
+                return Err(anyhow!(
+                    "transcript log tail window is not contiguous: expected idx {expected_idx}, found {idx}"
+                ));
+            }
+            expected_idx += 1;
+        }
+        Ok((tail_len, entries))
     }
 
     /// Read committed entries with `idx >= from_idx`, in log (append) order.
@@ -525,6 +647,109 @@ mod tests {
 
         assert_eq!(writer.delete_from("session-a", 0).unwrap(), 2);
         assert!(writer.read_from("session-a", 0).unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_read_tail_window_pages_backwards_from_the_extent() {
+        let path = temp_store_path("tail_window");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let messages = sample_messages();
+        // Simulate a blob-covered prefix (idx 0-1) and a live tail (idx 2-3):
+        // the window reads are relative to blob_len = 2.
+        for (idx, message) in messages.iter().enumerate() {
+            writer.append("session-a", idx as u64, message).unwrap();
+        }
+
+        // Extent probe: a zero-limit window still reports the tail length.
+        let (tail_len, rows) = writer.read_tail_window("session-a", 2, 0, 0).unwrap();
+        assert_eq!(tail_len, 2);
+        assert!(rows.is_empty());
+
+        // Full tail == read_from for the same range.
+        let full = writer.read_tail_from("session-a", 2).unwrap();
+        let reference = writer.read_from("session-a", 2).unwrap();
+        assert_eq!(full.len(), reference.len());
+        for ((idx, message), (ref_idx, ref_message)) in full.iter().zip(reference.iter()) {
+            assert_eq!(idx, ref_idx);
+            assert_eq!(canonical(message), canonical(ref_message));
+        }
+        assert_eq!(full.len(), 2);
+        assert_eq!(full[0].0, 2);
+
+        // One-row windows walk the tail backwards without overlap.
+        let (_, last) = writer.read_tail_window("session-a", 2, 1, 1).unwrap();
+        assert_eq!(last.len(), 1);
+        assert_eq!(last[0].0, 3);
+        assert_eq!(canonical(&last[0].1), canonical(&messages[3]));
+        let (_, first) = writer.read_tail_window("session-a", 2, 0, 1).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].0, 2);
+        assert_eq!(canonical(&first[0].1), canonical(&messages[2]));
+
+        // Windows clamp at both ends; a blob that covers the log has no tail.
+        let (tail_len, clamped) = writer
+            .read_tail_window("session-a", 2, 1, usize::MAX)
+            .unwrap();
+        assert_eq!(tail_len, 2);
+        assert_eq!(clamped.len(), 1);
+        assert!(writer
+            .read_tail_window("session-a", 2, 2, 4)
+            .unwrap()
+            .1
+            .is_empty());
+        assert_eq!(writer.read_tail_window("session-a", 4, 0, 4).unwrap().0, 0);
+        assert_eq!(writer.read_tail_window("session-a", 99, 0, 4).unwrap().0, 0);
+        assert_eq!(writer.read_tail_window("session-b", 0, 0, 4).unwrap().0, 0);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_read_tail_window_fails_loudly_on_gaps_and_foreign_rows() {
+        let path = temp_store_path("tail_window_gaps");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        for (idx, message) in sample_messages().iter().take(2).enumerate() {
+            writer.append("session-a", idx as u64, message).unwrap();
+        }
+        // A hand-inserted row that skips idx 2: the tail [1, 3] is not
+        // contiguous and must fail the window read loudly.
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(
+                3,
+                &Message::User {
+                    content: "gap".to_string(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(writer
+            .read_tail_window("session-a", 1, 0, usize::MAX)
+            .is_err());
+        // The extent probe decodes only the last row, so a zero-limit window
+        // still succeeds; the gap surfaces only when the window covers it.
+        assert_eq!(writer.read_tail_window("session-a", 1, 0, 0).unwrap().0, 3);
+
+        // A foreign row under the reserved name fails even the extent probe.
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            "{\"type\":\"run_started\",\"prompt_preview\":\"run started\"}",
+        )
+        .unwrap();
+        assert!(writer.read_tail_window("session-a", 1, 0, 0).is_err());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

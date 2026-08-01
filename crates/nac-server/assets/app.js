@@ -33,7 +33,7 @@ const state = {
   threadCycles: new Map(),
   attentionSessions: new Set(),
   sessionRunActivity: new Map(),
-  acceptedRuns: new Map(),
+  pendingEchoes: new Map(),
   runtimeTimer: null,
   launchMode: "local",
   launchCwdDrafts: { localSandbox: null, ssh: null },
@@ -364,8 +364,11 @@ function noteSessionRunEvent(sessionId, type, runId = null) {
   if (!["run_completed", "run_failed"].includes(type) || !runId) return;
   const matches = (run) => run && String(run.run_id || "") === String(runId);
   let cleared = false;
-  if (matches(state.acceptedRuns.get(sessionId))) {
-    state.acceptedRuns.delete(sessionId);
+  const echo = state.pendingEchoes.get(sessionId);
+  if (echo && String(echo.run_id || "") === String(runId)) {
+    // A run that ends before its prompt commit landed leaves nothing
+    // canonical behind; the optimistic echo must not linger.
+    state.pendingEchoes.delete(sessionId);
     cleared = true;
   }
   const entry = sessionEntry(sessionId);
@@ -378,7 +381,7 @@ function noteSessionRunEvent(sessionId, type, runId = null) {
     state.snapshots.set(sessionId, { ...snapshot, active_run: null });
     cleared = true;
   }
-  const stillActive = Boolean(state.acceptedRuns.get(sessionId) || entry?.active_run || state.snapshots.get(sessionId)?.active_run);
+  const stillActive = Boolean(entry?.active_run || state.snapshots.get(sessionId)?.active_run);
   state.sessionRunActivity.set(sessionId, stillActive);
   if (cleared && !stillActive) state.attentionSessions.add(sessionId);
 }
@@ -1107,7 +1110,7 @@ function acceptSnapshot(sessionId, snapshot, { announce = false, compactionFence
     throw new Error(`Snapshot identity mismatch: requested ${sessionId}, received ${responseSessionId}`);
   }
   mergeSnapshotMessageWindow(sessionId, snapshot);
-  reconcileAcceptedRun(sessionId, snapshot);
+  reconcilePendingEcho(sessionId, snapshot);
   invalidateWorkspaceDiffs(sessionId);
   snapshot = reconcileSessionCompactionSnapshot(sessionId, snapshot, compactionFence);
   state.snapshots.set(sessionId, snapshot);
@@ -1184,167 +1187,62 @@ function prependMessageWindow(sessionId, snapshot, response) {
   return true;
 }
 
-function messageCycleUserCount(snapshot) {
-  const marker = String(snapshot?.message_cycle?.marker || "");
-  const match = marker.match(/^history:(\d+):/);
-  if (match) return Number(match[1]);
-  const startsAtBeginning = !snapshot?.message_page || Number(snapshot.message_page.start || 0) === 0;
-  if (!startsAtBeginning) return null;
-  return (snapshot?.messages || []).filter((message) => message?.role === "user").length;
-}
+// --- Optimistic submit echo (DB-direct transcript workset, step 3) ---------
+// The chat reads the store-backed transcript, so a submitted prompt appears
+// on its own at the first commit point (seconds cadence). The only window
+// that needs a client-side echo is submit-accept → first commit-point
+// refetch. This is deliberately the simplest version: one pending row per
+// session, cleared when a refetched snapshot's canonical messages contain
+// the matching user message (content match — no baselines or counts), or
+// when the run ends before the prompt could land.
 
-function normalizedSubmittedMessage(activeRun, source = "snapshot") {
-  const submitted = activeRun?.submitted_user_message;
-  if (!submitted || submitted.content === null || submitted.content === undefined) return null;
-  const baselineValue = submitted.baseline_user_message_count;
-  const baseline = baselineValue === null || baselineValue === undefined || baselineValue === ""
-    ? Number.NaN
-    : Number(baselineValue);
-  const baselineTotalValue = activeRun?.baseline_message_total;
-  const baselineTotal = baselineTotalValue === null || baselineTotalValue === undefined || baselineTotalValue === ""
-    ? Number.NaN
-    : Number(baselineTotalValue);
-  return {
-    role: "user",
-    content: String(submitted.content),
-    pending: true,
-    pendingSource: source,
-    run_id: String(submitted.run_id || activeRun?.run_id || ""),
-    client_id: submitted.client_id || activeRun?.client_id || null,
-    baselineUserCount: Number.isSafeInteger(baseline) && baseline >= 0 ? baseline : null,
-    baselineMessageTotal: Number.isSafeInteger(baselineTotal) && baselineTotal >= 0 ? baselineTotal : null,
-    submitted_at_epoch_ms: submitted.submitted_at_epoch_ms || activeRun?.started_at_epoch_ms || null,
-  };
-}
-
-function pendingMessagesMatch(left, right) {
-  const leftRunId = String(left?.run_id || "");
-  const rightRunId = String(right?.run_id || "");
-  if (leftRunId && rightRunId && leftRunId === rightRunId) return true;
-  return String(left?.content ?? "") === String(right?.content ?? "");
-}
-
-function pendingMessageCoveredByCanonical(pending, snapshot) {
-  if (!pending) return false;
-  const messages = snapshot?.messages || [];
-  const windowStart = Number(snapshot?.message_page?.start || 0);
-  const userMessages = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message?.role === "user") userMessages.push({ message, index });
-  }
-
-  // A baseline message total is captured from the exact include-system page used
-  // when a run is accepted. Any later canonical user row is therefore the
-  // submitted row, even when command expansion changes its persisted content.
-  const hasMessageBaseline = Number.isSafeInteger(pending.baselineMessageTotal);
-  if (hasMessageBaseline) {
-    if (userMessages.some(({ index }) => windowStart + index >= pending.baselineMessageTotal)) return true;
-  }
-
-  // The server's user-count baseline is authoritative across paged windows. Do
-  // not let a same-text user row from before that baseline hide the pending row.
-  if (Number.isSafeInteger(pending.baselineUserCount)) {
-    const globalUserCount = messageCycleUserCount(snapshot);
-    if (globalUserCount !== null && globalUserCount > pending.baselineUserCount) {
-      return userMessages.length > 0;
-    }
-    if (windowStart === 0 && userMessages.length > pending.baselineUserCount) return true;
-    return false;
-  }
-  if (hasMessageBaseline) return false;
-
-  // Legacy active-run snapshots may lack both baselines. In that case only the
-  // newest visible user row may reconcile an identical pending message.
-  const latestUser = userMessages.at(-1)?.message;
-  return Boolean(latestUser && pendingMessagesMatch(latestUser, pending));
-}
-
-function captureAcceptedRun(sessionId, response, prompt, snapshot = state.snapshots.get(sessionId), now = Date.now()) {
-  if (!sessionId || !response?.run_id) return null;
-  const displayPrompt = String(response.display_prompt ?? prompt ?? "");
-  const baselineUserCount = messageCycleUserCount(snapshot);
-  const pageTotal = Number(snapshot?.message_page?.total);
-  const baselineMessageTotal = Number.isSafeInteger(pageTotal) && pageTotal >= 0
-    ? pageTotal
-    : (!snapshot?.message_page ? (snapshot?.messages || []).length : null);
-  const accepted = {
-    run_id: String(response.run_id),
-    client_id: response.client_id || null,
-    prompt_preview: displayPrompt.slice(0, 160),
-    submitted_user_message: {
-      run_id: String(response.run_id),
-      client_id: response.client_id || null,
-      content: displayPrompt,
-      baseline_user_message_count: baselineUserCount,
-      submitted_at_epoch_ms: now,
-    },
-    started_at_epoch_ms: now,
-    baseline_message_total: baselineMessageTotal,
-    accepted_response: true,
-  };
-  state.acceptedRuns.set(sessionId, accepted);
-  state.sessionRunActivity.set(sessionId, true);
-  state.attentionSessions.delete(sessionId);
-  return accepted;
-}
-
-function captureStartedRun(sessionId, envelope) {
-  const runId = String(envelope?.run_id || "");
+function notePendingEcho(sessionId, runId, content) {
   if (!sessionId || !runId) return null;
-  const existing = state.acceptedRuns.get(sessionId);
-  const submitted = envelope?.event?.submitted_user_message || existing?.submitted_user_message || null;
-  const started = {
-    ...(existing || {}),
-    run_id: runId,
-    client_id: envelope?.client_id || submitted?.client_id || existing?.client_id || null,
-    prompt_preview: envelope?.event?.prompt_preview || existing?.prompt_preview || "",
-    submitted_user_message: submitted ? {
-      ...submitted,
-      run_id: submitted.run_id || runId,
-      client_id: submitted.client_id || envelope?.client_id || existing?.client_id || null,
-    } : null,
-    started_at_epoch_ms: envelope?.event?.started_at_epoch_ms || existing?.started_at_epoch_ms || Date.now(),
-    accepted_response: Boolean(existing?.accepted_response),
-  };
-  state.acceptedRuns.set(sessionId, started);
-  return started;
+  const echo = { run_id: String(runId), content: String(content ?? "") };
+  state.pendingEchoes.set(sessionId, echo);
+  return echo;
 }
 
-function effectiveActiveRun(snapshot = currentSnapshot(), sessionId = state.currentId) {
-  const accepted = sessionId ? state.acceptedRuns.get(sessionId) : null;
-  const canonical = snapshot?.active_run || null;
-  if (!canonical) return accepted;
-  if (!accepted || String(accepted.run_id || "") !== String(canonical.run_id || "")) return canonical;
-  return {
-    ...accepted,
-    ...canonical,
-    submitted_user_message: canonical.submitted_user_message || accepted.submitted_user_message || null,
-    accepted_response: Boolean(accepted.accepted_response),
-  };
+// JS port of commands::display_prompt_from_message: an expanded /plan or
+// /run prompt canonicalizes back to its display form, so the echo (the raw
+// composer input) matches the canonical user message content.
+function displayPromptFromMessage(content) {
+  const text = String(content ?? "");
+  const header = text.split("\n")[0] || "";
+  if (!header.startsWith("# /")) return text;
+  const colon = header.indexOf(":");
+  if (colon < 0) return text;
+  const kind = header.slice(3, colon).trim();
+  if (kind !== "plan" && kind !== "run") return text;
+  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return text;
+  const rest = text.slice(markerIndex + marker.length);
+  const end = rest.indexOf("\n\n");
+  if (end < 0) return text;
+  const value = rest.slice(0, end).trim();
+  return value ? `/${kind} ${value}` : text;
 }
 
-function effectivePendingMessages(sessionId = state.currentId, snapshot = state.snapshots.get(sessionId)) {
-  const active = effectiveActiveRun(snapshot, sessionId);
-  const source = active?.accepted_response ? "accepted response" : "active snapshot";
-  const pending = normalizedSubmittedMessage(active, source);
-  return pending && !pendingMessageCoveredByCanonical(pending, snapshot) ? [pending] : [];
+function pendingEchoCoveredByCanonical(echo, snapshot) {
+  if (!echo) return false;
+  return (snapshot?.messages || []).some((message) => message?.role === "user"
+    && displayPromptFromMessage(message.content) === echo.content);
 }
 
-function reconcileAcceptedRun(sessionId, snapshot) {
-  const accepted = state.acceptedRuns.get(sessionId);
-  if (!accepted) return false;
-  const canonical = snapshot?.active_run;
-  if (canonical && String(canonical.run_id || "") !== String(accepted.run_id || "")) {
-    state.acceptedRuns.delete(sessionId);
-    return true;
-  }
-  const pending = normalizedSubmittedMessage(accepted, "accepted response");
-  if (pendingMessageCoveredByCanonical(pending, snapshot)) {
-    state.acceptedRuns.delete(sessionId);
+function reconcilePendingEcho(sessionId, snapshot) {
+  const echo = state.pendingEchoes.get(sessionId);
+  if (echo && pendingEchoCoveredByCanonical(echo, snapshot)) {
+    state.pendingEchoes.delete(sessionId);
     return true;
   }
   return false;
+}
+
+function effectivePendingMessages(sessionId = state.currentId, snapshot = state.snapshots.get(sessionId)) {
+  const echo = sessionId ? state.pendingEchoes.get(sessionId) : null;
+  if (!echo || pendingEchoCoveredByCanonical(echo, snapshot)) return [];
+  return [{ role: "user", content: echo.content, run_id: echo.run_id }];
 }
 
 function responseDurationAssignments(snapshot, messages = snapshot?.messages || []) {
@@ -1509,7 +1407,7 @@ function resetSessionSequenceEpoch(sessionId, boundary = 0, epochId = null) {
   state.threadCycles.delete(sessionId);
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
-  state.acceptedRuns.delete(sessionId);
+  state.pendingEchoes.delete(sessionId);
   transitionSessionCompaction(sessionId, { type: "epoch_reset" });
   const entry = sessionEntry(sessionId);
   if (entry?.active_run) entry.active_run = null;
@@ -1560,9 +1458,7 @@ function recordSessionEnvelope(sessionId, envelope, { historical = false } = {})
   const observedAgentEvent = agentEvent(envelope);
   noteSessionCompactionEvent(sessionId, observedAgentEvent);
   if (!historical) {
-    const type = envelope.event?.type;
-    if (type === "run_started") captureStartedRun(sessionId, envelope);
-    noteSessionRunEvent(sessionId, type, envelope.run_id || null);
+    noteSessionRunEvent(sessionId, envelope.event?.type, envelope.run_id || null);
   }
   return true;
 }
@@ -1663,7 +1559,9 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
 
 function eventNeedsSnapshot(envelope) {
   const type = envelope.event?.type;
-  if (["run_started", "run_completed", "run_failed", "snapshot_saved"].includes(type)) return true;
+  // transcript_appended is the live mid-run signal: a commit point just made
+  // new orchestrator messages visible in the store-backed transcript.
+  if (["run_started", "run_completed", "run_failed", "snapshot_saved", "transcript_appended"].includes(type)) return true;
   const agent = agentEvent(envelope);
   if (agent?.reason === "manual"
       && (agent.type === COMPACTION_STARTED_EVENT_TYPE || COMPACTION_TERMINAL_EVENT_TYPES.has(agent.type))) return true;
@@ -1697,7 +1595,7 @@ function renderConfigRepairGuidance(summary) {
 
 function runTimingPresentation(snapshot = currentSnapshot(), sessionId = state.currentId, now = Date.now()) {
   const entryActive = sessionEntry(sessionId)?.active_run || null;
-  const active = effectiveActiveRun(snapshot, sessionId) || entryActive;
+  const active = snapshot?.active_run || entryActive;
   const lifecycle = orchestratorLifecycle(snapshot, sessionId);
   const activeRunId = String(active?.run_id || "");
   const terminalMatchesActive = ["completed", "failed"].includes(lifecycle.state)
@@ -2031,7 +1929,7 @@ function displayedTokenUsage(snapshot, sessionId = state.currentId, envelopes = 
 }
 
 function usageRunId(snapshot, envelopes) {
-  const snapshotRunId = effectiveActiveRun(snapshot)?.run_id;
+  const snapshotRunId = snapshot?.active_run?.run_id;
   if (snapshotRunId) return String(snapshotRunId);
   let activeRunId = null;
   for (const envelope of envelopes || []) {
@@ -2123,13 +2021,13 @@ function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
       detail: type === "run_started" ? envelope.event.prompt_preview : type === "run_completed" ? envelope.event.response : envelope.event.message,
     };
   }
-  const active = effectiveActiveRun(snapshot, sessionId);
+  const active = snapshot?.active_run || null;
   const activeRunId = active?.run_id == null ? null : String(active.run_id);
   if (active && (!observed || observed.state === "running" || (activeRunId && activeRunId !== observed.runId))) {
     const matchesObserved = observed?.state === "running" && (!activeRunId || activeRunId === observed.runId);
     return {
       state: "running",
-      provenance: active.accepted_response ? "accepted" : "snapshot",
+      provenance: "snapshot",
       sequenceId: matchesObserved ? observed.sequenceId : null,
       startSequence: matchesObserved ? observed.startSequence : null,
       finishSequence: null,
@@ -3265,10 +3163,7 @@ function renderFocusMessage(message) {
     ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
     : "";
   if (!copy) return "";
-  const pendingBadge = message?.pending
-    ? `<span class="focus-pending-badge">Sending…</span>`
-    : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-body">${copy}</div>${pendingBadge}</article>`;
+  return `<article class="focus-message" data-role="${escapeAttr(role)}"><div class="focus-message-body">${copy}</div></article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
@@ -4140,7 +4035,7 @@ function clearComposerDraftIfUnchanged(sessionId, submittedDraft) {
 
 function renderComposerTarget() {
   const targeted = Boolean(state.targetedThread);
-  const orchestratorActive = Boolean(effectiveActiveRun(currentSnapshot(), state.currentId));
+  const orchestratorActive = Boolean(currentSnapshot()?.active_run);
   const compacting = sessionCompactionBusy(state.currentId);
   el.composerTarget.hidden = !targeted;
   el.composerTargetName.textContent = state.targetedThread || "";
@@ -4252,7 +4147,7 @@ async function submitComposer(event) {
   }
 
   const target = state.targetedThread;
-  const activeAtSubmission = !target && Boolean(effectiveActiveRun(state.snapshots.get(sessionId), sessionId));
+  const activeAtSubmission = !target && Boolean(state.snapshots.get(sessionId)?.active_run);
   const submission = { sessionId, target };
   state.submittingSessions.add(sessionId);
   el.sendPrompt.disabled = true;
@@ -4262,7 +4157,9 @@ async function submitComposer(event) {
     if (contextIsCurrent()) showToast(message, error);
   };
   const noteAcceptedRun = (accepted) => {
-    captureAcceptedRun(sessionId, accepted, input, state.snapshots.get(sessionId));
+    // Optimistic echo for the accept → first-commit-point window; cleared
+    // when the canonical user message lands in a refetched snapshot.
+    notePendingEcho(sessionId, accepted?.run_id, accepted?.display_prompt ?? input);
     noteSessionRunEvent(sessionId, "run_started");
     clearSubmittedInput();
     notify("Run started");
@@ -4287,7 +4184,7 @@ async function submitComposer(event) {
         const runEnded = error.status === 409 && /no active run|finishing/i.test(error.message);
         if (!runEnded) throw error;
         const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: input });
-        captureAcceptedRun(sessionId, accepted, input, state.snapshots.get(sessionId));
+        notePendingEcho(sessionId, accepted?.run_id, accepted?.display_prompt ?? input);
         noteSessionRunEvent(sessionId, "run_started");
         steered = false;
       }

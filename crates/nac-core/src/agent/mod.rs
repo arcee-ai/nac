@@ -664,6 +664,21 @@ impl Agent {
         self.appended_steering_ids.clear();
     }
 
+    /// Shared handle to the transcript log writer, present only for
+    /// orchestrator agents with a session id. The session service reads the
+    /// log through the same writer for store-backed transcript reads (step
+    /// 3), so reads and appends serialize on one connection.
+    pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
+        self.transcript_log
+            .as_ref()
+            .map(|sink| sink.writer.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn push_and_log_for_test(&mut self, message: Message) -> Result<()> {
+        self.push_and_log(message).await
+    }
+
     /// Restore a stored transcript while keeping the current system prompt.
     pub fn restore_messages(&mut self, mut messages: Vec<Message>) {
         if let Some(Message::System { content: stored }) = messages.first_mut() {
@@ -765,9 +780,13 @@ impl Agent {
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
         let messages = messages.to_vec();
+        let batch_len = messages.len() as u64;
         tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
             .await
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Live trigger (step 3): emitted after the log commit, before the
+        // vec push — the store-backed read path sees the rows immediately.
+        self.event_sink.emit_transcript_appended(start_idx + batch_len);
         Ok(())
     }
 
@@ -783,6 +802,8 @@ impl Agent {
         tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
             .await
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Live trigger (step 3): see log_transcript_batch.
+        self.event_sink.emit_transcript_appended(idx + 1);
         Ok(())
     }
 

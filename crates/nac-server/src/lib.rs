@@ -863,11 +863,10 @@ impl SessionManager {
         session_id: &str,
         request: MessagePageRequest,
     ) -> Result<MessagesPageSnapshot> {
-        Ok(self
-            .attach_session(session_id)
+        self.attach_session(session_id)
             .await?
             .messages_page(request)
-            .await)
+            .await
     }
 
     pub async fn thread_events(
