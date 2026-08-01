@@ -15,7 +15,6 @@ interface SessionActions {
   remove: (summary: SessionSummarySnapshot) => void;
   settings: (sessionId: string) => void;
   togglePin: (summary: SessionSummarySnapshot) => Promise<void>;
-  copyId: (id: string) => Promise<void>;
   stopRun: (summary: SessionSummarySnapshot) => Promise<void>;
 }
 
@@ -62,14 +61,6 @@ export function SessionActionsProvider({
           await togglePin(summary);
         } catch (error) {
           toast.error(`Failed to update pin: ${errorMessage(error)}`);
-        }
-      },
-      copyId: async (id) => {
-        try {
-          await navigator.clipboard.writeText(id);
-          toast.success("Session id copied");
-        } catch (error) {
-          toast.error(`Failed to copy id: ${errorMessage(error)}`);
         }
       },
       stopRun: async (summary) => {

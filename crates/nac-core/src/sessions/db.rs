@@ -35,6 +35,17 @@ pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     Ok(())
 }
 
+/// Bumps the lifetime run counter for a session. Kept out of the snapshot write
+/// path so a stale in-memory service cannot roll the counter back.
+pub fn increment_run_count(path: &Path, session_id: &str) -> Result<()> {
+    let conn = crate::store::open_runtime_connection(path)?;
+    conn.execute(
+        "UPDATE sessions SET run_count = COALESCE(run_count, 0) + 1 WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    Ok(())
+}
+
 pub fn update_session_config(
     path: &Path,
     snapshot: &SessionSnapshot,
@@ -506,7 +517,8 @@ fn query_session_summary(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
+                    COALESCE(s.run_count, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -526,7 +538,8 @@ fn query_session_summaries(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
+                    COALESCE(s.run_count, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              WHERE COALESCE(p.pinned, 0) = ?1
@@ -539,7 +552,8 @@ fn query_session_summaries(
             "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
                     s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
                     s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json
+                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
+                    COALESCE(s.run_count, 0)
              FROM sessions s
              LEFT JOIN session_presentations p ON p.session_id = s.session_id
              ORDER BY COALESCE(p.pinned, 0) DESC,
@@ -580,6 +594,7 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         sort_order: row.get(13)?,
         presentation_version: row.get(14)?,
         token_usages_json: row.get(15)?,
+        run_count: row.get(16)?,
     })
 }
 
@@ -600,6 +615,7 @@ struct SessionSummaryRow {
     sort_order: i64,
     presentation_version: i64,
     token_usages_json: Option<String>,
+    run_count: i64,
 }
 
 impl SessionSummaryRow {
@@ -645,6 +661,7 @@ impl SessionSummaryRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             total_tokens,
+            run_count: self.run_count.max(0) as u64,
         })
     }
 }

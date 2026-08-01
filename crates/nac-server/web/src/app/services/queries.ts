@@ -10,14 +10,19 @@ import {
 
 import { api } from "@/app/services/api";
 import type {
+  BackendKind,
   BranchList,
+  BrowseListing,
+  CreateModelConfigurationRequest,
   CreateSessionRequest,
-  LaunchModelDefaults,
-  LaunchModelDefaultsRequest,
   ManagedSessionSummary,
+  ModelConfigurationList,
+  ProviderModelList,
   RawSessionConfig,
+  ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  StoredCredentialList,
   StoreInfo,
   SwitchBranchRequest,
   UpdateConfigRequest,
@@ -34,12 +39,18 @@ export const SESSIONS_POLL_MS = 5000;
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
+  credentials: ["credentials"] as const,
+  modelConfigs: ["model-configs"] as const,
+  browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
+  providerModels: (backend: string, apiKey: string, baseUrl: string) =>
+    ["provider-models", { backend, apiKey, baseUrl }] as const,
+  resolvedModelConfig: (configId: string) =>
+    ["model-config-resolved", configId] as const,
+  resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
   sessions: (workspaceStats: boolean) => ["sessions", { workspaceStats }] as const,
   sessionsAll: ["sessions"] as const,
   session: (id: string) => ["session", id] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
-  launchDefaults: (cwd: string, sshHost: string) =>
-    ["launch-defaults", { cwd, sshHost }] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -66,26 +77,137 @@ export function useStoreInfo() {
   });
 }
 
+/**
+ * Which API key names have a value stored in NAC home. Used to tell the user
+ * whether a session can authenticate without the environment variable being
+ * set; failures are non-fatal because the environment may well supply the key.
+ */
+export function useStoredCredentials(enabled = true) {
+  return useQuery<StoredCredentialList>({
+    queryKey: queryKeys.credentials,
+    queryFn: ({ signal }) => api.listCredentials(signal),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useStoreCredential() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, value }: { name: string; value: string }) =>
+      api.storeCredential(name, value),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+  });
+}
+
+export function useDeleteCredential() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteCredential(name),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+  });
+}
+
+export type BrowseKind = "directory" | "toml";
+
+/**
+ * Directory listing from the machine running the server. Only fetched while
+ * the picker is open, and never cached long: the filesystem moves under us.
+ */
+export function useBrowsePath(path: string | null, kind: BrowseKind, enabled: boolean) {
+  return useQuery<BrowseListing>({
+    queryKey: queryKeys.browse(path ?? "", kind),
+    queryFn: ({ signal }) => api.browsePath(path, kind, signal),
+    enabled,
+    staleTime: 2000,
+    retry: false,
+  });
+}
+
+export function useModelConfigs() {
+  return useQuery<ModelConfigurationList>({
+    queryKey: queryKeys.modelConfigs,
+    queryFn: ({ signal }) => api.listModelConfigs(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/**
+ * The models an API key can reach, which is also how the key is validated: the
+ * provider rejects the very same request when the key is wrong.
+ *
+ * The key appears in the query key so a corrected key refetches. That cache is
+ * in memory for the lifetime of the tab and is never persisted.
+ */
+export function useProviderModels(
+  backend: BackendKind,
+  apiKey: string,
+  baseUrl: string | null,
+  enabled: boolean,
+) {
+  return useQuery<ProviderModelList>({
+    queryKey: queryKeys.providerModels(backend, apiKey, baseUrl ?? ""),
+    queryFn: () =>
+      api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }),
+    enabled: enabled && apiKey.length > 0,
+    retry: false,
+    staleTime: 5 * 60_000,
+    gcTime: 60_000,
+  });
+}
+
+/**
+ * A saved configuration or a `config.toml`, checked end to end by the server:
+ * the credential resolves and the provider answers with its model list.
+ */
+export function useResolvedModelConfig(configId: string | null, filePath: string) {
+  const path = filePath.trim();
+  return useQuery<ResolvedModelConfiguration>({
+    queryKey: configId
+      ? queryKeys.resolvedModelConfig(configId)
+      : queryKeys.resolvedConfigFile(path),
+    queryFn: () =>
+      configId ? api.resolveModelConfig(configId) : api.resolveConfigFile(path),
+    enabled: Boolean(configId ?? path),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateModelConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateModelConfigurationRequest) =>
+      api.createModelConfig(payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
+      // The server files the key under a generated credential name.
+      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+    },
+  });
+}
+
+export function useDeleteModelConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (configId: string) => api.deleteModelConfig(configId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
+      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+    },
+  });
+}
+
 export function useSessions(workspaceStats = true) {
   return useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(workspaceStats),
     queryFn: ({ signal }) => api.listSessions(workspaceStats, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
-  });
-}
-
-/**
- * Model defaults configured for a launch location. Failures are non-fatal: the
- * modal simply cannot pre-resolve a managed backend.
- */
-export function useLaunchDefaults(location: LaunchModelDefaultsRequest, enabled = true) {
-  return useQuery<LaunchModelDefaults>({
-    queryKey: queryKeys.launchDefaults(location.cwd ?? "", location.ssh_host ?? ""),
-    queryFn: ({ signal }) => api.launchDefaults(location, signal),
-    enabled,
-    staleTime: 60_000,
-    retry: false,
   });
 }
 

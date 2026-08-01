@@ -1,6 +1,10 @@
 use super::*;
 
-const STORE_SCHEMA_VERSION: i64 = 3;
+const STORE_SCHEMA_VERSION: i64 = 6;
+
+/// Schema version that introduced `sessions.run_count`. Databases older than
+/// this have never had the column populated from their message history.
+const RUN_COUNT_BACKFILL_VERSION: i64 = 5;
 
 /// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
@@ -89,10 +93,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_steering(&transaction)?;
             migrate_thread_events(&transaction)?;
         }
-        2 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -106,8 +110,18 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             crate::MAX_SUPPORTED_TOKEN_COUNT
         ),
     )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "run_count",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0)",
+    )?;
+    if schema_version < RUN_COUNT_BACKFILL_VERSION {
+        backfill_run_counts(&transaction)?;
+    }
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
     create_workspace_revisions_table(&transaction)?;
+    create_model_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -179,6 +193,7 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              extra_headers_json TEXT,
              token_usages_json TEXT,
              config_version INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0),
+             run_count INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
              orchestrator_compaction_threshold INTEGER
                  CHECK (orchestrator_compaction_threshold IS NULL OR
                         (typeof(orchestrator_compaction_threshold) = 'integer' AND
@@ -526,6 +541,32 @@ fn create_workspace_revisions_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Reusable model settings the launch modal offers by name.
+///
+/// The secret never lands here: `api_key_env` holds the name the key is filed
+/// under in the credential store, which is the same indirection a hand-written
+/// `config.toml` uses, so resolving a key at run time needs no special case.
+/// The table is global rather than per-session, hence no foreign key.
+fn create_model_configurations_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS model_configurations (
+             config_id TEXT PRIMARY KEY,
+             name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+             backend TEXT NOT NULL CHECK (length(trim(backend)) > 0),
+             model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+             base_url TEXT NOT NULL CHECK (length(trim(base_url)) > 0),
+             api_key_env TEXT,
+             reasoning_effort TEXT,
+             extra_headers_json TEXT NOT NULL DEFAULT '{}',
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_model_configurations_name
+             ON model_configurations(name);",
+    )?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(
@@ -644,6 +685,24 @@ fn ensure_workset_items_acceptance_column(conn: &Connection) -> Result<()> {
     }
     conn.execute(
         "ALTER TABLE workset_items ADD COLUMN acceptance TEXT NOT NULL DEFAULT ''",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Seeds the run counter for sessions that predate it. One run submits exactly
+/// one user message, so the stored history is the best available estimate.
+/// Rows that already counted a run keep their value, and unparseable history
+/// stays at zero rather than failing the migration.
+fn backfill_run_counts(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions
+         SET run_count = (
+             SELECT COUNT(*)
+             FROM json_each(sessions.messages_json)
+             WHERE json_extract(value, '$.role') = 'user'
+         )
+         WHERE run_count = 0 AND json_valid(messages_json)",
         [],
     )?;
     Ok(())

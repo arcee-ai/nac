@@ -13,6 +13,7 @@ import {
   type SelectItem,
 } from "@/app/atoms";
 import { SESSION_ENVS, type SessionEnv } from "@/app/lib/format";
+import { providerLabel } from "@/app/lib/providers";
 import {
   RANGE_ITEMS,
   SORT_ITEMS,
@@ -21,13 +22,13 @@ import {
   setQuery,
   setSort,
   toggleEnv,
-  toggleModel,
+  toggleProvider,
   useCreatedRange,
   useFilterQuery,
   useModifiedRange,
   useSelectedEnvs,
-  useSelectedModels,
-  useSessionModels,
+  useSelectedProviders,
+  useSessionProviders,
   useSort,
   type RangeId,
   type SortId,
@@ -79,12 +80,14 @@ function Chips<T extends string>({
   selected,
   onToggle,
   emptyText,
+  labelOf = (option: T) => option as string,
 }: {
   label: string;
   options: readonly T[];
   selected: readonly T[];
   onToggle: (value: T) => void;
   emptyText?: string;
+  labelOf?: (value: T) => string;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -107,7 +110,7 @@ function Chips<T extends string>({
               aria-pressed={selected.includes(option)}
               style={CHIP_PADDING}
             >
-              {option}
+              {labelOf(option)}
             </Button>
           ))}
         </div>
@@ -126,8 +129,8 @@ export function SessionFilters({
   const createdRange = useCreatedRange();
   const modifiedRange = useModifiedRange();
   const envs = useSelectedEnvs();
-  const models = useSelectedModels();
-  const modelOptions = useSessionModels(sessions);
+  const providers = useSelectedProviders();
+  const providerOptions = useSessionProviders(sessions);
 
   return (
     <div className="flex flex-col">
@@ -175,11 +178,12 @@ export function SessionFilters({
       <Divider />
       <Section>
         <Chips
-          label="Model"
-          options={modelOptions}
-          selected={models}
-          onToggle={toggleModel}
-          emptyText="No models yet"
+          label="Provider"
+          options={providerOptions}
+          selected={providers}
+          onToggle={toggleProvider}
+          emptyText="No providers yet"
+          labelOf={providerLabel}
         />
       </Section>
     </div>

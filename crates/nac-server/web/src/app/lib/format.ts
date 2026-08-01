@@ -137,12 +137,6 @@ export function sessionEnvLabel(
   return ENV_LOCAL;
 }
 
-/** Compact id for the card badge; the full id stays available for copying. */
-export function sessionIdShort(id: string | null | undefined): string {
-  if (!id) return "--";
-  return id.length > 11 ? id.slice(0, 11) : id;
-}
-
 const TERMINAL_RUN_STATES = [
   "done",
   "completed",

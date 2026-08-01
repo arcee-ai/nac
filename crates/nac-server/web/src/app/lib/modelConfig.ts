@@ -2,7 +2,7 @@
 // backends with a fixed base URL, credential modes, reasoning-effort clearing
 // and extra-header validation. Ported from the legacy UI unchanged.
 
-import type { CreateSessionRequest, UpdateConfigRequest } from "@/app/types/api";
+import type { UpdateConfigRequest } from "@/app/types/api";
 
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
@@ -16,13 +16,6 @@ export const CLEAR_EFFORT = "__clear__";
 
 export function managedLaunchBaseUrl(backend: string | null | undefined): string | null {
   return MANAGED_LAUNCH_BASE_URLS[(backend ?? "").trim()] ?? null;
-}
-
-export function effectiveBackend(
-  selectedBackend: string | null | undefined,
-  configuredBackend: string | null | undefined,
-): string {
-  return (selectedBackend ?? "").trim() || (configuredBackend ?? "").trim();
 }
 
 /** Backends that authenticate from stored credentials (no api_key_env allowed). */
@@ -40,13 +33,6 @@ export function csv(value: string | null | undefined): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
-}
-
-function optionalLaunchString(value: string, label: string): string | undefined {
-  if (value === "") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) throw new Error(`${label} cannot contain only whitespace`);
-  return trimmed;
 }
 
 /** `undefined` inherits the configured value, `null` clears it. */
@@ -156,53 +142,6 @@ export interface ModelFormValues {
   credential_mode: CredentialMode;
   api_key_env: string;
   extra_headers: string;
-}
-
-type LaunchModelPayload = Pick<
-  CreateSessionRequest,
-  "model" | "base_url" | "backend" | "reasoning_effort" | "api_key_env" | "extra_headers"
->;
-
-/**
- * The model and credential half of a create-session payload. Fields the user
- * left untouched stay omitted so the session inherits them from config.toml.
- */
-export function buildLaunchModelPayload(
-  values: ModelFormValues & { configured_backend: string | null },
-): LaunchModelPayload {
-  const payload: LaunchModelPayload = {};
-
-  const model = optionalLaunchString(values.model, "Model");
-  if (model !== undefined) payload.model = model;
-
-  const selectedBackend = optionalLaunchString(values.backend, "Backend");
-  if (selectedBackend !== undefined) payload.backend = selectedBackend;
-
-  const backend = effectiveBackend(selectedBackend, values.configured_backend);
-  const managedUrl = managedLaunchBaseUrl(backend);
-
-  if (managedUrl) {
-    if (selectedBackend !== undefined) payload.base_url = managedUrl;
-  } else {
-    const baseUrl = optionalLaunchString(values.base_url, "Base URL");
-    if (baseUrl !== undefined) payload.base_url = baseUrl;
-  }
-
-  if (values.reasoning_effort === CLEAR_EFFORT) payload.reasoning_effort = null;
-  else if (values.reasoning_effort) payload.reasoning_effort = values.reasoning_effort;
-
-  if (managedUrl) {
-    payload.api_key_env = null;
-  } else {
-    validateCredentialMode(payload.backend ?? undefined, values.credential_mode);
-    const apiKeyEnv = selectedApiKeyEnv(values.credential_mode, values.api_key_env);
-    if (apiKeyEnv !== undefined) payload.api_key_env = apiKeyEnv;
-  }
-
-  const headers = serializeExtraHeaders(values.extra_headers, undefined);
-  if (headers !== undefined) payload.extra_headers = headers;
-
-  return payload;
 }
 
 export interface SettingsInitialValues {

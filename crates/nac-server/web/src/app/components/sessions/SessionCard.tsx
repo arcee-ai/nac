@@ -14,11 +14,10 @@ import { cn } from "@/app/lib/cn";
 import {
   displaySessionTitle,
   formatClock,
-  formatTokens,
   isActiveRun,
   sessionEnvLabel,
-  sessionIdShort,
 } from "@/app/lib/format";
+import { providerLabel } from "@/app/lib/providers";
 import { useNow } from "@/app/hooks/useNow";
 import { SessionCardActions } from "@/app/components/sessions/SessionCardActions";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
@@ -53,44 +52,24 @@ function surfaceToken({
   return selected ? SURFACE_TOKENS.selected : SURFACE_TOKENS.default;
 }
 
-function Metrics({ summary }: { summary: SessionSummarySnapshot }) {
-  const tokens = summary.total_tokens;
+function RunCount({ runs }: { runs: number }) {
   return (
-    <div className="flex items-end justify-between w-full h-6 text-[11px] leading-[14px] whitespace-nowrap">
-      <div className="flex flex-wrap items-center gap-2.5 min-w-0">
-        {tokens == null ? null : (
-          <span className="text-info-primary">{formatTokens(tokens)} Tokens</span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2.5 text-basic-tertiary min-w-0">
-        <span className="font-bold">{sessionEnvLabel(summary)}</span>
-        {summary.model ? (
-          <span className="truncate">{summary.model}</span>
-        ) : null}
-      </div>
-    </div>
+    <span className="text-micro text-info-primary whitespace-nowrap">
+      {runs} {runs === 1 ? "Run" : "Runs"}
+    </span>
   );
 }
 
-function IdBadge({ id, onCopy }: { id: string; onCopy: () => void }) {
+function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
+  const provider = providerLabel(summary.backend);
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
-      <span className="code code-small leading-4 text-basic-primary truncate">
-        ID:{sessionIdShort(id)}
+    <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
+      <span className="label-micro text-basic-tertiary">
+        {sessionEnvLabel(summary)}
       </span>
-      <Tooltip title="Copy session id" position={TooltipPosition.TopCenter} sticky>
-        <button
-          type="button"
-          className="shrink-0 grid place-items-center p-1 rounded-[4px] text-basic-secondary hover:bg-btn-ghost-hovered hover:text-basic-primary"
-          aria-label="Copy session id"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCopy();
-          }}
-        >
-          <Icon iconName={IconName.FileCopy} />
-        </button>
-      </Tooltip>
+      {provider ? (
+        <span className="text-micro text-basic-muted truncate">{provider}</span>
+      ) : null}
     </div>
   );
 }
@@ -104,7 +83,6 @@ interface SessionCardProps {
   onRename: (entry: ManagedSessionSummary) => void;
   onDelete: (entry: ManagedSessionSummary) => void;
   onStop: (entry: ManagedSessionSummary) => void;
-  onCopyId: (id: string) => void;
 }
 
 export function SessionCard({
@@ -116,7 +94,6 @@ export function SessionCard({
   onRename,
   onDelete,
   onStop,
-  onCopyId,
 }: SessionCardProps) {
   const summary = entry.summary;
   const id = summary.session_id;
@@ -141,7 +118,7 @@ export function SessionCard({
   return (
     <div
       className={cn(
-        "group fade-up relative flex flex-col gap-4 px-6 py-5 rounded-[8px] overflow-hidden cursor-default",
+        "group fade-up relative flex flex-col gap-4 px-6 pt-5 pb-3 rounded-[8px] overflow-hidden cursor-default",
         "bg-elevation-level-1 shadow-convex",
       )}
       role="button"
@@ -236,21 +213,19 @@ export function SessionCard({
         </div>
       </div>
 
-      <div className="relative w-full h-6">
+      <div className="relative flex items-center justify-between w-full h-6 gap-2">
+        <RunCount runs={summary.run_count} />
         {showActions ? (
-          <div className="flex items-end justify-between w-full h-6 gap-2">
-            <IdBadge id={id} onCopy={() => onCopyId(id)} />
-            <SessionCardActions
-              pinned={Boolean(summary.pinned)}
-              running={running}
-              onTogglePin={() => onTogglePin(entry)}
-              onRename={() => onRename(entry)}
-              onDelete={() => onDelete(entry)}
-              onStop={() => onStop(entry)}
-            />
-          </div>
+          <SessionCardActions
+            pinned={Boolean(summary.pinned)}
+            running={running}
+            onTogglePin={() => onTogglePin(entry)}
+            onRename={() => onRename(entry)}
+            onDelete={() => onDelete(entry)}
+            onStop={() => onStop(entry)}
+          />
         ) : (
-          <Metrics summary={summary} />
+          <Provenance summary={summary} />
         )}
       </div>
     </div>

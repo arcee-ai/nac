@@ -5,19 +5,27 @@
 
 import type {
   BranchList,
+  BrowseListing,
   CompactSessionResponse,
+  CreateModelConfigurationRequest,
   CreateSessionRequest,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
   ManagedSessionSummary,
   MessagesPageResponse,
+  ModelConfigurationList,
+  ModelConfigurationRecord,
   OrchestratorSteeringResponse,
+  ProviderModelList,
+  ProviderModelsRequest,
   RawSessionConfig,
   RecentEventsResponse,
   ReorderSessionsRequest,
   ReorderSessionsResponse,
+  ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  StoredCredentialList,
   StoreInfo,
   SubmitPromptResponse,
   SwitchBranchRequest,
@@ -132,6 +140,56 @@ export const api = {
 
   getStore: (signal?: AbortSignal) =>
     request<StoreInfo>("GET", "/store", { signal }),
+
+  // Credentials are write-only: the value is sent to the server and never
+  // read back, so the UI only ever learns which names have a key stored.
+  listCredentials: (signal?: AbortSignal) =>
+    request<StoredCredentialList>("GET", "/credentials", { signal }),
+
+  storeCredential: (name: string, value: string) =>
+    request<void>("PUT", `/credentials/${encodeURIComponent(name)}`, {
+      body: { value },
+    }),
+
+  deleteCredential: (name: string) =>
+    request<void>("DELETE", `/credentials/${encodeURIComponent(name)}`),
+
+  // Browsers withhold absolute paths from every file-picking API, so a local
+  // path is chosen against the filesystem the server sees.
+  browsePath: (
+    path: string | null,
+    kind: "directory" | "toml" = "directory",
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams({ kind });
+    if (path) query.set("path", path);
+    return request<BrowseListing>("GET", `/fs/browse?${query.toString()}`, { signal });
+  },
+
+  /** Validates the key as a side effect: a bad key cannot list models. */
+  listProviderModels: (payload: ProviderModelsRequest) =>
+    request<ProviderModelList>("POST", "/providers/models", { body: payload }),
+
+  listModelConfigs: (signal?: AbortSignal) =>
+    request<ModelConfigurationList>("GET", "/model-configs", { signal }),
+
+  createModelConfig: (payload: CreateModelConfigurationRequest) =>
+    request<ModelConfigurationRecord>("POST", "/model-configs", { body: payload }),
+
+  deleteModelConfig: (configId: string) =>
+    request<void>("DELETE", `/model-configs/${encodeURIComponent(configId)}`),
+
+  /** Resolves a saved configuration's credential and lists its models. */
+  resolveModelConfig: (configId: string) =>
+    request<ResolvedModelConfiguration>(
+      "POST",
+      `/model-configs/${encodeURIComponent(configId)}/models`,
+    ),
+
+  resolveConfigFile: (path: string) =>
+    request<ResolvedModelConfiguration>("POST", "/model-configs/from-file", {
+      body: { path },
+    }),
 
   listSessions: (workspaceStats = false, signal?: AbortSignal) =>
     request<ManagedSessionSummary[]>(

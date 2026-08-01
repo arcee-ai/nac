@@ -9,8 +9,6 @@ import {
   ButtonVariant,
   Icon,
   IconName,
-  Loader,
-  LoaderSize,
 } from "@/app/atoms";
 import { SessionCard } from "@/app/components/sessions/SessionCard";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
@@ -20,7 +18,11 @@ import { routes } from "@/app/lib/routes";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useSessions } from "@/app/services/queries";
-import { clearAttention, trackAttention, useAttention } from "@/app/store/attentionStore";
+import {
+  clearAttention,
+  trackAttention,
+  useAttention,
+} from "@/app/store/attentionStore";
 import { useVisibleSessions } from "@/app/store/sessionFiltersStore";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
@@ -56,7 +58,6 @@ function GridCard({
       onRename={(e) => actions.rename(e.summary)}
       onDelete={(e) => actions.remove(e.summary)}
       onStop={(e) => void actions.stopRun(e.summary)}
-      onCopyId={(id) => void actions.copyId(id)}
     />
   );
 }
@@ -67,7 +68,7 @@ export default function SessionsListPage() {
   const actions = useSessionActions();
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const { data, isLoading, isFetching, error } = useSessions();
+  const { data, isLoading, error } = useSessions();
   const all = data ?? [];
   const sessions = useVisibleSessions(all);
 
@@ -107,10 +108,7 @@ export default function SessionsListPage() {
     <BoxSurface
       title={countLabel}
       headerContent={
-        <div className="flex items-center gap-2 shrink-0">
-          {isFetching ? <Loader size={LoaderSize.Micro} /> : null}
-          {newButton}
-        </div>
+        <div className="flex items-center gap-2 shrink-0">{newButton}</div>
       }
       className="h-full"
       bodyClassName="overflow-auto"
@@ -170,7 +168,9 @@ export default function SessionsListPage() {
             </div>
           ) : null}
 
-          {pinned.length > 0 ? <CardGrid>{pinned.map(renderCard)}</CardGrid> : null}
+          {pinned.length > 0 ? (
+            <CardGrid>{pinned.map(renderCard)}</CardGrid>
+          ) : null}
           {unpinned.length > 0 ? (
             <CardGrid>{unpinned.map(renderCard)}</CardGrid>
           ) : null}

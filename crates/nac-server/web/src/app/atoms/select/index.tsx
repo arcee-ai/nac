@@ -88,7 +88,7 @@ const Select: React.FC<SelectProps> = ({
         <div
           className={cn(
             "absolute z-20 mt-1 min-w-full flex flex-col gap-1 p-2 rounded-[8px] fade",
-            "bg-elevation-level-2 border border-secondary shadow-xl",
+            "bg-elevation-level-2 shadow-2xl",
             panelClassName,
           )}
         >

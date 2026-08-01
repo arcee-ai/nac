@@ -1,12 +1,12 @@
 use super::*;
 
-fn is_valid_env_name(name: &str) -> bool {
+pub(super) fn is_valid_env_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-fn api_key_backend(backend: BackendKind) -> bool {
+pub(super) fn api_key_backend(backend: BackendKind) -> bool {
     matches!(
         backend,
         BackendKind::DeepSeekChat
@@ -131,6 +131,75 @@ pub fn validate_model_reasoning_effort(
     )))
 }
 
+/// Provider origins NAC will send an API key to without an operator opt-in.
+///
+/// Arcee and Codex are absent because they enforce their own origin policies
+/// before a credential is attached.
+fn builtin_provider_hosts(backend: BackendKind) -> &'static [&'static str] {
+    match backend {
+        BackendKind::OpenAiResponses => &["api.openai.com"],
+        BackendKind::AnthropicMessages => &["api.anthropic.com"],
+        BackendKind::DeepSeekChat => &["api.deepseek.com"],
+        BackendKind::TogetherChat => &["api.together.xyz"],
+        BackendKind::FireworksChat => &["api.fireworks.ai"],
+        BackendKind::ArceeApi | BackendKind::ArceeAuth | BackendKind::ChatGptCodexResponses => &[],
+    }
+}
+
+fn normalized_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Reject a base URL that would send an API key to an origin the operator
+/// never approved.
+///
+/// This is the trust boundary for values arriving over the unauthenticated
+/// loopback HTTP API: `config.toml` is edited by hand and is therefore
+/// authoritative, while a request body is not. Loopback and private-network
+/// hosts stay usable without an opt-in so local proxies keep working.
+pub fn validate_caller_supplied_base_url(
+    backend: BackendKind,
+    base_url: &str,
+    trusted_hosts: &[String],
+) -> Result<()> {
+    let approved_hosts = builtin_provider_hosts(backend);
+    if approved_hosts.is_empty() {
+        return Ok(());
+    }
+
+    let parsed = Url::parse(base_url).map_err(|error| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
+            base_url, error
+        ))
+    })?;
+    let host = parsed.host().ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' must include a host",
+            base_url
+        ))
+    })?;
+    if types::allows_plaintext_transport(&host) {
+        return Ok(());
+    }
+
+    let host = normalized_host(parsed.host_str().unwrap_or_default());
+    if approved_hosts.contains(&host.as_str())
+        || trusted_hosts
+            .iter()
+            .any(|trusted| normalized_host(trusted.trim()) == host)
+    {
+        return Ok(());
+    }
+
+    Err(model_configuration_error(format!(
+        "invalid model configuration: base_url host '{}' is not approved for backend '{}'; approved hosts are {}, and any other host must be listed under [security] trusted_base_url_hosts in config.toml before NAC sends credentials to it",
+        host,
+        backend,
+        approved_hosts.join(", ")
+    )))
+}
+
 pub fn validate_backend_api_key_env(
     backend: BackendKind,
     _base_url: Option<&str>,
@@ -183,18 +252,24 @@ pub(super) fn api_key_for_backend(
     }
 
     let env_name = configured_env.expect("validated API-key backend selector");
-    let Some(value) = std::env::var_os(env_name) else {
-        return Err(model_configuration_error(format!(
-            "invalid model configuration: configured api_key_env '{}' is not set for backend '{}'",
-            env_name, backend
-        )));
+    // The environment wins so that servers, CI, and managed workers keep the
+    // credential they were started with; storage is the desktop fallback.
+    let value = match std::env::var_os(env_name) {
+        Some(value) => value.into_string().map_err(|_| {
+            model_configuration_error(format!(
+                "invalid model configuration: configured api_key_env '{}' contains a non-Unicode value for backend '{}'",
+                env_name, backend
+            ))
+        })?,
+        None => api_key_store::read_stored_api_key(env_name)
+            .map_err(|error| model_configuration_error(error.to_string()))?
+            .ok_or_else(|| {
+                model_configuration_error(format!(
+                    "invalid model configuration: configured api_key_env '{}' is not set for backend '{}' and no key is stored under that name",
+                    env_name, backend
+                ))
+            })?,
     };
-    let value = value.into_string().map_err(|_| {
-        model_configuration_error(format!(
-            "invalid model configuration: configured api_key_env '{}' contains a non-Unicode value for backend '{}'",
-            env_name, backend
-        ))
-    })?;
     if value.trim().is_empty() {
         return Err(model_configuration_error(format!(
             "invalid model configuration: configured api_key_env '{}' is empty or whitespace-only for backend '{}'",

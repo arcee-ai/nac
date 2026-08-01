@@ -9,9 +9,11 @@ use url::Url;
 use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 mod anthropic;
+mod api_key_store;
 mod arcee;
 mod auth_store;
 mod backend;
+mod catalog;
 mod chat;
 mod chatgpt_codex;
 mod client;
@@ -21,8 +23,24 @@ mod responses;
 pub(crate) mod test_http;
 mod types;
 
+pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
-pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
+pub use backend::{
+    validate_backend_api_key_env, validate_caller_supplied_base_url,
+    validate_model_reasoning_effort,
+};
+pub use catalog::{
+    list_provider_models, provider_default_base_url, provider_uses_api_key, ProviderModel,
+};
+
+/// Resolve the API key a backend would use at run time.
+///
+/// Reads the environment first and the credential store second, exactly as a
+/// launched session does, so validating a saved configuration exercises the
+/// same lookup the session will.
+pub fn resolve_backend_api_key(backend: BackendKind, api_key_env: Option<&str>) -> Result<String> {
+    backend::api_key_for_backend(backend, api_key_env)
+}
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;

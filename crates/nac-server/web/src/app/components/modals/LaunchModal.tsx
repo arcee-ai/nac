@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -16,35 +16,37 @@ import {
   Select,
   type SelectItem,
   Switch,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
 import {
-  BACKEND_OPTIONS,
-  CREDENTIAL_OPTIONS,
-  REASONING_OPTIONS,
-} from "@/app/components/modals/options";
-import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
+  ConfigDivider,
+  ConfigRow,
+  ConfigTextArea,
+  FieldLabel,
+} from "@/app/components/modals/ConfigRow";
+import {
+  ConfigurationsPanel,
+  type LaunchModelSelection,
+} from "@/app/components/modals/ConfigurationsPanel";
+import { REASONING_OPTIONS } from "@/app/components/modals/options";
+import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { cn } from "@/app/lib/cn";
 import {
-  buildLaunchModelPayload,
+  CLEAR_EFFORT,
   csv,
-  effectiveBackend,
   launchLocationFromValues,
-  managedLaunchBaseUrl,
   nullable,
-  type CredentialMode,
+  serializeExtraHeaders,
 } from "@/app/lib/modelConfig";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import {
+  useCreateModelConfig,
   useCreateSession,
-  useLaunchDefaults,
   useStoreInfo,
   useUpdatePresentation,
 } from "@/app/services/queries";
-import type { CreateSessionRequest } from "@/app/types/api";
+import type { BackendKind, CreateSessionRequest } from "@/app/types/api";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -54,131 +56,18 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "sandbox", label: "Sandbox" },
 ];
 
-// "config.toml" is how the design spells "inherited from configuration".
-const INHERIT_LABEL = "config.toml";
-
-const withInheritLabel = (items: SelectItem[]) =>
-  items.map((item) =>
-    item.id === "" || item.id === "inherit" ? { ...item, label: INHERIT_LABEL } : item,
-  );
-
-const CONFIG_BACKENDS = withInheritLabel(BACKEND_OPTIONS);
-const CONFIG_REASONING = withInheritLabel(REASONING_OPTIONS);
-// Shortened next to the row label, which already says what the value is about.
-const CONFIG_CREDENTIALS = CREDENTIAL_OPTIONS.map((item) =>
-  item.id === "inherit"
-    ? { ...item, label: INHERIT_LABEL }
-    : item.id === "none"
-      ? { ...item, label: "None" }
-      : item,
+/** The configuration decides these, so "inherit" means "leave it alone". */
+const ADVANCED_REASONING: SelectItem[] = REASONING_OPTIONS.map((item) =>
+  item.id === "" ? { ...item, label: "From configuration" } : item,
 );
 
-const DEFAULTS_DEBOUNCE_MS = 250;
+// The design insets the collapsible header by 8px; `.btn-medium.btn-text` wins
+// over a utility class on specificity, so the override has to be inline.
+const ADVANCED_HEADER_PADDING = { paddingInline: "8px" };
 
-function InfoHint({ text }: { text: string }) {
-  return (
-    <Tooltip title={text} position={TooltipPosition.BottomLeft}>
-      <Icon iconName={IconName.Info} className="text-basic-muted shrink-0" />
-    </Tooltip>
-  );
-}
-
-function FieldLabel({
-  label,
-  hint,
-  required = false,
-  invalid = false,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  invalid?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1 w-full">
-      <div className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}>
-        {label}
-      </div>
-      {hint ? <InfoHint text={hint} /> : null}
-      {required ? (
-        <div className="flex-1 text-right text-micro text-basic-muted">Required</div>
-      ) : null}
-    </div>
-  );
-}
-
-/** One line inside the Configurations box: label left, control right. */
-function ConfigRow({
-  label,
-  hint,
-  invalid = false,
-  secondary = false,
-  control,
-}: {
-  label: string;
-  hint?: string;
-  invalid?: boolean;
-  secondary?: boolean;
-  control: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-1 w-full min-h-5">
-      <div className="flex items-center gap-1 flex-1 min-w-0">
-        <div
-          className={cn(
-            "truncate",
-            secondary ? "text-micro" : "label-micro",
-            invalid
-              ? "text-error-primary"
-              : secondary
-                ? "text-basic-secondary"
-                : "text-basic-primary",
-          )}
-        >
-          {label}
-        </div>
-        {hint ? <InfoHint text={hint} /> : null}
-      </div>
-      <div className="shrink-0">{control}</div>
-    </div>
-  );
-}
-
-function ConfigDivider() {
-  return <div className="h-px w-full bg-divider-muted" />;
-}
-
-function ConfigTextArea({
-  label,
-  help,
-  placeholder,
-  value,
-  onChange,
-  className,
-}: {
-  label: string;
-  help?: string;
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 w-full">
-      <div className="label-micro text-basic-primary">{label}</div>
-      <textarea
-        className={cn(
-          "input rounded-[4px] px-3 py-2 resize-none font-normal leading-relaxed",
-          className,
-        )}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {help ? <div className="text-micro text-basic-muted">{help}</div> : null}
-    </div>
-  );
-}
+// `.btn-medium.btn-icon-right` also wins on specificity, so the inset that lines
+// the path up with the neighbouring input has to be inline too.
+const CWD_BUTTON_PADDING = { paddingInline: "8px" };
 
 interface SandboxState {
   noMount: boolean;
@@ -221,37 +110,25 @@ function LaunchForm({
   const navigate = useNavigate();
   const toast = useToast();
   const createSession = useCreateSession();
+  const createModelConfig = useCreateModelConfig();
   const updatePresentation = useUpdatePresentation();
 
   const [mode, setMode] = useState<Mode>("local");
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [sshHost, setSshHost] = useState("");
-  const [backend, setBackend] = useState("");
-  const [model, setModel] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [credentialMode, setCredentialMode] = useState<CredentialMode>("inherit");
-  const [apiKeyEnv, setApiKeyEnv] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
   const [initialPrompt, setInitialPrompt] = useState("");
   const [sandbox, setSandbox] = useState<SandboxState>(EMPTY_SANDBOX);
   const [advanced, setAdvanced] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [error, setError] = useState<FormError | null>(null);
 
   const isSsh = mode === "ssh";
-  const busy = createSession.isPending;
-
-  // Configured defaults follow the location, so they are refreshed as the user
-  // types a path or a host.
-  const debouncedCwd = useDebouncedValue(cwd, DEFAULTS_DEBOUNCE_MS);
-  const debouncedHost = useDebouncedValue(isSsh ? sshHost : "", DEFAULTS_DEBOUNCE_MS);
-  const { data: defaults } = useLaunchDefaults(
-    launchLocationFromValues({ cwd: debouncedCwd, ssh_host: debouncedHost }),
-  );
-  const configuredBackend = defaults?.configured_model_backend ?? null;
-  const configuredBaseUrl = defaults?.configured_model_base_url ?? null;
+  const busy = createSession.isPending || createModelConfig.isPending;
 
   // Any edit clears the previous attempt's error, which also re-enables submit.
   const edit =
@@ -265,15 +142,11 @@ function LaunchForm({
     setSandbox((current) => ({ ...current, ...patch }));
   };
 
-  const explicitBackend = backend.trim();
-  const managedUrl = managedLaunchBaseUrl(effectiveBackend(backend, configuredBackend));
-  const locked = Boolean(managedUrl);
-  const displayBaseUrl = managedUrl
-    ? explicitBackend
-      ? managedUrl
-      : (configuredBaseUrl ?? managedUrl)
-    : baseUrl;
-  const effectiveCredMode: CredentialMode = locked ? "none" : credentialMode;
+  // Stable, so the panel does not re-emit its selection on every render.
+  const onSelection = useCallback((next: LaunchModelSelection | null) => {
+    setSelection(next);
+    setError((current) => (current?.field === "config" ? null : current));
+  }, []);
 
   const submit = async () => {
     if (busy) return;
@@ -285,29 +158,61 @@ function LaunchForm({
       setError({ field: "cwd", message: "A working directory is required." });
       return;
     }
-
-    let body: CreateSessionRequest;
-    try {
-      body = {
-        ...launchLocationFromValues({ cwd, ssh_host: isSsh ? sshHost : "" }),
-        ...buildLaunchModelPayload({
-          model,
-          base_url: baseUrl,
-          backend,
-          reasoning_effort: reasoning,
-          credential_mode: credentialMode,
-          api_key_env: apiKeyEnv,
-          extra_headers: extraHeaders,
-          configured_backend: configuredBackend,
-        }),
-      };
-    } catch (validationError) {
+    if (!selection) {
       setError({
         field: "config",
-        message: `Invalid configurations: ${errorMessage(validationError)}`,
+        message: "Complete the provider configuration before creating a session.",
       });
       return;
     }
+
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = serializeExtraHeaders(extraHeaders, undefined);
+    } catch (validationError) {
+      setError({ field: "config", message: errorMessage(validationError) });
+      return;
+    }
+
+    let backend: BackendKind;
+    let model: string;
+    let baseUrl: string;
+    let apiKeyEnv: string | null;
+    let configuredEffort: string | null;
+    try {
+      if (selection.kind === "save") {
+        const record = await createModelConfig.mutateAsync(selection.request);
+        backend = record.backend as BackendKind;
+        model = record.model;
+        baseUrl = record.base_url;
+        apiKeyEnv = record.api_key_env;
+        configuredEffort = record.reasoning_effort;
+      } else {
+        backend = selection.backend;
+        model = selection.model;
+        baseUrl = selection.base_url;
+        apiKeyEnv = selection.api_key_env;
+        configuredEffort = selection.reasoning_effort;
+        headers = headers ?? selection.extra_headers ?? undefined;
+      }
+    } catch (saveError) {
+      setError({
+        field: "config",
+        message: `The configuration could not be saved: ${errorMessage(saveError)}`,
+      });
+      return;
+    }
+
+    const body: CreateSessionRequest = {
+      ...launchLocationFromValues({ cwd, ssh_host: isSsh ? sshHost : "" }),
+      model,
+      base_url: baseUrl,
+      backend,
+      api_key_env: apiKeyEnv,
+      reasoning_effort:
+        reasoning === CLEAR_EFFORT ? null : reasoning || configuredEffort || null,
+    };
+    if (headers !== undefined) body.extra_headers = headers;
 
     const threshold = nullable(compaction);
     if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
@@ -398,7 +303,7 @@ function LaunchForm({
           content={ButtonContent.Text}
           onClick={submit}
           loading={busy}
-          disabled={Boolean(error)}
+          disabled={Boolean(error) || !selection}
         >
           Create Session
         </Button>
@@ -457,16 +362,45 @@ function LaunchForm({
               required={!isSsh}
               invalid={invalid("cwd")}
             />
-            <Input
-              inputSize={InputSize.Medium}
-              trailing={InputTrailing.Icon}
-              trailingIconName={IconName.Folder}
-              placeholder={isSsh ? "~ (remote)" : "/path/to/project"}
-              value={cwd}
-              validation={invalid("cwd")}
-              validationText={invalid("cwd") ? error?.message : ""}
-              onChange={(e) => edit(setCwd)(e.target.value)}
-            />
+            {isSsh ? (
+              // Remote paths live on the SSH host, which this server cannot list.
+              <Input
+                inputSize={InputSize.Medium}
+                trailing={InputTrailing.Icon}
+                trailingIconName={IconName.Folder}
+                placeholder="~ (remote)"
+                value={cwd}
+                validation={invalid("cwd")}
+                validationText={invalid("cwd") ? error?.message : ""}
+                onChange={(e) => edit(setCwd)(e.target.value)}
+              />
+            ) : (
+              <>
+                <Button
+                  variant={ButtonVariant.Secondary}
+                  size={ButtonSize.Medium}
+                  content={ButtonContent.IconRight}
+                  className={cn("w-full", invalid("cwd") && "input-validation")}
+                  style={CWD_BUTTON_PADDING}
+                  onClick={() => setPicking(true)}
+                >
+                  <span
+                    className={cn(
+                      "flex-1 min-w-0 truncate text-left font-normal",
+                      cwd ? "text-basic-primary" : "text-basic-muted",
+                    )}
+                  >
+                    {cwd || "/path/to/project"}
+                  </span>
+                  <Icon iconName={IconName.Folder} className="shrink-0" />
+                </Button>
+                {invalid("cwd") ? (
+                  <p className="pt-1 text-error-primary text-micro">
+                    {error?.message}
+                  </p>
+                ) : null}
+              </>
+            )}
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-0">
             <FieldLabel label="Title (optional)" />
@@ -479,237 +413,174 @@ function LaunchForm({
           </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-4 w-full">
-            <div
-              className={cn(
-                "label-small flex-1 min-w-0",
-                invalid("config") ? "text-error-primary" : "text-basic-primary",
-              )}
+        <ConfigurationsPanel
+          invalid={invalid("config")}
+          errorText={invalid("config") ? error?.message : undefined}
+          onChange={onSelection}
+        >
+          <div className="flex flex-col -mx-1">
+            <Button
+              variant={ButtonVariant.Ghost}
+              size={ButtonSize.Medium}
+              content={ButtonContent.Text}
+              className="w-full justify-start"
+              style={ADVANCED_HEADER_PADDING}
+              onClick={() => setAdvanced((open) => !open)}
+              aria-expanded={advanced}
             >
-              Configurations
-            </div>
-            <div className="text-micro text-basic-muted shrink-0">Required</div>
-          </div>
-          <div
-            className={cn(
-              "flex flex-col rounded-[4px] bg-input shadow-concave p-3 gap-2",
-              invalid("config") && "border-2 border-error-primary",
-            )}
-          >
-            <ConfigRow
-              label="Backend"
-              hint="Provider protocol; inherit to use the value from config.toml."
-              control={smallSelect(CONFIG_BACKENDS, backend, edit(setBackend))}
-            />
-            <ConfigDivider />
-            <ConfigRow
-              label="Model"
-              hint="Model identifier, e.g. gpt-5.5. Leave empty to inherit."
-              control={
-                <Input
-                  inputSize={InputSize.Small}
-                  className="w-[181px]"
-                  placeholder={INHERIT_LABEL}
-                  value={model}
-                  onChange={(e) => edit(setModel)(e.target.value)}
+              <Icon iconName={IconName.Gear} size={20} className="shrink-0" />
+              <span className="flex-1 min-w-0 text-left">Advanced Configurations</span>
+              <Icon
+                iconName={advanced ? IconName.Down : IconName.Right}
+                size={20}
+                className="shrink-0"
+              />
+            </Button>
+
+            {advanced ? (
+              <div className="flex flex-col px-1 pt-2 gap-2">
+                <ConfigRow
+                  label="Reasoning"
+                  hint="Reasoning effort passed to the model."
+                  control={smallSelect(ADVANCED_REASONING, reasoning, edit(setReasoning))}
                 />
-              }
-            />
-            <ConfigDivider />
-            <ConfigRow
-              label="Base URL"
-              hint={
-                locked
-                  ? "Managed by the selected backend."
-                  : "API endpoint. Leave empty to inherit."
-              }
-              control={
-                <Input
-                  inputSize={InputSize.Small}
-                  className="w-[181px]"
-                  placeholder={INHERIT_LABEL}
-                  value={displayBaseUrl}
-                  isDisabled={locked}
-                  onChange={(e) => edit(setBaseUrl)(e.target.value)}
+                <ConfigDivider />
+                <ConfigRow
+                  label="Orchestrator compaction threshold"
+                  hint="Context size that triggers compaction; 0 disables it."
+                  control={
+                    <Input
+                      inputSize={InputSize.Small}
+                      className="w-[105px]"
+                      inputClassName="text-right"
+                      placeholder="config.toml"
+                      inputMode="numeric"
+                      value={compaction}
+                      onChange={(e) => edit(setCompaction)(e.target.value)}
+                    />
+                  }
                 />
-              }
-            />
-            <ConfigDivider />
-            <ConfigRow
-              label="API Key"
-              hint="How the API key is provided to the session."
-              control={smallSelect(
-                CONFIG_CREDENTIALS,
-                effectiveCredMode,
-                (id) => edit(setCredentialMode)(id as CredentialMode),
-                locked,
-              )}
-            />
-            <ConfigRow
-              label="API key environment variable"
-              hint="Name of the environment variable holding the key."
-              secondary
-              control={
-                <Input
-                  inputSize={InputSize.Small}
-                  className="w-[181px]"
-                  placeholder="eg. OPENAI_API_KEY"
-                  value={apiKeyEnv}
-                  isDisabled={locked || effectiveCredMode !== "variable"}
-                  onChange={(e) => edit(setApiKeyEnv)(e.target.value)}
+
+                {mode === "sandbox" ? (
+                  <>
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="Container image"
+                      hint="Image the sandbox runs; empty uses the configured default."
+                      control={
+                        <Input
+                          inputSize={InputSize.Small}
+                          className="w-[181px]"
+                          placeholder="python:3.13-bookworm"
+                          value={sandbox.image}
+                          onChange={(e) => setSb({ image: e.target.value })}
+                        />
+                      }
+                    />
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="GPUs"
+                      hint="Comma-separated GPU list, e.g. all."
+                      control={
+                        <Input
+                          inputSize={InputSize.Small}
+                          className="w-[181px]"
+                          placeholder="all"
+                          value={sandbox.gpu}
+                          onChange={(e) => setSb({ gpu: e.target.value })}
+                        />
+                      }
+                    />
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="Container workdir"
+                      hint="Working directory inside the container."
+                      control={
+                        <Input
+                          inputSize={InputSize.Small}
+                          className="w-[181px]"
+                          placeholder="/workspace"
+                          value={sandbox.workdir}
+                          onChange={(e) => setSb({ workdir: e.target.value })}
+                        />
+                      }
+                    />
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="Shared memory size"
+                      hint="Container /dev/shm size, e.g. 1g."
+                      control={
+                        <Input
+                          inputSize={InputSize.Small}
+                          className="w-[181px]"
+                          placeholder="0"
+                          value={sandbox.shm}
+                          onChange={(e) => setSb({ shm: e.target.value })}
+                        />
+                      }
+                    />
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="Mounts (HOST:GUEST)"
+                      hint="Comma-separated bind mounts."
+                      control={
+                        <Input
+                          inputSize={InputSize.Small}
+                          className="w-[181px]"
+                          placeholder="/data:/data"
+                          value={sandbox.mounts}
+                          onChange={(e) => setSb({ mounts: e.target.value })}
+                        />
+                      }
+                    />
+                    <ConfigDivider />
+                    <ConfigRow
+                      label="Don't mount the working directory"
+                      secondary
+                      control={
+                        <Switch
+                          checked={sandbox.noMount}
+                          onChange={(value) => setSb({ noMount: value })}
+                          aria-label="Don't mount the working directory"
+                        />
+                      }
+                    />
+                  </>
+                ) : null}
+
+                <ConfigDivider />
+                <ConfigTextArea
+                  label="Extra headers (JSON object)"
+                  help="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
+                  placeholder='{"X-Title": "nac"}'
+                  value={extraHeaders}
+                  onChange={edit(setExtraHeaders)}
+                  className="h-[108px]"
                 />
-              }
-            />
+                <ConfigDivider />
+                <ConfigTextArea
+                  label="Initial prompt"
+                  placeholder="Send a first message right after the session is created…"
+                  value={initialPrompt}
+                  onChange={edit(setInitialPrompt)}
+                  className="h-[116px]"
+                />
+              </div>
+            ) : null}
           </div>
-          {invalid("config") ? (
-            <p className="label-micro text-error-primary">{error?.message}</p>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-4 w-full">
-            <div className="label-small text-basic-primary flex-1 min-w-0">
-              Advanced Configurations
-            </div>
-            <Switch
-              checked={advanced}
-              onChange={setAdvanced}
-              aria-label="Advanced Configurations"
-            />
-          </div>
-
-          {advanced ? (
-            <div className="flex flex-col rounded-[4px] bg-input shadow-concave p-3 gap-2">
-              <ConfigRow
-                label="Reasoning"
-                hint="Reasoning effort passed to the model."
-                control={smallSelect(CONFIG_REASONING, reasoning, edit(setReasoning))}
-              />
-              <ConfigDivider />
-              <ConfigRow
-                label="Orchestrator compaction threshold"
-                hint="Context size that triggers compaction; 0 disables it."
-                control={
-                  <Input
-                    inputSize={InputSize.Small}
-                    className="w-[181px]"
-                    placeholder={INHERIT_LABEL}
-                    inputMode="numeric"
-                    value={compaction}
-                    onChange={(e) => edit(setCompaction)(e.target.value)}
-                  />
-                }
-              />
-
-              {mode === "sandbox" ? (
-                <>
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="Container image"
-                    hint="Image the sandbox runs; empty uses the configured default."
-                    control={
-                      <Input
-                        inputSize={InputSize.Small}
-                        className="w-[181px]"
-                        placeholder="python:3.13-bookworm"
-                        value={sandbox.image}
-                        onChange={(e) => setSb({ image: e.target.value })}
-                      />
-                    }
-                  />
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="GPUs"
-                    hint="Comma-separated GPU list, e.g. all."
-                    control={
-                      <Input
-                        inputSize={InputSize.Small}
-                        className="w-[181px]"
-                        placeholder="all"
-                        value={sandbox.gpu}
-                        onChange={(e) => setSb({ gpu: e.target.value })}
-                      />
-                    }
-                  />
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="Container workdir"
-                    hint="Working directory inside the container."
-                    control={
-                      <Input
-                        inputSize={InputSize.Small}
-                        className="w-[181px]"
-                        placeholder="/workspace"
-                        value={sandbox.workdir}
-                        onChange={(e) => setSb({ workdir: e.target.value })}
-                      />
-                    }
-                  />
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="Shared memory size"
-                    hint="Container /dev/shm size, e.g. 1g."
-                    control={
-                      <Input
-                        inputSize={InputSize.Small}
-                        className="w-[181px]"
-                        placeholder="0"
-                        value={sandbox.shm}
-                        onChange={(e) => setSb({ shm: e.target.value })}
-                      />
-                    }
-                  />
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="Mounts (HOST:GUEST)"
-                    hint="Comma-separated bind mounts."
-                    control={
-                      <Input
-                        inputSize={InputSize.Small}
-                        className="w-[181px]"
-                        placeholder="/data:/data"
-                        value={sandbox.mounts}
-                        onChange={(e) => setSb({ mounts: e.target.value })}
-                      />
-                    }
-                  />
-                  <ConfigDivider />
-                  <ConfigRow
-                    label="Don't mount the working directory"
-                    secondary
-                    control={
-                      <Switch
-                        checked={sandbox.noMount}
-                        onChange={(value) => setSb({ noMount: value })}
-                        aria-label="Don't mount the working directory"
-                      />
-                    }
-                  />
-                </>
-              ) : null}
-
-              <ConfigDivider />
-              <ConfigTextArea
-                label="Extra headers (JSON object)"
-                help="Blank inherits configured headers. Enter {} to explicitly clear them for the new session; header values must be strings."
-                placeholder='{"X-Title": "nac"}'
-                value={extraHeaders}
-                onChange={edit(setExtraHeaders)}
-                className="h-[108px]"
-              />
-              <ConfigDivider />
-              <ConfigTextArea
-                label="Initial prompt"
-                placeholder="Send a first message right after the session is created…"
-                value={initialPrompt}
-                onChange={edit(setInitialPrompt)}
-                className="h-[116px]"
-              />
-            </div>
-          ) : null}
-        </div>
+        </ConfigurationsPanel>
       </div>
+
+      <PathPickerModal
+        open={picking}
+        kind="directory"
+        initialPath={cwd.trim()}
+        onClose={() => setPicking(false)}
+        onSelect={(path) => {
+          edit(setCwd)(path);
+          setPicking(false);
+        }}
+      />
     </Modal>
   );
 }

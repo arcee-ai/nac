@@ -19,6 +19,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// Alt-click jumps from a rendered element to its source. The import is dynamic
+// and guarded so the tool never reaches the committed production bundle; the
+// element ids it reads are stamped by the Babel plugin the dev server adds.
+if (import.meta.env.DEV) {
+  void import("@locator/runtime").then(({ default: setupLocatorUI }) => {
+    setupLocatorUI();
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

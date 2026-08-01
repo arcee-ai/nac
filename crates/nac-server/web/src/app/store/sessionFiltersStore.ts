@@ -10,6 +10,7 @@ import {
   sessionEnvLabel,
   type SessionEnv,
 } from "@/app/lib/format";
+import { providersFromBackends } from "@/app/lib/providers";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 export const SORT_MANUAL = "manual";
@@ -53,7 +54,8 @@ interface FiltersState {
   createdRange: RangeId;
   modifiedRange: RangeId;
   envs: SessionEnv[];
-  models: string[];
+  /** Selected `BackendKind` values, not their display labels. */
+  providers: string[];
 }
 
 export const sessionFiltersStore = createStore<FiltersState>({
@@ -62,7 +64,7 @@ export const sessionFiltersStore = createStore<FiltersState>({
   createdRange: RANGE_ANY,
   modifiedRange: RANGE_ANY,
   envs: [],
-  models: [],
+  providers: [],
 });
 
 const { getState, setState, useStore } = sessionFiltersStore;
@@ -78,8 +80,8 @@ export const setModifiedRange = (modifiedRange: RangeId) =>
   setState({ modifiedRange });
 export const toggleEnv = (env: SessionEnv) =>
   setState((s) => ({ envs: toggle(s.envs, env) }));
-export const toggleModel = (model: string) =>
-  setState((s) => ({ models: toggle(s.models, model) }));
+export const toggleProvider = (provider: string) =>
+  setState((s) => ({ providers: toggle(s.providers, provider) }));
 
 export function resetFilters(): void {
   setState({
@@ -87,7 +89,7 @@ export function resetFilters(): void {
     createdRange: RANGE_ANY,
     modifiedRange: RANGE_ANY,
     envs: [],
-    models: [],
+    providers: [],
   });
 }
 
@@ -98,7 +100,7 @@ export function hasActiveFilters(): boolean {
     s.createdRange !== RANGE_ANY ||
     s.modifiedRange !== RANGE_ANY ||
     s.envs.length > 0 ||
-    s.models.length > 0
+    s.providers.length > 0
   );
 }
 
@@ -165,7 +167,10 @@ export function useVisibleSessions(
       ) {
         return false;
       }
-      if (filters.models.length > 0 && !filters.models.includes(summary.model)) {
+      if (
+        filters.providers.length > 0 &&
+        !filters.providers.includes(summary.backend)
+      ) {
         return false;
       }
       return true;
@@ -178,15 +183,14 @@ export function useVisibleSessions(
   }, [sessions, filters, now]);
 }
 
-/** Model chips are derived from the data so they never list unused models. */
-export function useSessionModels(sessions: ManagedSessionSummary[]): string[] {
-  return useMemo(() => {
-    const models = new Set<string>();
-    for (const { summary } of sessions) {
-      if (summary.model) models.add(summary.model);
-    }
-    return Array.from(models).sort();
-  }, [sessions]);
+/** Provider chips are derived from the data so they never list unused ones. */
+export function useSessionProviders(
+  sessions: ManagedSessionSummary[],
+): string[] {
+  return useMemo(
+    () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
+    [sessions],
+  );
 }
 
 export const useFilterQuery = () => useStore((s) => s.query);
@@ -194,5 +198,5 @@ export const useSort = () => useStore((s) => s.sort);
 export const useCreatedRange = () => useStore((s) => s.createdRange);
 export const useModifiedRange = () => useStore((s) => s.modifiedRange);
 export const useSelectedEnvs = () => useStore((s) => s.envs);
-export const useSelectedModels = () => useStore((s) => s.models);
+export const useSelectedProviders = () => useStore((s) => s.providers);
 export const useIsManualSort = () => useStore((s) => s.sort === SORT_MANUAL);

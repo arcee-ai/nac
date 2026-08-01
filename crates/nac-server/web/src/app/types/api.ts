@@ -78,6 +78,7 @@ export interface SessionSummarySnapshot {
   created_at: string;
   updated_at: string;
   total_tokens?: number;
+  run_count: number;
 }
 
 export interface SubmittedUserMessageSnapshot {
@@ -575,6 +576,95 @@ export interface LaunchModelDefaults {
 export interface LaunchModelDefaultsRequest {
   cwd?: string | null;
   ssh_host?: string | null;
+}
+
+/**
+ * An API key kept in NAC home. The value itself never leaves the server, so
+ * only the selector name and a short suffix are available to the UI.
+ */
+export interface StoredCredentialSummary {
+  name: string;
+  /** Empty when the secret is too short for a suffix to be safe to show. */
+  last_four: string;
+}
+
+export interface StoredCredentialList {
+  credentials: StoredCredentialSummary[];
+}
+
+/** One entry of `GET /fs/browse`, listed from the machine running the server. */
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  is_directory: boolean;
+}
+
+export interface BrowseListing {
+  path: string;
+  /** Absent at a filesystem root, where upward navigation stops. */
+  parent: string | null;
+  home: string | null;
+  entries: BrowseEntry[];
+  /** Set when the directory had more entries than the server will serialize. */
+  truncated: boolean;
+}
+
+export interface ProviderModel {
+  id: string;
+  display_name: string | null;
+}
+
+export interface ProviderModelsRequest {
+  backend: BackendKind;
+  api_key?: string | null;
+  /** Overrides the provider's canonical URL. */
+  base_url?: string | null;
+}
+
+export interface ProviderModelList {
+  base_url: string;
+  models: ProviderModel[];
+}
+
+/**
+ * A saved provider setup. The key itself is not here: `api_key_env` names the
+ * credential the server files it under.
+ */
+export interface ModelConfigurationRecord {
+  config_id: string;
+  name: string;
+  backend: string;
+  model: string;
+  base_url: string;
+  api_key_env: string | null;
+  reasoning_effort: string | null;
+  extra_headers: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelConfigurationList {
+  configurations: ModelConfigurationRecord[];
+}
+
+export interface CreateModelConfigurationRequest {
+  name: string;
+  backend: BackendKind;
+  model: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  reasoning_effort?: string | null;
+  extra_headers?: Record<string, string>;
+}
+
+/** A configuration the server checked end to end, with the models it allows. */
+export interface ResolvedModelConfiguration {
+  backend: BackendKind;
+  model: string | null;
+  base_url: string;
+  api_key_env: string | null;
+  reasoning_effort: string | null;
+  models: ProviderModel[];
 }
 
 /**

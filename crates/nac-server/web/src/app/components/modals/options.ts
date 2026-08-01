@@ -1,18 +1,12 @@
 import type { SelectItem } from "@/app/atoms";
 import { CLEAR_EFFORT } from "@/app/lib/modelConfig";
+import { PROVIDER_KINDS, providerLabel } from "@/app/lib/providers";
 
 // Backend and reasoning-effort choices mirror nac-core's serde enums
 // (BackendKind = kebab-case, ReasoningEffort = lowercase).
 export const BACKEND_OPTIONS: SelectItem[] = [
   { id: "", label: "Inherit config" },
-  { id: "openai-responses", label: "OpenAI Responses" },
-  { id: "chatgpt-codex-responses", label: "ChatGPT Codex Responses" },
-  { id: "anthropic-messages", label: "Anthropic Messages" },
-  { id: "deepseek-chat", label: "DeepSeek Chat" },
-  { id: "fireworks-chat", label: "Fireworks Chat" },
-  { id: "together-chat", label: "Together Chat" },
-  { id: "arcee-auth", label: "Arcee (stored login)" },
-  { id: "arcee-api", label: "Arcee API" },
+  ...PROVIDER_KINDS.map((kind) => ({ id: kind, label: providerLabel(kind) })),
 ];
 
 export const REASONING_OPTIONS: SelectItem[] = [

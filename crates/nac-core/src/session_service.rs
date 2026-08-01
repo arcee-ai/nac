@@ -1377,6 +1377,13 @@ impl SessionService {
         }));
         drop(guard);
 
+        if let Some(session_id) = self.metadata.session_id.as_deref() {
+            if let Err(error) = sessions::increment_run_count(&self.metadata.store_path, session_id)
+            {
+                eprintln!("nac: failed to record run count: {error:#}");
+            }
+        }
+
         self.event_bus.emit_with_context(
             SessionEvent::RunStarted {
                 prompt_preview: active_run.prompt_preview.clone(),
@@ -1417,7 +1424,8 @@ impl SessionService {
             }
         };
 
-        self.capture_workspace_revision(&finishing_run.snapshot).await;
+        self.capture_workspace_revision(&finishing_run.snapshot)
+            .await;
 
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
@@ -1459,9 +1467,8 @@ impl SessionService {
         let label = run.prompt_preview.clone();
 
         let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
-            let previous =
-                crate::store::latest_workspace_revision(&store_path, &session_id)?
-                    .map(|revision| revision.commit_sha);
+            let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
+                .map(|revision| revision.commit_sha);
             let captured = crate::workspace::capture(&root, &session_id, previous.as_deref())?;
             crate::store::append_workspace_revision(
                 &store_path,

@@ -7,6 +7,17 @@ pub mod commands;
 pub mod events;
 mod mcp;
 pub mod model;
+
+/// Named, reusable model setups the launch UI offers instead of asking for a
+/// backend, model and base URL every time.
+pub mod model_configurations {
+    pub use crate::store::{
+        delete_model_configuration, insert_model_configuration, list_model_configurations,
+        load_model_configuration, ModelConfigurationRecord, ModelConfigurationStoreError,
+        NewModelConfiguration,
+    };
+}
+
 mod paths;
 mod process;
 pub mod runtime;

@@ -1,6 +1,8 @@
 mod compaction;
+mod filesystem;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
+pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -13,27 +15,32 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use async_stream::stream;
-use include_dir::{include_dir, Dir};
 use axum::{
     extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
     http::{header, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
+use include_dir::{include_dir, Dir};
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{SessionEventEnvelope, SessionReplayGap},
     model::{
-        managed_backend_base_url, resolve_model_base_url, validate_model_configuration,
-        BackendKind, EffectiveModelSettings, ModelConfigurationError, ReasoningEffort,
+        list_provider_models, list_stored_api_keys, managed_backend_base_url,
+        provider_default_base_url, provider_uses_api_key, remove_api_key, resolve_backend_api_key,
+        resolve_model_base_url, store_api_key, validate_caller_supplied_base_url,
+        validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
+        ProviderModel, ReasoningEffort,
     },
+    model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     runtime::{
-        self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
-        StoreOptions,
+        self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
+        RunOptions, SandboxOptions, StoreOptions,
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
@@ -242,6 +249,78 @@ pub struct SandboxRequest {
     pub backend: Option<String>,
     pub cpus: Option<u8>,
     pub memory_mib: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StoredCredentialSummary {
+    pub name: String,
+    /// Empty when the secret is too short for a suffix to be safe to show.
+    pub last_four: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StoredCredentialList {
+    pub credentials: Vec<StoredCredentialSummary>,
+}
+
+/// Marks credential names this server generated for a saved configuration, so
+/// deleting one never removes a key the operator manages themselves.
+const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateModelConfigurationRequest {
+    pub name: String,
+    pub backend: BackendKind,
+    pub model: String,
+    /// Defaults to the provider's canonical URL.
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub extra_headers: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelConfigurationList {
+    pub configurations: Vec<ModelConfigurationRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelConfigFromFileRequest {
+    pub path: String,
+}
+
+/// A configuration that has been checked end to end: the destination is
+/// approved, the credential resolves, and the provider answered with the
+/// models it allows.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedModelConfiguration {
+    pub backend: BackendKind,
+    pub model: Option<String>,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderModelsRequest {
+    pub backend: BackendKind,
+    pub api_key: Option<String>,
+    /// Overrides the provider's canonical URL, for a proxy or a custom gateway.
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderModelList {
+    /// The URL the models were actually read from, so the caller can persist
+    /// the same destination it validated against.
+    pub base_url: String,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StoreCredentialRequest {
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -731,6 +810,11 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        enforce_trusted_base_url(
+            model.backend.or(config.model.backend),
+            model.api_base_url.as_deref(),
+            &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+        )?;
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
@@ -955,13 +1039,9 @@ impl SessionManager {
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let root = summary
-            .summary
-            .workspace_host_path
-            .clone()
-            .ok_or_else(|| {
-                anyhow!("branch operations are not supported for remote/sandbox-only sessions")
-            })?;
+        let root = summary.summary.workspace_host_path.clone().ok_or_else(|| {
+            anyhow!("branch operations are not supported for remote/sandbox-only sessions")
+        })?;
 
         if let Some(busy) = sessions.iter().find(|entry| {
             entry.active_run.is_some()
@@ -1338,6 +1418,16 @@ impl SessionManager {
             api_key_env_omitted,
         )?;
 
+        // An untouched destination carries no new risk, so only a patch that
+        // moves the endpoint or switches the credential type is authorized.
+        if !base_url_omitted || backend_selected {
+            enforce_trusted_base_url(
+                Some(backend),
+                Some(prospective.base_url.as_str()),
+                &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
+            )?;
+        }
+
         let _settings = EffectiveModelSettings::new(
             backend,
             prospective.model.clone(),
@@ -1405,10 +1495,96 @@ fn validate_bind_address(addr: SocketAddr) -> Result<()> {
     Ok(())
 }
 
+/// Extra names this server answers to, as a comma-separated list.
+///
+/// A tunnel or reverse proxy forwards its own public name in `Host`, which the
+/// rebinding guard below would otherwise refuse. Naming it here is the
+/// operator's statement that whatever fronts the server authenticates callers
+/// before traffic reaches it. `*` disables the guard entirely.
+const ALLOWED_HOSTS_ENV: &str = "NAC_ALLOWED_HOSTS";
+
+fn configured_allowed_hosts() -> Vec<String> {
+    std::env::var(ALLOWED_HOSTS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .map(|entry| entry.trim().to_ascii_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// The host name inside a `Host` header, without its port.
+fn bare_host(host: &str) -> Option<&str> {
+    let host = host.trim();
+    match host.strip_prefix('[') {
+        // IPv6 literals are bracketed, so the port separator is the colon that
+        // follows the closing bracket rather than the last colon in the string.
+        Some(rest) => rest.split_once(']').map(|(address, _port)| address),
+        None => host.split(':').next().filter(|bare| !bare.is_empty()),
+    }
+}
+
+/// Whether a `Host` header names this loopback server.
+///
+/// Binding to loopback does not keep a hostile page out: an attacker can point
+/// their own domain at 127.0.0.1 (DNS rebinding) and drive this unauthenticated
+/// API from the victim's browser. A browser always sends the name it dialled,
+/// and it cannot forge that name, so refusing every host but the loopback ones
+/// closes the hole.
+fn is_loopback_host(host: &str) -> bool {
+    let Some(bare) = bare_host(host) else {
+        return false;
+    };
+    bare.eq_ignore_ascii_case("localhost")
+        || bare
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn host_is_allowed(host: &str, allowed: &[String]) -> bool {
+    if is_loopback_host(host) {
+        return true;
+    }
+    let host = host.trim().to_ascii_lowercase();
+    let bare = bare_host(&host).unwrap_or_default().to_string();
+    allowed
+        .iter()
+        .any(|entry| entry == "*" || *entry == host || *entry == bare)
+}
+
+async fn reject_foreign_host(
+    State(allowed): State<Arc<Vec<String>>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .map(|value| value.to_str().unwrap_or_default())
+        // HTTP/2 carries the authority in the pseudo-header instead.
+        .or_else(|| request.uri().host());
+    match host {
+        // An absent header is accepted because HTTP/1.1 clients that omit it
+        // are never browsers.
+        Some(host) if !host_is_allowed(host, &allowed) => (
+            StatusCode::FORBIDDEN,
+            format!(
+                "refusing request for host '{host}'; set {ALLOWED_HOSTS_ENV} to serve it through \
+                 an authenticating proxy"
+            ),
+        )
+            .into_response(),
+        _ => next.run(request).await,
+    }
+}
+
 pub fn router(manager: SessionManager) -> Router {
     api_router(manager)
         .merge(embedded_frontend_router())
         .layer(response_compression_layer())
+        .layer(middleware::from_fn_with_state(
+            Arc::new(configured_allowed_hosts()),
+            reject_foreign_host,
+        ))
 }
 
 fn embedded_frontend_router() -> Router {
@@ -1422,6 +1598,29 @@ fn api_router(manager: SessionManager) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/store", get(store_info))
+        .route("/fs/browse", get(browse_filesystem_handler))
+        .route("/providers/models", post(provider_models_handler))
+        .route(
+            "/model-configs",
+            get(list_model_configs_handler).post(create_model_config_handler),
+        )
+        .route(
+            "/model-configs/from-file",
+            post(model_config_from_file_handler),
+        )
+        .route(
+            "/model-configs/{config_id}",
+            delete(delete_model_config_handler),
+        )
+        .route(
+            "/model-configs/{config_id}/models",
+            post(saved_model_config_models_handler),
+        )
+        .route("/credentials", get(list_credentials_handler))
+        .route(
+            "/credentials/{name}",
+            put(store_credential_handler).delete(delete_credential_handler),
+        )
         .route(
             "/sessions/launch-defaults",
             post(launch_model_defaults_handler),
@@ -1438,7 +1637,10 @@ fn api_router(manager: SessionManager) -> Router {
             get(thread_events),
         )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route("/sessions/{session_id}/workspace/files", get(workspace_files))
+        .route(
+            "/sessions/{session_id}/workspace/files",
+            get(workspace_files),
+        )
         .route("/sessions/{session_id}/workspace/file", get(workspace_file))
         .route(
             "/sessions/{session_id}/workspace/branches",
@@ -1559,6 +1761,346 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
 
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
+}
+
+/// The picker starts wherever the caller last was; with no path yet it opens on
+/// the server root the session would default to anyway.
+async fn browse_filesystem_handler(
+    State(manager): State<SessionManager>,
+    Query(query): Query<filesystem::BrowseQuery>,
+) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
+    let listing = filesystem::browse(&query, &manager.inner.root_cwd)?;
+    Ok(Json(listing))
+}
+
+/// Validate an API key by asking its provider which models it may use.
+///
+/// The key arrives in the request body and is forwarded once; it is never
+/// stored by this route, and the destination goes through the same credential
+/// trust check as a session launch.
+async fn provider_models_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ProviderModelsRequest>, JsonRejection>,
+) -> std::result::Result<Json<ProviderModelList>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let backend = request.backend;
+
+    let api_key = request.api_key.unwrap_or_default();
+    if !provider_uses_api_key(backend) {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "backend '{backend}' authenticates with a stored login, so it has no API key to validate"
+            ),
+        });
+    }
+    if api_key.trim().is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires a nonblank API key"),
+        });
+    }
+
+    let base_url = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+
+    let models = list_provider_models(backend, &base_url, &api_key)
+        .await
+        .map_err(|error| ApiError {
+            // A rejected key is the caller's problem, not a server fault.
+            status: StatusCode::BAD_GATEWAY,
+            message: error.to_string(),
+        })?;
+    Ok(Json(ProviderModelList { base_url, models }))
+}
+
+async fn list_model_configs_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<ModelConfigurationList>, ApiError> {
+    let configurations =
+        model_configurations::list_model_configurations(&manager.inner.store_path)?;
+    Ok(Json(ModelConfigurationList { configurations }))
+}
+
+/// Save a validated provider setup under a name.
+///
+/// The key is filed in the credential store under a generated name that the
+/// row then points at, so the secret stays out of the database and a launched
+/// session resolves it through the ordinary `api_key_env` path.
+async fn create_model_config_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<CreateModelConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ModelConfigurationRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let backend = request.backend;
+
+    let base_url = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    let base_url = resolve_model_base_url(backend, Some(base_url))?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+
+    let api_key = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let expects_key = provider_uses_api_key(backend);
+    if expects_key && api_key.is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires an API key"),
+        });
+    }
+    if !expects_key && !api_key.is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "backend '{backend}' authenticates with a stored login and accepts no API key"
+            ),
+        });
+    }
+
+    let id = uuid::Uuid::new_v4();
+    let credential_name =
+        expects_key.then(|| format!("{GENERATED_CREDENTIAL_PREFIX}{}", id.simple()));
+    if let Some(name) = credential_name.as_deref() {
+        store_api_key(name, api_key)?;
+    }
+
+    let configuration = model_configurations::NewModelConfiguration {
+        name: request.name,
+        backend: backend.to_string(),
+        model: request.model,
+        base_url,
+        api_key_env: credential_name.clone(),
+        reasoning_effort: request
+            .reasoning_effort
+            .map(|effort| effort.as_str().to_string()),
+        extra_headers: request.extra_headers.unwrap_or_default(),
+    };
+    let record = model_configurations::insert_model_configuration(
+        &manager.inner.store_path,
+        &id.to_string(),
+        configuration,
+    );
+
+    match record {
+        Ok(record) => Ok((StatusCode::CREATED, Json(record))),
+        Err(error) => {
+            // The row is what makes the credential reachable, so a failed
+            // insert must not leave the secret behind.
+            if let Some(name) = credential_name.as_deref() {
+                let _ = remove_api_key(name);
+            }
+            Err(error.into())
+        }
+    }
+}
+
+/// Read a configuration the user picked from disk and check it can actually run.
+///
+/// The key is never sent by the client here: the file names an environment
+/// variable or stored credential, and the server resolves it the same way a
+/// session would.
+async fn model_config_from_file_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let path = PathBuf::from(request.path.trim());
+    if path.as_os_str().is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "a configuration file path is required".to_string(),
+        });
+    }
+
+    let config = NacConfig::load_from_file(&path).map_err(|error| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: error.to_string(),
+    })?;
+    let backend = config.model.backend.ok_or_else(|| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: format!(
+            "{} does not set [model] backend, so it cannot describe a provider",
+            path.display()
+        ),
+    })?;
+
+    resolve_configuration(
+        &manager,
+        backend,
+        config.model.model,
+        config.model.base_url,
+        config.model.api_key_env,
+        config.model.reasoning_effort,
+    )
+    .await
+}
+
+async fn saved_model_config_models_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let record =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    let backend: BackendKind = record.backend.parse().map_err(|message: String| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message,
+    })?;
+    let reasoning_effort = record
+        .reasoning_effort
+        .as_deref()
+        .map(|raw| parse_request_enum::<ReasoningEffort>(raw, "reasoning_effort"))
+        .transpose()?;
+
+    resolve_configuration(
+        &manager,
+        backend,
+        Some(record.model),
+        Some(record.base_url),
+        record.api_key_env,
+        reasoning_effort,
+    )
+    .await
+}
+
+/// Shared tail of the saved-configuration and config-file paths: settle the
+/// destination, resolve the credential, and confirm both by listing models.
+async fn resolve_configuration(
+    manager: &SessionManager,
+    backend: BackendKind,
+    model: Option<String>,
+    base_url: Option<String>,
+    api_key_env: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let base_url = base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    let base_url = resolve_model_base_url(backend, Some(base_url))?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+
+    let models = if provider_uses_api_key(backend) {
+        let api_key =
+            resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: error.to_string(),
+            })?;
+        list_provider_models(backend, &base_url, &api_key)
+            .await
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_GATEWAY,
+                message: error.to_string(),
+            })?
+    } else {
+        // A stored login has no key to check and no model index to read; the
+        // configured model is the only one on offer.
+        Vec::new()
+    };
+
+    Ok(Json(ResolvedModelConfiguration {
+        backend,
+        model,
+        base_url,
+        api_key_env,
+        reasoning_effort,
+        models,
+    }))
+}
+
+async fn delete_model_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let record =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
+
+    // Only a key this server filed away is ours to drop; a hand-configured
+    // environment variable name belongs to the operator.
+    if let Some(name) = record
+        .api_key_env
+        .as_deref()
+        .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
+    {
+        let _ = remove_api_key(name);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stored credentials are write-only over HTTP: a caller may add, replace or
+/// drop a key, but the value is never echoed back. Only enough of a suffix to
+/// tell two keys apart leaves the process.
+async fn list_credentials_handler() -> std::result::Result<Json<StoredCredentialList>, ApiError> {
+    let credentials = list_stored_api_keys()?
+        .into_iter()
+        .map(|entry| StoredCredentialSummary {
+            name: entry.name,
+            last_four: entry.last_four,
+        })
+        .collect();
+    Ok(Json(StoredCredentialList { credentials }))
+}
+
+async fn store_credential_handler(
+    AxumPath(name): AxumPath<String>,
+    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    store_api_key(&name, &request.value)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_credential_handler(
+    AxumPath(name): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    if remove_api_key(&name)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("no stored credential named '{name}' was found"),
+        })
+    }
 }
 
 async fn launch_model_defaults_handler(
@@ -1758,7 +2300,9 @@ async fn switch_workspace_branch(
 ) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     Ok(Json(
-        manager.switch_workspace_branch(&session_id, request).await?,
+        manager
+            .switch_workspace_branch(&session_id, request)
+            .await?,
     ))
 }
 
@@ -1990,6 +2534,25 @@ fn model_options(
         api_key_env,
         extra_headers,
     })
+}
+
+/// Reject a credential destination that only the HTTP request asked for.
+///
+/// `config.toml` is hand-edited and therefore authoritative; a request body
+/// reaching the unauthenticated loopback API is not, so it may only name a
+/// known provider origin, a local address, or a pre-approved host.
+fn enforce_trusted_base_url(
+    backend: Option<BackendKind>,
+    base_url: Option<&str>,
+    policy: &CredentialDestinationPolicy,
+) -> Result<()> {
+    let (Some(backend), Some(base_url)) = (backend, base_url) else {
+        return Ok(());
+    };
+    if policy.configured_base_url.as_deref() == Some(base_url) {
+        return Ok(());
+    }
+    validate_caller_supplied_base_url(backend, base_url, &policy.trusted_hosts)
 }
 
 fn apply_raw_config_patch(
@@ -2315,6 +2878,35 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
     }
 }
 
+impl From<ModelConfigurationStoreError> for ApiError {
+    fn from(error: ModelConfigurationStoreError) -> Self {
+        let status = match &error {
+            ModelConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            ModelConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<filesystem::BrowseError> for ApiError {
+    fn from(error: filesystem::BrowseError) -> Self {
+        let status = match &error {
+            filesystem::BrowseError::NotFound(_) => StatusCode::NOT_FOUND,
+            filesystem::BrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
+            filesystem::BrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<RequestConfigurationError> for ApiError {
     fn from(error: RequestConfigurationError) -> Self {
         Self {
@@ -2599,6 +3191,8 @@ mod tests {
         let root = temp_root("public_proxy_headers");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        // The proxy's public name is only served once the operator names it.
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "preview-1234.ngrok-free.app") };
         seed_editable_session(&root, "session");
         let app = router(test_manager(&root));
 
@@ -2667,6 +3261,140 @@ mod tests {
         drop(response);
         drop(app);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_foreign_host_is_refused_until_the_operator_names_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("foreign_host");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+
+        let health = |app: Router, host: &'static str| async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        };
+
+        // Rebinding turns an attacker-controlled name into a request for this
+        // very server, so the name is what has to be refused.
+        let guarded = router(test_manager(&root));
+        assert_eq!(
+            health(guarded.clone(), "rebound.example").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            health(guarded.clone(), "127.0.0.1.rebound.example").await,
+            StatusCode::FORBIDDEN
+        );
+        for host in [
+            "127.0.0.1:3210",
+            "localhost:3210",
+            "[::1]:3210",
+            "LOCALHOST",
+        ] {
+            assert_eq!(
+                health(guarded.clone(), host).await,
+                StatusCode::OK,
+                "{host} names this server"
+            );
+        }
+
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "nac.internal, preview.example") };
+        let allowlisted = router(test_manager(&root));
+        assert_eq!(
+            health(allowlisted.clone(), "preview.example").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            health(allowlisted.clone(), "preview.example:8443").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            health(allowlisted.clone(), "other.example").await,
+            StatusCode::FORBIDDEN
+        );
+
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "*") };
+        let unguarded = router(test_manager(&root));
+        assert_eq!(
+            health(unguarded.clone(), "anything.example").await,
+            StatusCode::OK
+        );
+
+        drop((guarded, allowlisted, unguarded));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_host_header_is_served() {
+        let root = temp_root("hostless_request");
+        let app = router(test_manager(&root));
+
+        // HTTP/1.0 clients and probes omit the header; browsers never do.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn host_headers_are_split_from_their_port_before_they_are_judged() {
+        assert_eq!(bare_host("example.com:8443"), Some("example.com"));
+        assert_eq!(bare_host("[::1]:3210"), Some("::1"));
+        assert_eq!(bare_host("  example.com  "), Some("example.com"));
+        assert_eq!(bare_host(":3210"), None);
+        // An unterminated IPv6 literal is malformed, not a host.
+        assert_eq!(bare_host("[::1"), None);
+
+        for host in [
+            "127.0.0.1",
+            "127.9.9.9:80",
+            "[::1]",
+            "localhost",
+            "LocalHost:1",
+        ] {
+            assert!(is_loopback_host(host), "{host} should be loopback");
+        }
+        for host in [
+            "example.com",
+            "127.0.0.1.example.com",
+            "[::1",
+            "",
+            "10.0.0.1",
+        ] {
+            assert!(!is_loopback_host(host), "{host} should not be loopback");
+        }
+    }
+
+    #[test]
+    fn the_allowlist_is_parsed_leniently_and_matched_exactly() {
+        let allowed = vec!["nac.internal".to_string(), "preview.example".to_string()];
+
+        assert!(host_is_allowed("NAC.Internal:8080", &allowed));
+        assert!(host_is_allowed("preview.example", &allowed));
+        assert!(!host_is_allowed("evil-preview.example", &allowed));
+        assert!(!host_is_allowed("preview.example.evil.com", &allowed));
+        // Loopback needs no entry at all.
+        assert!(host_is_allowed("localhost:3210", &[]));
     }
 
     #[test]
@@ -2783,6 +3511,7 @@ mod tests {
                 "OPENAI_API_KEY",
                 "OPENAI_BASE_URL",
                 "SECOND_API_KEY",
+                ALLOWED_HOSTS_ENV,
             ];
             let original = names
                 .into_iter()
@@ -2805,6 +3534,7 @@ mod tests {
                 }
                 std::env::remove_var("OPENAI_BASE_URL");
                 std::env::remove_var("SECOND_API_KEY");
+                std::env::remove_var(ALLOWED_HOSTS_ENV);
             }
             Self { original }
         }

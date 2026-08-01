@@ -17,9 +17,9 @@ mod snapshot;
 mod summary;
 
 pub use db::{
-    create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_config, reorder_sessions, save_session, session_exists, update_raw_session_config,
-    update_session_config, update_session_presentation,
+    create_session, delete_session, increment_run_count, list_sessions, load_last_session,
+    load_session, load_session_config, reorder_sessions, save_session, session_exists,
+    update_raw_session_config, update_session_config, update_session_presentation,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
@@ -146,6 +146,8 @@ pub struct SessionSummary {
     /// Billable tokens accumulated over the whole session, or `None` when no
     /// response ever reported usage.
     pub total_tokens: Option<u64>,
+    /// Number of runs ever started in this session.
+    pub run_count: u64,
 }
 
 #[derive(Debug)]

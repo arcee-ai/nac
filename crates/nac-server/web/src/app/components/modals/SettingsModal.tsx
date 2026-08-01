@@ -14,6 +14,7 @@ import {
   REASONING_OPTIONS,
   SETTINGS_CREDENTIAL_OPTIONS,
 } from "@/app/components/modals/options";
+import { StoredApiKey } from "@/app/components/modals/StoredApiKey";
 import {
   buildSettingsPatch,
   managedLaunchBaseUrl,
@@ -285,6 +286,12 @@ function SettingsForm({
             onChange={(e) => setApiKeyEnv(e.target.value)}
           />
         </div>
+
+        {!locked && effectiveCredMode === "variable" ? (
+          <Field label="Stored API key">
+            <StoredApiKey name={apiKeyEnv} />
+          </Field>
+        ) : null}
 
         <Field label="Extra headers (JSON)">
           <textarea

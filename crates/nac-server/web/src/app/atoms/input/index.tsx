@@ -118,6 +118,8 @@ interface InputProps
   inputSize?: InputSize;
   leading?: InputLeading;
   leadingOnClick?: () => void;
+  /** Occupies the leading slot with arbitrary content, e.g. a status glyph. */
+  leadingSlot?: React.ReactNode;
   trailing?: InputTrailing;
   trailingOnClick?: () => void;
   leadingIconName?: IconName;
@@ -140,6 +142,7 @@ const Input: React.FC<InputProps> & {
   inputSize = InputSize.Large,
   leading = InputLeading.None,
   leadingOnClick,
+  leadingSlot,
   trailing = InputTrailing.None,
   trailingOnClick,
   leadingIconName = IconName.Add,
@@ -162,7 +165,9 @@ const Input: React.FC<InputProps> & {
     inputSize,
     inputClassName,
     rounded ? "rounded-full" : "rounded-[4px]",
-    leading === InputLeading.None ? padLeft[inputSize] : padLeftIcon[inputSize],
+    leading === InputLeading.None && !leadingSlot
+      ? padLeft[inputSize]
+      : padLeftIcon[inputSize],
     trailing === InputTrailing.None
       ? padRight[inputSize]
       : padRightIcon[inputSize],
@@ -183,7 +188,21 @@ const Input: React.FC<InputProps> & {
       className={className}
     >
       <div className="input-wrapper relative w-full h-fit">
-        {leading === InputLeading.Icon ? (
+        {leadingSlot ? (
+          <div
+            className={cn(
+              "absolute flex items-center justify-center",
+              leadingIconPos[inputSize],
+            )}
+            style={{
+              width: iconSizeFor[inputSize],
+              height: iconSizeFor[inputSize],
+            }}
+          >
+            {leadingSlot}
+          </div>
+        ) : null}
+        {!leadingSlot && leading === InputLeading.Icon ? (
           <Icon
             iconName={leadingIconName}
             size={iconSizeFor[inputSize]}
@@ -191,7 +210,7 @@ const Input: React.FC<InputProps> & {
             color={iconColor}
           />
         ) : null}
-        {leading === InputLeading.Button ? (
+        {!leadingSlot && leading === InputLeading.Button ? (
           <Button
             size={buttonSizeFor[inputSize]}
             variant={ButtonVariant.Ghost}

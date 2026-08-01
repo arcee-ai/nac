@@ -28,7 +28,10 @@ import {
   useSelectedWorkset,
   useSidePanelLayout,
 } from "@/app/store/sessionLayoutStore";
-import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
+import type {
+  SessionSnapshotResponse,
+  WorkspaceSnapshot,
+} from "@/app/types/api";
 
 const PANEL_LABEL: Record<SessionPanel, string> = {
   files: "Files",
@@ -117,7 +120,7 @@ export function SessionSideBox({
   const selectedRevision = useSelectedRevision();
 
   return (
-    <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1">
+    <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-sm">
       <div className="flex items-center gap-4 pl-1 pr-2 pt-1 shrink-0 border-b border-muted bg-elevation-level-2">
         <div className="flex flex-1 min-w-0 items-center gap-3" role="tablist">
           {SESSION_PANELS.map((name) => (
@@ -146,7 +149,9 @@ export function SessionSideBox({
               onClick={toggleSidePanelExpanded}
             >
               <Icon
-                iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen}
+                iconName={
+                  expanded ? IconName.FullScreenExit : IconName.FullScreen
+                }
               />
             </Button>
           </Tooltip>

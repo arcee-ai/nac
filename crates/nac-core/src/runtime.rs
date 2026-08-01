@@ -37,11 +37,23 @@ pub struct NacConfig {
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub worker: WorkerConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct StorageConfig {
     pub store_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct SecurityConfig {
+    /// Extra hosts allowed to receive API-key credentials as `base_url`.
+    ///
+    /// Only this file can widen the set, which is what keeps the credential
+    /// destination out of reach of the unauthenticated HTTP API.
+    #[serde(default)]
+    pub trusted_base_url_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -82,6 +94,8 @@ struct NonModelNacConfig {
     sandbox: SandboxConfig,
     #[serde(default)]
     worker: WorkerConfig,
+    #[serde(default)]
+    security: SecurityConfig,
 }
 
 impl From<NonModelNacConfig> for NacConfig {
@@ -92,6 +106,7 @@ impl From<NonModelNacConfig> for NacConfig {
             compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
             worker: config.worker,
+            security: config.security,
         }
     }
 }
@@ -135,6 +150,36 @@ impl NacConfig {
             .with_context(|| format!("failed to parse non-model config {}", path.display()))
     }
 
+    /// Load the settings that decide where credentials may be sent.
+    ///
+    /// Deliberately lenient about the rest of `[model]`: config repair runs
+    /// through the same request path, so an obsolete backend name must not
+    /// stop NAC from authorizing a destination.
+    pub fn load_credential_destination_policy(cwd: &Path) -> Result<CredentialDestinationPolicy> {
+        let paths = PathContext::new(cwd);
+        let Some(path) = paths.nac_config_path() else {
+            return Ok(CredentialDestinationPolicy::default());
+        };
+        let raw = Self::read_config(&path)?;
+        let parsed = toml::from_str::<CredentialPolicyConfig>(&raw).with_context(|| {
+            format!("failed to parse credential policy from {}", path.display())
+        })?;
+        Ok(CredentialDestinationPolicy {
+            configured_base_url: parsed.model.base_url,
+            trusted_hosts: parsed.security.trusted_base_url_hosts,
+        })
+    }
+
+    /// Load a configuration file the user pointed at explicitly.
+    ///
+    /// Unlike the ambient search, a missing file is an error: the user named
+    /// this path, so silently falling back to defaults would hide a typo.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
     fn load_from_path(path: PathBuf) -> Result<Self> {
         let raw = Self::read_config(&path)?;
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
@@ -149,6 +194,29 @@ impl NacConfig {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CredentialPolicyConfig {
+    #[serde(default)]
+    model: CredentialPolicyModelConfig,
+    #[serde(default)]
+    security: SecurityConfig,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CredentialPolicyModelConfig {
+    #[serde(default)]
+    base_url: Option<String>,
+}
+
+/// Destinations an operator has approved for API-key credentials.
+#[derive(Debug, Clone, Default)]
+pub struct CredentialDestinationPolicy {
+    /// `[model] base_url`, which is authoritative by virtue of living in a
+    /// hand-edited file rather than arriving over the HTTP API.
+    pub configured_base_url: Option<String>,
+    pub trusted_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -9,6 +9,9 @@
 #     API   http://127.0.0.1:3210
 #     app   http://localhost:5173
 #
+# The dev server also enables LocatorJS: hold Alt and click a rendered element to
+# open its source. It is absent from the committed build that ./start.sh serves.
+#
 # Environment:
 #   NAC_BIND      address nac-web binds to (default 127.0.0.1:3210)
 #   VITE_PORT     port for the Vite dev server (default 5173)

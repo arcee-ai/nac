@@ -7,6 +7,12 @@ import Icon, { IconName } from "../icon";
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Open dialogs, oldest first. Escape is a document-level listener, so without
+ * this a dialog opened on top of another would dismiss both at once.
+ */
+const openModals: object[] = [];
+
 export enum ModalSize {
   Small = "max-w-[400px]",
   Medium = "max-w-[560px]",
@@ -40,14 +46,23 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   footer,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const token = useRef({});
 
   useEffect(() => {
     if (!open) return undefined;
+    const self = token.current;
+    openModals.push(self);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
+      if (e.key !== "Escape") return;
+      if (openModals[openModals.length - 1] !== self) return;
+      onClose?.();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const index = openModals.indexOf(self);
+      if (index >= 0) openModals.splice(index, 1);
+    };
   }, [open, onClose]);
 
   // Autofocus the first meaningful field and trap Tab within the dialog.
