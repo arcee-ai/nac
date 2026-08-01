@@ -18,8 +18,8 @@ mod summary;
 
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_config, reorder_sessions, save_session, session_exists, update_raw_session_config,
-    update_session_config, update_session_presentation,
+    load_session_config, reorder_sessions, save_session, save_session_run_state, session_exists,
+    update_raw_session_config, update_session_config, update_session_presentation,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
@@ -27,7 +27,7 @@ pub use operation_lease::{
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;
 pub type SessionRunLeaseError = SessionOperationLeaseError;
-pub use snapshot::{new_snapshot, refresh_snapshot};
+pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
 
 use codec::*;
 use summary::*;
@@ -1120,14 +1120,6 @@ mod tests {
             r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
         )
         .unwrap();
-        crate::store::write_session_overview(
-            &store_path,
-            "session-del",
-            "Work is active.",
-            "model-a",
-            &snapshot.updated_at,
-        )
-        .unwrap();
 
         // Verify data exists
         assert!(!crate::store::list_threads(&store_path, "session-del")
@@ -1145,11 +1137,6 @@ mod tests {
                 .unwrap()
                 .len(),
             1
-        );
-        assert!(
-            crate::store::read_session_overview(&store_path, "session-del")
-                .unwrap()
-                .is_some()
         );
         assert_eq!(
             crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"]
@@ -1176,11 +1163,6 @@ mod tests {
             crate::store::list_thread_steering(&store_path, "session-del")
                 .unwrap()
                 .is_empty()
-        );
-        assert!(
-            crate::store::read_session_overview(&store_path, "session-del")
-                .unwrap()
-                .is_none()
         );
         assert!(
             crate::store::load_all_thread_events(&store_path, "session-del", 20)
@@ -1607,6 +1589,202 @@ mod tests {
         update_session_presentation(&store_path, "newer-created", "Renamed and pinned", true, 0)
             .unwrap();
         assert_eq!(load_last_session(&store_path).unwrap().session_id, "active");
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn save_session_run_state_preserves_messages_and_config_columns() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("run_state_sparing_save");
+        let mut snapshot = test_snapshot(
+            "session-sparing",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        snapshot.messages = vec![
+            Message::System {
+                content: "system head".to_string(),
+            },
+            Message::User {
+                content: "hello".to_string(),
+            },
+        ];
+        snapshot.orchestrator_compaction_threshold = Some(4_096);
+        create_session(&store_path, &snapshot).unwrap();
+        let raw_messages_json = || {
+            crate::store::open_connection(&store_path)
+                .unwrap()
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = 'session-sparing'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let messages_json_before = raw_messages_json();
+
+        let mut in_memory = load_session(&store_path, "session-sparing").unwrap();
+        let update = in_memory.apply_run_state(SessionRunState {
+            last_response_duration_ms: Some(250),
+            previous_response_duration_ms: Some(125),
+            response_durations_ms: Some(vec![Some(125), Some(250)]),
+            token_usages: vec![
+                None,
+                Some(crate::model::TokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    cache_read_tokens: 3,
+                    cache_write_tokens: 4,
+                    reasoning_tokens: 5,
+                    orchestrator_context_tokens: 42,
+                }),
+            ],
+        });
+        save_session_run_state(&store_path, &update).unwrap();
+
+        assert_eq!(
+            raw_messages_json(),
+            messages_json_before,
+            "the sparing save must leave messages_json byte-identical"
+        );
+        let stored = load_session(&store_path, "session-sparing").unwrap();
+        assert_eq!(stored.last_response_duration_ms, Some(250));
+        assert_eq!(stored.previous_response_duration_ms, Some(125));
+        assert_eq!(
+            stored.response_durations_ms,
+            Some(vec![Some(125), Some(250)])
+        );
+        assert_eq!(stored.token_usages.len(), 2);
+        assert!(stored.token_usages[0].is_none());
+        assert_eq!(
+            stored.token_usages[1]
+                .as_ref()
+                .unwrap()
+                .orchestrator_context_tokens,
+            42
+        );
+        assert_eq!(stored.updated_at, update.updated_at);
+        // Configuration columns are CAS-only: untouched by the run-end save.
+        assert_eq!(stored.model, "model-a");
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(4_096));
+        assert_eq!(stored.config_version, 0);
+
+        // A missing session row is an error, not an upsert: run end of a
+        // persisted session always has its row.
+        let missing = SessionRunStateUpdate {
+            session_id: "session-missing".to_string(),
+            ..update
+        };
+        let error = save_session_run_state(&store_path, &missing).unwrap_err();
+        assert!(error.to_string().contains("session-missing"), "{error:#}");
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("summary_blob_plus_log");
+
+        // Never-fold session shape (step 4): a write-once blob (system head
+        // ++ legacy prefix) plus the live transcript in the log.
+        let mut with_log = test_snapshot(
+            "session-with-log",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-02 00:00:00.000000000",
+        );
+        with_log.messages = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::User {
+                content: "blob prompt".to_string(),
+            },
+            Message::Assistant {
+                content: Some("blob answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ];
+        create_session(&store_path, &with_log).unwrap();
+        let tool_call = crate::types::ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            function: crate::types::FunctionCall {
+                name: "read".to_string(),
+                arguments: "{\"path\":\"x\"}".to_string(),
+            },
+        };
+        let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append_batch(
+                "session-with-log",
+                3,
+                &[
+                    Message::User {
+                        content: "log prompt".to_string(),
+                    },
+                    Message::Assistant {
+                        content: Some("log answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                    },
+                    Message::Assistant {
+                        content: None,
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: Some(vec![tool_call]),
+                    },
+                    Message::Tool {
+                        tool_call_id: "call-1".to_string(),
+                        content: "tool output".to_string(),
+                    },
+                ],
+            )
+            .unwrap();
+
+        // Pre-log session shape: blob only, exactly the pre-log numbers.
+        let mut blob_only = test_snapshot(
+            "session-blob-only",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        blob_only.messages = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::User {
+                content: "blob only prompt".to_string(),
+            },
+        ];
+        create_session(&store_path, &blob_only).unwrap();
+
+        let summaries = list_sessions(&store_path).unwrap();
+        let with_log_summary = summaries
+            .iter()
+            .find(|summary| summary.session_id == "session-with-log")
+            .unwrap();
+        assert_eq!(
+            with_log_summary.visible_message_count, 4,
+            "blob visible (user + answer) ++ log visible (user + answer)"
+        );
+        assert_eq!(
+            with_log_summary.last_user_prompt.as_deref(),
+            Some("log prompt"),
+            "the log tail holds the latest user prompt"
+        );
+        let blob_only_summary = summaries
+            .iter()
+            .find(|summary| summary.session_id == "session-blob-only")
+            .unwrap();
+        assert_eq!(blob_only_summary.visible_message_count, 1);
+        assert_eq!(
+            blob_only_summary.last_user_prompt.as_deref(),
+            Some("blob only prompt")
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

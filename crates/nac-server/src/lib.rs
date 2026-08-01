@@ -37,7 +37,7 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionOverviewRecord,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
         SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
@@ -863,11 +863,10 @@ impl SessionManager {
         session_id: &str,
         request: MessagePageRequest,
     ) -> Result<MessagesPageSnapshot> {
-        Ok(self
-            .attach_session(session_id)
+        self.attach_session(session_id)
             .await?
             .messages_page(request)
-            .await)
+            .await
     }
 
     pub async fn thread_events(
@@ -880,13 +879,6 @@ impl SessionManager {
         self.attach_session(session_id)
             .await?
             .thread_events_page(thread_name, before_id, limit)
-    }
-
-    pub async fn generate_overview(&self, session_id: &str) -> Result<SessionOverviewRecord> {
-        self.attach_session(session_id)
-            .await?
-            .generate_overview()
-            .await
     }
 
     pub async fn workspace_file_diff(
@@ -1132,7 +1124,7 @@ impl SessionManager {
             }
         }
 
-        // Independent server/TUI processes coordinate through the same
+        // Independent server processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
         let _operation_lease =
@@ -1261,10 +1253,6 @@ pub fn router(manager: SessionManager) -> Router {
         .route(
             "/sessions/{session_id}/config",
             get(session_config_handler).patch(update_config_handler),
-        )
-        .route(
-            "/sessions/{session_id}/overview",
-            post(generate_overview_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/compact", post(compaction::handler))
@@ -1487,12 +1475,6 @@ async fn thread_events(
     ))
 }
 
-async fn generate_overview_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<SessionOverviewRecord>, ApiError> {
-    Ok(Json(manager.generate_overview(&session_id).await?))
-}
 
 async fn workspace_diff(
     State(manager): State<SessionManager>,

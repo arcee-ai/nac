@@ -20,7 +20,6 @@ const state = {
   statsLoadedAt: 0,
   statusTimer: null,
   commandIndex: 0,
-  overviewGenerationId: null,
   focusView: null,
   settingsFocus: null,
   settingsRequestGeneration: 0,
@@ -34,7 +33,7 @@ const state = {
   threadCycles: new Map(),
   attentionSessions: new Set(),
   sessionRunActivity: new Map(),
-  acceptedRuns: new Map(),
+  pendingEchoes: new Map(),
   runtimeTimer: null,
   launchMode: "local",
   launchCwdDrafts: { localSandbox: null, ssh: null },
@@ -47,12 +46,13 @@ const state = {
   workspaceRenderSessionId: null,
   workspaceRestoreId: 0,
   focusOpener: null,
-  drawerOpener: null,
+  workspaceView: "chat",
+  workspaceViewScroll: { sessionId: null, chat: Number.NaN, threads: Number.NaN },
 };
 
-const ACTION_LEDGER_LIMIT = 5;
+const ACTION_LEDGER_LIMIT = 10;
 const ORCHESTRATOR_MESSAGE_PAGE_LIMIT = 24;
-const THREAD_EVENT_PAGE_LIMIT = 24;
+const THREAD_EVENT_PAGE_LIMIT = 50;
 const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const REORDER_DRAG_THRESHOLD_PX = 6;
 const ORCHESTRATOR_STEERING_TARGET = "__orchestrator__";
@@ -60,7 +60,6 @@ let focusMarkdownRenderer = null;
 
 const commands = [
   { name: "worksets", description: "inspect complete persisted worksets" },
-  { name: "transcript", description: "open the orchestrator transcript" },
   { name: "workspace", description: "inspect changed files and diffs" },
   { name: "info", description: "show complete session and store identity" },
   { name: "settings", description: "edit this session's configuration" },
@@ -85,14 +84,12 @@ function bindElements() {
     "app", "pickerTitle", "sessionPicker", "sessionWorkspace", "sessionLayout", "pickerSessionTotal", "pickerStorePath", "pickerNavStatus",
     "newSessionBtn", "sessionGrid", "reorderLive", "backToSessions", "sessionTitle",
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
-    "metricChanges", "sessionNavStatus", "stopRun", "refreshSession", "generatedOverview",
-    "worksetRail", "worksetRailCount", "worksetRailSummary", "expandWorksets",
+    "metricChanges", "sessionNavStatus", "stopRun", "viewToggle",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
-    "orchestratorState", "orchestratorLedger", "expandOrchestrator",
+    "orchestratorChatContent",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
-    "promptInput", "sendPrompt", "commandMenu", "drawerBackdrop", "utilityDrawer",
-    "drawerTitle", "drawerContent", "closeDrawer", "launchDialog", "launchForm",
+    "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
@@ -119,13 +116,12 @@ function bindEvents() {
   el.sessionInfo.addEventListener("click", () => openFocusView("info"));
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
   el.stopRun.addEventListener("click", stopActiveRun);
-  el.refreshSession.addEventListener("click", generateOverview);
-  el.expandWorksets.addEventListener("click", () => openFocusView("worksets"));
-  el.expandOrchestrator.addEventListener("click", () => openFocusView("orchestrator"));
+  el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
+  el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
-  el.focusContent.addEventListener("submit", handleDrawerSubmit);
+  el.focusContent.addEventListener("submit", handleFocusPanelSubmit);
   el.threadGrid.addEventListener("click", handleThreadClick);
   el.commandComposer.addEventListener("submit", submitComposer);
   el.promptInput.addEventListener("input", handleComposerInput);
@@ -141,10 +137,6 @@ function bindEvents() {
     const closer = event.target.closest("[data-close-dialog]");
     if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
   });
-  el.drawerBackdrop.addEventListener("click", closeDrawer);
-  el.closeDrawer.addEventListener("click", closeDrawer);
-  el.utilityDrawer.addEventListener("keydown", handleDrawerKeydown);
-  el.drawerContent.addEventListener("submit", handleDrawerSubmit);
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
@@ -375,8 +367,11 @@ function noteSessionRunEvent(sessionId, type, runId = null) {
   if (!["run_completed", "run_failed"].includes(type) || !runId) return;
   const matches = (run) => run && String(run.run_id || "") === String(runId);
   let cleared = false;
-  if (matches(state.acceptedRuns.get(sessionId))) {
-    state.acceptedRuns.delete(sessionId);
+  const echo = state.pendingEchoes.get(sessionId);
+  if (echo && String(echo.run_id || "") === String(runId)) {
+    // A run that ends before its prompt commit landed leaves nothing
+    // canonical behind; the optimistic echo must not linger.
+    state.pendingEchoes.delete(sessionId);
     cleared = true;
   }
   const entry = sessionEntry(sessionId);
@@ -389,7 +384,7 @@ function noteSessionRunEvent(sessionId, type, runId = null) {
     state.snapshots.set(sessionId, { ...snapshot, active_run: null });
     cleared = true;
   }
-  const stillActive = Boolean(state.acceptedRuns.get(sessionId) || entry?.active_run || state.snapshots.get(sessionId)?.active_run);
+  const stillActive = Boolean(entry?.active_run || state.snapshots.get(sessionId)?.active_run);
   state.sessionRunActivity.set(sessionId, stillActive);
   if (cleared && !stillActive) state.attentionSessions.add(sessionId);
 }
@@ -543,7 +538,7 @@ function renderPicker() {
   const sessions = state.sessions;
   el.pickerSessionTotal.textContent = sessions.length;
   if (!sessions.length) {
-    el.sessionGrid.innerHTML = `<div class="empty-picker"><div><strong>No sessions yet</strong>Launch one to start orchestrating.</div></div>`;
+    el.sessionGrid.innerHTML = `<div class="empty-picker"><div><h2>No sessions yet</h2>Launch one to start orchestrating.</div></div>`;
     return;
   }
   const pinned = sessions.filter((entry) => entry.summary.pinned);
@@ -646,7 +641,7 @@ function renderSessionCard(entry, index = 0, entries = []) {
   const workspaceLocation = [branch, basename(summary.cwd)].filter(Boolean).join(" · ") || summary.cwd;
   const fullLocation = location.text;
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
-  const identity = `${displaySessionTitle(summary)} · session ${sessionId}`;
+  const identity = displaySessionTitle(summary);
   const prompt = summary.last_user_prompt || "No prompt submitted";
   const statusLabel = status === "running" ? "Running" : status === "attention" ? "Finished, needs attention" : "Idle";
   const changes = workspaceSummaryPresentation(entry.workspace_diff);
@@ -1027,6 +1022,7 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   state.focusView = null;
   state.settingsFocus = null;
   state.settingsRequestGeneration += 1;
+  setWorkspaceView("chat", { preserveScroll: false });
   el.sessionPicker.hidden = true;
   el.sessionWorkspace.hidden = false;
   restoreComposerDraft(sessionId);
@@ -1049,7 +1045,6 @@ function showPicker(updateHash = true) {
   if (state.eventSource) state.eventSource.close();
   state.eventSource = null;
   stopRuntimeTimer();
-  closeDrawer();
   el.sessionWorkspace.hidden = true;
   el.sessionPicker.hidden = false;
   if (updateHash) history.pushState(null, "", window.location.pathname);
@@ -1119,7 +1114,7 @@ function acceptSnapshot(sessionId, snapshot, { announce = false, compactionFence
     throw new Error(`Snapshot identity mismatch: requested ${sessionId}, received ${responseSessionId}`);
   }
   mergeSnapshotMessageWindow(sessionId, snapshot);
-  reconcileAcceptedRun(sessionId, snapshot);
+  reconcilePendingEcho(sessionId, snapshot);
   invalidateWorkspaceDiffs(sessionId);
   snapshot = reconcileSessionCompactionSnapshot(sessionId, snapshot, compactionFence);
   state.snapshots.set(sessionId, snapshot);
@@ -1196,167 +1191,62 @@ function prependMessageWindow(sessionId, snapshot, response) {
   return true;
 }
 
-function messageCycleUserCount(snapshot) {
-  const marker = String(snapshot?.message_cycle?.marker || "");
-  const match = marker.match(/^history:(\d+):/);
-  if (match) return Number(match[1]);
-  const startsAtBeginning = !snapshot?.message_page || Number(snapshot.message_page.start || 0) === 0;
-  if (!startsAtBeginning) return null;
-  return (snapshot?.messages || []).filter((message) => message?.role === "user").length;
-}
+// --- Optimistic submit echo (DB-direct transcript workset, step 3) ---------
+// The chat reads the store-backed transcript, so a submitted prompt appears
+// on its own at the first commit point (seconds cadence). The only window
+// that needs a client-side echo is submit-accept → first commit-point
+// refetch. This is deliberately the simplest version: one pending row per
+// session, cleared when a refetched snapshot's canonical messages contain
+// the matching user message (content match — no baselines or counts), or
+// when the run ends before the prompt could land.
 
-function normalizedSubmittedMessage(activeRun, source = "snapshot") {
-  const submitted = activeRun?.submitted_user_message;
-  if (!submitted || submitted.content === null || submitted.content === undefined) return null;
-  const baselineValue = submitted.baseline_user_message_count;
-  const baseline = baselineValue === null || baselineValue === undefined || baselineValue === ""
-    ? Number.NaN
-    : Number(baselineValue);
-  const baselineTotalValue = activeRun?.baseline_message_total;
-  const baselineTotal = baselineTotalValue === null || baselineTotalValue === undefined || baselineTotalValue === ""
-    ? Number.NaN
-    : Number(baselineTotalValue);
-  return {
-    role: "user",
-    content: String(submitted.content),
-    pending: true,
-    pendingSource: source,
-    run_id: String(submitted.run_id || activeRun?.run_id || ""),
-    client_id: submitted.client_id || activeRun?.client_id || null,
-    baselineUserCount: Number.isSafeInteger(baseline) && baseline >= 0 ? baseline : null,
-    baselineMessageTotal: Number.isSafeInteger(baselineTotal) && baselineTotal >= 0 ? baselineTotal : null,
-    submitted_at_epoch_ms: submitted.submitted_at_epoch_ms || activeRun?.started_at_epoch_ms || null,
-  };
-}
-
-function pendingMessagesMatch(left, right) {
-  const leftRunId = String(left?.run_id || "");
-  const rightRunId = String(right?.run_id || "");
-  if (leftRunId && rightRunId && leftRunId === rightRunId) return true;
-  return String(left?.content ?? "") === String(right?.content ?? "");
-}
-
-function pendingMessageCoveredByCanonical(pending, snapshot) {
-  if (!pending) return false;
-  const messages = snapshot?.messages || [];
-  const windowStart = Number(snapshot?.message_page?.start || 0);
-  const userMessages = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message?.role === "user") userMessages.push({ message, index });
-  }
-
-  // A baseline message total is captured from the exact include-system page used
-  // when a run is accepted. Any later canonical user row is therefore the
-  // submitted row, even when command expansion changes its persisted content.
-  const hasMessageBaseline = Number.isSafeInteger(pending.baselineMessageTotal);
-  if (hasMessageBaseline) {
-    if (userMessages.some(({ index }) => windowStart + index >= pending.baselineMessageTotal)) return true;
-  }
-
-  // The server's user-count baseline is authoritative across paged windows. Do
-  // not let a same-text user row from before that baseline hide the pending row.
-  if (Number.isSafeInteger(pending.baselineUserCount)) {
-    const globalUserCount = messageCycleUserCount(snapshot);
-    if (globalUserCount !== null && globalUserCount > pending.baselineUserCount) {
-      return userMessages.length > 0;
-    }
-    if (windowStart === 0 && userMessages.length > pending.baselineUserCount) return true;
-    return false;
-  }
-  if (hasMessageBaseline) return false;
-
-  // Legacy active-run snapshots may lack both baselines. In that case only the
-  // newest visible user row may reconcile an identical pending message.
-  const latestUser = userMessages.at(-1)?.message;
-  return Boolean(latestUser && pendingMessagesMatch(latestUser, pending));
-}
-
-function captureAcceptedRun(sessionId, response, prompt, snapshot = state.snapshots.get(sessionId), now = Date.now()) {
-  if (!sessionId || !response?.run_id) return null;
-  const displayPrompt = String(response.display_prompt ?? prompt ?? "");
-  const baselineUserCount = messageCycleUserCount(snapshot);
-  const pageTotal = Number(snapshot?.message_page?.total);
-  const baselineMessageTotal = Number.isSafeInteger(pageTotal) && pageTotal >= 0
-    ? pageTotal
-    : (!snapshot?.message_page ? (snapshot?.messages || []).length : null);
-  const accepted = {
-    run_id: String(response.run_id),
-    client_id: response.client_id || null,
-    prompt_preview: displayPrompt.slice(0, 160),
-    submitted_user_message: {
-      run_id: String(response.run_id),
-      client_id: response.client_id || null,
-      content: displayPrompt,
-      baseline_user_message_count: baselineUserCount,
-      submitted_at_epoch_ms: now,
-    },
-    started_at_epoch_ms: now,
-    baseline_message_total: baselineMessageTotal,
-    accepted_response: true,
-  };
-  state.acceptedRuns.set(sessionId, accepted);
-  state.sessionRunActivity.set(sessionId, true);
-  state.attentionSessions.delete(sessionId);
-  return accepted;
-}
-
-function captureStartedRun(sessionId, envelope) {
-  const runId = String(envelope?.run_id || "");
+function notePendingEcho(sessionId, runId, content) {
   if (!sessionId || !runId) return null;
-  const existing = state.acceptedRuns.get(sessionId);
-  const submitted = envelope?.event?.submitted_user_message || existing?.submitted_user_message || null;
-  const started = {
-    ...(existing || {}),
-    run_id: runId,
-    client_id: envelope?.client_id || submitted?.client_id || existing?.client_id || null,
-    prompt_preview: envelope?.event?.prompt_preview || existing?.prompt_preview || "",
-    submitted_user_message: submitted ? {
-      ...submitted,
-      run_id: submitted.run_id || runId,
-      client_id: submitted.client_id || envelope?.client_id || existing?.client_id || null,
-    } : null,
-    started_at_epoch_ms: envelope?.event?.started_at_epoch_ms || existing?.started_at_epoch_ms || Date.now(),
-    accepted_response: Boolean(existing?.accepted_response),
-  };
-  state.acceptedRuns.set(sessionId, started);
-  return started;
+  const echo = { run_id: String(runId), content: String(content ?? "") };
+  state.pendingEchoes.set(sessionId, echo);
+  return echo;
 }
 
-function effectiveActiveRun(snapshot = currentSnapshot(), sessionId = state.currentId) {
-  const accepted = sessionId ? state.acceptedRuns.get(sessionId) : null;
-  const canonical = snapshot?.active_run || null;
-  if (!canonical) return accepted;
-  if (!accepted || String(accepted.run_id || "") !== String(canonical.run_id || "")) return canonical;
-  return {
-    ...accepted,
-    ...canonical,
-    submitted_user_message: canonical.submitted_user_message || accepted.submitted_user_message || null,
-    accepted_response: Boolean(accepted.accepted_response),
-  };
+// JS port of commands::display_prompt_from_message: an expanded /plan or
+// /run prompt canonicalizes back to its display form, so the echo (the raw
+// composer input) matches the canonical user message content.
+function displayPromptFromMessage(content) {
+  const text = String(content ?? "");
+  const header = text.split("\n")[0] || "";
+  if (!header.startsWith("# /")) return text;
+  const colon = header.indexOf(":");
+  if (colon < 0) return text;
+  const kind = header.slice(3, colon).trim();
+  if (kind !== "plan" && kind !== "run") return text;
+  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return text;
+  const rest = text.slice(markerIndex + marker.length);
+  const end = rest.indexOf("\n\n");
+  if (end < 0) return text;
+  const value = rest.slice(0, end).trim();
+  return value ? `/${kind} ${value}` : text;
 }
 
-function effectivePendingMessages(sessionId = state.currentId, snapshot = state.snapshots.get(sessionId)) {
-  const active = effectiveActiveRun(snapshot, sessionId);
-  const source = active?.accepted_response ? "accepted response" : "active snapshot";
-  const pending = normalizedSubmittedMessage(active, source);
-  return pending && !pendingMessageCoveredByCanonical(pending, snapshot) ? [pending] : [];
+function pendingEchoCoveredByCanonical(echo, snapshot) {
+  if (!echo) return false;
+  return (snapshot?.messages || []).some((message) => message?.role === "user"
+    && displayPromptFromMessage(message.content) === echo.content);
 }
 
-function reconcileAcceptedRun(sessionId, snapshot) {
-  const accepted = state.acceptedRuns.get(sessionId);
-  if (!accepted) return false;
-  const canonical = snapshot?.active_run;
-  if (canonical && String(canonical.run_id || "") !== String(accepted.run_id || "")) {
-    state.acceptedRuns.delete(sessionId);
-    return true;
-  }
-  const pending = normalizedSubmittedMessage(accepted, "accepted response");
-  if (pendingMessageCoveredByCanonical(pending, snapshot)) {
-    state.acceptedRuns.delete(sessionId);
+function reconcilePendingEcho(sessionId, snapshot) {
+  const echo = state.pendingEchoes.get(sessionId);
+  if (echo && pendingEchoCoveredByCanonical(echo, snapshot)) {
+    state.pendingEchoes.delete(sessionId);
     return true;
   }
   return false;
+}
+
+function effectivePendingMessages(sessionId = state.currentId, snapshot = state.snapshots.get(sessionId)) {
+  const echo = sessionId ? state.pendingEchoes.get(sessionId) : null;
+  if (!echo || pendingEchoCoveredByCanonical(echo, snapshot)) return [];
+  return [{ role: "user", content: echo.content, run_id: echo.run_id }];
 }
 
 function responseDurationAssignments(snapshot, messages = snapshot?.messages || []) {
@@ -1389,17 +1279,6 @@ function responseDurationAssignments(snapshot, messages = snapshot?.messages || 
 
 function handleFocusScroll(event) {
   const scroller = event.target;
-  if (state.focusView?.type === "orchestrator" && scroller?.classList?.contains("focus-chat")) {
-    if (event.isTrusted) {
-      state.orchestratorViewport = {
-        sessionId: state.currentId,
-        pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
-        scrollTop: scroller.scrollTop,
-      };
-    }
-    if (scroller.scrollTop <= 36) loadOlderOrchestratorMessages(scroller);
-    return;
-  }
   if (state.focusView?.type === "thread" && scroller?.classList?.contains("focus-activity")) {
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48) {
       loadOlderThreadEvents(state.focusView.name, scroller);
@@ -1418,7 +1297,7 @@ async function loadOlderOrchestratorMessages(scroller) {
   if (loader) {
     loader.classList.add("is-loading");
     const label = loader.querySelector("span");
-    if (label) label.textContent = "loading earlier messages";
+    if (label) label.textContent = "Loading earlier messages…";
   }
   const anchor = {
     sessionId,
@@ -1427,7 +1306,7 @@ async function loadOlderOrchestratorMessages(scroller) {
   };
   try {
     const response = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/messages?before=${messageWindow.start}&limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}`);
-    if (state.currentId !== sessionId || state.focusView?.type !== "orchestrator") {
+    if (state.currentId !== sessionId) {
       messageWindow.loading = false;
       return;
     }
@@ -1436,7 +1315,10 @@ async function loadOlderOrchestratorMessages(scroller) {
       return;
     }
     state.orchestratorPrependAnchor = anchor;
-    renderFocusView(snapshot);
+    renderOrchestratorChatRail(snapshot);
+    if (el.orchestratorChatContent && anchor) {
+      el.orchestratorChatContent.scrollTop = Math.max(0, el.orchestratorChatContent.scrollHeight - anchor.scrollHeight + anchor.scrollTop);
+    }
   } catch (error) {
     messageWindow.loading = false;
     showToast(error.message, true);
@@ -1458,9 +1340,9 @@ function orchestratorHistoryNeedsFill(scroller, messageWindow) {
 }
 
 function ensureOrchestratorScrollableHistory(renderId = state.focusRenderId) {
-  if (renderId !== state.focusRenderId || state.focusView?.type !== "orchestrator") return;
+  if (renderId !== state.focusRenderId || !state.currentId) return;
   const sessionId = state.currentId;
-  const scroller = el.focusContent?.querySelector?.(".focus-chat");
+  const scroller = el.orchestratorChatContent;
   const messageWindow = sessionId ? state.messageWindows.get(sessionId) : null;
   if (orchestratorHistoryNeedsFill(scroller, messageWindow)) {
     loadOlderOrchestratorMessages(scroller);
@@ -1529,7 +1411,7 @@ function resetSessionSequenceEpoch(sessionId, boundary = 0, epochId = null) {
   state.threadCycles.delete(sessionId);
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
-  state.acceptedRuns.delete(sessionId);
+  state.pendingEchoes.delete(sessionId);
   transitionSessionCompaction(sessionId, { type: "epoch_reset" });
   const entry = sessionEntry(sessionId);
   if (entry?.active_run) entry.active_run = null;
@@ -1580,9 +1462,7 @@ function recordSessionEnvelope(sessionId, envelope, { historical = false } = {})
   const observedAgentEvent = agentEvent(envelope);
   noteSessionCompactionEvent(sessionId, observedAgentEvent);
   if (!historical) {
-    const type = envelope.event?.type;
-    if (type === "run_started") captureStartedRun(sessionId, envelope);
-    noteSessionRunEvent(sessionId, type, envelope.run_id || null);
+    noteSessionRunEvent(sessionId, envelope.event?.type, envelope.run_id || null);
   }
   return true;
 }
@@ -1683,11 +1563,14 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
 
 function eventNeedsSnapshot(envelope) {
   const type = envelope.event?.type;
-  if (["run_started", "run_completed", "run_failed", "snapshot_saved"].includes(type)) return true;
+  // transcript_appended is the live mid-run signal: a commit point just made
+  // new orchestrator messages visible in the store-backed transcript.
+  if (["run_started", "run_completed", "run_failed", "snapshot_saved", "transcript_appended"].includes(type)) return true;
   const agent = agentEvent(envelope);
   if (agent?.reason === "manual"
       && (agent.type === COMPACTION_STARTED_EVENT_TYPE || COMPACTION_TERMINAL_EVENT_TYPES.has(agent.type))) return true;
-  return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired"].includes(agent?.type);
+  return ["thread_started", "thread_finished", "thread_steering_queued", "thread_steering_delivered", "thread_steering_expired",
+    "orchestrator_steering_queued", "orchestrator_steering_delivered", "orchestrator_steering_expired"].includes(agent?.type);
 }
 
 function scheduleSnapshot(sessionId) {
@@ -1716,7 +1599,7 @@ function renderConfigRepairGuidance(summary) {
 
 function runTimingPresentation(snapshot = currentSnapshot(), sessionId = state.currentId, now = Date.now()) {
   const entryActive = sessionEntry(sessionId)?.active_run || null;
-  const active = effectiveActiveRun(snapshot, sessionId) || entryActive;
+  const active = snapshot?.active_run || entryActive;
   const lifecycle = orchestratorLifecycle(snapshot, sessionId);
   const activeRunId = String(active?.run_id || "");
   const terminalMatchesActive = ["completed", "failed"].includes(lifecycle.state)
@@ -1892,8 +1775,6 @@ function focusScrollTargets() {
   const targets = [];
   if (el.focusContent) targets.push(["focus-content", el.focusContent]);
   const selectors = [
-    ["orchestrator-chat", ".focus-chat"],
-    ["orchestrator-live", ".focus-live"],
     ["thread-activity", ".focus-activity"],
     ["thread-episodes", ".focus-episodes"],
     ["worksets", ".focus-worksets-scroll"],
@@ -1960,23 +1841,7 @@ function restoreFocusViewState(restoration, { renderId, prependAnchor = null } =
   restoreFormControlStates(restoration.forms);
   const applyScroll = () => {
     if (renderId !== state.focusRenderId || restoration.identity !== focusViewIdentity()) return false;
-    const skip = state.focusView?.type === "orchestrator" ? new Set(["orchestrator-chat"]) : new Set();
-    restoreScrollPositions(restoration.scroll, focusScrollTargets(), { skip });
-    if (state.focusView?.type === "orchestrator") {
-      const scroller = el.focusContent?.querySelector?.(".focus-chat");
-      if (scroller) {
-        if (prependAnchor) {
-          scroller.scrollTop = Math.max(0, scroller.scrollHeight - prependAnchor.scrollHeight + prependAnchor.scrollTop);
-        } else {
-          const captured = restoration.scroll.find((entry) => entry.key === "orchestrator-chat");
-          const viewport = state.orchestratorViewport?.sessionId === state.currentId
-            ? state.orchestratorViewport
-            : null;
-          const pinnedToBottom = viewport?.pinnedToBottom ?? !captured;
-          scroller.scrollTop = pinnedToBottom ? scroller.scrollHeight : (captured?.top ?? viewport?.scrollTop ?? 0);
-        }
-      }
-    }
+    restoreScrollPositions(restoration.scroll, focusScrollTargets());
     return true;
   };
   // Restore synchronously so a steady event stream cannot starve restoration by
@@ -2008,9 +1873,9 @@ function renderWorkspace() {
   const sessionId = String(summary.session_id || state.currentId || "");
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
   el.sessionTitle.textContent = displayTitle;
-  el.sessionTitle.title = `${displayTitle} · session ${sessionId}`;
-  el.renameSession.title = `Rename ${displayTitle} · session ${sessionId}`;
-  el.renameSession.setAttribute("aria-label", `Rename ${displayTitle}; session ID ${sessionId}`);
+  el.sessionTitle.title = displayTitle;
+  el.renameSession.title = `Rename ${displayTitle}`;
+  el.renameSession.setAttribute("aria-label", `Rename ${displayTitle}`);
   applySessionExecutionLocation(el.sessionLocation, location);
   renderConfigRepairGuidance(summary);
   el.metricModel.textContent = shortModel(fullModel);
@@ -2026,8 +1891,10 @@ function renderWorkspace() {
   const diff = workspace ?? entry.workspace_diff;
   applyWorkspaceSummaryMetric(el.metricChanges, workspaceSummaryPresentation(diff));
   const active = timing?.state === "active";
-  el.stopRun.hidden = !active;
-  renderOverview(snapshot);
+  el.stopRun.disabled = !active;
+  el.stopRun.hidden = false;
+  renderOrchestratorChatRail(snapshot);
+  requestAnimationFrame(() => ensureOrchestratorScrollableHistory(state.focusRenderId));
   renderThreads(snapshot);
   renderComposerTarget();
   if (state.focusView?.type !== "settings" || !el.focusContent.querySelector("#settingsForm")) renderFocusView(snapshot);
@@ -2066,7 +1933,7 @@ function displayedTokenUsage(snapshot, sessionId = state.currentId, envelopes = 
 }
 
 function usageRunId(snapshot, envelopes) {
-  const snapshotRunId = effectiveActiveRun(snapshot)?.run_id;
+  const snapshotRunId = snapshot?.active_run?.run_id;
   if (snapshotRunId) return String(snapshotRunId);
   let activeRunId = null;
   for (const envelope of envelopes || []) {
@@ -2094,26 +1961,6 @@ function tokenUsageTitle(usage) {
   if (!usage) return "";
   const exact = (value) => Number(value || 0).toLocaleString();
   return `input ${exact(usage.input_tokens)} · cache read ${exact(usage.cache_read_tokens)} · output ${exact(usage.output_tokens)}`;
-}
-
-function renderOverview(snapshot) {
-  const overview = snapshot?.overview;
-  const generating = state.overviewGenerationId === state.currentId;
-  const action = overview ? "Regenerate" : "Generate";
-  el.refreshSession.disabled = generating;
-  el.refreshSession.classList.toggle("is-generating", generating);
-  el.refreshSession.setAttribute("aria-label", generating ? "Generating overview" : `${action} overview`);
-  el.refreshSession.title = generating ? "Generating overview" : `${action} from current session state`;
-  if (generating) el.refreshSession.setAttribute("aria-busy", "true");
-  else el.refreshSession.removeAttribute("aria-busy");
-  el.generatedOverview.classList.toggle("is-empty", !overview);
-  if (!overview) {
-    el.generatedOverview.innerHTML = `<p class="overview-empty">${generating ? "Generating current state…" : "Not generated."}</p>`;
-  } else {
-    el.generatedOverview.innerHTML = `<p class="overview-copy">${escapeHtml(overview.summary || overview.status || "")}</p>`;
-  }
-  renderWorksetRail(snapshot);
-  renderOrchestratorLedger(snapshot);
 }
 
 function worksetsPresentation(snapshot) {
@@ -2149,50 +1996,6 @@ function worksetStatusText(workset) {
   return status || "Status not recorded";
 }
 
-function renderCompactWorkset(workset) {
-  const summary = String(workset?.summary ?? "");
-  return `<article class="compact-workset" data-status="${escapeAttr(workset?.status ?? "")}">
-    <header><strong>${escapeHtml(workset?.id ?? "")}</strong><span>${escapeHtml(worksetStatusText(workset))}</span></header>
-    <div>${escapeHtml(worksetItemCountLabel(workset?.items))}</div>
-    ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
-  </article>`;
-}
-
-function renderWorksetRail(snapshot) {
-  const presentation = worksetsPresentation(snapshot);
-  el.worksetRailSummary.dataset.state = presentation.state;
-  el.worksetRailCount.textContent = presentation.state === "loading"
-    ? "…"
-    : presentation.state === "error" ? "!" : String(presentation.items.length);
-  if (presentation.state === "loading") {
-    el.worksetRailSummary.innerHTML = "<p>Loading worksets…</p>";
-  } else if (presentation.state === "error") {
-    el.worksetRailSummary.innerHTML = `<p class="workset-rail-error" role="alert">${escapeHtml(presentation.error)}</p>`;
-  } else if (presentation.state === "empty") {
-    el.worksetRailSummary.innerHTML = "<p>No worksets yet.</p>";
-  } else {
-    el.worksetRailSummary.innerHTML = presentation.items.map(renderCompactWorkset).join("");
-  }
-}
-
-async function generateOverview() {
-  if (!state.currentId || el.refreshSession.disabled) return;
-  const sessionId = state.currentId;
-  state.overviewGenerationId = sessionId;
-  renderOverview(currentSnapshot());
-  try {
-    const overview = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/overview`);
-    const snapshot = state.snapshots.get(sessionId);
-    if (snapshot) snapshot.overview = overview;
-    showToast("Overview generated from current session state");
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    if (state.overviewGenerationId === sessionId) state.overviewGenerationId = null;
-    if (state.currentId === sessionId) renderOverview(state.snapshots.get(sessionId));
-  }
-}
-
 function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
   const events = state.events.get(sessionId) || [];
   let observed = null;
@@ -2222,13 +2025,13 @@ function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
       detail: type === "run_started" ? envelope.event.prompt_preview : type === "run_completed" ? envelope.event.response : envelope.event.message,
     };
   }
-  const active = effectiveActiveRun(snapshot, sessionId);
+  const active = snapshot?.active_run || null;
   const activeRunId = active?.run_id == null ? null : String(active.run_id);
   if (active && (!observed || observed.state === "running" || (activeRunId && activeRunId !== observed.runId))) {
     const matchesObserved = observed?.state === "running" && (!activeRunId || activeRunId === observed.runId);
     return {
       state: "running",
-      provenance: active.accepted_response ? "accepted" : "snapshot",
+      provenance: "snapshot",
       sequenceId: matchesObserved ? observed.sequenceId : null,
       startSequence: matchesObserved ? observed.startSequence : null,
       finishSequence: null,
@@ -2249,17 +2052,6 @@ function orchestratorLifecycle(snapshot, sessionId = state.currentId) {
     durationMs: null,
     detail: "No run lifecycle event is available in the current replay window.",
   };
-}
-
-function renderOrchestratorLedger(snapshot) {
-  const lifecycle = orchestratorLifecycle(snapshot);
-  el.orchestratorState.textContent = lifecycle.state;
-  el.orchestratorState.dataset.state = lifecycle.state;
-  el.orchestratorState.classList.toggle("is-active", lifecycle.state === "running");
-  el.orchestratorLedger.innerHTML = renderActionRows(
-    buildOrchestratorActions(snapshot),
-    "No orchestrator action evidence",
-  );
 }
 
 function actionEvidence(entry, overrides = {}) {
@@ -2284,22 +2076,22 @@ function combineActionDetail(...values) {
 }
 
 function compactionReasonLabel(reason) {
-  if (reason === "manual") return "manual";
-  if (reason === "auto") return "automatic";
-  return "trigger unavailable";
+  if (reason === "manual") return "Manual";
+  if (reason === "auto") return "Automatic";
+  return "Not triggered";
 }
 
 function compactionSkipLabel(cause) {
-  if (cause === "no_eligible_boundary") return "no eligible boundary";
-  if (cause === "already_compacted") return "already compacted";
+  if (cause === "no_eligible_boundary") return "Nothing to compact";
+  if (cause === "already_compacted") return "Already compacted";
   return "skip cause unavailable";
 }
 
 function compactionFailureLabel(failure) {
-  if (failure === "summary_request_failed") return "summary request failed";
-  if (failure === "summary_rejected") return "summary rejected";
-  if (failure === "checkpoint_persistence_failed") return "checkpoint persistence failed";
-  if (failure === "cancelled") return "cancelled";
+  if (failure === "summary_request_failed") return "Summary generation failed";
+  if (failure === "summary_rejected") return "Summary rejected";
+  if (failure === "checkpoint_persistence_failed") return "Failed to save checkpoint";
+  if (failure === "cancelled") return "Cancelled";
   return "failure type unavailable";
 }
 
@@ -2394,7 +2186,8 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
         state: "live",
         callId: event.call_id || null,
         argumentsDetail,
-        detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", argumentsDetail),
+        keyArgPreview: event.key_arg_preview || null,
+        detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : null, argumentsDetail),
         ...evidence,
       };
       actions.push(action);
@@ -2405,11 +2198,11 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
     } else if (event.type === "tool_call_finished") {
       if (event.call_id) observedCallIds.add(event.call_id);
       const existing = calls.get(event.call_id);
-      const resultDetail = event.content_preview ? `result: ${event.content_preview}` : "Result preview unavailable";
+      const resultDetail = event.content_preview ? `result: ${event.content_preview}` : null;
       if (existing) {
         existing.result = event.is_error ? "failed" : "done";
         existing.state = event.is_error ? "error" : "done";
-        existing.detail = combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", existing.argumentsDetail, resultDetail);
+        existing.detail = combineActionDetail(event.call_id ? `call ${event.call_id}` : null, existing.argumentsDetail, resultDetail);
         existing.finishSequenceId = evidence.sequenceId;
       } else {
         actions.push({
@@ -2417,7 +2210,7 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
           result: event.is_error ? "failed" : "done",
           state: event.is_error ? "error" : "done",
           callId: event.call_id || null,
-          detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : "Call ID unavailable", resultDetail),
+          detail: combineActionDetail(event.call_id ? `call ${event.call_id}` : null, resultDetail),
           ...evidence,
         });
       }
@@ -2431,11 +2224,11 @@ function buildOrchestratorActions(snapshot, { limit = true } = {}) {
       const result = event.type.split("_").at(-1);
       observedSteering.add(event.steering_id);
       actions.push({
-        name: "steering",
+        name: "guidance",
         result,
         state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
         steeringId: event.steering_id ?? null,
-        detail: combineActionDetail(event.steering_id == null ? "Steering ID unavailable" : `steering #${event.steering_id}`, event.instruction_preview),
+        detail: combineActionDetail(event.steering_id == null ? null : `guidance #${event.steering_id}`, event.instruction_preview),
         ...evidence,
       });
     } else if (event.type === "run_started" || event.type === "run_finished") {
@@ -2470,7 +2263,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           kind: "tool_call",
           callId: call.id || null,
           argumentsDetail: "",
-          detail: call.id ? `call ${call.id}` : "Call ID unavailable",
+          detail: call.id ? `call ${call.id}` : null,
         };
         actions.push(action);
         if (call.id) calls.set(call.id, action);
@@ -2480,7 +2273,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
       if (existing) {
         existing.result = "completed";
         existing.state = "done";
-        existing.detail = message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable";
+        existing.detail = message.tool_call_id ? `call ${message.tool_call_id}` : null;
       } else {
         actions.push({
           name: "tool result",
@@ -2489,7 +2282,7 @@ function buildPersistedOrchestratorActions(messages, { limit = true } = {}) {
           provenance: "persisted",
           kind: "tool_result",
           callId: message.tool_call_id || null,
-          detail: message.tool_call_id ? `call ${message.tool_call_id}` : "Call ID unavailable",
+          detail: message.tool_call_id ? `call ${message.tool_call_id}` : null,
         });
       }
     } else if (message.role === "assistant" && message.content) {
@@ -2521,11 +2314,10 @@ function renderSessionInfo(summary = sessionEntry()?.summary, snapshot = current
   const storePath = store?.store_path ?? snapshot?.metadata?.store_path;
   const sshHost = topology.host || `Not applicable for ${topology.mode} execution`;
   return `<div class="focus-info-scroll"><section class="session-info" aria-label="Complete session identity">
-    <p>Complete values for the selected session. Credential selectors, header values, and other secrets are not shown.</p>
     <dl class="session-info-grid">
       ${renderEvidenceField("Session ID", sessionId)}
       ${renderEvidenceField("Working directory", cwd)}
-      ${renderEvidenceField("Execution topology", topology.detail)}
+      ${renderEvidenceField("Execution mode", topology.detail)}
       ${renderEvidenceField("SSH host", sshHost)}
       ${renderEvidenceField("Sandbox state", sandboxStateForInfo(summary, snapshot))}
       ${renderEvidenceField("Backend", backend)}
@@ -2544,9 +2336,6 @@ function openFocusView(type, name = null) {
     state.settingsRequestGeneration += 1;
   }
   state.focusView = { type, name, path };
-  if (type === "orchestrator") {
-    state.orchestratorViewport = { sessionId: state.currentId, pinnedToBottom: true, scrollTop: 0 };
-  }
   if (type === "settings") {
     state.settingsFocus = {
       sessionId: state.currentId,
@@ -2571,9 +2360,12 @@ function openFocusView(type, name = null) {
 function closeFocusView() {
   const fallback = state.focusView?.type === "thread"
     ? el.threadGrid.querySelector(`[data-focus-thread="${cssEscape(state.focusView.name)}"]`)
-    : state.focusView?.type === "orchestrator" ? el.expandOrchestrator
-      : state.focusView?.type === "worksets" ? el.expandWorksets
-        : state.focusView?.type === "info" ? el.sessionInfo : el.promptInput;
+    : state.focusView?.type === "worksets" ? el.promptInput
+      : state.focusView?.type === "info" ? el.sessionInfo
+        : state.focusView?.type === "rename" ? el.renameSession
+          : state.focusView?.type === "delete" ? el.renameSession
+            : state.focusView?.type === "help" ? el.promptInput
+              : el.promptInput;
   const openerTarget = state.focusOpener;
   const fallbackTarget = captureFocusTarget(fallback);
   if (state.focusView?.type === "settings") {
@@ -2582,11 +2374,61 @@ function closeFocusView() {
   }
   state.focusView = null;
   state.focusOpener = null;
-  state.orchestratorViewport = null;
   renderFocusView(currentSnapshot());
   requestAnimationFrame(() => {
     if (!restoreFocusTarget(openerTarget)) restoreFocusTarget(fallbackTarget);
   });
+}
+
+function workspaceViewScroller(view) {
+  return view === "threads" ? el.threadGrid : el.orchestratorChatContent;
+}
+
+function captureWorkspaceViewScroll(view) {
+  const store = state.workspaceViewScroll;
+  if (store.sessionId !== state.currentId) {
+    store.sessionId = state.currentId;
+    store.chat = Number.NaN;
+    store.threads = Number.NaN;
+  }
+  const scroller = workspaceViewScroller(view);
+  store[view] = scroller ? Number(scroller.scrollTop || 0) : Number.NaN;
+}
+
+function restoreWorkspaceViewScroll(view) {
+  const scroller = workspaceViewScroller(view);
+  if (!scroller) return;
+  const store = state.workspaceViewScroll;
+  const saved = store.sessionId === state.currentId ? store[view] : Number.NaN;
+  // The pane was display:none while inactive, which resets its scroll offset;
+  // restore it once the pane is visible again. The chat follows the same
+  // pin-to-bottom rule as renderOrchestratorChatRail when the user never
+  // scrolled away from the latest messages.
+  requestAnimationFrame(() => {
+    if (view === "chat") {
+      const viewport = state.orchestratorViewport;
+      if (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom || !Number.isFinite(saved)) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else {
+        scroller.scrollTop = saved;
+      }
+    } else if (Number.isFinite(saved)) {
+      scroller.scrollTop = saved;
+    }
+  });
+}
+
+function setWorkspaceView(view, { preserveScroll = true } = {}) {
+  const next = view === "threads" ? "threads" : "chat";
+  const previous = state.workspaceView === "threads" ? "threads" : "chat";
+  if (preserveScroll && previous !== next) captureWorkspaceViewScroll(previous);
+  state.workspaceView = next;
+  if (el.sessionLayout) el.sessionLayout.classList.toggle("is-threads-view", next === "threads");
+  if (el.viewToggle) {
+    el.viewToggle.dataset.view = next;
+    el.viewToggle.setAttribute("aria-pressed", String(next === "threads"));
+  }
+  if (preserveScroll && previous !== next) restoreWorkspaceViewScroll(next);
 }
 
 function renderFocusView(snapshot) {
@@ -2595,7 +2437,6 @@ function renderFocusView(snapshot) {
   const renderId = ++state.focusRenderId;
   el.sessionLayout.classList.toggle("is-focused", Boolean(view));
   el.focusPanel.classList.toggle("is-thread", view?.type === "thread");
-  el.focusPanel.classList.toggle("is-orchestrator", view?.type === "orchestrator");
   el.focusPanel.classList.toggle("is-worksets", view?.type === "worksets");
   el.focusPanel.classList.toggle("is-workspace", view?.type === "workspace");
   el.focusPanel.classList.toggle("is-info", view?.type === "info");
@@ -2611,19 +2452,9 @@ function renderFocusView(snapshot) {
   const nextIdentity = focusViewIdentity(view);
   el.focusPanel.dataset.viewIdentity = nextIdentity;
   delete el.focusState.dataset.state;
-  const prependAnchor = view.type === "orchestrator" && state.orchestratorPrependAnchor?.sessionId === state.currentId
-    ? state.orchestratorPrependAnchor
-    : null;
-  if (prependAnchor) state.orchestratorPrependAnchor = null;
+  const prependAnchor = null;
 
-  if (view.type === "orchestrator") {
-    const lifecycle = orchestratorLifecycle(snapshot);
-    el.focusTitle.textContent = "Orchestrator";
-    el.focusState.textContent = lifecycle.state;
-    el.focusState.dataset.state = lifecycle.state;
-    el.focusState.classList.toggle("is-active", lifecycle.state === "running");
-    el.focusContent.innerHTML = renderOrchestratorConversation(snapshot);
-  } else if (view.type === "thread") {
+  if (view.type === "thread") {
     const model = buildThreadModels(snapshot).find((thread) => thread.name === view.name);
     const status = threadStatusPresentation(model?.state);
     el.focusTitle.textContent = view.name || "Thread";
@@ -2664,16 +2495,30 @@ function renderFocusView(snapshot) {
     el.focusState.dataset.state = topology.mode;
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderSessionInfo(summary, snapshot);
+  } else if (view.type === "rename") {
+    const entry = sessionEntry();
+    el.focusTitle.textContent = "Rename session";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry?.summary?.title || "")}" placeholder="${escapeAttr(shortId(entry?.summary?.session_id || ""))}"></label><div class="settings-actions"><span class="form-status" data-rename-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-primary" type="submit">save title</button></div></form>`;
+  } else if (view.type === "delete") {
+    const entry = sessionEntry();
+    el.focusTitle.textContent = "Delete session";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry?.summary?.session_id || "")}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry?.summary))}</strong> and its transcript, worksets, episode history, and guidance history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`;
+  } else if (view.type === "help") {
+    el.focusTitle.textContent = "Commands";
+    el.focusState.textContent = "";
+    el.focusState.classList.remove("is-active");
+    el.focusContent.innerHTML = renderCommandReference();
   } else {
-    el.focusTitle.textContent = "settings";
+    el.focusTitle.textContent = "Settings";
     el.focusState.textContent = "session configuration";
     el.focusState.classList.remove("is-active");
     el.focusContent.innerHTML = renderFocusSettings();
   }
   restoreFocusViewState(restoration, { renderId, prependAnchor });
-  if (view.type === "orchestrator") {
-    requestAnimationFrame(() => ensureOrchestratorScrollableHistory(renderId));
-  }
 }
 
 function settingsContextIsCurrent(requestGeneration, sessionId) {
@@ -2868,18 +2713,18 @@ function buildSettingsPatch(values, initial) {
 function renderFocusSettings() {
   const settings = state.settingsFocus;
   if (!settings || settings.sessionId !== state.currentId || settings.status === "loading") {
-    const message = settings?.message || "loading configuration…";
+    const message = settings?.message || "Loading configuration…";
     return `<div class="focus-settings-layout"><div class="focus-empty">${escapeHtml(message)}</div></div>`;
   }
   if (settings.status === "error") {
     const repairError = sessionEntry()?.summary?.model_config_error;
-    return `<div class="focus-settings-layout"><section class="settings-load-error" role="alert"><strong>Configuration could not be loaded.</strong><p>${escapeHtml(settings.error)}</p>${repairError ? `<p>Repair required: ${escapeHtml(repairError)}</p>` : ""}<button class="button" type="button" data-retry-settings>retry configuration load</button></section></div>`;
+    return `<div class="focus-settings-layout"><section class="settings-load-error" role="alert"><h3>Configuration could not be loaded.</h3><p>${escapeHtml(settings.error)}</p>${repairError ? `<p>Repair required: ${escapeHtml(repairError)}</p>` : ""}<button class="button" type="button" data-retry-settings>retry configuration load</button></section></div>`;
   }
   const config = settings.config || {};
   const headers = rawHeadersFromConfig(config);
   const diagnostics = Array.isArray(config.diagnostics) ? config.diagnostics : [];
   const diagnosticHtml = diagnostics.length
-    ? `<section class="settings-diagnostics" role="alert"><strong>Repair required</strong><p>Replace every unsupported or malformed value, then save.</p><ul>${diagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic)}</li>`).join("")}</ul></section>`
+    ? `<section class="settings-diagnostics" role="alert"><h3>Repair required</h3><p>Replace every unsupported or malformed value, then save.</p><ul>${diagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic)}</li>`).join("")}</ul></section>`
     : "";
   const submission = state.settingsSubmission;
   const savingThisSession = submission?.sessionId === state.currentId;
@@ -2916,33 +2761,68 @@ function renderEvidenceField(label, value, unavailable) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${evidenceValue(value, unavailable)}</dd></div>`;
 }
 
-function renderOrchestratorConversation(snapshot) {
+// Orchestrator guidance renders as an ordinary user message from the moment it
+// is queued. The backend flags records whose verbatim user message is already
+// in the visible transcript (covered_orchestrator_steering_ids); those are
+// hidden here so guidance renders exactly once. Expired records never reached
+// the model and never become canonical, so they leave the chat on expiry
+// (their lifecycle stays visible in the event feed).
+function orchestratorGuidanceEntries(snapshot) {
+  const covered = new Set((snapshot?.covered_orchestrator_steering_ids || []).map((id) => Number(id)));
+  return (snapshot?.thread_steering || [])
+    .filter((record) => record?.thread_name === ORCHESTRATOR_STEERING_TARGET
+      && Number.isSafeInteger(Number(record?.id))
+      && String(record?.status || "") !== "expired"
+      && !covered.has(Number(record.id)))
+    .sort((left, right) => Number(left.id) - Number(right.id));
+}
+
+function renderOrchestratorGuidance(record) {
+  const status = String(record?.status || "queued").trim() || "queued";
+  const instruction = String(record?.instruction || "").trim() || "Instruction unavailable";
+  const statusBadge = status !== "delivered"
+    ? `<span class="focus-guidance-status">queued…</span>`
+    : "";
+  return `<article class="focus-message is-guidance" data-role="user" data-guidance-status="${escapeAttr(status)}"><div class="focus-message-body"><div class="focus-message-copy">${renderFocusMarkdown(instruction)}</div></div>${statusBadge}</article>`;
+}
+
+function renderOrchestratorChatRail(snapshot) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
-  const durations = responseDurationAssignments(snapshot, messages);
-  const ordinalBase = Number.isSafeInteger(Number(snapshot?.message_page?.start))
-    ? Number(snapshot.message_page.start)
-    : 0;
+  const guidance = orchestratorGuidanceEntries(snapshot);
   const transcriptEntries = [
-    ...messages.map((message, index) => ({
-      message,
-      ordinal: ordinalBase + index + 1,
-      durationMs: durations.get(index) ?? null,
-    })),
-    ...pending.map((message) => ({ message, ordinal: null, durationMs: null })),
-  ].filter(({ message }) => message?.role !== "system" && message?.role !== "tool");
-  const transcript = transcriptEntries.map(({ message, ordinal, durationMs }) => renderFocusMessage(message, {
-    ordinal,
-    durationMs,
-  })).join("");
+    ...messages.map((message) => ({ message })),
+    ...guidance.map((record) => ({ guidance: record })),
+    ...pending.map((message) => ({ message })),
+  ];
+  const transcript = transcriptEntries
+    .filter((entry) => entry.guidance || (entry.message?.role !== "system" && entry.message?.role !== "tool"))
+    .map((entry) => entry.guidance ? renderOrchestratorGuidance(entry.guidance) : renderFocusMessage(entry.message))
+    .join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
-    ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "loading earlier messages" : "scroll up for earlier messages"}</span></div>`
+    ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
     : "";
-  const lifecycle = orchestratorLifecycle(snapshot);
-  const actions = buildOrchestratorActions(snapshot, { limit: false }).reverse();
-  const live = `<section class="focus-live"><div class="focus-column-heading"><span>Live activity</span><strong>${actions.length} persisted + observed</strong></div>${renderFocusActions(actions, { showTechnicalEvidence: true })}</section>`;
-  return `<div class="focus-orchestrator-layout" data-state="${escapeAttr(lifecycle.state)}"><div class="focus-orchestrator-sidebar">${live}</div><section class="focus-chat"><div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div></section></div>`;
+  el.orchestratorChatContent.innerHTML = `<div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div>`;
+  const viewport = state.orchestratorViewport;
+  if (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom) {
+    requestAnimationFrame(() => {
+      el.orchestratorChatContent.scrollTop = el.orchestratorChatContent.scrollHeight;
+    });
+  }
+}
+
+function handleOrchestratorChatScroll(event) {
+  const scroller = event.target;
+  if (scroller !== el.orchestratorChatContent) return;
+  if (event.isTrusted) {
+    state.orchestratorViewport = {
+      sessionId: state.currentId,
+      pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
+      scrollTop: scroller.scrollTop,
+    };
+  }
+  if (scroller.scrollTop <= 36) loadOlderOrchestratorMessages(scroller);
 }
 
 function worksetValueHtml(value, emptyLabel = "Not recorded") {
@@ -3010,13 +2890,13 @@ function renderWorksetDetail(workset) {
 function renderWorksetsFocus(snapshot) {
   const presentation = worksetsPresentation(snapshot);
   if (presentation.state === "loading") {
-    return `<div class="focus-worksets-scroll" data-state="loading"><div class="worksets-focus-state" role="status"><strong>Loading worksets…</strong><p>Waiting for the session snapshot.</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="loading"><div class="worksets-focus-state" role="status"><h3>Loading worksets…</h3><p>Waiting for the session snapshot.</p></div></div>`;
   }
   if (presentation.state === "error") {
-    return `<div class="focus-worksets-scroll" data-state="error"><div class="worksets-focus-state is-error" role="alert"><strong>Worksets could not be loaded.</strong><p>${escapeHtml(presentation.error)}</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="error"><div class="worksets-focus-state is-error" role="alert"><h3>Worksets could not be loaded.</h3><p>${escapeHtml(presentation.error)}</p></div></div>`;
   }
   if (presentation.state === "empty") {
-    return `<div class="focus-worksets-scroll" data-state="empty"><div class="worksets-focus-state"><strong>No worksets yet.</strong><p>This session has no persisted worksets.</p></div></div>`;
+    return `<div class="focus-worksets-scroll" data-state="empty"><div class="worksets-focus-state"><h3>No worksets yet.</h3><p>This session has no persisted worksets.</p></div></div>`;
   }
   return `<div class="focus-worksets-scroll" data-state="populated"><div class="worksets-focus-list">${presentation.items.map(renderWorksetDetail).join("")}</div></div>`;
 }
@@ -3104,10 +2984,10 @@ function renderWorkspaceFocus(workspace, selectedPath) {
     : "";
   return `<div class="focus-workspace-layout"><aside class="focus-files" aria-label="Changed files">
     <div class="focus-repository-context" aria-label="Workspace repository context"><span>Repository</span><strong>${repoLabel}</strong><div>${branch}</div>${workspaceDisplay}</div>
-    <div class="focus-column-heading"><span>Changed files</span><strong>${files.length}</strong></div>
+    <div class="focus-column-heading"><h3>Changed files</h3><strong>${files.length}</strong></div>
     <div class="focus-workspace-totals" aria-label="Workspace totals: ${escapeAttr(workspace.total_additions || 0)} additions and ${escapeAttr(workspace.total_deletions || 0)} deletions"><span>+${escapeHtml(workspace.total_additions || 0)}</span><span>−${escapeHtml(workspace.total_deletions || 0)}</span></div>
     <div class="focus-file-list">${files.map((file) => renderWorkspaceFile(file, selectedPath)).join("")}</div>
-  </aside><section class="focus-diff" aria-label="File diff"><div class="focus-column-heading"><span>${selectedPath ? escapeHtml(selectedPath) : "Diff"}</span></div>${detail}</section></div>`;
+  </aside><section class="focus-diff" aria-label="File diff"><div class="focus-column-heading"><h3>${selectedPath ? escapeHtml(selectedPath) : "Diff"}</h3></div>${detail}</section></div>`;
 }
 
 function workspaceDiffLinePresentation(line) {
@@ -3254,13 +3134,6 @@ async function loadFocusWorkspaceDiff(path, { force = false } = {}) {
   return true;
 }
 
-function focusMessageRoleLabel(role) {
-  if (role === "system") return "System";
-  if (role === "user") return "You";
-  if (role === "assistant") return "Orchestrator";
-  return role || "Message";
-}
-
 function focusToolArguments(call) {
   const raw = call?.function?.arguments;
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
@@ -3281,81 +3154,71 @@ function focusToolTarget(argumentsValue, ...keys) {
   return "";
 }
 
-function orchestratorToolSummaries(toolCalls) {
-  const calls = toolCalls || [];
-  const dispatched = calls
-    .filter((call) => call?.function?.name === "thread")
-    .map((call) => focusToolTarget(focusToolArguments(call), "name"))
-    .filter(Boolean);
-  const summaries = [];
-  let emittedDispatches = false;
-  for (const call of calls) {
-    const name = call?.function?.name || "tool";
-    const argumentsValue = focusToolArguments(call);
-    if (name === "thread") {
-      if (!emittedDispatches) {
-        summaries.push({ operation: "threads dispatched", target: dispatched.join(", ") });
-        emittedDispatches = true;
-      }
-      continue;
-    }
-    if (name.startsWith("workset_")) {
-      summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "id", "name") });
-      continue;
-    }
-    if (name === "threads") {
-      summaries.push({ operation: "threads listed", target: "" });
-      continue;
-    }
-    summaries.push({ operation: name, target: focusToolTarget(argumentsValue, "name", "id") });
+function isThreadToolName(name) {
+  return name === "thread" || name === "threads" || String(name || "").startsWith("thread_");
+}
+
+function formatToolCall(toolCall) {
+  const name = toolCall?.function?.name || "tool";
+  const args = focusToolArguments(toolCall);
+  let argsLabel = "";
+  let dispatchAction = "";
+  if (isThreadToolName(name)) {
+    // Every thread tool (thread, threads, thread_read, thread_delete, …) keys on `name`.
+    argsLabel = focusToolTarget(args, "name");
+    if (name === "thread") dispatchAction = focusToolTarget(args, "action");
+  } else if (name === "workset_define" || name === "workset_update") {
+    argsLabel = focusToolTarget(args, "id", "name");
+  } else if (name === "read") {
+    argsLabel = focusToolTarget(args, "path", "file");
+  } else if (name === "bash" || name === "command" || name === "exec_command" || name === "exec" || name === "shell") {
+    argsLabel = focusToolTarget(args, "cmd", "command", "workdir");
+  } else if (name === "write" || name === "edit") {
+    argsLabel = focusToolTarget(args, "path", "file");
+  } else if (name === "grep" || name === "search") {
+    argsLabel = focusToolTarget(args, "pattern", "query");
+  } else {
+    argsLabel = focusToolTarget(args, "name", "id");
   }
-  return summaries;
+  return { name, args: argsLabel, action: dispatchAction, result: "" };
 }
 
-function renderOrchestratorToolTurn(message, { ordinal = null } = {}) {
-  const summaries = orchestratorToolSummaries(message?.tool_calls);
-  const body = summaries.map(({ operation, target }) => `<div class="focus-tool-summary"><span>${escapeHtml(operation)}</span>${target ? `<strong>${escapeHtml(target)}</strong>` : ""}</div>`).join("");
-  const ordinalLabel = ordinal === null
-    ? ""
-    : `<span class="focus-message-ordinal" title="Transcript ordinal among messages included by this query; not a durable message ID">#${escapeHtml(ordinal)}</span>`;
-  const meta = ordinalLabel ? `<div class="focus-message-meta">${ordinalLabel}</div>` : "";
-  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-label"><span class="focus-message-role">Orchestrator</span>${meta}</div><div class="focus-message-body"><div class="focus-tool-summaries">${body}</div></div></article>`;
+function renderOrchestratorToolTurn(message) {
+  const calls = message?.tool_calls || [];
+  const blocks = calls.map((call) => {
+    const { name, args, action } = formatToolCall(call);
+    if (isThreadToolName(name)) {
+      // One consistent structure for every thread-tool block: `tool · key-arg`
+      // header at --fs-md, plus a same-size single-line instruction preview
+      // for dispatches. Truncation relies on min-width: 0 up the chain.
+      const separator = args ? `<span class="tool-block-separator" aria-hidden="true">·</span>` : "";
+      const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
+      const previewText = name === "thread" && action ? compactActionDetail(action, 320) : "";
+      const preview = previewText
+        ? `<div class="tool-block-preview" title="${escapeAttr(previewText)}">${escapeHtml(previewText)}</div>`
+        : "";
+      return `<div class="tool-block tool-block-thread" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${separator}${argsSpan}</div>${preview}</div>`;
+    }
+    const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
+    return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
+  }).join("");
+  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-body">${blocks}</div></article>`;
 }
 
-function renderFocusMessage(message, { ordinal = null, durationMs = null } = {}) {
+function renderFocusMessage(message) {
   if (message?.role === "system" || message?.role === "tool") return "";
   const role = message?.role || "message";
   if (role === "assistant" && message?.tool_calls?.length) {
-    return renderOrchestratorToolTurn(message, { ordinal });
+    return renderOrchestratorToolTurn(message);
   }
-  const label = focusMessageRoleLabel(role);
   const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)
-    : "";
-  const reasoning = role === "assistant"
-    && message?.reasoning_text !== null
-    && message?.reasoning_text !== undefined
-    ? String(message.reasoning_text)
-    : "";
-  const reasoningBlock = reasoning
-    ? `<div class="focus-message-copy is-reasoning"><span class="focus-message-content-kind">reasoning</span>${renderFocusMarkdown(reasoning)}</div>`
     : "";
   const copy = content
     ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
     : "";
-  const body = reasoningBlock || copy
-    ? `${reasoningBlock}${copy}`
-    : `<div class="focus-message-copy is-empty"><span class="focus-message-content-kind">empty message</span>${renderFocusMarkdown("[empty]")}</div>`;
-  const ordinalLabel = message?.pending
-    ? `<span class="focus-message-ordinal is-submitted" title="Pending user message from ${escapeAttr(message.pendingSource || "submission")}; removed when its canonical transcript row arrives">submitted · pending</span>`
-    : ordinal === null ? "" : `<span class="focus-message-ordinal" title="Transcript ordinal among messages included by this query; not a durable message ID">#${escapeHtml(ordinal)}</span>`;
-  const duration = durationMs !== null && durationMs !== undefined && Number.isFinite(Number(durationMs))
-    ? `<span class="focus-message-duration" title="Response duration: ${escapeAttr(Number(durationMs).toLocaleString())} ms">response ${escapeHtml(formatDuration(Number(durationMs)))}</span>`
-    : "";
-  const meta = ordinalLabel || duration
-    ? `<div class="focus-message-meta">${ordinalLabel}${duration}</div>`
-    : "";
-  return `<article class="focus-message${message?.pending ? " is-pending" : ""}" data-role="${escapeAttr(role)}"${message?.pending ? ` data-pending-source="${escapeAttr(message.pendingSource || "submitted")}"` : ""}><div class="focus-message-label"><span class="focus-message-role">${escapeHtml(label)}</span>${meta}</div><div class="focus-message-body">${body}</div></article>`;
+  if (!copy) return "";
+  return `<article class="focus-message" data-role="${escapeAttr(role)}"><div class="focus-message-body">${copy}</div></article>`;
 }
 
 function serializedAgentEvent(event, maxChars = 1200) {
@@ -3424,11 +3287,12 @@ function threadFocusEvidenceEntries(name, snapshot, windowState) {
 }
 
 function threadFinishDetail(event) {
-  const exit = event.exit_code === null || event.exit_code === undefined ? "exit unavailable" : `exit ${event.exit_code}`;
-  const timeout = event.timed_out
-    ? `timed out${event.timeout_reason ? `: ${event.timeout_reason}` : " (reason unavailable)"}`
-    : "not timed out";
-  return combineActionDetail(exit, timeout);
+  const exit = event.exit_code === null || event.exit_code === undefined ? "" : `exit ${event.exit_code}`;
+  if (event.timed_out) {
+    const reason = event.timeout_reason ? `: ${event.timeout_reason}` : "";
+    return combineActionDetail(exit, `timed out${reason}`);
+  }
+  return exit || "finished";
 }
 
 function threadEventAction(event, entry = {}, matchedStart = null) {
@@ -3449,7 +3313,9 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
     const argumentsDetail = formatToolArguments(event.args_preview);
     return {
       name: toolDisplayName(event.name), result: "Running", state: "live",
-      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, ...evidence,
+      callId: event.call_id || null, argumentsDetail, detail: argumentsDetail, resultText: "",
+      keyArgPreview: event.key_arg_preview || null,
+      ...evidence,
     };
   }
   if (event.type === "tool_call_finished") {
@@ -3459,12 +3325,16 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
       result: event.is_error ? "Failed" : "Done",
       state: event.is_error ? "error" : "done",
       callId: event.call_id || matchedStart?.callId || null,
-      argumentsDetail, detail: toolCompletionDetail(argumentsDetail, event), ...evidence,
+      argumentsDetail, detail: toolCompletionDetail(argumentsDetail),
+      resultText: compactActionDetail(event.content_preview, 160),
+      keyArgPreview: matchedStart?.keyArgPreview || null,
+      ...evidence,
     };
   }
   if (event.type === "assistant_message") {
-    const detail = combineActionDetail(event.content, event.usage ? usageDetail(event.usage) : "");
-    return detail ? { name: "response", result: "returned", state: "done", detail, ...evidence } : null;
+    const content = compactActionDetail(event.content, 200);
+    const usage = event.usage || null;
+    return content ? { name: "response", result: "returned", state: "done", detail: content, resultText: content, usage, ...evidence } : null;
   }
   if (event.type === "error") {
     return { name: "error", result: "failed", state: "error", detail: compactActionDetail(event.message), ...evidence };
@@ -3474,10 +3344,10 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
       || event.type === "thread_steering_expired") {
     const result = event.type.split("_").at(-1);
     return {
-      name: "steering", result,
+      name: "guidance", result,
       state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
       steeringId: event.steering_id ?? null,
-      detail: combineActionDetail(event.steering_id == null ? "Steering ID unavailable" : `steering #${event.steering_id}`, event.instruction_preview),
+      detail: combineActionDetail(event.steering_id == null ? null : `guidance #${event.steering_id}`, event.instruction_preview),
       ...evidence,
     };
   }
@@ -3492,7 +3362,7 @@ function threadEventAction(event, entry = {}, matchedStart = null) {
   if (event.type === "run_finished") {
     return { name: "agent run", result: "finished", state: "done", detail: "", ...evidence };
   }
-  return { name: "Activity", result: "recorded", state: "recorded", detail: "Activity recorded", ...evidence };
+  return null;
 }
 
 function projectThreadActions(entries, { newestFirst = false } = {}) {
@@ -3529,7 +3399,7 @@ function threadFocusActions(name, snapshot, windowState) {
   const durable = (snapshot?.thread_steering || [])
     .filter((record) => record.thread_name === name && !observedSteering.has(record.id))
     .map(steeringRecordAction).reverse();
-  return [...actions, ...durable];
+  return dedupGuidanceActions(guidanceInstructionsFromRecords([...actions, ...durable], snapshot?.thread_steering || []));
 }
 
 function latestThreadEvidence(entries, type) {
@@ -3539,7 +3409,7 @@ function latestThreadEvidence(entries, type) {
 function renderWorkerUsage(usageEvidence) {
   const usage = usageEvidence?.usage;
   const metric = (label, value) => `<div><dt>${escapeHtml(label)}</dt><dd>${usage ? Number(value || 0).toLocaleString() : `<span class="evidence-unavailable">Unavailable</span>`}</dd></div>`;
-  return `<section class="worker-usage"><div class="thread-evidence-heading"><h4>Worker usage</h4></div><dl>
+  return `<section class="worker-usage"><div class="thread-evidence-heading"><h4>Token usage</h4></div><dl>
     ${metric("Input", usage?.input_tokens)}
     ${metric("Cache read", usage?.cache_read_tokens)}
     ${metric("Output", usage?.output_tokens)}
@@ -3548,7 +3418,7 @@ function renderWorkerUsage(usageEvidence) {
 }
 
 function renderThreadSteering(records) {
-  if (!records.length) return `<div class="thread-evidence-empty">No persisted steering records.</div>`;
+  if (!records.length) return `<div class="thread-evidence-empty">No guidance history.</div>`;
   return `<ol class="thread-steering-list">${records.map((record) => `<li data-status="${escapeAttr(record.status || "unknown")}">
     <header><strong>${record.id == null ? "ID unavailable" : `#${escapeHtml(record.id)}`}</strong><span>${escapeHtml(record.status || "status unavailable")}</span></header>
     <p>${escapeHtml(record.instruction || "Instruction unavailable")}</p>
@@ -3578,7 +3448,7 @@ function renderThreadEvidence(name, model, snapshot, entries) {
   const steering = (snapshot?.thread_steering || []).filter((item) => item.thread_name === name);
   const status = threadStatusPresentation(model?.state);
   return `<section class="thread-evidence" data-state="${escapeAttr(status.state)}">
-    <div class="thread-evidence-heading"><h3>Lifecycle</h3><span>${escapeHtml(status.label)}</span></div>
+    <div class="thread-evidence-heading"><h3>Status</h3><span>${escapeHtml(status.label)}</span></div>
     <dl class="evidence-grid">
       ${renderEvidenceField("Outcome", model?.outcome)}
       ${renderEvidenceField("Session ID", record?.session_id || snapshot?.metadata?.session_id || summary?.session_id)}
@@ -3586,7 +3456,6 @@ function renderThreadEvidence(name, model, snapshot, entries) {
       ${renderEvidenceField("Session updated", summary?.updated_at)}
       ${renderEvidenceField("Thread created", record?.created_at)}
       ${renderEvidenceField("Thread updated", record?.updated_at)}
-      ${renderEvidenceField("Persisted episode count", record?.episode_count)}
       ${renderEvidenceField("Source threads", sourceText, start ? "Source-thread field unavailable" : "No start event in current evidence")}
       ${renderEvidenceField("Start time", start?.timestamp)}
       ${renderEvidenceField("Finish time", finish?.timestamp)}
@@ -3596,7 +3465,7 @@ function renderThreadEvidence(name, model, snapshot, entries) {
       ${renderEvidenceField("Latest error", model?.latestError)}
     </dl>
     ${renderWorkerUsage(model?.usageEvidence)}
-    <section class="thread-steering"><div class="thread-evidence-heading"><h4>Steering history</h4><span>${steering.length}</span></div>${renderThreadSteering(steering)}</section>
+    <section class="thread-steering"><div class="thread-evidence-heading"><h4>Guidance history</h4><span>${steering.length}</span></div>${renderThreadSteering(steering)}</section>
   </section>`;
 }
 
@@ -3606,25 +3475,65 @@ function renderThreadFocus(name, model, snapshot) {
   const entries = threadFocusEvidenceEntries(name, snapshot, windowState);
   const actions = threadFocusActions(name, snapshot, windowState);
   const historyLoader = windowState?.hasOlder
-    ? `<div class="focus-event-loader ${windowState.loading ? "is-loading" : ""}" data-event-loader role="status"><span>${windowState.loading ? "loading earlier events" : "scroll down for earlier events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></div>`
+    ? `<div class="focus-event-loader ${windowState.loading ? "is-loading" : ""}" data-event-loader role="status"><span>${windowState.loading ? "Loading earlier events…" : "scroll down for earlier events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"></path></svg></div>`
     : "";
   const episodes = snapshot?.thread_episodes?.[name] || [];
   const episodeHtml = renderThreadEpisodes(episodes);
-  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Action evidence · latest first</h3><span>${actions.length}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes"><div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+  const visibleActionCount = actions.filter(isTileVisibleAction).length;
+  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes">${renderThreadCurrentAction(name, model, snapshot)}<div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+}
+
+function threadInflightDispatch(name, snapshot) {
+  // The `thread` dispatch tool blocks until the worker finishes, so an
+  // assistant tool call with no matching tool-result message later in the
+  // transcript is a dispatch still in flight. Result-arrived is the source of
+  // truth for completion; crash-resume normalization appends a synthetic
+  // result for dangling calls, so interrupted runs resolve the same way. The
+  // latest unanswered call wins, so a re-dispatch shows its own instruction.
+  const messages = snapshot?.messages || [];
+  const answered = new Set();
+  for (const message of messages) {
+    if (message?.role === "tool" && message.tool_call_id !== null && message.tool_call_id !== undefined) {
+      answered.add(String(message.tool_call_id));
+    }
+  }
+  let inflight = null;
+  for (const message of messages) {
+    if (message?.role !== "assistant" || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      if (call?.function?.name !== "thread") continue;
+      const args = focusToolArguments(call);
+      if (focusToolTarget(args, "name") !== name) continue;
+      const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
+      if (callId && answered.has(callId)) continue;
+      inflight = { callId: callId || null, action: focusToolTarget(args, "action") };
+    }
+  }
+  return inflight;
+}
+
+function renderThreadCurrentAction(name, model, snapshot) {
+  const inflight = threadInflightDispatch(name, snapshot);
+  // Lifecycle corroboration: terminal evidence (finish/error after the latest
+  // start) hides the section even if the tool-result message has not landed
+  // in the transcript window yet, so a completed/cancelled/failed dispatch
+  // never leaves a stale "current action" behind.
+  const status = threadStatusPresentation(model?.state);
+  if (!inflight || status.state === "finished") return "";
+  const action = inflight.action || "Action unavailable";
+  return `<section class="focus-current-action" data-state="${escapeAttr(status.state)}"><div class="focus-thread-column-title"><h3>Current action</h3><span class="focus-current-action-status">${escapeHtml(status.label)}</span></div><div class="focus-current-action-card"><section class="focus-episode-prompt"><span>Action</span><p>${escapeHtml(action)}</p></section></div></section>`;
 }
 
 function renderThreadEpisodes(episodes) {
-  if (!episodes.length) return `<div class="focus-empty">No retained episodes. Episode identity and content are unavailable.</div>`;
+  if (!episodes.length) return `<div class="focus-empty">No episode history recorded.</div>`;
   return episodes.map((episode, index) => {
     const action = episode.action || "Action unavailable";
     const response = episode.content || "";
     const isLatest = index === episodes.length - 1;
-    const durableId = episode.id == null ? "ID unavailable" : `ID ${episode.id}`;
     return `<details class="focus-episode" data-episode-index="${index}" data-episode-id="${escapeAttr(episode.id ?? "")}"${isLatest ? " open" : ""}>
-      <summary data-episode-summary="${index}"><span>Episode ${index + 1} · ${escapeHtml(durableId)}</span><strong>${escapeHtml(action)}</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
+      <summary data-episode-summary="${index}"><span>Episode ${index + 1}</span><strong>${escapeHtml(action)}</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
       <div class="focus-episode-body">
         <dl class="episode-identity">
-          ${renderEvidenceField("Durable episode ID", episode.id)}
           ${renderEvidenceField("Session ID", episode.session_id)}
           ${renderEvidenceField("Thread", episode.thread_name)}
           ${renderEvidenceField("Created", episode.created_at)}
@@ -3636,23 +3545,45 @@ function renderThreadEpisodes(episodes) {
   }).join("");
 }
 
-function renderFocusActions(actions, { showTechnicalEvidence = false } = {}) {
-  if (!actions.length) return `<div class="focus-empty">No action evidence is available.</div>`;
-  return `<ol class="focus-action-list">${actions.map((action) => {
-    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
-    const evidence = showTechnicalEvidence ? [
-      action.provenance === "observed" ? "observed live" : action.provenance,
-      action.kind,
-      action.sequenceId == null ? null : `sequence #${action.sequenceId}`,
-      action.finishSequenceId == null ? null : `finished #${action.finishSequenceId}`,
-      action.eventId == null ? null : `event #${action.eventId}`,
-      action.timestamp,
-      action.callId ? `call ${action.callId}` : null,
-      action.steeringId == null ? null : `steering #${action.steeringId}`,
-    ].filter(Boolean) : [];
-    const provenance = showTechnicalEvidence ? ` data-provenance="${escapeAttr(action.provenance || "unavailable")}"` : "";
-    return `<li class="focus-action ${action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : ""}"${provenance}><span class="action-mark">${marker}</span><strong>${escapeHtml(action.name)}</strong><em>${escapeHtml(action.result)}</em>${evidence.length ? `<div class="focus-action-evidence">${evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}${action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : ""}</li>`;
-  }).join("")}</ol>`;
+function isToolAction(action) {
+  if (action?.callId) return true;
+  if (action?.argumentsDetail && String(action.argumentsDetail).trim() && action.argumentsDetail !== "—") return true;
+  return false;
+}
+
+function isTileVisibleAction(action) {
+  if (isToolAction(action)) return true;
+  if (action.name === "dispatch") return true;
+  if (action.name === "guidance") return true;
+  if (action.name === "thread") {
+    const result = String(action.result || "");
+    if (result === "finished" || result.startsWith("failed") || result.startsWith("timed out")) return true;
+  }
+  return false;
+}
+
+function actionIcon(action) {
+  if (action.name === "dispatch") return "→";
+  if (action.name === "guidance") return "❯";
+  if (action.name === "thread") {
+    const result = String(action.result || "");
+    if (result === "finished") return "✓";
+    if (result.startsWith("failed") || result.startsWith("timed out")) return "✕";
+  }
+  const tool = String(action.name || "").toLowerCase();
+  if (tool === "command" || tool === "exec_command" || tool === "bash" || tool === "shell" || tool === "exec") return "$";
+  if (tool === "read" || tool === "thread_read") return "▾";
+  if (tool === "write") return "✎";
+  if (tool === "edit") return "✸";
+  if (tool === "grep" || tool === "search" || tool === "searchgithub") return "?";
+  if (tool === "thread_delete") return "✕";
+  if (tool.startsWith("workset")) return "□";
+  return "·";
+}
+
+function renderFocusActions(actions) {
+  if (!actions.length) return `<div class="focus-empty">No activity yet.</div>`;
+  return `<ol class="focus-action-list">${renderFocusActionRows(actions)}</ol>`;
 }
 function renderMarkdownImageToken(tokens, index, options, env, renderer) {
   const token = tokens[index];
@@ -3817,11 +3748,13 @@ function buildThreadModels(snapshot = currentSnapshot()) {
     const observedSteering = new Set(entries.map((entry) => entry.event)
       .filter((event) => event?.type?.startsWith("thread_steering_")).map((event) => event.steering_id));
     for (const durable of steering) if (!observedSteering.has(durable.id)) actions.push(steeringRecordAction(durable));
+    guidanceInstructionsFromRecords(actions, steering);
+    const dedupedActions = dedupGuidanceActions(actions);
     if (record || (snapshot?.thread_episodes?.[name] || []).length || steering.length
         || (snapshot?.message_cycle?.thread_names || []).includes(name)) {
       if (!lifecycle.provenance.includes("persisted")) lifecycle.provenance.unshift("persisted");
     }
-    return { name, ...lifecycle, record, entries, actions };
+    return { name, ...lifecycle, record, entries, actions: dedupedActions };
   });
   const currentCycle = currentCycleThreadNames(snapshot);
   return models.map((thread) => ({
@@ -3869,19 +3802,63 @@ function eventThreadName(event) {
   return null;
 }
 
+function guidanceInstructionsFromRecords(actions, records) {
+  const byId = new Map((records || []).map((record) => [Number(record?.id), record]));
+  for (const action of actions || []) {
+    if (action?.name !== "guidance" || action.instruction) continue;
+    const record = action.steeringId === null || action.steeringId === undefined
+      ? null
+      : byId.get(Number(action.steeringId));
+    if (record?.instruction) action.instruction = record.instruction;
+  }
+  return actions;
+}
+
+const GUIDANCE_STATUS_PRIORITY = { queued: 0, delivered: 1, expired: 2 };
+
+function guidanceStatusPriority(action) {
+  return GUIDANCE_STATUS_PRIORITY[String(action?.result || "")] ?? 1;
+}
+
+function dedupGuidanceActions(actions) {
+  // One row per steering id: lifecycle events (queued → delivered/expired) for
+  // the same guidance must not stack as separate rows. The earliest lifecycle
+  // state wins (queued, then delivered, then expired) and keeps the first
+  // occurrence's chronological slot. Actions without a steering id can't be
+  // correlated and are always kept.
+  const keptIndexById = new Map();
+  const output = [];
+  for (const action of actions || []) {
+    if (action?.name !== "guidance" || action.steeringId === null || action.steeringId === undefined) {
+      output.push(action);
+      continue;
+    }
+    const key = String(action.steeringId);
+    const keptIndex = keptIndexById.get(key);
+    if (keptIndex === undefined) {
+      keptIndexById.set(key, output.length);
+      output.push(action);
+      continue;
+    }
+    if (guidanceStatusPriority(action) < guidanceStatusPriority(output[keptIndex])) output[keptIndex] = action;
+  }
+  return output;
+}
+
 function steeringRecordAction(record) {
   const result = record?.status || "status unavailable";
   const transitionTime = result === "delivered" ? record.delivered_at : result === "expired" ? record.expired_at : null;
   return {
-    name: "steering",
+    name: "guidance",
     result,
     state: result === "queued" ? "live" : result === "expired" ? "error" : "done",
     provenance: "persisted",
     kind: "steering_record",
     steeringId: record?.id ?? null,
+    instruction: record?.instruction || null,
     timestamp: transitionTime || record?.created_at || null,
     detail: combineActionDetail(
-      record?.id == null ? "Steering ID unavailable" : `steering #${record.id}`,
+      record?.id == null ? null : `guidance #${record.id}`,
       record?.instruction || "Instruction unavailable",
       record?.created_at ? `created ${record.created_at}` : "created time unavailable",
       record?.delivered_at ? `delivered ${record.delivered_at}` : "",
@@ -3898,7 +3875,7 @@ function renderThreads(snapshot) {
   const earlier = models.filter((thread) => thread.compact);
   const currentGrid = current.length ? `<div class="thread-current-grid">${current.map(renderThreadTile).join("")}</div>` : "";
   const earlierGrid = earlier.length ? `<div class="thread-earlier-grid ${current.length ? "" : "is-only"}">${earlier.map(renderThreadTile).join("")}</div>` : "";
-  const empty = models.length ? "" : `<p class="thread-board-empty">No thread lifecycle or retained-history evidence.</p>`;
+  const empty = models.length ? "" : `<p class="thread-board-empty">No threads yet.</p>`;
   el.threadGrid.innerHTML = currentGrid + earlierGrid + empty;
   renderComposerTarget();
   scheduleActiveControlRestoration(activeControl);
@@ -3908,41 +3885,68 @@ function renderThreadTile(thread) {
   const selected = state.targetedThread === thread.name;
   const status = threadStatusPresentation(thread.state);
   const available = ["running", "queued"].includes(status.state);
-  const label = available ? `Target ${thread.name} for steering` : `Open ${thread.name} fullscreen`;
-  const ledger = thread.compact ? "" : `<ol class="action-ledger">${renderActionRows(thread.actions, "No action evidence")}</ol>`;
+  const label = available ? `Target ${thread.name} for guidance` : `Open ${thread.name} fullscreen`;
+  const ledger = thread.compact ? "" : `<ol class="action-ledger">${renderActionRows(thread.actions, "No activity yet.")}</ol>`;
   return `<article class="thread-tile ${thread.compact ? "is-compact" : ""} ${selected ? "is-selected" : ""}" data-state="${escapeAttr(status.state)}"><header class="thread-tile-head"><button class="thread-select" type="button" data-thread-name="${escapeAttr(thread.name)}" data-thread-state="${escapeAttr(status.state)}" aria-pressed="${selected}" aria-label="${escapeAttr(label)}"><span class="thread-name" title="${escapeAttr(thread.name)}">${escapeHtml(thread.name)}</span><span class="thread-state" aria-label="${escapeAttr(status.label)}">${escapeHtml(status.label)}</span></button><button class="expand-button thread-expand" type="button" data-focus-thread="${escapeAttr(thread.name)}" aria-label="Open ${escapeAttr(thread.name)} fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg></button></header>${ledger}</article>`;
 }
 
 function selectTileActions(actions, limit = ACTION_LEDGER_LIMIT) {
-  if (actions.length <= limit) return [...actions];
+  const visible = actions.filter(isTileVisibleAction);
+  if (visible.length <= limit) return visible;
   const protectedIndexes = new Set();
-  for (const predicate of [
-    (action) => action.name === "response",
-    (action) => action.kind === "error" || action.name === "error",
-    (action) => ["thread_finished", "run_finished"].includes(action.kind),
-  ]) {
-    const index = actions.findLastIndex(predicate);
-    if (index >= 0) protectedIndexes.add(index);
-  }
-  for (let index = actions.length - 1; index >= 0 && protectedIndexes.size < limit; index -= 1) {
+  const failIndex = visible.findLastIndex(
+    (action) => action.name === "thread" && String(action.result || "").startsWith("failed"),
+  );
+  if (failIndex >= 0) protectedIndexes.add(failIndex);
+  for (let index = visible.length - 1; index >= 0 && protectedIndexes.size < limit; index -= 1) {
     protectedIndexes.add(index);
   }
-  return [...protectedIndexes].sort((left, right) => left - right).map((index) => actions[index]);
+  return [...protectedIndexes].sort((left, right) => left - right).map((index) => visible[index]);
+}
+
+function renderFocusActionRows(actions) {
+  const visible = actions.filter(isTileVisibleAction);
+  if (!visible.length) {
+    return `<li class="action-row is-placeholder"><span class="action-args">No activity.</span></li>`;
+  }
+  return visible.map((action) => {
+    const state = escapeAttr(action.state || "recorded");
+    const guidance = action.name === "guidance" ? " is-guidance" : "";
+    if (action.name === "thread" && !isToolAction(action)) {
+      const result = String(action.result || "");
+      const icon = result === "finished" ? "✓" : "✕";
+      const text = result === "finished" ? "thread complete"
+        : result.startsWith("timed out") ? "thread timed out"
+        : "thread failed";
+      return `<li class="action-row" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
+    }
+    const icon = actionIcon(action);
+    const args = formatActionArgs(action);
+    return `<li class="action-row${guidance}" data-state="${state}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+  }).join("");
 }
 
 function renderActionRows(actions, emptyLabel) {
   const visible = selectTileActions(actions);
-  const placeholders = Array.from({ length: ACTION_LEDGER_LIMIT - visible.length }, (_, index) => {
-    const label = !visible.length && index === ACTION_LEDGER_LIMIT - 1 ? emptyLabel : "";
-    return `<li class="action-row is-placeholder" aria-hidden="true">${label ? `<span class="action-detail">${escapeHtml(label)}</span>` : ""}</li>`;
-  });
-  const rows = visible.map((action) => {
-    const rowClass = action.state === "live" ? "is-live" : action.state === "error" ? "is-error" : "";
-    const marker = action.state === "live" ? "›" : action.state === "error" ? "×" : action.state === "done" ? "✓" : "·";
-    const detail = action.detail ? `<span class="action-detail" title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</span>` : "";
-    return `<li class="action-row ${rowClass} ${detail ? "has-detail" : ""}"><span class="action-mark">${marker}</span><span class="action-name">${escapeHtml(action.name)}</span><span class="action-result">${escapeHtml(action.result)}</span>${detail}</li>`;
-  });
-  return placeholders.concat(rows).join("");
+  if (!visible.length) {
+    return `<li class="action-row is-placeholder"><span class="action-args">${escapeHtml(emptyLabel)}</span></li>`;
+  }
+  return visible.map((action, index) => {
+    const state = escapeAttr(action.state || "recorded");
+    const recency = visible.length - 1 - index;
+    const guidance = action.name === "guidance" ? " is-guidance" : "";
+    if (action.name === "thread" && !isToolAction(action)) {
+      const result = String(action.result || "");
+      const icon = result === "finished" ? "✓" : "✕";
+      const text = result === "finished" ? "thread complete"
+        : result.startsWith("timed out") ? "thread timed out"
+        : "thread failed";
+      return `<li class="action-row" data-state="${state}" data-recency="${recency}"><span class="action-icon">${icon}</span><span class="action-args">${escapeHtml(text)}</span></li>`;
+    }
+    const icon = actionIcon(action);
+    const args = formatActionArgs(action);
+    return `<li class="action-row${guidance}" data-state="${state}" data-recency="${recency}"><span class="action-icon">${icon}</span><span class="action-args" title="${escapeAttr(args)}">${escapeHtml(args)}</span></li>`;
+  }).join("");
 }
 
 function toolDisplayName(value) {
@@ -3961,12 +3965,74 @@ function toolDisplayName(value) {
 }
 
 function formatToolArguments(argsPreview) {
-  return compactActionDetail(argsPreview, 280) || "Arguments unavailable";
+  return compactActionDetail(argsPreview, 280) || "—";
 }
 
-function toolCompletionDetail(argumentsDetail, event) {
-  const result = compactActionDetail(event?.content_preview, 160);
-  return combineActionDetail(argumentsDetail, result ? `result: ${result}` : "");
+function parseArgumentsDetail(raw) {
+  const text = String(raw || "").trim();
+  if (!text || text === "—") return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch (_) {}
+  return {};
+}
+
+function formatActionArgs(action) {
+  if (action?.keyArgPreview) {
+    const preview = String(action.keyArgPreview).trim();
+    if (preview && !preview.startsWith("{") && !preview.startsWith("[") && !preview.startsWith("(in ")) return preview;
+  }
+  const name = String(action?.name || "").toLowerCase();
+  const argsDetail = String(action?.argumentsDetail || "").trim();
+  const detailStr = String(action?.detail || "").trim();
+  const raw = argsDetail || (detailStr && !detailStr.startsWith("{") && !detailStr.startsWith("[") ? detailStr : "");
+  const parsed = parseArgumentsDetail(raw);
+  const plainDetail = detailStr && !detailStr.startsWith("{") && !detailStr.startsWith("[") ? detailStr : "";
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return null;
+  };
+
+  if (name === "read") return pick("path", "file") || plainDetail || "";
+  if (name === "bash" || name === "command" || name === "exec_command" || name === "shell" || name === "exec") {
+    const cmd = pick("cmd", "command");
+    if (cmd) return cmd;
+    const workdir = pick("workdir");
+    if (workdir) {
+      const parts = workdir.split("/").filter(Boolean);
+      return `in ${parts[parts.length - 1] || workdir}`;
+    }
+    return plainDetail || "";
+  }
+  if (name === "write" || name === "edit") return pick("path", "file") || plainDetail || "";
+  if (name === "grep" || name === "search" || name === "searchgithub") return pick("pattern", "query") || plainDetail || "";
+  if (name === "thread" || name === "dispatch") return pick("name", "thread") || (action?.sourceThreads?.length ? action.sourceThreads.join(", ") : "") || plainDetail || "";
+  if (name.startsWith("workset_")) return pick("id", "name") || plainDetail || "";
+  if (name === "response") {
+    const usage = action?.usage;
+    if (usage) return `↑${Number(usage.input_tokens || 0)} ↓${Number(usage.output_tokens || 0)}`;
+    return compactActionDetail(action?.detail, 200);
+  }
+  if (name === "guidance") return compactActionDetail(action?.instruction, 200) || action?.result || compactActionDetail(action?.detail, 200);
+  if (name === "agent run") return action?.result || compactActionDetail(action?.detail, 200);
+  const detailRaw = String(action?.detail || "").trim();
+  if (detailRaw.startsWith("{") || detailRaw.startsWith("[")) {
+    const detailParsed = parseArgumentsDetail(detailRaw);
+    for (const key of ["cmd", "command", "path", "file", "query", "pattern", "name", "workdir", "operation"]) {
+      const value = detailParsed[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  }
+  return compactActionDetail(action?.detail, 200);
+}
+
+function toolCompletionDetail(argumentsDetail) {
+  return argumentsDetail;
 }
 
 function threadToolCallKey(event) {
@@ -4005,7 +4071,8 @@ function completeThreadToolAction(action, event, entry = {}) {
   action.callId = action.callId || event.call_id || null;
   action.finishSequenceId = entry.sequenceId ?? null;
   action.finishEventId = entry.eventId ?? null;
-  action.detail = toolCompletionDetail(action.argumentsDetail, event);
+  action.detail = toolCompletionDetail(action.argumentsDetail);
+  action.resultText = compactActionDetail(event?.content_preview, 160);
   return action;
 }
 
@@ -4064,7 +4131,7 @@ function clearComposerDraftIfUnchanged(sessionId, submittedDraft) {
 
 function renderComposerTarget() {
   const targeted = Boolean(state.targetedThread);
-  const orchestratorActive = Boolean(effectiveActiveRun(currentSnapshot(), state.currentId));
+  const orchestratorActive = Boolean(currentSnapshot()?.active_run);
   const compacting = sessionCompactionBusy(state.currentId);
   el.composerTarget.hidden = !targeted;
   el.composerTargetName.textContent = state.targetedThread || "";
@@ -4176,20 +4243,19 @@ async function submitComposer(event) {
   }
 
   const target = state.targetedThread;
-  const activeAtSubmission = !target && Boolean(effectiveActiveRun(state.snapshots.get(sessionId), sessionId));
+  const activeAtSubmission = !target && Boolean(state.snapshots.get(sessionId)?.active_run);
   const submission = { sessionId, target };
   state.submittingSessions.add(sessionId);
   el.sendPrompt.disabled = true;
-  if (!target && state.focusView?.type === "orchestrator") {
-    state.orchestratorViewport = { sessionId, pinnedToBottom: true, scrollTop: 0 };
-  }
   const contextIsCurrent = () => state.currentId === sessionId;
   const clearSubmittedInput = () => clearComposerDraftIfUnchanged(sessionId, rawInput);
   const notify = (message, error = false) => {
     if (contextIsCurrent()) showToast(message, error);
   };
   const noteAcceptedRun = (accepted) => {
-    captureAcceptedRun(sessionId, accepted, input, state.snapshots.get(sessionId));
+    // Optimistic echo for the accept → first-commit-point window; cleared
+    // when the canonical user message lands in a refetched snapshot.
+    notePendingEcho(sessionId, accepted?.run_id, accepted?.display_prompt ?? input);
     noteSessionRunEvent(sessionId, "run_started");
     clearSubmittedInput();
     notify("Run started");
@@ -4214,7 +4280,7 @@ async function submitComposer(event) {
         const runEnded = error.status === 409 && /no active run|finishing/i.test(error.message);
         if (!runEnded) throw error;
         const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: input });
-        captureAcceptedRun(sessionId, accepted, input, state.snapshots.get(sessionId));
+        notePendingEcho(sessionId, accepted?.run_id, accepted?.display_prompt ?? input);
         noteSessionRunEvent(sessionId, "run_started");
         steered = false;
       }
@@ -4279,7 +4345,7 @@ function renderCommandMenu() {
   el.commandMenu.hidden = false;
   el.promptInput.setAttribute?.("aria-expanded", "true");
   el.promptInput.setAttribute?.("aria-activedescendant", commandOptionId(matches[state.commandIndex].name));
-  el.commandMenu.innerHTML = matches.map((command, index) => `<button id="${commandOptionId(command.name)}" class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" role="option" aria-selected="${index === state.commandIndex}" tabindex="-1" data-command-option="${command.name}"><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></button>`).join("");
+  el.commandMenu.innerHTML = matches.map((command, index) => `<button id="${commandOptionId(command.name)}" class="command-option ${index === state.commandIndex ? "is-active" : ""}" type="button" role="option" aria-selected="${index === state.commandIndex}" tabindex="-1" data-command-option="${command.name}"><span class="command-name">/${command.name}</span><span>${escapeHtml(command.description)}</span></button>`).join("");
 }
 
 function handleComposerKeydown(event) {
@@ -4316,85 +4382,18 @@ function runCommand(name) {
   if (state.currentId) state.composerDrafts.set(state.currentId, "");
   resizeComposer();
   if (name === "worksets") openFocusView("worksets");
-  else if (name === "transcript") openFocusView("orchestrator");
   else if (name === "workspace") openFocusView("workspace");
   else if (name === "info") openFocusView("info");
   else if (name === "settings") openFocusView("settings");
-  else if (name === "help") showHelpDrawer();
+  else if (name === "help") openFocusView("help");
   else if (name === "stop") stopActiveRun();
   else if (name === "rename") renameCurrentSession();
   else if (name === "delete") deleteCurrentSession();
   else if (name === "clear") clearThreadTarget();
 }
 
-function setAppModalState(active) {
-  if (!el.app) return;
-  el.app.inert = Boolean(active);
-  if (active) {
-    el.app.setAttribute("inert", "");
-    el.app.setAttribute("aria-hidden", "true");
-  } else {
-    el.app.removeAttribute("inert");
-    el.app.removeAttribute("aria-hidden");
-  }
-}
-
-function drawerFocusableElements() {
-  const selector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
-  return [...(el.utilityDrawer?.querySelectorAll?.(selector) || [])]
-    .filter((item) => !item.hidden && item.getAttribute?.("aria-hidden") !== "true");
-}
-
-function openDrawer(title, html, view = "detail") {
-  if (el.utilityDrawer.hidden) state.drawerOpener = captureFocusTarget(document.activeElement);
-  el.drawerTitle.textContent = title;
-  el.drawerContent.innerHTML = html;
-  el.utilityDrawer.dataset.view = view;
-  el.drawerBackdrop.hidden = false;
-  el.utilityDrawer.hidden = false;
-  el.closeDrawer.focus({ preventScroll: true });
-  setAppModalState(true);
-}
-
-function closeDrawer() {
-  const wasOpen = !el.utilityDrawer.hidden;
-  const returnTarget = state.drawerOpener;
-  state.drawerOpener = null;
-  el.drawerBackdrop.hidden = true;
-  el.utilityDrawer.hidden = true;
-  el.drawerContent.innerHTML = "";
-  setAppModalState(false);
-  if (wasOpen) requestAnimationFrame(() => restoreFocusTarget(returnTarget));
-}
-
-function handleDrawerKeydown(event) {
-  if (el.utilityDrawer.hidden) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    closeDrawer();
-    return;
-  }
-  if (event.key !== "Tab") return;
-  const focusable = drawerFocusableElements();
-  if (!focusable.length) {
-    event.preventDefault();
-    el.utilityDrawer.focus?.({ preventScroll: true });
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable.at(-1);
-  if (event.shiftKey && (document.activeElement === first || !el.utilityDrawer.contains?.(document.activeElement))) {
-    event.preventDefault();
-    last.focus({ preventScroll: true });
-  } else if (!event.shiftKey && (document.activeElement === last || !el.utilityDrawer.contains?.(document.activeElement))) {
-    event.preventDefault();
-    first.focus({ preventScroll: true });
-  }
-}
-
-function showHelpDrawer() {
-  openDrawer("commands", `<div class="command-reference">${commands.map((command) => `<div><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></div>`).join("")}</div>`, "compact");
+function renderCommandReference() {
+  return `<div class="command-reference">${commands.map((command) => `<div><code>/${command.name}</code><span>${escapeHtml(command.description)}</span></div>`).join("")}</div>`;
 }
 
 async function reconcileCompletedSettingsSave(submission) {
@@ -4426,7 +4425,7 @@ function setSettingsFormStatus(formElement, message, error = false) {
   status.classList.toggle("is-error", error);
 }
 
-async function handleDrawerSubmit(event) {
+async function handleFocusPanelSubmit(event) {
   if (event.target.id === "renameForm") {
     event.preventDefault();
     await saveSessionRename(event.target);
@@ -4508,10 +4507,9 @@ async function stopActiveRun() {
 }
 
 function renameCurrentSession() {
-  const entry = sessionEntry();
-  if (!entry) return;
-  openDrawer("rename session", `<form id="renameForm" class="settings-form"><label class="field span-two"><span>session title</span><input name="title" maxlength="120" autocomplete="off" value="${escapeAttr(entry.summary.title || "")}" placeholder="${escapeAttr(shortId(entry.summary.session_id))}"></label><div class="settings-actions"><span class="form-status" data-rename-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-primary" type="submit">save title</button></div></form>`, "compact");
-  requestAnimationFrame(() => el.drawerContent.querySelector('input[name="title"]')?.focus());
+  if (!sessionEntry()) return;
+  openFocusView("rename");
+  requestAnimationFrame(() => el.focusContent.querySelector('input[name="title"]')?.focus());
 }
 
 async function saveSessionRename(formElement) {
@@ -4528,7 +4526,7 @@ async function saveSessionRename(formElement) {
     });
     renderWorkspace();
     renderPicker();
-    closeDrawer();
+    closeFocusView();
     showToast("Session renamed");
   } catch (error) {
     status.textContent = error.message;
@@ -4537,9 +4535,8 @@ async function saveSessionRename(formElement) {
 }
 
 function deleteCurrentSession() {
-  const entry = sessionEntry();
-  if (!entry) return;
-  openDrawer("delete session", `<form id="deleteSessionForm" class="settings-form" data-session-id="${escapeAttr(entry.summary.session_id)}"><div class="span-two"><p class="workset-goal">Delete <strong>${escapeHtml(displaySessionTitle(entry.summary))}</strong> and its transcript, worksets, retained episodes, and steering history. This cannot be undone.</p></div><div class="settings-actions"><span class="form-status" data-delete-status role="status" aria-live="polite" aria-atomic="true"></span><button class="button button-danger" type="submit">delete permanently</button></div></form>`, "compact");
+  if (!sessionEntry()) return;
+  openFocusView("delete");
 }
 
 async function confirmSessionDeletion(formElement) {
@@ -4547,7 +4544,7 @@ async function confirmSessionDeletion(formElement) {
   const sessionId = String(formElement.dataset?.sessionId || state.currentId || "");
   if (!sessionId) return;
   const ownsView = () => state.currentId === sessionId
-    && el.drawerContent?.querySelector?.("#deleteSessionForm") === formElement;
+    && el.focusContent?.querySelector?.("#deleteSessionForm") === formElement;
   status.textContent = "Deleting…";
   try {
     await apiDelete(`/sessions/${encodeURIComponent(sessionId)}`);
@@ -4772,7 +4769,7 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
   return `<dl class="launch-default-values">
     <div><dt>Configured backend</dt><dd>${escapeHtml(backend)}</dd></div>
     <div><dt>Configured base URL</dt><dd>${escapeHtml(baseUrl)}</dd></div>
-  </dl>${managedHtml}<p class="launch-default-scope">This preview reports configured backend and base URL only. It does not validate model availability or whether stored or named credentials will work; session creation may still fail.</p>`;
+  </dl>${managedHtml}<p class="launch-default-scope">Preview only — session creation validates these settings.</p>`;
 }
 
 function renderLaunchDefaultsPreview() {
@@ -4980,8 +4977,7 @@ function handleGlobalKeydown(event) {
     event.preventDefault();
     el.promptInput.focus();
   }
-  if (event.key === "Escape" && !el.utilityDrawer.hidden) closeDrawer();
-  else if (event.key === "Escape" && state.focusView) closeFocusView();
+  if (event.key === "Escape" && state.focusView) closeFocusView();
 }
 
 function showToast(message, error = false) {
@@ -4990,14 +4986,17 @@ function showToast(message, error = false) {
   const inactive = target === el.sessionNavStatus ? el.pickerNavStatus : el.sessionNavStatus;
   inactive.hidden = true;
   inactive.textContent = "";
+  inactive.classList.remove("is-toast");
   target.textContent = message;
   target.title = message;
   target.classList.toggle("is-error", error);
+  target.classList.add("is-toast");
   target.hidden = false;
   state.statusTimer = window.setTimeout(() => {
     target.hidden = true;
     target.textContent = "";
     target.removeAttribute("title");
+    target.classList.remove("is-toast");
   }, error ? 5_500 : 2_500);
 }
 

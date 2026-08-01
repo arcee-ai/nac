@@ -1015,7 +1015,13 @@ async fn build_resume_config_from_snapshot(
             thread_timeout_secs: worker_thread_timeout_secs(config),
         },
     )?;
-    agent.restore_messages(snapshot.messages.clone());
+    // Restore is blob ++ transcript log: rows the crashed previous run
+    // appended after the last snapshot save are merged over the blob, and a
+    // dangling tool turn is trimmed from both (crash-resume normalization).
+    // An empty log tail is exactly the pre-log restore path.
+    agent
+        .restore_messages_merging_log_tail(snapshot.messages.clone())
+        .await?;
     agent.restore_compaction_checkpoint()?;
 
     let session_id = snapshot.session_id.clone();

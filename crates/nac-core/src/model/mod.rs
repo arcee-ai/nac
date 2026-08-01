@@ -8,6 +8,14 @@ use url::Url;
 
 use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
+fn backoff_duration(attempt: usize) -> Duration {
+    let base_ms = 200u64;
+    let delay_ms = std::cmp::min(base_ms.saturating_mul(1 << attempt), 30_000);
+    // rand::random::<f64>() samples [0, 1), so the jitter multiplier spans [0.9, 1.1).
+    let jitter = 0.9 + rand::random::<f64>() * 0.2;
+    Duration::from_millis((delay_ms as f64 * jitter) as u64)
+}
+
 mod anthropic;
 mod arcee;
 mod auth_store;
@@ -248,6 +256,25 @@ mod tests {
             .collect::<Vec<_>>();
         names.sort();
         names
+    }
+
+    #[test]
+    fn backoff_duration_stays_within_jitter_bounds() {
+        for attempt in 0..10usize {
+            let base_ms = std::cmp::min(200u64.saturating_mul(1 << attempt), 30_000);
+            // Multiplier must span [0.9, 1.1): inclusive bounds with one
+            // ulp of slack for f64 rounding at the top edge.
+            let lower = (base_ms as f64 * 0.9) as u64;
+            let upper = (base_ms as f64 * 1.1) as u64;
+            for _ in 0..200 {
+                let delay = backoff_duration(attempt);
+                assert!(
+                    delay >= Duration::from_millis(lower)
+                        && delay <= Duration::from_millis(upper),
+                    "attempt {attempt} produced {delay:?} outside [{lower}ms, {upper}ms]"
+                );
+            }
+        }
     }
 
     #[test]

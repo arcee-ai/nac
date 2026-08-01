@@ -134,16 +134,6 @@ fn assert_current_schema(conn: &Connection) {
         .iter()
         .any(|column| column == "orchestrator_compaction_threshold"));
     assert_eq!(
-        table_columns(conn, "session_overviews"),
-        [
-            "session_id",
-            "summary",
-            "model",
-            "generated_at",
-            "source_updated_at"
-        ]
-    );
-    assert_eq!(
         table_columns(conn, "thread_steering"),
         [
             "id",
@@ -168,7 +158,7 @@ fn assert_current_schema(conn: &Connection) {
             "created_at"
         ]
     );
-    for table in ["session_overviews", "thread_steering", "thread_events"] {
+    for table in ["thread_steering", "thread_events"] {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
@@ -294,27 +284,13 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
     legacy
         .execute_batch(
             "PRAGMA user_version = 0;
-             CREATE TABLE session_overviews (
-                 session_id TEXT PRIMARY KEY,
-                 status TEXT NOT NULL,
-                 focus_json TEXT NOT NULL,
-                 completed_json TEXT NOT NULL,
-                 blockers_json TEXT NOT NULL,
-                 next_steps_json TEXT NOT NULL,
-                 model TEXT NOT NULL,
-                 generated_at TEXT NOT NULL,
-                 source_updated_at TEXT NOT NULL
-             );
-             CREATE TABLE thread_events (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 session_id TEXT NOT NULL,
-                 thread_name TEXT NOT NULL,
-                 event_json TEXT NOT NULL,
-                 created_at TEXT NOT NULL
-             );
-             INSERT INTO session_overviews VALUES
-                 ('owned', 'legacy summary', '[]', '[]', '[]', '[]',
-                  'model-a', 'generated', 'source');
+              CREATE TABLE thread_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  session_id TEXT NOT NULL,
+                  thread_name TEXT NOT NULL,
+                  event_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+              );
              INSERT INTO thread_events
                  (id, session_id, thread_name, event_json, created_at)
              VALUES (8, 'owned', 'pre-episode-worker',
@@ -328,12 +304,6 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 
     let migrated = Connection::open(&path).unwrap();
     assert_current_schema(&migrated);
-    let summary: String = migrated
-        .query_row("SELECT summary FROM session_overviews", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(summary, "legacy summary");
     let event: (i64, String) = migrated
         .query_row("SELECT id, thread_name FROM thread_events", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -355,17 +325,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
              PRAGMA user_version = 1;
-             CREATE TABLE session_overviews (
-                 session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                 status TEXT NOT NULL,
-                 focus_json TEXT NOT NULL,
-                 completed_json TEXT NOT NULL,
-                 blockers_json TEXT NOT NULL,
-                 next_steps_json TEXT NOT NULL,
-                 model TEXT NOT NULL,
-                 generated_at TEXT NOT NULL,
-                 source_updated_at TEXT NOT NULL
-             );
              CREATE TABLE thread_steering (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  session_id TEXT NOT NULL,
@@ -383,12 +342,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
                  event_json TEXT NOT NULL,
                  created_at TEXT NOT NULL
              );
-             INSERT INTO session_overviews VALUES
-                 ('owned', 'owned summary', '[]', '[]', '[]', '[]',
-                  'model-a', 'generated-a', 'source-a');
-             INSERT INTO session_overviews VALUES
-                 ('orphan', 'secret orphan', '[]', '[]', '[]', '[]',
-                  'model-b', 'generated-b', 'source-b');
              INSERT INTO thread_steering VALUES
                  (7, 'owned', 'worker', 'queued instruction', 'queued',
                   'created-7', NULL, NULL);
@@ -403,7 +356,7 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
                   'created-13', NULL, NULL);
              INSERT INTO thread_events VALUES
                  (20, 'owned', 'worker-without-thread-row',
-                  '{\"type\":\"tool_call_started\",\"thread_name\":\"worker-without-thread-row\",\"call_id\":\"call-20\",\"name\":\"exec_command\",\"args_preview\":\"CANARY_COMMAND\",\"args_detail\":\"{\\\"cmd\\\":\\\"CANARY_COMMAND\\\",\\\"workdir\\\":\\\"/safe/work\\\"}\"}',
+                  '{\"type\":\"tool_call_started\",\"thread_name\":\"worker-without-thread-row\",\"call_id\":\"call-20\",\"name\":\"exec_command\",\"args_preview\":\"CANARY_COMMAND\",\"args_detail\":\"{\\\"cmd\\\":\\\"echo safe_cmd\\\",\\\"workdir\\\":\\\"/safe/work\\\"}\"}',
                   'created-20');
              INSERT INTO thread_events VALUES
                  (21, 'owned', 'worker-without-thread-row',
@@ -421,23 +374,6 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
 
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
-    let overview: (String, String, String, String) = migrated
-        .query_row(
-            "SELECT summary, model, generated_at, source_updated_at
-             FROM session_overviews",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        overview,
-        (
-            "owned summary".to_string(),
-            "model-a".to_string(),
-            "generated-a".to_string(),
-            "source-a".to_string()
-        )
-    );
 
     let steering = migrated
         .prepare(
@@ -497,10 +433,12 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
             call_id,
             args_preview,
             args_detail: None,
+            key_arg_preview,
             ..
         } if call_id == "call-20"
             && args_preview.contains("/safe/work")
             && args_preview.contains("execute")
+            && key_arg_preview.as_deref() == Some("echo safe_cmd")
     ));
     let migrated_event_count: i64 = migrated
         .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
@@ -526,6 +464,102 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
         .unwrap();
     assert!(migrated.last_insert_rowid() > 25);
 
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn transcript_log_rows_survive_thread_events_rebuild_migration() {
+    // Pins the invariant that the thread_events sanitize-drop rebuild (and any
+    // future rebuild-migration) carries transcript log rows through verbatim.
+    // Current v3 DBs never re-run this migration, but the assertion keeps the
+    // pattern honest for future rebuilds.
+    let path = temp_store_path("transcript_survival");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    create_legacy_base(&legacy);
+    insert_legacy_session(&legacy, "owned");
+    let transcript_zero = crate::store::encode_transcript_log_entry(
+        0,
+        &crate::types::Message::User {
+            content: "prompt".to_string(),
+        },
+    )
+    .unwrap();
+    let transcript_one = crate::store::encode_transcript_log_entry(
+        1,
+        &crate::types::Message::Assistant {
+            content: Some("answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        },
+    )
+    .unwrap();
+    legacy
+        .execute_batch(
+            "PRAGMA user_version = 1;
+             CREATE TABLE thread_events (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 session_id TEXT NOT NULL,
+                 thread_name TEXT NOT NULL,
+                 event_json TEXT NOT NULL,
+                 created_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+    for (id, thread_name, event_json) in [
+        (30, "__orchestrator__", transcript_zero.as_str()),
+        (31, "__orchestrator__", transcript_one.as_str()),
+        (
+            32,
+            "worker",
+            "{\"type\":\"thread_started\",\"name\":\"worker\",\"action\":\"legacy action\",\"source_threads\":[]}",
+        ),
+        (33, "worker", "{malformed"),
+    ] {
+        legacy
+            .execute(
+                "INSERT INTO thread_events
+                     (id, session_id, thread_name, event_json, created_at)
+                 VALUES (?1, 'owned', ?2, ?3, 'created')",
+                params![id, thread_name, event_json],
+            )
+            .unwrap();
+    }
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    let rows = migrated
+        .prepare("SELECT id, thread_name, event_json FROM thread_events ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    // Transcript rows survive byte-identical; the valid AgentEvent row is
+    // sanitized and kept; the malformed row is dropped.
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        (30, "__orchestrator__".to_string(), transcript_zero)
+    );
+    assert_eq!(
+        rows[1],
+        (31, "__orchestrator__".to_string(), transcript_one)
+    );
+    assert_eq!(rows[2].0, 32);
+    assert_eq!(rows[2].1, "worker");
+    assert!(serde_json::from_str::<crate::events::AgentEvent>(&rows[2].2).is_ok());
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

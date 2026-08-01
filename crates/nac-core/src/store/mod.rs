@@ -7,19 +7,19 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 pub(crate) mod orchestrator_compaction;
 mod render;
 mod schema;
-mod session_overviews;
 mod steering;
 mod thread_events;
 mod threads;
 mod time;
+mod transcript;
 mod worksets;
 
 pub use render::*;
 pub use schema::{default_store_path, initialize};
-pub use session_overviews::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
+pub use transcript::*;
 pub use worksets::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};
@@ -280,6 +280,79 @@ mod tests {
     }
 
     #[test]
+    fn delete_thread_rejects_reserved_orchestrator_target() {
+        let store_path = temp_store_path("delete_reserved");
+        initialize(&store_path).unwrap();
+        insert_test_session(&store_path, "session-c");
+
+        // Transcript log rows and orchestrator steering live under the
+        // reserved name without any threads row.
+        let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append(
+                "session-c",
+                0,
+                &crate::types::Message::User {
+                    content: "prompt".to_string(),
+                },
+            )
+            .unwrap();
+        writer
+            .append(
+                "session-c",
+                1,
+                &crate::types::Message::Assistant {
+                    content: Some("answer".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+            )
+            .unwrap();
+        queue_thread_steering(
+            &store_path,
+            "session-c",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "dispatch-1",
+            "instruction",
+        )
+        .unwrap();
+        append_episode(&store_path, "session-c", "keep", "step", "episode").unwrap();
+
+        let error = delete_thread(
+            &store_path,
+            "session-c",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("reserved"));
+
+        // Nothing was deleted: transcript and steering rows survive intact.
+        assert_eq!(writer.read_from("session-c", 0).unwrap().len(), 2);
+        let conn = open_runtime_connection(&store_path).unwrap();
+        for table in ["thread_steering", "thread_events"] {
+            let count: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table}
+                         WHERE session_id = 'session-c' AND thread_name = '__orchestrator__'"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let expected = if table == "thread_events" { 2 } else { 1 };
+            assert_eq!(count, expected, "reserved rows lost from {table}");
+        }
+        drop(conn);
+
+        // Normal deletes are unaffected.
+        assert!(delete_thread(&store_path, "session-c", "keep").unwrap());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn define_read_and_list_worksets() {
         let store_path = temp_store_path("worksets");
         initialize(&store_path).unwrap();
@@ -303,7 +376,7 @@ mod tests {
                 },
                 WorksetItemDefinition {
                     title: "Implement auth state update".to_string(),
-                    scope: "crates/nac-tui/src/tui/mod.rs".to_string(),
+                    scope: "crates/nac-core/src/store/mod.rs".to_string(),
                     description: "Apply the focused code change.".to_string(),
                     role: "implement".to_string(),
                     depends_on: vec!["Inspect auth state handling".to_string()],

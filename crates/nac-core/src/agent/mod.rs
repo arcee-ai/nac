@@ -23,6 +23,8 @@ mod tool_exec;
 mod compaction_integration_tests;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod transcript_log_tests;
 
 #[cfg(test)]
 pub(crate) use compaction::checkpoint_digests as compaction_checkpoint_digests_for_test;
@@ -33,6 +35,7 @@ pub(crate) use compaction::{
 };
 use compaction::{CompactionState, PreparedProviderView};
 use preview::*;
+pub(crate) use preview::key_arg_preview;
 use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
@@ -77,9 +80,20 @@ pub struct Agent {
     thread_name: Option<String>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
+    /// Orchestrator transcript log sink (DB-direct transcript workset, see
+    /// store/transcript.rs). Present only for orchestrator agents with a
+    /// session id — workers (separate `__worker` processes) never log.
+    transcript_log: Option<TranscriptLogSink>,
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
+}
+
+/// Connection and identity needed to append to the orchestrator transcript
+/// log. The writer is shared into `spawn_blocking` closures per append.
+struct TranscriptLogSink {
+    writer: Arc<crate::store::TranscriptLogWriter>,
+    session_id: String,
 }
 
 fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
@@ -89,6 +103,45 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
     if let Some(Message::System { content }) = messages.first_mut() {
         content.push_str("\n\n");
         content.push_str(extra);
+    }
+}
+
+/// Trim a trailing assistant tool-call turn whose tool results never arrived
+/// (a crash or cancel between the assistant message and the tool-result
+/// batch). Shared by the session cancel path and the transcript-log restore
+/// merge, which also removes the matching log tail.
+pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
+    let Some(index) = messages.iter().rposition(|message| {
+        matches!(
+            message,
+            Message::Assistant {
+                tool_calls: Some(tool_calls),
+                ..
+            } if !tool_calls.is_empty()
+        )
+    }) else {
+        return;
+    };
+    let Message::Assistant {
+        tool_calls: Some(tool_calls),
+        ..
+    } = &messages[index]
+    else {
+        return;
+    };
+    let expected = tool_calls
+        .iter()
+        .map(|tool_call| tool_call.id.as_str())
+        .collect::<HashSet<_>>();
+    let observed = messages[index + 1..]
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    if !expected.is_subset(&observed) {
+        messages.truncate(index);
     }
 }
 
@@ -107,6 +160,17 @@ impl Agent {
             })
         } else {
             None
+        };
+        // Construction-time gate for the transcript log: orchestrator-only,
+        // and only with a session id (mirrors the compaction gate). Worker
+        // agents run in separate `__worker` processes and must never write
+        // `__orchestrator__` transcript rows.
+        let transcript_log = match (mode, config.session_id.clone()) {
+            (AgentMode::Orchestrator, Some(session_id)) => Some(TranscriptLogSink {
+                writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
+                session_id,
+            }),
+            _ => None,
         };
 
         let (system_prompt, mut tool_defs) = match config.mode {
@@ -299,6 +363,7 @@ impl Agent {
             thread_name: config.thread_name,
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
+            transcript_log,
             last_usage: None,
         })
     }
@@ -355,12 +420,24 @@ impl Agent {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
         });
-        self.messages.push(Message::User {
-            content: prompt.to_string(),
-        });
         // `last_usage` is per-send. Clearing it prevents a cancellation before
         // the first current model response from persisting a previous run's usage.
         self.last_usage = None;
+        // Transcript commit point (prompt): the prompt is durable in the log
+        // before the first model call. A log failure is fatal to the run.
+        if let Err(error) = self
+            .push_and_log(Message::User {
+                content: prompt.to_string(),
+            })
+            .await
+        {
+            self.emit(AgentEvent::Error {
+                thread_name: self.thread_name.clone(),
+                message: error.to_string(),
+            });
+            self.tool_runtime.terminal_manager.remove_all().await;
+            return Err(error);
+        }
 
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
@@ -458,12 +535,26 @@ impl Agent {
                 .map(|tool_calls| !tool_calls.is_empty())
                 .unwrap_or(false);
 
-            self.messages.push(Message::Assistant {
-                content: response.assistant.content.clone(),
-                reasoning_text: response.assistant.reasoning_text.clone(),
-                reasoning_details: response.assistant.reasoning_details.clone(),
-                tool_calls: response.assistant.tool_calls.clone(),
-            });
+            // Transcript commit point (assistant): durable at push.
+            if let Err(error) = self
+                .push_and_log(Message::Assistant {
+                    content: response.assistant.content.clone(),
+                    reasoning_text: response.assistant.reasoning_text.clone(),
+                    reasoning_details: response.assistant.reasoning_details.clone(),
+                    tool_calls: response.assistant.tool_calls.clone(),
+                })
+                .await
+            {
+                // Preserve accumulated usage, mirroring the model-call error
+                // path above.
+                self.last_usage = Some(accumulated_usage.clone());
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Err(error);
+            }
             if let Some(compaction) = &mut self.compaction {
                 compaction.record_ordinary_context(
                     &self.messages,
@@ -515,14 +606,26 @@ impl Agent {
 
             self.last_usage = Some(accumulated_usage.clone());
 
-            for (tool_call_id, _tool_name, result) in results {
-                self.messages.push(Message::Tool {
+            let tool_messages = results
+                .into_iter()
+                .map(|(tool_call_id, _tool_name, result)| Message::Tool {
                     tool_call_id,
                     content: result.content,
+                })
+                .collect::<Vec<_>>();
+            // Transcript commit point (tool results): the complete parallel
+            // batch is logged atomically before any of it enters the
+            // transcript, so the loop re-enters provider-view preparation
+            // only after the complete batch is both durable and appended.
+            if let Err(error) = self.push_batch_and_log(tool_messages).await {
+                self.last_usage = Some(accumulated_usage.clone());
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
                 });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Err(error);
             }
-            // The loop re-enters provider-view preparation only after the
-            // complete parallel tool-result batch has been appended.
         }
     }
 
@@ -561,6 +664,21 @@ impl Agent {
         self.appended_steering_ids.clear();
     }
 
+    /// Shared handle to the transcript log writer, present only for
+    /// orchestrator agents with a session id. The session service reads the
+    /// log through the same writer for store-backed transcript reads (step
+    /// 3), so reads and appends serialize on one connection.
+    pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
+        self.transcript_log
+            .as_ref()
+            .map(|sink| sink.writer.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn push_and_log_for_test(&mut self, message: Message) -> Result<()> {
+        self.push_and_log(message).await
+    }
+
     /// Restore a stored transcript while keeping the current system prompt.
     pub fn restore_messages(&mut self, mut messages: Vec<Message>) {
         if let Some(Message::System { content: stored }) = messages.first_mut() {
@@ -572,6 +690,177 @@ impl Agent {
         if let Some(compaction) = &mut self.compaction {
             compaction.reset_for_transcript_replacement();
         }
+    }
+
+    /// Restore from a snapshot blob, then merge any transcript-log tail (rows
+    /// with `idx >= blob.len()`) left behind by a crashed run, and normalize
+    /// a dangling tool turn in both the restored transcript and the log
+    /// (crash-resume normalization). An empty log tail is exactly
+    /// [`Agent::restore_messages`] — the pre-log behavior.
+    ///
+    /// The merge fails loudly when the tail is not contiguous with the blob:
+    /// appends are log-first and `idx` is the absolute Vec index, so a gap
+    /// means the log and the snapshot disagree about the transcript.
+    pub async fn restore_messages_merging_log_tail(
+        &mut self,
+        messages: Vec<Message>,
+    ) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            self.restore_messages(messages);
+            return Ok(());
+        };
+        let blob_len = messages.len();
+        let tail = {
+            let writer = sink.writer.clone();
+            let session_id = sink.session_id.clone();
+            tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len as u64))
+                .await
+                .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
+        };
+        if tail.is_empty() {
+            self.restore_messages(messages);
+            return Ok(());
+        }
+
+        let mut merged = messages;
+        let mut expected_idx = blob_len as u64;
+        for (idx, message) in tail {
+            if idx != expected_idx {
+                return Err(anyhow!(
+                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
+                ));
+            }
+            merged.push(message);
+            expected_idx += 1;
+        }
+
+        let merged_len = merged.len();
+        truncate_incomplete_tool_turn(&mut merged);
+        if merged.len() < merged_len {
+            self.delete_log_tail(merged.len() as u64).await?;
+        }
+        self.restore_messages(merged);
+        Ok(())
+    }
+
+    /// Trim a dangling tool turn from the transcript AND the transcript log
+    /// tail. Shared by the run-failure path
+    /// (`SessionService::finish_run_once`) and the cancel path
+    /// (`Agent::append_cancellation_marker`, which additionally logs a
+    /// marker). A run that fails at the tool-result commit point leaves the
+    /// assistant tool-call message in the vec AND the log with its tool
+    /// results in neither; the agent is long-lived, so the next run would
+    /// reuse that dirty transcript and providers would reject it (assistant
+    /// tool calls with no tool results) until re-attach.
+    ///
+    /// The log tail is deleted unconditionally (not only when the vec was
+    /// trimmed): a run-task abort cannot interrupt a `spawn_blocking` append
+    /// once started, so the log can hold a straggler row at `messages.len()`
+    /// that the vec never saw — without the delete, the next append would
+    /// reuse that idx and leave duplicate-idx rows for the restore merge.
+    /// Both terminal paths treat a normalization error as best-effort: the
+    /// next restore re-normalizes the stale tail.
+    pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
+        truncate_incomplete_tool_turn(&mut self.messages);
+        self.delete_log_tail(self.messages.len() as u64).await
+    }
+
+    /// Cancellation normalization for the session cancel path: trim a
+    /// dangling tool turn from the transcript AND the log tail (see
+    /// [`Agent::normalize_dangling_tail`]), then append and log the
+    /// cancellation marker. On a log error the marker is not appended at
+    /// all — deliberately: a snapshot that ends at the trimmed length lets
+    /// the next restore re-normalize the stale log tail, while a persisted
+    /// marker would cover the stale rows and resurrect orphaned tool results
+    /// into the provider view.
+    pub async fn append_cancellation_marker(&mut self) -> Result<()> {
+        self.normalize_dangling_tail().await?;
+        self.push_and_log(Message::Assistant {
+            content: Some("[run cancelled by user]".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        })
+        .await
+    }
+
+    /// Append `messages` to the transcript log at absolute positions
+    /// `start_idx..` via `spawn_blocking` (steering-claim precedent). A no-op
+    /// for agents without a transcript log (workers, picker sessions).
+    async fn log_transcript_batch(&self, start_idx: u64, messages: &[Message]) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(());
+        };
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let messages = messages.to_vec();
+        let batch_len = messages.len() as u64;
+        tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
+            .await
+            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Live trigger (step 3): emitted after the log commit, before the
+        // vec push — the store-backed read path sees the rows immediately.
+        self.event_sink.emit_transcript_appended(start_idx + batch_len);
+        Ok(())
+    }
+
+    /// Append one message to the transcript log at absolute position `idx`
+    /// via `spawn_blocking`. A no-op for agents without a transcript log.
+    async fn log_transcript_message(&self, idx: u64, message: &Message) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(());
+        };
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let message = message.clone();
+        tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
+            .await
+            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Live trigger (step 3): see log_transcript_batch.
+        self.event_sink.emit_transcript_appended(idx + 1);
+        Ok(())
+    }
+
+    /// Push one message into the transcript, appending it to the log first
+    /// (log-first: the vec never holds an undurable message). `idx` is the
+    /// absolute Vec index — `messages.len()` before the push.
+    async fn push_and_log(&mut self, message: Message) -> Result<()> {
+        let idx = self.messages.len() as u64;
+        self.log_transcript_message(idx, &message).await?;
+        self.messages.push(message);
+        Ok(())
+    }
+
+    /// Push a batch into the transcript atomically: the whole batch is
+    /// logged in one transaction before any of it enters the vec.
+    async fn push_batch_and_log(&mut self, messages: Vec<Message>) -> Result<()> {
+        let start_idx = self.messages.len() as u64;
+        self.log_transcript_batch(start_idx, &messages).await?;
+        self.messages.extend(messages);
+        Ok(())
+    }
+
+    /// Append the already-staged transcript tail `self.messages[from_idx..]`
+    /// to the log (steering commit point: stage→ack→append).
+    async fn log_transcript_tail(&self, from_idx: usize) -> Result<()> {
+        let staged = self.messages[from_idx..].to_vec();
+        self.log_transcript_batch(from_idx as u64, &staged).await
+    }
+
+    /// Delete log rows with `idx >= from_idx` (crash/cancel normalization).
+    async fn delete_log_tail(&self, from_idx: u64) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(());
+        };
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
+            .await
+            .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        Ok(())
     }
 
     /// Restore the newest checkpoint that still validates against the complete
@@ -643,6 +932,24 @@ impl Agent {
             for id in &staged_ids {
                 self.appended_steering_ids.remove(id);
             }
+            return Err(error);
+        }
+
+        // Transcript commit point (steering): stage→ack→append. The staged
+        // messages are appended to the log only after the ack is durable. On
+        // log failure they are truncated from the vec — unlike the
+        // ack-failure path above, the ids stay staged because the ack is
+        // durable: the records keep their delivered status and are never
+        // redelivered. Keeping the messages would break the log-first
+        // invariant (the vec never holds an undurable message): the next
+        // append would use `idx = messages.len()` past the unlogged rows,
+        // leaving a permanent gap in the log that fails the restore merge
+        // and store-backed reads. The acked steering is thereby lost from
+        // the transcript — accepted: a transient echo is not worth a
+        // bricked session, and the durable steering records still show the
+        // delivery.
+        if let Err(error) = self.log_transcript_tail(message_checkpoint).await {
+            self.messages.truncate(message_checkpoint);
             return Err(error);
         }
 

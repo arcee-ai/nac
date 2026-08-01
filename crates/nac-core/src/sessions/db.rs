@@ -35,6 +35,72 @@ pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     Ok(())
 }
 
+/// Messages-sparing run-end save (DB-direct transcript workset, step 4 —
+/// never-fold): UPDATEs only run-state and row-context columns.
+/// `messages_json` is written once at session creation
+/// (`insert_or_replace_session`) and never rewritten at run end — the live
+/// transcript is the orchestrator transcript log (store/transcript.rs), so
+/// the blob stays the system head ++ legacy prefix forever. Model
+/// configuration columns stay CAS-only (`update_raw_session_config`).
+///
+/// Errors when the session row is missing: run end of a persisted session
+/// always has its row (the transcript log appends FK-require it), so a
+/// missing row is corruption, not an upsert case.
+pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Result<()> {
+    let sandbox_json = update
+        .sandbox_spec
+        .as_ref()
+        .map(serialize_sandbox)
+        .transpose()?;
+    let response_durations_ms_json = update
+        .run_state
+        .response_durations_ms
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .context("failed to serialize session response durations")?;
+    let token_usages_json = if update.run_state.token_usages.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&update.run_state.token_usages)
+                .context("failed to serialize session token usages")?,
+        )
+    };
+
+    let mut conn = crate::store::open_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let updated = tx.execute(
+        "UPDATE sessions
+         SET sandbox_json = ?1,
+             last_response_duration_ms = ?2,
+             previous_response_duration_ms = ?3,
+             response_durations_ms_json = ?4,
+             token_usages_json = ?5,
+             updated_at = ?6,
+             host_id = ?7
+         WHERE session_id = ?8",
+        params![
+            sandbox_json,
+            update.run_state.last_response_duration_ms,
+            update.run_state.previous_response_duration_ms,
+            response_durations_ms_json,
+            token_usages_json,
+            update.updated_at,
+            update.ssh_host,
+            update.session_id,
+        ],
+    )?;
+    if updated == 0 {
+        return Err(anyhow!(
+            "session '{}' was not found for the run-state save",
+            update.session_id
+        ));
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn update_session_config(
     path: &Path,
     snapshot: &SessionSnapshot,
@@ -514,7 +580,7 @@ fn query_session_summary(
             map_session_summary_row,
         )
         .optional()?;
-    row.map(SessionSummaryRow::into_summary).transpose()
+    row.map(|row| row.into_summary(conn)).transpose()
 }
 
 fn query_session_summaries(
@@ -557,9 +623,7 @@ fn query_session_summaries(
             .query_map([], map_session_summary_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
-    rows.into_iter()
-        .map(SessionSummaryRow::into_summary)
-        .collect()
+    rows.into_iter().map(|row| row.into_summary(conn)).collect()
 }
 
 fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummaryRow> {
@@ -601,7 +665,7 @@ struct SessionSummaryRow {
 }
 
 impl SessionSummaryRow {
-    fn into_summary(self) -> Result<SessionSummary> {
+    fn into_summary(self, conn: &rusqlite::Connection) -> Result<SessionSummary> {
         let diagnostics = model_config_diagnostics(
             self.backend_raw.as_deref(),
             self.reasoning_effort_raw.as_deref(),
@@ -621,6 +685,14 @@ impl SessionSummaryRow {
         };
         let messages: Vec<Message> = serde_json::from_str(&self.messages_json)
             .context("failed to parse stored session messages")?;
+        // Never-fold (step 4): messages_json is the write-once blob (system
+        // head ++ legacy prefix); the recent transcript is the orchestrator
+        // transcript log. Summary stats are blob stats ++ log stats (SQL
+        // aggregates over the log payload, no Message decode). A pre-log
+        // session has no log rows and gets exactly the pre-log numbers.
+        let log_visible =
+            crate::store::count_visible_transcript_log_messages(conn, &self.session_id)?;
+        let log_last_user = crate::store::last_transcript_log_user_prompt(conn, &self.session_id)?;
         Ok(SessionSummary {
             session_id: self.session_id,
             cwd,
@@ -628,8 +700,8 @@ impl SessionSummaryRow {
             model: self.model,
             backend,
             model_config_error: (!diagnostics.is_empty()).then(|| diagnostics.join("; ")),
-            visible_message_count: visible_message_count(&messages),
-            last_user_prompt: last_user_prompt(&messages),
+            visible_message_count: visible_message_count(&messages) + log_visible,
+            last_user_prompt: log_last_user.or_else(|| last_user_prompt(&messages)),
             sandboxed,
             ssh_host: self.ssh_host,
             title: self.title,
@@ -652,6 +724,16 @@ fn insert_or_replace_session(
         .as_ref()
         .map(serialize_sandbox)
         .transpose()?;
+    // NEVER-FOLD (DB-direct transcript workset, step 4): this is the only
+    // writer of messages_json — session creation and the legacy full upsert
+    // below. Run end never rewrites the blob (`save_session_run_state`):
+    // the live transcript is the orchestrator transcript log
+    // (store/transcript.rs) and the blob is the write-once system head ++
+    // legacy prefix. DOWNGRADE CAVEAT (user-accepted): builds older than
+    // the transcript-log workset read only messages_json, so they show this
+    // store's history truncated to the blob — invisibility, not corruption;
+    // the log rows are untouched and a current build reads the full
+    // transcript again.
     let messages_json = serde_json::to_string(&snapshot.messages)
         .context("failed to serialize session messages")?;
     let response_durations_ms_json = snapshot

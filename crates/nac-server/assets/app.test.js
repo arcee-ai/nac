@@ -44,15 +44,19 @@ function loadApp(overrides = {}) {
       reconcileSessionCompactionSnapshot, noteSessionCompactionEvent,
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
-      renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorConversation,
+      renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
+      renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch,
+      renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
+      formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
+      orchestratorGuidanceEntries, renderOrchestratorGuidance,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
       renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
-      normalizedSubmittedMessage, pendingMessageCoveredByCanonical, captureAcceptedRun,
-      effectiveActiveRun, effectivePendingMessages, reconcileAcceptedRun,
+      notePendingEcho, displayPromptFromMessage, pendingEchoCoveredByCanonical,
+      reconcilePendingEcho, effectivePendingMessages,
       responseDurationAssignments, runTimingPresentation, updateRuntimeMetric,
       threadCycleSeed, displaySessionTitle, shortId, basename, shortModel, formatNumber,
       formatTokenCount, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
@@ -60,19 +64,21 @@ function loadApp(overrides = {}) {
       displayedTokenUsage, usageRunId, orchestratorContextTokens, tokenUsageSummary,
       tokenUsageTitle, effortOptions, escapeHtml, rawHeadersFromConfig, settingsValuesFromConfig,
       serializeSettingsHeaders, buildSettingsPatch, loadFocusSettings, renderFocusSettings,
-      handleDrawerSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
+      handleFocusPanelSubmit, scheduleWorkspaceRender, renderWorkspace, renderComposerTarget,
       captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
-      restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, openDrawer,
-      closeDrawer, handleDrawerKeydown, renderConfigRepairGuidance, recordSessionEnvelope,
-      connectEventStream, worksetsPresentation, renderWorksetRail, renderWorksetsFocus,
+      restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
+      handleOrchestratorChatScroll,
+      setWorkspaceView, captureWorkspaceViewScroll, restoreWorkspaceViewScroll,
+      renderConfigRepairGuidance, recordSessionEnvelope,
+      connectEventStream, worksetsPresentation, renderWorksetsFocus,
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
-      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown, showHelpDrawer,
+      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -257,6 +263,7 @@ function fakeElement() {
     setAttribute(name, value) { attributes.set(name, String(value)); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     removeAttribute(name) { attributes.delete(name); },
+    querySelectorAll() { return []; },
     textContent: "", title: "", };
 }
 
@@ -265,9 +272,9 @@ function installWorkspaceElements(uiInstance) {
     hidden: false, innerHTML: "", querySelector() { return null; }, querySelectorAll() { return []; }, });
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
-    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun",
-    "refreshSession", "generatedOverview", "worksetRailSummary", "worksetRailCount",
-    "orchestratorState", "orchestratorLedger", "threadGrid", "composerTarget", "composerTargetName",
+    "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun", "viewToggle",
+    "orchestratorChatContent",
+    "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
     "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
   ]) uiInstance.el[name] = element();
@@ -291,10 +298,8 @@ test("production shell preserves privacy and mobile chat-only access", () => {
     assert.match(indexSource, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(indexSource, /Session Events/i);
-  assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(620px, 40vw\) minmax\(0, 1fr\)/s);
-  const mobile = redesignSource.match(/@media \(max-width: 780px\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(mobile, /\.focus-panel\.is-orchestrator \.focus-orchestrator-sidebar \{[^}]*display: none/);
+  assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\)/s);
+  assert.match(redesignSource, /\.orchestrator-chat-content \{/);
 });
 
 test("session opening renders the workspace and starts snapshot and SSE without removed-surface references", () => {
@@ -312,7 +317,7 @@ test("session opening renders the workspace and starts snapshot and SSE without 
   assert.doesNotThrow(() => isolated.openSession("release-session"));
   assert.equal(isolated.el.sessionWorkspace.hidden, false);
   assert.equal(isolated.el.promptInput.style.height, "50px");
-  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=24&include_sessions=false"]);
+  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=50&include_sessions=false"]);
   assert.equal(instances[0].url, "/sessions/release-session/events/stream?limit=512");
 });
 
@@ -328,7 +333,7 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   isolated.state.events.set(sessionId, [{ sequence_id: 900, event: { type: "run_completed", response: "old" } }]);
   isolated.state.threadCycles.set(sessionId, { marker: "old", names: new Set(["old-thread"]) });
   isolated.state.threadEventWindows.set(`${sessionId}:old-thread`, { afterSequence: 900, events: [{}] });
-  isolated.state.acceptedRuns.set(sessionId, { run_id: "accepted-old" });
+  isolated.state.pendingEchoes.set(sessionId, { run_id: "accepted-old", content: "old prompt" });
   isolated.noteSessionCompactionEvent(sessionId, {
     type: "orchestrator_compaction_failed", compaction_id: "old-terminal", reason: "manual", failure: "cancelled",
   });
@@ -347,7 +352,7 @@ scenario("SSE", "SSE resets lower epochs cursor-free and ignores the replaced so
   assert.equal(stale.closed, true);
   assert.equal(instances.length, 2);
   assert.doesNotMatch(instances[1].url, /after_sequence_id/);
-  for (const store of [isolated.state.lastSequence, isolated.state.events, isolated.state.threadCycles, isolated.state.acceptedRuns]) {
+  for (const store of [isolated.state.lastSequence, isolated.state.events, isolated.state.threadCycles, isolated.state.pendingEchoes]) {
     assert.equal(store.has(sessionId), false); }
   assert.equal(isolated.state.threadEventWindows.has(`${sessionId}:old-thread`), false);
   assert.equal(isolated.state.sessions[0].active_run, null);
@@ -483,6 +488,44 @@ scenario("SSE", "replay-gap compaction reconciliation retries a snapshot invalid
   assert.equal(isolated.state.snapshots.get(sessionId).active_compaction, null);
 });
 
+scenario("SSE", "transcript_appended schedules a debounced refetch that renders mid-run messages", async () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const requests = [];
+  const timers = [];
+  const isolated = loadApp({ EventSource: FakeEventSource,
+    fetch: async (path) => { requests.push(path);
+      return jsonResponse(sessionSnapshot("live-session", {
+        messages: [{ role: "user", content: "prompt" }, { role: "assistant", content: "mid-run answer" }],
+        active_run: { run_id: "run-live", started_at_epoch_ms: 1 },
+      })); },
+    window: { setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+      clearTimeout() {}, }, });
+  const sessionId = "live-session";
+  isolated.state.currentId = sessionId;
+  isolated.connectEventStream(sessionId);
+  const source = instances[0];
+  source.emit("replay_boundary", { replay_boundary_sequence_id: 1 });
+  // A historical (replayed) transcript_appended must not refetch.
+  source.emit("session_event", { session_id: sessionId, sequence_id: 1,
+    event: { type: "transcript_appended", transcript_len: 2 } });
+  assert.equal(timers.filter(({ delay }) => delay === 120).length, 0);
+  // The live signal schedules the debounced snapshot refetch.
+  source.emit("session_event", { session_id: sessionId, sequence_id: 2,
+    event: { type: "transcript_appended", transcript_len: 3 } });
+  const snapshotTimers = timers.filter(({ delay }) => delay === 120);
+  assert.equal(snapshotTimers.length, 1, "transcript_appended reuses the 120ms snapshot debounce");
+  snapshotTimers[0].callback();
+  const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
+  assert.ok(refreshDrain);
+  await refreshDrain;
+  assert.ok(requests.some((path) => path.startsWith(`/sessions/${sessionId}?`)),
+    "the live signal refetches the store-backed snapshot");
+  assert.deepEqual(
+    plain(isolated.state.snapshots.get(sessionId).messages.map((message) => message.role)),
+    ["user", "assistant"],
+    "mid-run messages from the refetched snapshot are the live transcript");
+});
+
 scenario("SSE", "initial replay hydrates chronology without replaying stale run-attention side effects", () => {
   const { FakeEventSource, instances } = eventSourceHarness();
   const isolated = loadApp({ EventSource: FakeEventSource });
@@ -506,39 +549,23 @@ scenario("SSE", "initial replay hydrates chronology without replaying stale run-
   assert.equal(isolated.state.sessionRunActivity.get(sessionId), true);
 });
 
-test("workset presentation and overview rail expose authoritative status, item counts, errors, and empty state", () => {
-  ui.el.worksetRailSummary = fakeElement();
-  ui.el.worksetRailCount = fakeElement();
-  ui.renderWorksetRail(undefined);
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "loading");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /Loading worksets/);
-  assert.equal(ui.el.worksetRailCount.textContent, "…");
+test("workset presentation exposes authoritative status, item counts, errors, and empty state", () => {
   for (const snapshot of [{}, { worksets: null }, { worksets: { items: null, error: null } }]) {
     const presentation = ui.worksetsPresentation(snapshot);
     assert.equal(presentation.state, "error");
     assert.match(presentation.error, /unavailable/i); }
-  ui.renderWorksetRail({ worksets: { items: [], error: "database <offline>" } });
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "error");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /database &lt;offline&gt;/);
-  assert.doesNotMatch(ui.el.worksetRailSummary.innerHTML, /database <offline>/);
-  assert.equal(ui.el.worksetRailCount.textContent, "!");
-  ui.renderWorksetRail({ worksets: { items: [], error: null } });
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "empty");
-  assert.match(ui.el.worksetRailSummary.innerHTML, /No worksets yet/);
-  assert.equal(ui.el.worksetRailCount.textContent, "0");
-  ui.renderWorksetRail({ worksets: { error: null, items: [{
+  const errPresentation = ui.worksetsPresentation({ worksets: { items: [], error: "database <offline>" } });
+  assert.equal(errPresentation.state, "error");
+  assert.match(errPresentation.error, /database <offline>/);
+  const emptyPresentation = ui.worksetsPresentation({ worksets: { items: [], error: null } });
+  assert.equal(emptyPresentation.state, "empty");
+  const populatedPresentation = ui.worksetsPresentation({ worksets: { error: null, items: [{
         id: "plan-<ui>", status: "in_review",
         summary: "Restore <all> fields",
         items: [{ title: "one", status: "invented-item-status" }, { title: "two" }],
       }], }, });
-  const html = ui.el.worksetRailSummary.innerHTML;
-  assert.equal(ui.el.worksetRailSummary.dataset.state, "populated");
-  assert.equal(ui.el.worksetRailCount.textContent, "1");
-  assert.match(html, /plan-&lt;ui&gt;/);
-  assert.match(html, /in_review/);
-  assert.match(html, /2 items/);
-  assert.match(html, /Restore &lt;all&gt; fields/);
-  assert.doesNotMatch(html, /invented-item-status|0\/2|progress-track/);
+  assert.equal(populatedPresentation.state, "populated");
+  assert.equal(populatedPresentation.items.length, 1);
 });
 
 test("worksets fullscreen distinguishes loading, error, empty, populated, and empty-workset states", () => {
@@ -620,7 +647,8 @@ test("session reordering uses pointer capture with touch targets and keyboard gr
 });
 
 scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, and omit result rows", () => {
-  const html = ui.renderOrchestratorConversation({
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail({
     messages: [
       { role: "user", content: "build the feature" },
       { role: "assistant", content: "private intermediate narration", reasoning_text: "private reasoning", tool_calls: [
@@ -634,25 +662,20 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
     ],
     active_run: null,
   });
+  const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /build the feature/);
   assert.match(html, /The feature is complete\./);
-  assert.match(html, /focus-tool-summary/);
+  assert.match(html, /tool-block/);
   assert.match(html, /workset_define/);
   assert.match(html, /ui-refresh/);
-  assert.match(html, /threads dispatched/);
-  assert.match(html, /impl\/shell, verify\/ui/);
+  assert.match(html, /impl\/shell/);
+  assert.match(html, /verify\/ui/);
+  // Dispatch turns intentionally show the instruction preview (see the
+  // dedicated thread-tool rendering test); other argument payloads stay hidden.
+  assert.match(html, /tool-block-thread/);
+  assert.match(html, /RAW_THREAD_ACTION/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
-  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL|RAW_THREAD_ACTION/);
-});
-
-test("orchestrator fullscreen activity renders newest actions first", () => {
-  ui.state.currentId = "activity-order-session";
-  ui.state.events.set("activity-order-session", [
-    agentEnvelope(1, { type: "assistant_message", content: "older activity" }),
-    agentEnvelope(2, { type: "assistant_message", content: "newer activity" }),
-  ]);
-  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
-  assert.ok(html.indexOf("newer activity") < html.indexOf("older activity"));
+  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL/);
 });
 
 test("compaction activity correlates lifecycle IDs and safely renders every terminal state", () => {
@@ -691,20 +714,12 @@ test("compaction activity correlates lifecycle IDs and safely renders every term
     id: action.compactionId, result: action.result, state: action.state, detail: action.detail,
     finishSequenceId: action.finishSequenceId ?? null,
   })), [
-    { id: "completed-id", result: "completed", state: "done", detail: "manual", finishSequenceId: 2 },
-    { id: "skipped-without-start", result: "unchanged", state: "recorded", detail: "automatic · no eligible boundary", finishSequenceId: null },
-    { id: "failed-without-start", result: "failed", state: "error", detail: "manual · checkpoint persistence failed", finishSequenceId: null },
-    { id: "running-id", result: "running", state: "live", detail: "automatic", finishSequenceId: null },
-    { id: "unknown-safe", result: "failed", state: "error", detail: "trigger unavailable · failure type unavailable", finishSequenceId: null },
+    { id: "completed-id", result: "completed", state: "done", detail: "Manual", finishSequenceId: 2 },
+    { id: "skipped-without-start", result: "unchanged", state: "recorded", detail: "Automatic · Nothing to compact", finishSequenceId: null },
+    { id: "failed-without-start", result: "failed", state: "error", detail: "Manual · Failed to save checkpoint", finishSequenceId: null },
+    { id: "running-id", result: "running", state: "live", detail: "Automatic", finishSequenceId: null },
+    { id: "unknown-safe", result: "failed", state: "error", detail: "Not triggered · failure type unavailable", finishSequenceId: null },
   ]);
-  const html = ui.renderOrchestratorConversation({ messages: [], active_run: null });
-  assert.equal(occurrences(html, />context compaction</g), 5);
-  assert.match(html, />completed</);
-  assert.match(html, />unchanged</);
-  assert.match(html, />failed</);
-  assert.match(html, />running</);
-  assert.match(html, /manual|automatic/);
-  assert.doesNotMatch(html, /SECRET|RAW|private|checkpoint-id|<script>|raw failure/i);
 });
 
 scenario("SSE", "compaction replay retains correlated activity and reconciles manual busy state", () => {
@@ -734,60 +749,58 @@ scenario("SSE", "compaction replay retains correlated activity and reconciles ma
   assert.equal(isolated.state.lastSequence.get(sessionId), 4);
   const actions = isolated.buildOrchestratorActions({ messages: [] }, { limit: false });
   assert.deepEqual(plain(actions.map(({ result, detail }) => ({ result, detail }))), [
-    { result: "completed", detail: "manual" },
-    { result: "unchanged", detail: "automatic · already compacted" },
+    { result: "completed", detail: "Manual" },
+    { result: "unchanged", detail: "Automatic · Already compacted" },
   ]);
 });
 
 scenario("Transcript privacy", "shared transcript message rendering excludes system rows without dropping supported message fields", () => {
-  const system = ui.renderFocusMessage({ role: "system", content: "policy <root>" }, { ordinal: 25 });
+  const system = ui.renderFocusMessage({ role: "system", content: "policy <root>" });
   assert.equal(system, "");
   const assistant = ui.renderFocusMessage({ role: "assistant",
     reasoning_text: "reason <carefully>", content: "answer <safely>",
     tool_calls: [{ id: "call-<42>",
       function: { name: "thread", arguments: '{"name":"review/<unsafe>","action":"RAW_TOOL_ARGUMENT_CANARY"}' },
-    }], }, { ordinal: 26, durationMs: 2_500 });
+    }], });
   assert.match(assistant, /focus-message is-tool-turn/);
-  assert.match(assistant, /threads dispatched/);
+  assert.match(assistant, /tool-block/);
+  assert.match(assistant, /thread/);
   assert.match(assistant, /review\/&lt;unsafe&gt;/);
-  assert.doesNotMatch(assistant, /RAW_TOOL_ARGUMENT_CANARY|call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;|response 00:00:02/);
+  // The dispatch instruction renders as an escaped preview by design; call
+  // IDs, reasoning, and assistant content stay hidden.
+  assert.match(assistant, /RAW_TOOL_ARGUMENT_CANARY/);
+  assert.doesNotMatch(assistant, /call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;/);
   assert.doesNotMatch(assistant, /<unsafe>|<carefully>|<safely>/);
-  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" }, { ordinal: 27 });
+  const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" });
   assert.equal(tool, "");
-  const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] }, { ordinal: 28 });
-  assert.match(empty, /focus-message-copy is-empty/);
-  assert.match(empty, /empty message/);
-  assert.match(empty, /\[empty\]/);
-  const pending = ui.renderFocusMessage({
-    role: "user", content: "just accepted", pending: true, pendingSource: "accepted response <client>",
-  });
-  assert.match(pending, /class="focus-message is-pending"/);
-  assert.match(pending, /submitted · pending/);
-  assert.match(pending, /data-pending-source="accepted response &lt;client&gt;"/);
-  assert.doesNotMatch(pending, />#\d+</);
+  const empty = ui.renderFocusMessage({ role: "assistant", content: null, reasoning_text: null, tool_calls: [] });
+  assert.equal(empty, "");
+  // The optimistic submit echo renders as a plain user message — the
+  // "Sending…" badge and its data attributes are gone with the baseline
+  // pending machinery.
+  const echo = ui.renderFocusMessage({ role: "user", content: "just accepted", run_id: "run-1" });
+  assert.match(echo, /class="focus-message" data-role="user"/);
+  assert.match(echo, /just accepted/);
+  assert.doesNotMatch(echo, /Sending…|is-pending|data-pending-source/);
 });
 
-scenario("Transcript privacy", "unfiltered post-create transcripts hide system and AGENTS content while retaining user and reasoning-only assistant rows", () => {
+scenario("Transcript privacy", "unfiltered post-create transcripts hide system and AGENTS content while retaining user rows", () => {
   const message = { role: "assistant", content: null,
     reasoning_text: "reason <carefully> & ignore <img src=x onerror=alert(1)>",
     tool_calls: [], };
-  const row = ui.renderFocusMessage(message, { ordinal: 7 });
-  assert.match(row, /data-role="assistant"/);
-  assert.match(row, /focus-message-copy is-reasoning/);
-  assert.match(row, />reasoning</);
-  assert.match(row, /reason &lt;carefully&gt; &amp; ignore &lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(row, /<img|empty message/);
-  const transcript = ui.renderOrchestratorConversation(sessionSnapshot("reasoning-session", {
+  const row = ui.renderFocusMessage(message);
+  assert.equal(row, "");
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(sessionSnapshot("reasoning-session", {
     messages: [
       { role: "system", content: "private system prompt with AGENTS.md instructions <never-show>" },
       { role: "user", content: "visible user prompt" }, message, ],
     message_page: { start: 0, end: 3, total: 3, has_older: false }, }));
-  assert.equal(occurrences(transcript, /focus-message-copy is-reasoning/g), 1);
+  const transcript = ui.el.orchestratorChatContent.innerHTML;
   assert.match(transcript, /visible user prompt/);
-  assert.match(transcript, />#2</);
-  assert.match(transcript, />#3</);
   assert.doesNotMatch(transcript, /private system prompt|AGENTS\.md|never-show|data-role="system"|>System</);
   assert.doesNotMatch(transcript, /No conversation messages|<img/);
+  assert.doesNotMatch(transcript, /focus-reasoning|reason &lt;carefully&gt;/);
 });
 
 scenario("Transcript privacy", "transcript image rendering stays textual and markdown output stays sanitizer-guarded", () => {
@@ -832,9 +845,9 @@ test("paged transcript requests leave the system-message API opt-in dormant", as
   isolated = loadApp({ fetch });
   const snapshot = await isolated.loadSnapshot("page/session");
   assert.equal(snapshot.messages[0].reasoning_text, "retained reasoning");
-  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=24&include_sessions=false");
+  assert.equal(urls[0], "/sessions/page%2Fsession?message_limit=24&thread_event_limit=50&include_sessions=false");
   isolated.state.currentId = "page/session";
-  isolated.state.focusView = { type: "orchestrator" };
+  isolated.el.orchestratorChatContent = fakeElement();
   isolated.state.snapshots.set("page/session", {
     messages: [{ role: "user", content: "tail" }, { role: "assistant", content: "reply" }],
     message_page: { start: 3, end: 5, total: 5, has_older: true }, });
@@ -863,15 +876,12 @@ test("orchestrator history auto-fills an underflowing viewport until scrolling i
   const scroller = { scrollHeight: 620, clientHeight: 900, scrollTop: 0,
     querySelector() { return null; }, };
   isolated.state.currentId = "underfilled-session";
-  isolated.state.focusView = { type: "orchestrator" };
   isolated.state.focusRenderId = 7;
   isolated.state.snapshots.set("underfilled-session", sessionSnapshot("underfilled-session"));
   isolated.state.messageWindows.set("underfilled-session", {
     start: 24, end: 48, total: 80, hasOlder: true, loading: false, messages: [],
   });
-  isolated.el.focusContent = { querySelector(selector) {
-      return selector === ".focus-chat" ? scroller : null;
-    }, };
+  isolated.el.orchestratorChatContent = scroller;
   isolated.ensureOrchestratorScrollableHistory(7);
   assert.deepEqual(requests, ["/sessions/underfilled-session/messages?before=24&limit=24"]);
   assert.equal(isolated.state.messageWindows.get("underfilled-session").loading, true);
@@ -1005,9 +1015,7 @@ test("a successfully deleted preserved session cannot be resurrected by its acti
     window: { setTimeout: () => 84, clearTimeout() {} },
   });
   installWorkspaceElements(isolated);
-  isolated.el.utilityDrawer = { hidden: true };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.drawerContent = { innerHTML: "" };
+  isolated.el.focusContent = { innerHTML: "", querySelector: () => null };
   isolated.state.currentId = "created-session";
   isolated.upsertCreatedSession(sessionSnapshot("created-session", {
     metadata: { session_id: "created-session", cwd: "/created", model: "model", backend: "test" },
@@ -1180,7 +1188,7 @@ test("snapshot refreshes coalesce bursts, carry dirty state through trailing req
   assert.equal(isolated.state.snapshots.get("snapshot-session").metadata.model, "fresh-final");
   assert.equal(isolated.el.sessionNavStatus.textContent, "Session refreshed", "queued announce intent reaches the final accepted request");
   assert.equal(isolated.state.snapshotRefreshCoordinators.has("snapshot-session"), false);
-  assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=24&include_sessions=false"));
+  assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=50&include_sessions=false"));
 });
 
 test("a failed invalidated snapshot GET yields to its successful trailing refresh while terminal errors remain visible", async () => {
@@ -1252,48 +1260,57 @@ test("snapshot coordinators remain independent across navigation and retain resp
   assert.equal(isolated.state.snapshots.has("session-A"), false);
   assert.match(isolated.el.sessionNavStatus.textContent, /Snapshot identity mismatch: requested session-A, received different-session/);
   assert.deepEqual(requests, [
-    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
-    "/sessions/session-B?message_limit=24&thread_event_limit=24&include_sessions=false",
-    "/sessions/session-A?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/session-A?message_limit=24&thread_event_limit=50&include_sessions=false",
+    "/sessions/session-B?message_limit=24&thread_event_limit=50&include_sessions=false",
+    "/sessions/session-A?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
 });
 
-test("pending messages reconcile only against canonical rows after their authoritative baseline", () => {
-  const absentBaselines = ui.normalizedSubmittedMessage({
-    run_id: "run-no-baseline", baseline_message_total: null,
-    submitted_user_message: { content: "new", baseline_user_message_count: null },
-  });
-  assert.equal(absentBaselines.baselineUserCount, null);
-  assert.equal(absentBaselines.baselineMessageTotal, null);
-  const activeRun = { run_id: "run-repeat",
-    started_at_epoch_ms: 1_000, submitted_user_message: {
-      run_id: "run-repeat", content: "repeat prompt",
-      baseline_user_message_count: 1, submitted_at_epoch_ms: 1_000, },
-  };
-  const beforeCanonical = { active_run: activeRun,
-    messages: [{ role: "user", content: "repeat prompt" }],
-    message_page: { start: 0, end: 1, total: 1 },
-    message_cycle: { marker: "history:1:0", thread_names: [] }, };
-  assert.equal(ui.effectivePendingMessages("repeat-session", beforeCanonical).length, 1);
-  const afterCanonical = { ...beforeCanonical, messages: [
-      { role: "user", content: "repeat prompt" },
-      { role: "assistant", content: "earlier response" },
-      { role: "user", content: "expanded canonical prompt that differs" },
-    ], message_page: { start: 0, end: 3, total: 3 },
-    message_cycle: { marker: "history:2:2", thread_names: [] }, };
-  assert.equal(ui.effectivePendingMessages("repeat-session", afterCanonical).length, 0);
-  const acceptedPending = { role: "user",
-    content: "/run compact-name", baselineMessageTotal: 20,
-    baselineUserCount: null, };
-  assert.equal(ui.pendingMessageCoveredByCanonical(acceptedPending, {
+test("the optimistic submit echo clears only when the canonical user message lands", () => {
+  const sessionId = "echo-session";
+  ui.notePendingEcho(sessionId, "run-1", "repeat prompt");
+  const beforeCanonical = { messages: [{ role: "user", content: "something else" }] };
+  assert.equal(ui.effectivePendingMessages(sessionId, beforeCanonical).length, 1);
+  assert.equal(ui.reconcilePendingEcho(sessionId, beforeCanonical), false);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), true);
+
+  // The canonical user message with the same content clears the echo.
+  const afterCanonical = { messages: [
+    { role: "user", content: "something else" },
+    { role: "assistant", content: "working" },
+    { role: "user", content: "repeat prompt" },
+  ] };
+  assert.equal(ui.reconcilePendingEcho(sessionId, afterCanonical), true);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
+  assert.equal(ui.effectivePendingMessages(sessionId, afterCanonical).length, 0);
+
+  // Command expansion: the canonical message is the expanded /run or /plan
+  // prompt, so coverage canonicalizes it back to the display form.
+  assert.equal(ui.displayPromptFromMessage("plain prompt"), "plain prompt");
+  const expandedRun = "# /run: Workset Execution\n\nWorkset id:\ncompact-name\n\nExecute an existing workset.\n\nSteps:\n1. ...";
+  assert.equal(ui.displayPromptFromMessage(expandedRun), "/run compact-name");
+  const expandedPlan = "# /plan: Workset Planning\n\nUser instruction:\nbuild the thing\n\nCreate exactly one durable high-level workset";
+  assert.equal(ui.displayPromptFromMessage(expandedPlan), "/plan build the thing");
+  ui.notePendingEcho(sessionId, "run-2", "/run compact-name");
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
+    messages: [{ role: "user", content: expandedRun }],
+  }), true);
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
     messages: [{ role: "user", content: "/run compact-name" }],
-    message_page: { start: 19 }, }), false);
-  assert.equal(ui.pendingMessageCoveredByCanonical(acceptedPending, {
-    messages: [{ role: "user", content: "expanded command body" }],
-    message_page: { start: 20 }, }), true);
+  }), true, "an unexpanded identical row also covers");
+  assert.equal(ui.pendingEchoCoveredByCanonical(ui.state.pendingEchoes.get(sessionId), {
+    messages: [{ role: "user", content: expandedPlan }],
+  }), false);
+
+  // A terminal event clears the echo only for the matching run.
+  ui.notePendingEcho(sessionId, "run-3", "never landed");
+  ui.noteSessionRunEvent(sessionId, "run_failed", "other-run");
+  assert.equal(ui.state.pendingEchoes.has(sessionId), true);
+  ui.noteSessionRunEvent(sessionId, "run_failed", "run-3");
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
 });
 
-test("an accepted run immediately supplies pending transcript and active elapsed state", () => {
+test("an accepted run immediately supplies the optimistic echo and run activity", () => {
   const sessionId = "accepted-session";
   const snapshot = sessionSnapshot(sessionId, {
     messages: [{ role: "system", content: "policy" }, { role: "user", content: "older" }],
@@ -1302,29 +1319,23 @@ test("an accepted run immediately supplies pending transcript and active elapsed
   ui.state.currentId = sessionId;
   ui.state.snapshots.set(sessionId, snapshot);
   ui.state.events.set(sessionId, []);
-  const accepted = ui.captureAcceptedRun(sessionId, {
-    run_id: "run-accepted", client_id: "client-7",
-    display_prompt: "/run accepted-workset",
-  }, "expanded input should not be shown yet", snapshot, 10_000);
-  assert.equal(accepted.baseline_message_total, 2);
-  assert.equal(ui.effectiveActiveRun(snapshot, sessionId).accepted_response, true);
+  ui.notePendingEcho(sessionId, "run-accepted", "/run accepted-workset");
+  ui.noteSessionRunEvent(sessionId, "run_started");
   assert.deepEqual(plain(ui.effectivePendingMessages(sessionId, snapshot).map((message) => ({
-    content: message.content, source: message.pendingSource,
-    runId: message.run_id,
-  }))), [{ content: "/run accepted-workset", source: "accepted response", runId: "run-accepted" }]);
-  assert.equal(ui.orchestratorLifecycle(snapshot, sessionId).provenance, "accepted");
-  assert.deepEqual(plain(ui.runTimingPresentation(snapshot, sessionId, 14_500)), {
-    state: "active", label: "00:00:04",
-    title: "Active elapsed runtime: 00:00:04", elapsedMs: 4_500, });
-  const html = ui.renderOrchestratorConversation(snapshot);
-  assert.match(html, /submitted · pending/);
-  assert.match(html, /\/run accepted-workset/);
+    content: message.content, runId: message.run_id,
+  }))), [{ content: "/run accepted-workset", runId: "run-accepted" }]);
+  assert.equal(ui.state.sessionRunActivity.get(sessionId), true);
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(snapshot);
+  const html = ui.el.orchestratorChatContent.innerHTML;
+  assert.match(html, /\/run accepted-workset/, "the echo renders as a plain user message");
+  assert.doesNotMatch(html, /Sending…|is-pending/, "no pending badge remains");
   const reconciled = { ...snapshot,
-    messages: [...snapshot.messages, { role: "user", content: "expanded canonical command body" }],
+    messages: [...snapshot.messages, { role: "user", content: "/run accepted-workset" }],
     message_page: { start: 0, end: 3, total: 3, has_older: false },
     message_cycle: { marker: "history:2:2", thread_names: [] }, };
-  assert.equal(ui.reconcileAcceptedRun(sessionId, reconciled), true);
-  assert.equal(ui.state.acceptedRuns.has(sessionId), false);
+  assert.equal(ui.reconcilePendingEcho(sessionId, reconciled), true);
+  assert.equal(ui.state.pendingEchoes.has(sessionId), false);
   assert.equal(ui.effectivePendingMessages(sessionId, reconciled).length, 0);
 });
 
@@ -1430,7 +1441,7 @@ test("exact /compact posts once without run, steering, transcript, or snapshot s
   assert.equal(isolated.el.promptInput.value, rawDraft, "the exact raw command remains editable while admission is pending");
   assert.equal(isolated.state.composerDrafts.get("compact/session"), rawDraft);
   assert.equal(isolated.sessionCompactionOperation("compact/session").request.draft, rawDraft);
-  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.pendingEchoes.size, 0);
   assert.equal(isolated.state.submittingSessions.size, 0);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
@@ -1444,7 +1455,7 @@ test("exact /compact posts once without run, steering, transcript, or snapshot s
   assert.equal(isolated.el.sendPrompt.disabled, false);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   assert.equal(JSON.stringify(snapshot.messages), transcriptBefore);
-  assert.ok(requests.every(({ path }) => !/\/runs|\/steering|cancel-active-run|\/overview/.test(path)));
+  assert.ok(requests.every(({ path }) => !/\/runs|\/steering|cancel-active-run/.test(path)));
 });
 
 test("/compact rejects arguments, prevents duplicates and ordinary submissions, and uses safe result notices", async () => {
@@ -1476,7 +1487,7 @@ test("/compact rejects arguments, prevents duplicates and ordinary submissions, 
   isolated.el.promptInput.value = "ordinary prompt must wait";
   await isolated.submitComposer({ preventDefault() {} });
   assert.deepEqual(requests, ["/sessions/compact-busy/compact"]);
-  assert.equal(isolated.state.acceptedRuns.size, 0);
+  assert.equal(isolated.state.pendingEchoes.size, 0);
   assert.equal(isolated.state.snapshotTimers.size, 0);
   completion.resolve(jsonResponse({
     status: "unchanged", compaction_id: "compaction-2", reason: "already_compacted",
@@ -1522,7 +1533,7 @@ test("manual compaction preserves the exact draft across 404, 409, 500, network,
     assert.equal(isolated.el.sessionNavStatus.textContent, failure.notice);
     assert.doesNotMatch(isolated.el.sessionNavStatus.textContent, /SECRET|checkpoint|provider|private|transport/i);
     assert.equal(isolated.sessionCompactionBusy(sessionId), false);
-    assert.equal(isolated.state.acceptedRuns.size, 0);
+    assert.equal(isolated.state.pendingEchoes.size, 0);
     assert.equal(isolated.state.snapshotTimers.size, 0);
   }
 });
@@ -1598,10 +1609,10 @@ test("active_compaction snapshots and manual lifecycle events reconcile composer
   assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), true);
   assert.equal(isolated.el.sendPrompt.disabled, true);
   assert.match(isolated.el.promptInput.placeholder, /Compacting orchestrator context/);
-  assert.equal(Boolean(isolated.effectiveActiveRun(active, "reconcile-compact")), false);
+  assert.equal(Boolean(active?.active_run), false);
   assert.equal(isolated.orchestratorLifecycle(active, "reconcile-compact").state, "no-run");
   isolated.renderWorkspace();
-  assert.equal(isolated.el.stopRun.hidden, true, "manual compaction never exposes the run-only stop control");
+  assert.equal(isolated.el.stopRun.disabled, true, "manual compaction never exposes the run-only stop control");
 
   isolated.acceptSnapshot("reconcile-compact", sessionSnapshot("reconcile-compact"));
   assert.equal(isolated.sessionCompactionBusy("reconcile-compact"), false);
@@ -1688,8 +1699,8 @@ test("composer fallback and accepted-run state stay bound to the originating ses
   await submission;
   assert.deepEqual(requests.map((request) => request.path), ["/sessions/session-A/steering", "/sessions/session-A/runs"]);
   assert.deepEqual(requests[1].body, { prompt: "continue A" });
-  assert.equal(isolated.state.acceptedRuns.get("session-A").run_id, "run-A");
-  assert.equal(isolated.state.acceptedRuns.has("session-B"), false);
+  assert.equal(isolated.state.pendingEchoes.get("session-A").run_id, "run-A");
+  assert.equal(isolated.state.pendingEchoes.has("session-B"), false);
   assert.equal(isolated.state.snapshotTimers.has("session-A"), true);
   assert.equal(isolated.state.snapshotTimers.has("session-B"), false);
   assert.equal(isolated.el.promptInput.value, "draft for B");
@@ -1808,25 +1819,26 @@ test("orchestrator message windows preserve loaded history across fresh tail sna
 
 test("orchestrator conversation keeps pagination available while filtering system rows", () => {
   ui.state.currentId = "loader-session";
+  ui.el.orchestratorChatContent = fakeElement();
   ui.state.messageWindows.set("loader-session", {
     start: 24, end: 48, total: 80, hasOlder: true, loading: false, messages: [],
   });
-  const html = ui.renderOrchestratorConversation({ messages: [
+  ui.renderOrchestratorChatRail({ messages: [
       { role: "system", content: "paged private AGENTS prompt" },
       { role: "user", content: "paged visible user prompt" }, ],
     message_page: { start: 24, end: 26, total: 80, has_older: true },
     active_run: null, worksets: { items: [] }, });
+  const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /data-history-loader/);
   assert.match(html, /scroll up for earlier messages/);
-  assert.match(html, />#26</);
   assert.match(html, /paged visible user prompt/);
-  assert.doesNotMatch(html, />#25</);
   assert.doesNotMatch(html, /paged private AGENTS prompt|data-role="system"/);
   ui.state.messageWindows.set("loader-session", {
     start: 0, end: 48, total: 48, hasOlder: false, loading: false, messages: [],
   });
+  ui.renderOrchestratorChatRail({ messages: [], active_run: null, worksets: { items: [] } });
   assert.doesNotMatch(
-    ui.renderOrchestratorConversation({ messages: [], active_run: null, worksets: { items: [] } }),
+    ui.el.orchestratorChatContent.innerHTML,
     /data-history-loader/);
 });
 
@@ -1874,7 +1886,8 @@ test("the canonical thread projector omits internal and metric rows while keepin
   const actions = ui.projectThreadActions(entries);
   assert.deepEqual(plain(actions.map((action) => action.name)), ["response", "response", "Read", "thread"]);
   assert.deepEqual(plain(actions.filter((action) => action.name === "response").map((action) => action.detail)), ["first answer", "second answer"]);
-  assert.match(actions[2].detail, /src\/app\.js.*succeeded/);
+  assert.match(actions[2].detail, /src\/app\.js/);
+  assert.match(actions[2].resultText, /succeeded/);
   assert.doesNotMatch(JSON.stringify(actions), /RAW_ARGUMENT_CANARY|raw log|iteration/);
   const snapshot = sessionSnapshot("episodes-only", { threads: [{ name: "worker" }],
     thread_episodes: { worker: [{ id: 1, action: "Retained", content: "episode-only content" }] },
@@ -1884,48 +1897,524 @@ test("the canonical thread projector omits internal and metric rows while keepin
   assert.match(ui.renderThreadEpisodes(snapshot.thread_episodes.worker), /episode-only content/);
 });
 
-test("tile selection protects the latest response, error, and terminal row", () => {
+test("tile selection filters to tool calls, dispatch, guidance, and thread completion", () => {
   const actions = [
     { name: "response", kind: "assistant_message", detail: "final answer" },
-    { name: "ordinary 1", kind: "tool_call_started" },
+    { name: "ordinary 1", kind: "tool_call_started", callId: "c1" },
     { name: "error", kind: "error", state: "error" },
-    { name: "ordinary 2", kind: "tool_call_started" },
-    { name: "thread", kind: "thread_finished", state: "done" },
-    { name: "ordinary 3", kind: "steering" },
-    { name: "ordinary 4", kind: "steering" },
+    { name: "ordinary 2", kind: "tool_call_started", callId: "c2" },
+    { name: "thread", kind: "thread_finished", state: "done", result: "finished" },
+    { name: "guidance", kind: "thread_steering_delivered", result: "delivered", state: "done", instruction: "tighten the layout" },
+    { name: "ordinary 3", kind: "guidance" },
+    { name: "ordinary 4", kind: "guidance" },
   ];
   const selected = ui.selectTileActions(actions);
-  assert.equal(selected.length, 5);
-  assert.deepEqual(plain(selected.map((action) => action.name)), ["response", "error", "thread", "ordinary 3", "ordinary 4"]);
-  assert.equal(ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done" }], "" ).includes('title="src/full/path.js"'), true);
+  assert.deepEqual(plain(selected.map((action) => action.name)), ["ordinary 1", "ordinary 2", "thread", "guidance"]);
+  const html = ui.renderActionRows([{ name: "Read", result: "Done", detail: "src/full/path.js", state: "done", callId: "c1" }], "");
+  assert.equal(html.includes('title="src/full/path.js"'), true);
+  assert.equal(html.includes("action-name"), false);
+  assert.equal(html.includes("action-result"), false);
+  assert.equal(html.includes('data-state="done"'), true);
+  assert.equal(html.includes("action-icon"), true);
+});
+
+test("renderFocusActions renders compact icon rows matching tile format", () => {
+  const html = ui.renderFocusActions([
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"operation":"read","path":"src/lib.rs"}', resultText: "248 lines" },
+    { name: "exec_command", result: "Done", state: "done", callId: "c2", argumentsDetail: '{"operation":"execute","workdir":"/repo"}', resultText: "all tests passed" },
+    { name: "dispatch", result: "started", state: "live", detail: "worker-1", sourceThreads: ["main"] },
+    { name: "guidance", result: "delivered", state: "done", detail: "guidance #3: do the thing" },
+    { name: "agent run", result: "started", state: "live", detail: "build the feature" },
+  ]);
+  assert.match(html, /action-row/);
+  assert.match(html, /action-icon/);
+  assert.match(html, /action-args/);
+  assert.doesNotMatch(html, /focus-action-result/);
+  assert.doesNotMatch(html, /focus-action-event/);
+  assert.doesNotMatch(html, /tool-block-name/);
+  assert.match(html, /data-state="done"/);
+  assert.match(html, /data-state="live"/);
+});
+
+test("tile action rows render oldest first with a discrete recency color per line", () => {
+  const actions = [
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"path":"a.js"}' },
+    { name: "write", result: "Done", state: "done", callId: "c2", argumentsDetail: '{"path":"b.js"}' },
+    { name: "edit", result: "Done", state: "done", callId: "c3", argumentsDetail: '{"path":"c.js"}' },
+  ];
+  const html = ui.renderActionRows(actions, "");
+  const titles = [...html.matchAll(/title="([^"]*)"/g)].map((match) => match[1]);
+  const recencies = [...html.matchAll(/data-recency="(\d+)"/g)].map((match) => match[1]);
+  assert.deepEqual(titles, ["a.js", "b.js", "c.js"], "oldest at the top, most recent at the bottom");
+  assert.deepEqual(recencies, ["2", "1", "0"], "recency counts down toward the most recent line");
+  assert.match(redesignSource, /--ledger-recency-0: #f1f1f1;/);
+  for (let index = 0; index <= 9; index += 1) {
+    assert.match(redesignSource, new RegExp(`\\.action-ledger \\.action-row\\[data-recency="${index}"\\] \\{ color: var\\(--ledger-recency-${index}\\); \\}`),
+      `recency step ${index} maps to one solid token color`);
+  }
+  const leastRecent = Number.parseInt(redesignSource.match(/--ledger-recency-9: #([0-9a-f]{6})/i)[1], 16);
+  const currentEventText = Number.parseInt("b0b0b0", 16);
+  assert.ok(leastRecent < currentEventText, "least recent line is slightly darker than the current event text color");
+});
+
+test("guidance actions render in thread tiles in the newest-step white with instruction text", () => {
+  const html = ui.renderActionRows([
+    { name: "guidance", result: "delivered", state: "done", steeringId: 7, instruction: "tighten the layout" },
+    { name: "read", result: "Done", state: "done", callId: "c1", argumentsDetail: '{"path":"a.js"}' },
+  ], "");
+  const guidanceRow = html.match(/<li class="action-row is-guidance"[^>]*>.*?<\/li>/s);
+  assert.ok(guidanceRow, "guidance row keeps its marker class");
+  assert.match(guidanceRow[0], /❯/);
+  assert.match(guidanceRow[0], /tighten the layout/);
+  assert.match(guidanceRow[0], /data-recency="1"/, "guidance is the older row here, so the white comes from the class, not recency");
+  const guidanceRule = redesignSource.match(/\.action-ledger \.action-row\.is-guidance,[^{]*\{ color: var\(--ledger-recency-0\); \}/s);
+  assert.ok(guidanceRule, "guidance rows map to the same solid white as the newest recency step");
+  assert.doesNotMatch(guidanceRule[0], /--attention/, "guidance rows are no longer attention-blue");
+  assert.ok(redesignSource.indexOf(guidanceRule[0]) > redesignSource.indexOf('.action-ledger .action-row[data-recency="9"]'),
+    "the guidance rule follows the recency rules so it wins at equal specificity");
+});
+
+test("thread models enrich live guidance actions with durable instruction text", () => {
+  ui.state.currentId = "guidance-enrich";
+  const snapshot = sessionSnapshot("guidance-enrich", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_steering_queued", name: "worker", steering_id: 7, instruction_preview: "steering queued" },
+    ] },
+    thread_steering: [{ id: 7, session_id: "guidance-enrich", thread_name: "worker", dispatch_id: "d1",
+      instruction: "tighten the layout", status: "queued", created_at: "2026-07-31T10:00:00Z",
+      claimed_at: null, delivered_at: null, expired_at: null }],
+  });
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === "worker");
+  const guidance = model.actions.find((action) => action.name === "guidance");
+  assert.equal(guidance.instruction, "tighten the layout");
+  assert.equal(ui.formatActionArgs(guidance), "tighten the layout");
+  const tile = ui.renderThreadTile(model);
+  assert.match(tile, /is-guidance/);
+  assert.match(tile, /tighten the layout/);
+});
+
+test("dedupGuidanceActions keeps one row per steering id, preferring queued over delivered", () => {
+  const deduped = ui.dedupGuidanceActions([
+    { name: "read", callId: "c1" },
+    { name: "guidance", result: "delivered", steeringId: 7, instruction: "x" },
+    { name: "guidance", result: "queued", steeringId: 7, instruction: "x" },
+    { name: "guidance", result: "expired", steeringId: 9, instruction: "y" },
+    { name: "guidance", result: "queued", steeringId: null },
+    { name: "guidance", result: "queued", steeringId: null },
+  ]);
+  assert.deepEqual(plain(deduped.map((action) => ({ name: action.name, steeringId: action.steeringId ?? null, result: action.result ?? null }))), [
+    { name: "read", steeringId: null, result: null },
+    { name: "guidance", steeringId: 7, result: "queued" },
+    { name: "guidance", steeringId: 9, result: "expired" },
+    { name: "guidance", steeringId: null, result: "queued" },
+    { name: "guidance", steeringId: null, result: "queued" },
+  ], "queued wins its slot regardless of event order; uncorrelatable rows (no id) are kept; expired renders when it is the only event");
+});
+
+test("thread tiles dedup guidance lifecycle events to one row per steering", () => {
+  ui.state.currentId = "guidance-dedup";
+  const snapshot = sessionSnapshot("guidance-dedup", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_steering_queued", name: "worker", steering_id: 7, instruction_preview: "steering queued" },
+      { type: "thread_steering_delivered", name: "worker", steering_id: 7, instruction_preview: "steering delivered" },
+      { type: "thread_steering_delivered", name: "worker", steering_id: 8, instruction_preview: "steering delivered" },
+    ] },
+    thread_steering: [
+      { id: 7, session_id: "guidance-dedup", thread_name: "worker", dispatch_id: "d1",
+        instruction: "tighten the layout", status: "delivered", created_at: "2026-07-31T10:00:00Z",
+        claimed_at: null, delivered_at: "2026-07-31T10:01:00Z", expired_at: null },
+      { id: 8, session_id: "guidance-dedup", thread_name: "worker", dispatch_id: "d2",
+        instruction: "then the tests", status: "delivered", created_at: "2026-07-31T10:02:00Z",
+        claimed_at: null, delivered_at: "2026-07-31T10:03:00Z", expired_at: null },
+    ],
+  });
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === "worker");
+  const guidance = model.actions.filter((action) => action.name === "guidance");
+  assert.equal(guidance.length, 2, "one row per steering id, not one per lifecycle event");
+  assert.equal(guidance[0].steeringId, 7);
+  assert.equal(guidance[0].result, "queued", "the queued event wins over the delivered one");
+  assert.equal(guidance[0].instruction, "tighten the layout", "durable instruction still enriches the kept row");
+  assert.equal(guidance[1].steeringId, 8);
+  assert.equal(guidance[1].result, "delivered", "delivered renders when no queued event is present");
+  const tile = ui.renderThreadTile(model);
+  assert.equal((tile.match(/is-guidance/g) || []).length, 2, "tile renders exactly one row per guidance");
+  assert.ok(tile.indexOf("tighten the layout") < tile.indexOf("then the tests"), "guidance rows stay chronological");
+});
+
+function threadDispatchMessage(callId, threadName, action) {
+  return { role: "assistant", content: null, tool_calls: [
+    { id: callId, type: "function", function: { name: "thread", arguments: JSON.stringify({ name: threadName, action }) } },
+  ] };
+}
+
+function renderWorkerFocus(snapshot, name = "worker") {
+  ui.state.currentId = snapshot.metadata.session_id;
+  const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === name);
+  return ui.renderThreadFocus(name, model, snapshot);
+}
+
+test("thread focus shows the in-flight dispatch instruction in a Current action section above Episodes", () => {
+  const snapshot = sessionSnapshot("inflight-show", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger\nand keep <tags> intact"),
+    ],
+  });
+  const html = renderWorkerFocus(snapshot);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "Current action section renders while the dispatch is in flight");
+  assert.match(section[0], /data-state="running"/);
+  assert.match(section[0], /<div class="focus-thread-column-title"><h3>Current action<\/h3>/,
+    "section label uses the established column-title microcopy pattern");
+  assert.match(section[0], /<span class="focus-current-action-status">Running<\/span>/,
+    "running indicator sits in the label row");
+  assert.match(section[0], /rewrite the tile ledger\nand keep &lt;tags&gt; intact/,
+    "the full instruction renders escaped, not truncated");
+  assert.match(section[0], /<div class="focus-current-action-card"><section class="focus-episode-prompt"><span>Action<\/span>/,
+    "the instruction renders like an episode's action");
+  assert.ok(html.indexOf("focus-current-action") < html.indexOf("<h3>Episodes</h3>"),
+    "the section sits directly above Episodes");
+});
+
+test("Current action hides once the dispatch result arrives and the episode renders below", () => {
+  const snapshot = sessionSnapshot("inflight-done", {
+    threads: [{ name: "worker" }],
+    active_threads: [],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+    ] },
+    thread_episodes: { worker: [
+      { id: 1, session_id: "inflight-done", thread_name: "worker", action: "rewrite the tile ledger",
+        content: "episode body", created_at: "2026-07-31T11:00:00Z" },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger"),
+      { role: "tool", tool_call_id: "call_1", content: "thread finished" },
+    ],
+  });
+  assert.equal(ui.threadInflightDispatch("worker", snapshot), null, "an answered call is not in flight");
+  const html = renderWorkerFocus(snapshot);
+  assert.doesNotMatch(html, /focus-current-action/, "no stale Current action after completion");
+  assert.match(html, /<h3>Episodes<\/h3>/);
+  assert.match(html, /rewrite the tile ledger/, "the committed episode carries the instruction below");
+});
+
+test("Current action hides on terminal lifecycle evidence even before the result message lands", () => {
+  const snapshot = sessionSnapshot("inflight-terminal", {
+    threads: [{ name: "worker" }],
+    active_threads: [],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 1, timed_out: false },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "rewrite the tile ledger"),
+    ],
+  });
+  assert.ok(ui.threadInflightDispatch("worker", snapshot), "the call is still unanswered in the transcript");
+  const html = renderWorkerFocus(snapshot);
+  assert.doesNotMatch(html, /focus-current-action/,
+    "finished lifecycle corroborates hiding while the result message is still in flight");
+});
+
+test("Current action shows the latest instruction when a thread is re-dispatched", () => {
+  const snapshot = sessionSnapshot("inflight-redispatch", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "first instruction"),
+      { role: "tool", tool_call_id: "call_1", content: "thread finished" },
+      { role: "assistant", content: "dispatching again" },
+      threadDispatchMessage("call_2", "worker", "second instruction"),
+    ],
+  });
+  const inflight = ui.threadInflightDispatch("worker", snapshot);
+  assert.equal(inflight.callId, "call_2");
+  assert.equal(inflight.action, "second instruction");
+  const html = renderWorkerFocus(snapshot);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "section renders for the re-dispatch");
+  assert.match(section[0], /second instruction/, "the latest in-flight instruction wins");
+  assert.doesNotMatch(section[0], /first instruction/);
+});
+
+test("Current action is absent for idle threads and labels queued dispatches", () => {
+  const idle = sessionSnapshot("inflight-idle", { threads: [{ name: "worker" }] });
+  assert.equal(ui.threadInflightDispatch("worker", idle), null, "no dispatches means nothing in flight");
+  assert.doesNotMatch(renderWorkerFocus(idle), /focus-current-action/, "idle threads render no section");
+
+  const queued = sessionSnapshot("inflight-queued", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "queued instruction"),
+    ],
+  });
+  const html = renderWorkerFocus(queued);
+  const section = html.match(/<section class="focus-current-action"[^>]*>.*?<\/section><\/div><\/section>/s);
+  assert.ok(section, "a dispatched-but-not-started thread still shows its instruction");
+  assert.match(section[0], /data-state="queued"/);
+  assert.match(section[0], /<span class="focus-current-action-status">Queued<\/span>/);
+  assert.match(section[0], /queued instruction/);
+});
+
+test("Current action styling reuses the episode card and section-label patterns", () => {
+  const cardRule = redesignSource.match(/\.focus-episode, \.focus-current-action-card \{[^}]*\}/);
+  assert.ok(cardRule, "the current-action card shares the episode card rule");
+  assert.match(cardRule[0], /border: 1px solid #292929;/);
+  assert.match(cardRule[0], /border-radius: var\(--r-md\);/);
+  assert.match(cardRule[0], /background: var\(--surface\);/);
+  assert.match(redesignSource, /\.focus-current-action-card \.focus-episode-prompt \{ border-bottom: 0; \}/,
+    "the standalone prompt drops the divider it needs inside an episode");
+  assert.match(redesignSource, /\.focus-current-action-status \{ animation: pending-badge-pulse 2\.6s ease-in-out infinite; \}/,
+    "the running indicator reuses the existing gentle pulse");
+  assert.match(redesignSource, /@keyframes pending-badge-pulse/);
+  const labelRule = redesignSource.match(/\.focus-thread-column-title h3 \{[^}]*\}/);
+  assert.ok(labelRule, "the section label reuses the column-title microcopy rule");
+  assert.match(labelRule[0], /var\(--fs-xs\)/);
+  assert.match(labelRule[0], /var\(--mono\)/);
+  assert.match(labelRule[0], /text-transform: uppercase;/);
+  assert.match(labelRule[0], /color: var\(--ink-muted\);/);
+});
+
+test("orchestrator guidance renders once as a normal user message from queue time", () => {
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.state.currentId = "guidance-chat";
+  const record = { id: 3, session_id: "guidance-chat", thread_name: "__orchestrator__", dispatch_id: "",
+    instruction: "focus on the CSS first", status: "queued", created_at: "2026-07-31T10:00:00Z",
+    claimed_at: null, delivered_at: null, expired_at: null };
+  const threadRecord = { id: 9, session_id: "guidance-chat", thread_name: "worker/a", dispatch_id: "d",
+    instruction: "thread-local guidance stays out of the chat", status: "delivered", created_at: "2026-07-31T10:01:00Z",
+    claimed_at: null, delivered_at: "2026-07-31T10:02:00Z", expired_at: null };
+  // The optimistic submit echo (set at accept) renders after queued guidance.
+  ui.notePendingEcho("guidance-chat", "r1", "the original prompt");
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 2, total: 2, has_older: false },
+    active_run: { run_id: "r1", submitted_user_message: { run_id: "r1", content: "the original prompt" } },
+    thread_steering: [record, threadRecord],
+  }));
+  const first = ui.el.orchestratorChatContent.innerHTML;
+  const guidanceArticle = first.match(/<article class="focus-message is-guidance"[^>]*>.*?<\/article>/s);
+  assert.ok(guidanceArticle, "guidance renders as a chat message article");
+  assert.match(guidanceArticle[0], /data-role="user"/, "guidance renders as a normal user message, not a blue box");
+  assert.match(guidanceArticle[0], /data-guidance-status="queued"/);
+  assert.match(guidanceArticle[0], /focus on the CSS first/);
+  assert.match(guidanceArticle[0], /<span class="focus-guidance-status">queued…<\/span>/,
+    "a queued record carries a subtle status marker");
+  assert.doesNotMatch(first, /data-role="guidance"/, "the blue guidance box is gone");
+  assert.doesNotMatch(first, /thread-local guidance stays out of the chat/);
+  assert.ok(first.indexOf("working on it") < first.indexOf("focus on the CSS first"),
+    "guidance renders after the visible transcript");
+  assert.ok(first.indexOf("focus on the CSS first") < first.indexOf("the original prompt"),
+    "guidance renders before the optimistic submit echo");
+
+  // Delivered but not yet persisted: the status marker drops, the message stays.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 2, total: 2, has_older: false },
+    thread_steering: [{ ...record, status: "delivered", delivered_at: "2026-07-31T10:03:00Z" }],
+  }));
+  const second = ui.el.orchestratorChatContent.innerHTML;
+  assert.match(second, /data-guidance-status="delivered"/);
+  assert.doesNotMatch(second, /focus-guidance-status/, "delivered guidance has no status marker");
+  assert.equal(occurrences(second, /focus on the CSS first/g), 1);
+
+  // Covered by the canonical transcript message: the record hides so the
+  // instruction renders exactly once, as the persisted user message.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }, { role: "user", content: "focus on the CSS first" },
+      { role: "assistant", content: "working on it" }],
+    message_page: { start: 0, end: 3, total: 3, has_older: false },
+    thread_steering: [{ ...record, status: "delivered", delivered_at: "2026-07-31T10:03:00Z" }],
+    covered_orchestrator_steering_ids: [3],
+  }));
+  const third = ui.el.orchestratorChatContent.innerHTML;
+  assert.equal(occurrences(third, /focus on the CSS first/g), 1, "no double render once the canonical message exists");
+  assert.doesNotMatch(third, /is-guidance/, "the covered record leaves no guidance article behind");
+
+  // Expired guidance never reached the model and never becomes canonical, so
+  // it leaves the chat instead of posing as a sent user message forever.
+  ui.renderOrchestratorChatRail(sessionSnapshot("guidance-chat", {
+    messages: [{ role: "user", content: "build the feature" }],
+    message_page: { start: 0, end: 1, total: 1, has_older: false },
+    thread_steering: [{ ...record, status: "expired", expired_at: "2026-07-31T10:04:00Z" }],
+  }));
+  const fourth = ui.el.orchestratorChatContent.innerHTML;
+  assert.doesNotMatch(fourth, /focus on the CSS first/, "expired guidance drops out of the chat");
+});
+
+test("orchestratorGuidanceEntries filters coverage, expiry, and thread targets", () => {
+  const entries = ui.orchestratorGuidanceEntries(sessionSnapshot("guidance-unit", {
+    thread_steering: [
+      { id: 5, thread_name: "__orchestrator__", status: "delivered", instruction: "newer" },
+      { id: 2, thread_name: "__orchestrator__", status: "queued", instruction: "older" },
+      { id: 3, thread_name: "__orchestrator__", status: "delivered", instruction: "covered" },
+      { id: 4, thread_name: "__orchestrator__", status: "expired", instruction: "expired" },
+      { id: 6, thread_name: "worker/a", status: "queued", instruction: "thread-local" },
+    ],
+    covered_orchestrator_steering_ids: [3],
+  }));
+  assert.deepEqual(plain(entries.map((record) => record.id)), [2, 5],
+    "sorted by id, covered/expired/thread-targeted records excluded");
+});
+
+test("the Sending… badge and its CSS are gone with the baseline pending machinery", () => {
+  const html = ui.renderFocusMessage({ role: "user", content: "just accepted", pending: true, pendingSource: "legacy" });
+  assert.match(html, /class="focus-message" data-role="user"/);
+  assert.doesNotMatch(html, /is-pending|focus-pending-badge|Sending…|data-pending-source/);
+  assert.doesNotMatch(redesignSource, /\.focus-pending-badge/, "the badge rule is deleted");
+  assert.doesNotMatch(redesignSource, /\.focus-message\.is-pending/, "the pending message rule is deleted");
+  assert.match(redesignSource, /@keyframes pending-badge-pulse/,
+    "the pulse keyframes stay: the guidance status marker still reuses them");
+});
+
+test("user messages carry modest vertical breathing room and the blue guidance box is gone", () => {
+  assert.match(redesignSource, /\.focus-message\[data-role="user"\] \{ margin-block: var\(--sp-2\); \}/);
+  assert.doesNotMatch(redesignSource, /data-role="guidance"/, "no guidance-role CSS remains");
+  assert.doesNotMatch(redesignSource, /focus-guidance-label/, "the attention-blue guidance label is gone");
+  assert.match(redesignSource, /\.focus-guidance-status \{[^}]*color: var\(--ink-muted\);[^}]*font: var\(--fs-xs\)\/var\(--lh-none\) var\(--mono\);[^}]*text-transform: uppercase;/s,
+    "the queued marker reuses the calm pending-badge pattern");
+});
+
+test("thread-tool turns render one consistent structure with a truncated same-size instruction preview", () => {
+  const longAction = "implement the retry loop\nwith jittered backoff   and keep\nthe tests green ".repeat(6);
+  const html = ui.renderFocusMessage({ role: "assistant", content: null, tool_calls: [
+    { id: "call-1", function: { name: "thread", arguments: JSON.stringify({ name: "impl/retry", action: longAction }) } },
+    { id: "call-2", function: { name: "thread_read", arguments: '{"name":"impl/retry"}' } },
+    { id: "call-3", function: { name: "thread_delete", arguments: '{"name":"impl/old"}' } },
+    { id: "call-4", function: { name: "threads", arguments: "{}" } },
+  ] });
+  assert.match(html, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(html, /<span class="tool-block-name">thread<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/retry<\/span>/);
+  const preview = html.match(/<div class="tool-block-preview" title="([^"]*)">([^<]*)<\/div>/);
+  assert.ok(preview, "dispatch preview line present");
+  assert.equal(preview[1], preview[2], "title carries the same single-line preview");
+  assert.equal(preview[2].length, 320, "preview is truncated to the compact-detail cap");
+  assert.ok(preview[2].endsWith("…"), "truncation ends with an ellipsis");
+  assert.doesNotMatch(preview[2], /\s{2,}/, "preview is whitespace-collapsed to a single line");
+  assert.match(html, /<span class="tool-block-name">thread_read<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/retry<\/span>/);
+  assert.match(html, /<span class="tool-block-name">thread_delete<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/old<\/span>/);
+  assert.ok(html.includes('<div class="tool-block tool-block-thread" data-tool="threads" data-state="done"><div class="tool-block-header"><span class="tool-block-name">threads</span></div></div>'),
+    "threads (no args) renders a bare header with no separator");
+  assert.equal((html.match(/tool-block-preview/g) || []).length, 1, "only the dispatch carries a preview");
+  // Uniform 13px sizing across name, separator, args, and preview.
+  assert.match(redesignSource, /\.tool-block-thread \.tool-block-name \{ font-size: var\(--fs-md\)/);
+  assert.match(redesignSource, /\.tool-block-separator \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*color: var\(--ink-soft\)/s);
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*font: var\(--fs-md\)/s);
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*color: var\(--ink-muted\)/s);
+  // The truncation chain: every level from the grid item down can shrink.
+  assert.match(redesignSource, /\.tool-block-preview \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
+  assert.match(redesignSource, /\.tool-block \{[^}]*min-width: 0/s);
+  assert.match(redesignSource, /\.tool-block-args \{[^}]*min-width: 0/s);
+  assert.match(redesignSource, /\.focus-message-body \{[^}]*min-width: 0/s);
+  // thread without an action: same thread-tool structure, no preview.
+  const bare = ui.renderFocusMessage({ role: "assistant", content: null, tool_calls: [
+    { id: "call-5", function: { name: "thread", arguments: '{"name":"impl/retry"}' } },
+  ] });
+  assert.match(bare, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(bare, /tool-block-separator/);
+  assert.doesNotMatch(bare, /tool-block-preview/);
+  // Key-arg extraction covers every thread tool the backend registers.
+  assert.equal(ui.isThreadToolName("thread"), true);
+  assert.equal(ui.isThreadToolName("threads"), true);
+  assert.equal(ui.isThreadToolName("thread_read"), true);
+  assert.equal(ui.isThreadToolName("thread_delete"), true);
+  assert.equal(ui.isThreadToolName("read"), false);
+  assert.equal(ui.formatToolCall({ function: { name: "thread_read", arguments: '{"name":"w"}' } }).args, "w");
+  assert.equal(ui.formatToolCall({ function: { name: "thread_delete", arguments: '{"name":"w"}' } }).args, "w");
+  assert.equal(ui.formatToolCall({ function: { name: "threads", arguments: "{}" } }).args, "");
+});
+
+test("thread tile ledgers are always exactly ten lines tall", () => {
+  assert.doesNotMatch(redesignSource, /\.thread-tile \{[^}]*height: 208px/s);
+  assert.doesNotMatch(redesignSource, /\.thread-current-grid \{[^}]*grid-auto-rows: 208px/s);
+  assert.match(redesignSource, /\.thread-current-grid \{[^}]*align-items: start/s);
+  assert.match(redesignSource, /\.action-ledger \{[^}]*; height: calc\(var\(--ledger-max-rows\) \* var\(--ledger-row-height\) \+ 4px\)/s,
+    "the ledger reserves exactly ten rows whether or not they are filled");
+  assert.doesNotMatch(redesignSource, /\.action-ledger \{[^}]*max-height/s,
+    "the ledger is no longer content-driven up to a cap");
+  assert.match(redesignSource, /--ledger-row-height: 15px;/);
+  assert.match(redesignSource, /--ledger-max-rows: 10;/);
+  assert.equal(10 * 15 + 4, 154, "ten 15px rows + 4px ledger vertical padding = 154px");
+});
+
+test("empty-tile placeholder rows stay visible inside the fixed-height ledger", () => {
+  assert.doesNotMatch(redesignSource, /\.action-row\.is-placeholder \{[^}]*height: 0/s,
+    "the placeholder row no longer collapses the empty tile to header-only");
+  assert.match(redesignSource, /\.action-row\.is-placeholder \{ justify-content: center; \}/);
+  const html = ui.renderActionRows([], "No activity yet.");
+  assert.match(html, /<li class="action-row is-placeholder">/);
+  assert.match(html, /No activity yet\./);
+  assert.doesNotMatch(html, /aria-hidden/, "the visible label is exposed to assistive tech");
+});
+
+test("formatActionArgs extracts the relevant argument per tool type", () => {
+  assert.equal(ui.formatActionArgs({ name: "read", argumentsDetail: '{"operation":"read","path":"src/lib.rs"}' }), "src/lib.rs");
+  assert.equal(ui.formatActionArgs({ name: "write", argumentsDetail: '{"operation":"write","path":"out.txt"}' }), "out.txt");
+  assert.equal(ui.formatActionArgs({ name: "edit", argumentsDetail: '{"operation":"edit","path":"mod.rs"}' }), "mod.rs");
+  assert.equal(ui.formatActionArgs({ name: "exec_command", argumentsDetail: '{"operation":"execute","cmd":"cargo test"}' }), "cargo test");
+  assert.equal(ui.formatActionArgs({ name: "thread", argumentsDetail: '{"operation":"dispatch","name":"worker-1"}' }), "worker-1");
+  assert.equal(ui.formatActionArgs({ name: "workset_define", argumentsDetail: '{"id":"ws-1","goal":"x"}' }), "ws-1");
+  assert.equal(ui.formatActionArgs({ name: "response", usage: { input_tokens: 160, output_tokens: 32 } }), "↑160 ↓32");
+  assert.equal(ui.formatActionArgs({ name: "guidance", result: "queued" }), "queued");
+  assert.equal(ui.formatActionArgs({ name: "agent run", result: "started" }), "started");
+});
+
+test("formatActionArgs prefers keyArgPreview over JSON parsing", () => {
+  assert.equal(ui.formatActionArgs({ name: "read", keyArgPreview: "crates/nac-server/src/lib.rs", argumentsDetail: '{"path":"src/lib.rs"}' }), "crates/nac-server/src/lib.rs");
+  assert.equal(ui.formatActionArgs({ name: "exec_command", keyArgPreview: "cargo build", argumentsDetail: '{"cmd":"npm test"}' }), "cargo build");
+  assert.equal(ui.formatActionArgs({ name: "read", keyArgPreview: null, argumentsDetail: '{"path":"src/lib.rs"}' }), "src/lib.rs");
 });
 
 test("terminal run events clear only matching active-run caches", () => {
   const entry = sessionListEntry("terminal", { active_run: { run_id: "new-run" } });
   ui.state.sessions = [entry];
   ui.state.snapshots.set("terminal", sessionSnapshot("terminal", { active_run: { run_id: "new-run" } }));
-  ui.state.acceptedRuns.set("terminal", { run_id: "new-run" });
+  ui.state.pendingEchoes.set("terminal", { run_id: "new-run" });
   ui.state.sessionRunActivity.set("terminal", true);
   ui.noteSessionRunEvent("terminal", "run_completed", "old-run");
   assert.equal(entry.active_run.run_id, "new-run");
   assert.equal(ui.state.snapshots.get("terminal").active_run.run_id, "new-run");
-  assert.equal(ui.state.acceptedRuns.get("terminal").run_id, "new-run");
+  assert.equal(ui.state.pendingEchoes.get("terminal").run_id, "new-run");
   ui.noteSessionRunEvent("terminal", "run_failed", "new-run");
   assert.equal(entry.active_run, null);
   assert.equal(ui.state.snapshots.get("terminal").active_run, null);
-  assert.equal(ui.state.acceptedRuns.has("terminal"), false);
+  assert.equal(ui.state.pendingEchoes.has("terminal"), false);
   assert.equal(ui.state.sessionRunActivity.get("terminal"), false);
 });
 
-test("late deletion completion cannot navigate away from a newer session or close its drawer", async () => {
+test("late deletion completion cannot navigate away from a newer session or close its focus view", async () => {
   const deletion = deferred();
   const isolated = loadApp({ fetch: async (path, options) => {
       if (options?.method === "DELETE") return deletion.promise;
       if (path === "/sessions?workspace_stats=true") return jsonResponse([sessionListEntry("session-b")]);
       throw new Error(`unexpected request ${path}`); }, });
   installWorkspaceElements(isolated);
-  isolated.el.drawerContent = { querySelector: () => ({ id: "newer-form" }) };
-  isolated.el.utilityDrawer = { hidden: false };
+  isolated.el.focusContent = { querySelector: () => ({ id: "newer-form" }) };
   isolated.state.currentId = "session-a";
   isolated.state.sessions = [sessionListEntry("session-a"), sessionListEntry("session-b")];
   const status = fakeElement();
@@ -1935,7 +2424,6 @@ test("late deletion completion cannot navigate away from a newer session or clos
   deletion.resolve(jsonResponse({}));
   await pending;
   assert.equal(isolated.state.currentId, "session-b");
-  assert.equal(isolated.el.utilityDrawer.hidden, false);
 });
 
 test("session-list recovery retries retained hashes and session navigation hands off focus", async () => {
@@ -1957,9 +2445,6 @@ test("session-list recovery retries retained hashes and session navigation hands
   installWorkspaceElements(isolated);
   isolated.el.renameSession.focus = () => focused.push("title");
   isolated.el.pickerTitle = { focus: () => focused.push("picker-title") };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.utilityDrawer = { hidden: true };
   isolated.el.app = fakeElement();
   isolated.el.sessionGrid.querySelector = () => ({ focus: () => focused.push("card") });
   await isolated.loadSessions();
@@ -2002,14 +2487,13 @@ test("session cards and command menu expose reviewed accessibility behavior", ()
   assert.equal(isolated.el.promptInput.getAttribute("aria-expanded"), "false");
   assert.equal(isolated.el.commandMenu.hidden, true);
 
-  isolated.el.utilityDrawer = { hidden: true, dataset: {} };
-  isolated.el.drawerTitle = fakeElement();
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.closeDrawer = { focus() {} };
-  isolated.el.app = fakeElement();
-  isolated.showHelpDrawer();
-  assert.match(isolated.el.drawerContent.innerHTML, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
+  isolated.el.focusContent = { innerHTML: "" };
+  isolated.el.focusTitle = fakeElement();
+  isolated.el.focusState = fakeElement();
+  isolated.el.focusPanel = { ...fakeElement(), hidden: true, classList: { toggle() {}, add() {}, remove() {} } };
+  isolated.el.sessionLayout = { classList: { toggle() {} } };
+  isolated.el.focusContent.innerHTML = isolated.renderCommandReference();
+  assert.match(isolated.el.focusContent.innerHTML, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
 });
 
 
@@ -2018,11 +2502,10 @@ test("thread fullscreen episodes keep counting labels and expose durable identit
     { id: 41, session_id: "session-a", thread_name: "worker", created_at: "created-41", action: "Inspect <schema> fully", content: "First response" },
     { id: 99, session_id: "session-a", thread_name: "worker", created_at: "created-99", action: "Verify migration", content: "Second response" },
   ]);
-  assert.match(html, /Episode 1 · ID 41/);
-  assert.match(html, /Episode 2 · ID 99/);
+  assert.match(html, /Episode 1/);
+  assert.match(html, /Episode 2/);
   assert.equal(occurrences(html, /<details class="focus-episode"/g), 2);
   assert.equal(occurrences(html, /<details class="focus-episode"[^>]* open/g), 1);
-  assert.match(html, /<dt>Durable episode ID<\/dt><dd>99<\/dd>/);
   assert.match(html, /<dt>Session ID<\/dt><dd>session-a<\/dd>/);
   assert.match(html, /<dt>Thread<\/dt><dd>worker<\/dd>/);
   assert.match(html, /<dt>Created<\/dt><dd>created-99<\/dd>/);
@@ -2310,7 +2793,7 @@ test("settings controller reports No changes without issuing PATCH", async () =>
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 4, status: "ready", config: persistedConfig(),
   };
-  await isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requestCount, 0);
   assert.equal(form.status.textContent, "No changes");
   assert.equal(form.inert, false);
@@ -2329,8 +2812,8 @@ test("settings controller suppresses duplicate submissions while a save is pendi
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 5, status: "ready", config: persistedConfig(),
   };
-  const first = isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
-  const duplicate = isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  const first = isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
+  const duplicate = isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requestCount, 1);
   assert.equal(form.inert, true);
   assert.equal(form.submit.disabled, true);
@@ -2379,7 +2862,7 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   isolated.state.settingsFocus = {
     sessionId: "settings-session", requestGeneration: 1, status: "ready", config: persistedConfig(),
   };
-  const first = isolated.handleDrawerSubmit({ target: originalForm, preventDefault() {} });
+  const first = isolated.handleFocusPanelSubmit({ target: originalForm, preventDefault() {} });
   assert.equal(requests.length, 1);
   const submission = isolated.state.settingsSubmission;
   assert.ok(submission);
@@ -2395,14 +2878,14 @@ test("closing and reopening settings retains the deferred PATCH guard and reconc
   assert.equal(isolated.state.settingsSubmission, submission);
   assert.match(isolated.renderFocusSettings(), /<form[^>]* inert aria-busy="true"/);
   assert.match(isolated.renderFocusSettings(), /data-settings-submit type="submit" disabled/);
-  await isolated.handleDrawerSubmit({ target: reopenedForm, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: reopenedForm, preventDefault() {} });
   assert.equal(requests.length, 1, "the reopened view must not start a second PATCH");
   patch.resolve({ ok: true, status: 200, statusText: "OK", async text() { return ""; } });
   await first;
   assert.equal(requests.filter(([, options]) => options.method === "PATCH").length, 1);
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsSubmission, null);
   assert.equal(isolated.state.settingsFocus.config.model, "authoritative-model");
@@ -2443,14 +2926,14 @@ test("empty PATCH responses reload config and reconcile snapshot and session sta
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 6, status: "ready", config: persistedConfig(),
   };
-  await isolated.handleDrawerSubmit({ target: form, preventDefault() {} });
+  await isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
   assert.equal(requests.length, 4);
   assert.equal(requests[0][0], "/sessions/settings-session/config");
   assert.equal(requests[0][1].method, "PATCH");
   assert.deepEqual(JSON.parse(requests[0][1].body), { model: "gpt-5.1" });
   assert.deepEqual(requests.slice(1).map(([path]) => path).sort(), [
     "/sessions", "/sessions/settings-session/config",
-    "/sessions/settings-session?message_limit=24&thread_event_limit=24&include_sessions=false",
+    "/sessions/settings-session?message_limit=24&thread_event_limit=50&include_sessions=false",
   ]);
   assert.equal(isolated.state.settingsFocus.config.model, "gpt-5.1");
   assert.equal(isolated.state.snapshots.get("settings-session").metadata.session_id, "settings-session");
@@ -2717,9 +3200,8 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   isolated.el.initialPrompt = { value: "start immediately" };
   isolated.el.commandComposer = { requestSubmit() { timeline.push("initial-prompt"); } };
   isolated.state.workspaceDiffs.set("created-session:src/old.js", { status: "ready" });
-  isolated.state.acceptedRuns.set("created-session", {
-    run_id: "preexisting", baseline_message_total: 0,
-    submitted_user_message: { content: "created prompt", baseline_user_message_count: null },
+  isolated.state.pendingEchoes.set("created-session", {
+    run_id: "preexisting", content: "created prompt",
   });
 
   await isolated.createSession({ preventDefault() {} });
@@ -2740,7 +3222,7 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
     messages: snapshot.messages,
   });
   assert.equal(isolated.state.workspaceDiffs.has("created-session:src/old.js"), false);
-  assert.equal(isolated.state.acceptedRuns.has("created-session"), false);
+  assert.equal(isolated.state.pendingEchoes.has("created-session"), false);
   assert.equal(isolated.state.sessions[0].summary.session_id, "created-session");
   assert.equal(isolated.el.promptInput.value, "start immediately");
   assert.equal(isolated.el.launchDialog.closed, true);
@@ -2803,9 +3285,7 @@ scenario("Launch modes and defaults", "launch-default preview limits claims and 
   assert.match(ready, /Canonical URL: <code>https:\/\/chatgpt\.com\/backend-api<\/code>/);
   assert.match(ready, /server-stored ChatGPT login/);
   assert.match(ready, /secret values are never returned/);
-  assert.match(ready, /reports configured backend and base URL only/);
-  assert.match(ready, /does not validate model availability/);
-  assert.match(ready, /credentials will work/);
+  assert.match(ready, /Preview only/);
   assert.doesNotMatch(ready, /must-not-render|super-secret/);
   const arcee = ui.managedLaunchDefaults("arcee-auth", "https://custom.example.test");
   assert.equal(arcee.usesCanonicalUrl, false);
@@ -3242,7 +3722,7 @@ test("session info renders only complete requested identity and execution fields
     root_cwd: "/excluded/server/root",
     store_path: "/var/lib/nac/<exact store>.sqlite",
     worker_executable: "/excluded/worker", });
-  for (const label of ["Session ID", "Working directory", "Execution topology", "SSH host", "Sandbox state", "Backend", "Model", "Store path"]) {
+  for (const label of ["Session ID", "Working directory", "Execution mode", "SSH host", "Sandbox state", "Backend", "Model", "Store path"]) {
     assert.match(html, new RegExp(`<dt>${label}</dt>`)); }
   for (const exactValue of [ "session-&lt;full&gt;-0123456789",
     "/remote/work trees/&lt;complete&gt;/repository",
@@ -3256,8 +3736,8 @@ test("session info renders only complete requested identity and execution fields
     assert.doesNotMatch(html, new RegExp(excluded)); }
   assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: true }, {
     metadata: { ...snapshot.metadata, sandbox_status: "running: podman" },
-  }, { store_path: "/store.db" }), /<dt>Execution topology<\/dt><dd>sandbox<\/dd>[\s\S]*<dt>Sandbox state<\/dt><dd>running: podman<\/dd>/);
-  assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: false }, null, { store_path: "/store.db" }), /<dt>Execution topology<\/dt><dd>local<\/dd>/);
+  }, { store_path: "/store.db" }), /<dt>Execution mode<\/dt><dd>sandbox<\/dd>[\s\S]*<dt>Sandbox state<\/dt><dd>running: podman<\/dd>/);
+  assert.match(ui.renderSessionInfo({ ...summary, ssh_host: null, sandboxed: false }, null, { store_path: "/store.db" }), /<dt>Execution mode<\/dt><dd>local<\/dd>/);
 });
 
 test("compact session and thread surfaces recover full identities through titles and ARIA", () => {
@@ -3268,15 +3748,15 @@ test("compact session and thread surfaces recover full identities through titles
     backend: "openai-responses", sandboxed: false, pinned: true,
     visible_message_count: 2, };
   const card = ui.renderSessionCard({ summary }, 0, [{ summary }]);
-  assert.match(card, /title="A compact session title · session 12345678-full-session-identity"/);
+  assert.match(card, /title="A compact session title"/);
   assert.match(card, /title="local · \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable"/);
   assert.match(card, /title="provider\/a-model-name-that-is-longer-than-twenty-four-characters" aria-label="Model: provider\/a-model-name-that-is-longer-than-twenty-four-characters"/);
-  assert.match(card, /aria-label="A compact session title · session 12345678-full-session-identity\. Idle\. No prompt submitted\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
+  assert.match(card, /aria-label="A compact session title\. Idle\. No prompt submitted\. local\. Working directory \/very\/long\/workspace\/path\/that\/must\/remain\/recoverable\. Model provider\/a-model-name-that-is-longer-than-twenty-four-characters\. Workspace changes not loaded\."/);
   const thread = ui.renderThreadTile({
     name: "worker/a-very-long-thread-name-<with-context>",
     state: "running", compact: false, actions: [], });
   assert.match(thread, /class="thread-name" title="worker\/a-very-long-thread-name-&lt;with-context&gt;"/);
-  assert.match(thread, /aria-label="Target worker\/a-very-long-thread-name-&lt;with-context&gt; for steering"/);
+  assert.match(thread, /aria-label="Target worker\/a-very-long-thread-name-&lt;with-context&gt; for guidance"/);
   assert.match(thread, /aria-label="Open worker\/a-very-long-thread-name-&lt;with-context&gt; fullscreen"/);
   assert.doesNotMatch(thread, /<with-context>/);
 });
@@ -3479,40 +3959,11 @@ test("fullscreen focus entry targets its heading, clears leaked state, and close
   assert.equal(document.activeElement, isolated.el.promptInput, "a hidden remembered opener must fall back to the visible default control");
 });
 
-test("utility drawer applies modal background semantics, contains Tab, and restores its opener", () => {
-  let document;
-  const focusable = (id) => ({ ...fakeElement(), id,
-    tagName: "BUTTON", isConnected: true, hidden: false,
-    disabled: false, focus() { document.activeElement = this; }, });
-  const opener = focusable("drawer-opener");
-  const close = focusable("closeDrawer");
-  const action = focusable("drawer-action");
-  document = {
-    addEventListener() {}, hidden: false, body: {}, documentElement: {}, activeElement: opener,
-    getElementById(id) { return id === opener.id ? opener : null; },
-    querySelectorAll() { return []; }, };
-  const isolated = loadApp({ document });
-  isolated.el.app = { ...fakeElement(), inert: false };
-  isolated.el.drawerTitle = fakeElement();
-  isolated.el.drawerContent = { innerHTML: "" };
-  isolated.el.drawerBackdrop = { hidden: true };
-  isolated.el.closeDrawer = close;
-  isolated.el.utilityDrawer = { ...fakeElement(), hidden: true,
-    querySelectorAll() { return [close, action]; },
-    contains(item) { return item === close || item === action; }, };
-  isolated.openDrawer("commands", "<button>action</button>");
-  assert.equal(document.activeElement, close);
-  assert.equal(isolated.el.app.inert, true);
-  assert.equal(isolated.el.app.getAttribute("aria-hidden"), "true");
-  document.activeElement = action;
-  let prevented = false;
-  isolated.handleDrawerKeydown({ key: "Tab", shiftKey: false, preventDefault() { prevented = true; } });
-  assert.equal(prevented, true);
-  assert.equal(document.activeElement, close);
-  isolated.closeDrawer();
-  assert.equal(isolated.el.app.inert, false);
-  assert.equal(isolated.el.app.getAttribute("aria-hidden"), null);
-  assert.equal(document.activeElement, opener);
+test("renderCommandReference produces the command reference HTML", () => {
+  const html = ui.renderCommandReference();
+  assert.match(html, /<div class="command-reference">/);
+  assert.match(html, /<code>\/compact<\/code><span>compact older orchestrator context<\/span>/);
+  assert.match(html, /<code>\/help<\/code><span>show all commands<\/span>/);
 });
 
 test("boot starts store and session requests concurrently and does not await a hung store", async () => {
@@ -3545,6 +3996,128 @@ test("late store metadata does not overwrite an already-started launch draft", a
   assert.equal(isolated.el.launchCwd.value, "/typed/before/store");
   assert.deepEqual(plain(isolated.state.launchCwdDrafts), {
     localSandbox: "/typed/before/store", ssh: "~/remote-draft", });
+});
+
+test("session bar includes the mobile view toggle with accessible pressed state", () => {
+  assert.match(indexSource, /<button id="viewToggle" class="view-toggle" type="button" data-view="chat" aria-pressed="false" aria-label="[^"]+"/);
+  assert.match(indexSource, /data-view-option="chat">Chat</);
+  assert.match(indexSource, /data-view-option="threads">Threads</);
+  const barStart = indexSource.indexOf('<header class="session-bar">');
+  const bar = indexSource.slice(barStart, indexSource.indexOf("</header>", barStart));
+  assert.ok(bar.includes('id="viewToggle"'), "toggle lives in the session bar");
+  assert.ok(bar.indexOf('id="stopRun"') < bar.indexOf('id="viewToggle"'), "toggle follows the stop button");
+});
+
+test("mobile view switch CSS: toggle hidden on desktop, panes swap below the 780px breakpoint", () => {
+  assert.match(redesignSource, /\.view-toggle \{[^}]*display: none;/s, "toggle is hidden by default (desktop)");
+  assert.match(redesignSource, /\.view-toggle\[data-view="chat"\] \.view-toggle-option\[data-view-option="chat"\][^{]*\{[^}]*background: var\(--paper\);/s,
+    "the active option is highlighted");
+  const start = redesignSource.indexOf("@media (max-width: 780px)");
+  const mobileBlock = redesignSource.slice(start, redesignSource.indexOf("@media", start + 10));
+  assert.match(mobileBlock, /\.view-toggle \{ display: inline-flex; \}/, "toggle appears below the breakpoint");
+  assert.match(mobileBlock, /\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto auto; \}/,
+    "the session bar gains a track for the toggle only below the breakpoint");
+  assert.match(mobileBlock, /\.session-layout:not\(\.is-threads-view\) > \.thread-canvas \{ display: none; \}/);
+  assert.match(mobileBlock, /\.session-layout\.is-threads-view > \.overview-rail \{ display: none; \}/);
+  assert.match(mobileBlock, /\.session-layout \{[^}]*height: calc\(100dvh - 112px\);[^}]*grid-template-columns: 1fr;[^}]*overflow: hidden;/s,
+    "the layout is fixed-height with internal pane scrolling, not page scroll");
+  assert.doesNotMatch(mobileBlock, /grid-template-rows: auto minmax\(400px,1fr\) auto/, "the old stacked grid rows are gone");
+  assert.doesNotMatch(mobileBlock, /\.overview-rail \{[^}]*overflow: visible/, "the old page-scroll rail is gone");
+  assert.doesNotMatch(mobileBlock, /min-height: 560px/, "the old thread-canvas page-scroll minimum is gone");
+  assert.doesNotMatch(mobileBlock, /position: sticky/, "the composer no longer sticks over a scrolling page");
+  assert.match(redesignSource, /#viewToggle \{ grid-column: 5; grid-row: 1; \}/, "toggle is placed in the 560px session-bar grid");
+  assert.match(redesignSource, /\.session-layout \{ height: calc\(100dvh - 148px\); \}/, "560px layout stays fixed-height");
+});
+
+test("desktop workspace layout rules are unchanged by the mobile view switch", () => {
+  assert.match(redesignSource, /\.session-layout \{\s*height: calc\(100dvh - 72px\);\s*display: grid;\s*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\);\s*grid-template-rows: minmax\(0, 1fr\) auto;\s*overflow: hidden;\s*\}/);
+  assert.match(redesignSource, /@media \(max-width: 1060px\) \{\s*\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto; \}/,
+    "the 1060px session-bar grid keeps its five tracks");
+  assert.doesNotMatch(redesignSource.slice(0, redesignSource.indexOf("@media")), /is-threads-view/,
+    "no view-switch rules exist outside the media queries");
+});
+
+test("session-bar spacing is one token-based rhythm and the toggle matches icon-button height", () => {
+  assert.match(redesignSource, /--sp-3: 8px;/);
+  assert.match(redesignSource, /--sp-4: 12px;/);
+  assert.match(redesignSource, /\.session-bar \{[^}]*gap: var\(--sp-4\);[^}]*padding: 10px 16px;/s,
+    "the base bar spaces controls with the --sp-4 step");
+  const narrow = redesignSource.slice(redesignSource.indexOf("@media (max-width: 560px)"));
+  assert.match(narrow, /\.session-bar \{[^}]*gap: var\(--sp-3\);[^}]*padding: 10px;/s,
+    "the 560px bar uses a uniform --sp-3 step of the same rhythm");
+  assert.doesNotMatch(narrow, /gap: 7px 6px/, "the old off-rhythm 560px gap is gone");
+  assert.match(redesignSource, /\.view-toggle \{[^}]*padding: 3px;/s);
+  assert.match(redesignSource, /\.view-toggle-option \{ padding: 10px;/,
+    "segments pad the pill to the 38px icon-button height");
+  assert.equal(2 + 2 * 3 + (2 * 10 + 10), 38,
+    "pill math: 2px border + 6px pill padding + 30px segments (10px label line)");
+  const coarse = redesignSource.slice(redesignSource.indexOf("@media (pointer: coarse)"));
+  assert.match(coarse, /\.view-toggle-option \{ padding-top: 13px; padding-bottom: 13px; \}/,
+    "coarse pointers grow the pill to the 44px icon-button height");
+  assert.doesNotMatch(coarse, /\.view-toggle \{ min-height: 44px; \}/,
+    "the pill height comes from segment padding, not a loose min-height");
+});
+
+test("workspace view toggle flips layout class and button state, defaulting to chat", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  isolated.setWorkspaceView("threads");
+  assert.equal(isolated.state.workspaceView, "threads");
+  assert.ok(isolated.el.sessionLayout.classList.contains("is-threads-view"));
+  assert.equal(isolated.el.viewToggle.dataset.view, "threads");
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "true");
+  isolated.setWorkspaceView("chat");
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  assert.equal(isolated.el.viewToggle.dataset.view, "chat");
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
+});
+
+test("workspace view switching preserves each pane's scroll position", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "scroll-session";
+  const chat = isolated.el.orchestratorChatContent;
+  const threads = isolated.el.threadGrid;
+  chat.scrollTop = 120;
+  isolated.state.orchestratorViewport = { sessionId: "scroll-session", pinnedToBottom: false, scrollTop: 120 };
+  isolated.setWorkspaceView("threads");
+  chat.scrollTop = 0; // display:none resets the hidden pane's offset
+  threads.scrollTop = 77;
+  isolated.setWorkspaceView("chat");
+  assert.equal(chat.scrollTop, 120, "chat scroll is restored on re-entry");
+  threads.scrollTop = 0;
+  isolated.setWorkspaceView("threads");
+  assert.equal(threads.scrollTop, 77, "threads scroll is restored on re-entry");
+});
+
+test("chat view re-entry pins to bottom when the user never scrolled up", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "pinned-session";
+  const chat = isolated.el.orchestratorChatContent;
+  chat.scrollHeight = 4000;
+  isolated.state.orchestratorViewport = { sessionId: "pinned-session", pinnedToBottom: true, scrollTop: 3960 };
+  isolated.setWorkspaceView("threads");
+  isolated.setWorkspaceView("chat");
+  assert.equal(chat.scrollTop, 4000, "chat jumps to the latest messages instead of a stale offset");
+});
+
+test("opening a session resets the mobile workspace view to chat", () => {
+  const { FakeEventSource } = eventSourceHarness();
+  const isolated = loadApp({ EventSource: FakeEventSource,
+    fetch() { return new Promise(() => {}); }, });
+  installWorkspaceElements(isolated);
+  isolated.state.sessions = [{ summary: { session_id: "view-reset-session", cwd: "/repo", model: "gpt-5" } }];
+  isolated.state.snapshots.set("view-reset-session", sessionSnapshot("view-reset-session"));
+  isolated.setWorkspaceView("threads");
+  assert.ok(isolated.el.sessionLayout.classList.contains("is-threads-view"));
+  assert.doesNotThrow(() => isolated.openSession("view-reset-session"));
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
 });
 
 for (const [group, rows] of scenarioGroups) {

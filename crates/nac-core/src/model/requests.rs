@@ -161,6 +161,7 @@ pub(super) fn openai_responses_request(
     let mut request = json!({
         "model": model,
         "input": responses_input_items(messages),
+        "store": false,
     });
     if !tools.is_empty() {
         request["tools"] = Value::Array(
@@ -169,9 +170,12 @@ pub(super) fn openai_responses_request(
                 .map(openai_responses_tool_to_value)
                 .collect::<Vec<_>>(),
         );
+        request["tool_choice"] = json!("auto");
+        request["parallel_tool_calls"] = json!(true);
     }
     if let Some(effort) = reasoning_effort {
         request["reasoning"] = json!({"effort": effort.as_str()});
+        request["include"] = json!(["reasoning.encrypted_content"]);
     }
     request
 }

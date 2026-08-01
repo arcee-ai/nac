@@ -85,9 +85,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             // Both v0 and v1 may contain some or all of the branch's v1
             // auxiliary tables. Rebuild every table that exists and create the
             // missing ones before applying the v3 addition.
-            migrate_session_overviews(&transaction)?;
             migrate_thread_steering(&transaction)?;
             migrate_thread_events(&transaction)?;
+            transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | STORE_SCHEMA_VERSION => {}
         unsupported => {
@@ -207,45 +207,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_session_overviews(conn: &Connection) -> Result<()> {
-    if !table_exists(conn, "session_overviews")? {
-        create_session_overviews_table(conn, "session_overviews")?;
-        return Ok(());
-    }
-
-    let summary_column = if column_exists(conn, "session_overviews", "summary")? {
-        "summary"
-    } else if column_exists(conn, "session_overviews", "status")? {
-        "status"
-    } else {
-        return Err(anyhow!(
-            "session_overviews has neither a summary nor legacy status column"
-        ));
-    };
-    let (source_count, orphan_count) = owned_row_counts(conn, "session_overviews")?;
-    report_omitted_orphans("session_overviews", orphan_count);
-
-    conn.execute_batch("DROP TABLE IF EXISTS session_overviews_v2")?;
-    create_session_overviews_table(conn, "session_overviews_v2")?;
-    let copied = conn.execute(
-        &format!(
-            "INSERT INTO session_overviews_v2
-                 (session_id, summary, model, generated_at, source_updated_at)
-             SELECT o.session_id, o.{summary_column}, o.model, o.generated_at,
-                    o.source_updated_at
-             FROM session_overviews o
-             INNER JOIN sessions s ON s.session_id = o.session_id"
-        ),
-        [],
-    )?;
-    verify_copy_count("session_overviews", source_count, orphan_count, copied)?;
-    conn.execute_batch(
-        "DROP TABLE session_overviews;
-         ALTER TABLE session_overviews_v2 RENAME TO session_overviews;",
-    )?;
-    Ok(())
-}
-
 fn migrate_thread_steering(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "thread_steering")? {
         create_thread_steering_table(conn, "thread_steering")?;
@@ -340,14 +301,24 @@ fn migrate_thread_events(conn: &Connection) -> Result<()> {
     let mut copied = 0_i64;
     let mut unsafe_events = 0_i64;
     for (id, session_id, thread_name, event_json, created_at) in records {
-        let sanitized = serde_json::from_str::<crate::events::AgentEvent>(&event_json)
-            .ok()
-            .and_then(crate::events::sanitize_external_agent_event);
-        let Some(event) = sanitized else {
-            unsafe_events += 1;
-            continue;
+        // Transcript log rows (store/transcript.rs) are NOT AgentEvents: they
+        // are the orchestrator's durable transcript and must be carried
+        // through verbatim. Running them through AgentEvent sanitize-drop
+        // would silently destroy the transcript. Any FUTURE rebuild-migration
+        // of thread_events MUST preserve transcript log rows the same way —
+        // detect them with is_transcript_log_payload, never via AgentEvent.
+        let event_json = if is_transcript_log_payload(&event_json) {
+            event_json
+        } else {
+            let sanitized = serde_json::from_str::<crate::events::AgentEvent>(&event_json)
+                .ok()
+                .and_then(crate::events::sanitize_external_agent_event);
+            let Some(event) = sanitized else {
+                unsafe_events += 1;
+                continue;
+            };
+            serde_json::to_string(&event)?
         };
-        let event_json = serde_json::to_string(&event)?;
         conn.execute(
             "INSERT INTO thread_events_v2
                  (id, session_id, thread_name, event_json, created_at)
@@ -376,20 +347,6 @@ fn migrate_thread_events(conn: &Connection) -> Result<()> {
     )?;
     restore_autoincrement_sequence(conn, "thread_events", prior_sequence)?;
     create_thread_events_index(conn)?;
-    Ok(())
-}
-
-fn create_session_overviews_table(conn: &Connection, table: &str) -> Result<()> {
-    conn.execute_batch(&format!(
-        "CREATE TABLE {table} (
-             session_id TEXT PRIMARY KEY
-                 REFERENCES sessions(session_id) ON DELETE CASCADE,
-             summary TEXT NOT NULL,
-             model TEXT NOT NULL,
-             generated_at TEXT NOT NULL,
-             source_updated_at TEXT NOT NULL
-         );"
-    ))?;
     Ok(())
 }
 
@@ -595,7 +552,6 @@ fn restore_autoincrement_sequence(
 
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
-        "session_overviews",
         "thread_steering",
         "thread_events",
         "orchestrator_compaction_checkpoints",

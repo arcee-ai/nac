@@ -119,3 +119,51 @@ pub fn refresh_snapshot(
         updated_at: now_utc(),
     }
 }
+
+/// Run-state fields refreshed at run end (DB-direct transcript workset,
+/// step 4 — never-fold): the token/timing bookkeeping persisted by
+/// [`crate::sessions::save_session_run_state`]. Everything else about a
+/// session row — above all `messages_json` — is deliberately untouched at
+/// run end.
+#[derive(Debug, Clone, Default)]
+pub struct SessionRunState {
+    pub last_response_duration_ms: Option<u64>,
+    pub previous_response_duration_ms: Option<u64>,
+    pub response_durations_ms: Option<Vec<Option<u64>>>,
+    pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+}
+
+/// The sparing run-end persistence update consumed by
+/// [`crate::sessions::save_session_run_state`]: run state plus the
+/// row-identity/context columns the run-end UPDATE writes. Owned and small
+/// — deliberately no transcript messages, so the run-end path never clones
+/// the (write-once) blob.
+#[derive(Debug, Clone)]
+pub struct SessionRunStateUpdate {
+    pub session_id: String,
+    pub ssh_host: Option<String>,
+    pub sandbox_spec: Option<SandboxSpec>,
+    pub run_state: SessionRunState,
+    pub updated_at: String,
+}
+
+impl SessionSnapshot {
+    /// Apply run-end state to the in-memory snapshot IN PLACE (never-fold:
+    /// `messages` is not touched — the blob is write-once) and capture the
+    /// sparing persistence update for `save_session_run_state`. `updated_at`
+    /// is stamped once and shared by the in-memory copy and the store write.
+    pub fn apply_run_state(&mut self, run_state: SessionRunState) -> SessionRunStateUpdate {
+        self.last_response_duration_ms = run_state.last_response_duration_ms;
+        self.previous_response_duration_ms = run_state.previous_response_duration_ms;
+        self.response_durations_ms = run_state.response_durations_ms.clone();
+        self.token_usages = run_state.token_usages.clone();
+        self.updated_at = now_utc();
+        SessionRunStateUpdate {
+            session_id: self.session_id.clone(),
+            ssh_host: self.ssh_host.clone(),
+            sandbox_spec: self.sandbox_spec.clone(),
+            run_state,
+            updated_at: self.updated_at.clone(),
+        }
+    }
+}

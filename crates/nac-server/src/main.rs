@@ -6,13 +6,17 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser, Subcommand};
 use nac_core::{
-    model::{BackendKind, ReasoningEffort},
+    model::{
+        run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind,
+        CodexAuthAction, ReasoningEffort,
+    },
     runtime::{
         self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
         StoreOptions, WorkerDispatchOptions,
     },
+    upgrade::{run_upgrade, UpgradeRequest},
 };
 use nac_server::{serve, ServerOptions, SessionManager};
 
@@ -34,6 +38,48 @@ struct ServerCli {
     /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
+}
+
+#[derive(Parser)]
+#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth")]
+struct CodexAuthCli {
+    #[command(subcommand)]
+    command: Option<CodexAuthCommand>,
+}
+
+#[derive(Subcommand)]
+enum CodexAuthCommand {
+    /// Sign in with ChatGPT using device code authorization
+    Login,
+    /// Show stored Codex auth status
+    Status,
+    /// Remove stored Codex auth
+    Logout,
+}
+
+#[derive(Parser)]
+#[command(name = "nac-web arcee-auth", about = "manage Arcee auth")]
+struct ArceeAuthCli {
+    #[command(subcommand)]
+    command: Option<ArceeAuthCommand>,
+}
+
+#[derive(Subcommand)]
+enum ArceeAuthCommand {
+    /// Sign in with Arcee using device code authorization
+    Login,
+    /// Show stored Arcee auth status
+    Status,
+    /// Remove stored Arcee auth
+    Logout,
+}
+
+#[derive(Parser)]
+#[command(name = "nac-web upgrade", about = "reinstall the latest nac-web release")]
+struct UpgradeCli {
+    /// Install directory to replace (default: current nac-web executable directory)
+    #[arg(long)]
+    install_dir: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -251,6 +297,9 @@ struct SandboxArgs {
 enum ParsedCli {
     Serve(ServerCli),
     ManagedWorker(ManagedWorkerCli),
+    CodexAuth(CodexAuthCli),
+    ArceeAuth(ArceeAuthCli),
+    Upgrade(UpgradeCli),
 }
 
 fn parse_cli() -> ParsedCli {
@@ -262,6 +311,30 @@ fn parse_cli() -> ParsedCli {
         ParsedCli::ManagedWorker(ManagedWorkerCli::parse_from(subcommand_args(
             args,
             "nac-web __worker",
+        )))
+    } else if args
+        .get(1)
+        .is_some_and(|value| value == OsStr::new("codex-auth"))
+    {
+        ParsedCli::CodexAuth(CodexAuthCli::parse_from(subcommand_args(
+            args,
+            "nac-web codex-auth",
+        )))
+    } else if args
+        .get(1)
+        .is_some_and(|value| value == OsStr::new("arcee-auth"))
+    {
+        ParsedCli::ArceeAuth(ArceeAuthCli::parse_from(subcommand_args(
+            args,
+            "nac-web arcee-auth",
+        )))
+    } else if args
+        .get(1)
+        .is_some_and(|value| value == OsStr::new("upgrade"))
+    {
+        ParsedCli::Upgrade(UpgradeCli::parse_from(subcommand_args(
+            args,
+            "nac-web upgrade",
         )))
     } else {
         ParsedCli::Serve(ServerCli::parse_from(args))
@@ -287,6 +360,9 @@ async fn run() -> Result<()> {
     match parse_cli() {
         ParsedCli::Serve(cli) => run_server(cli).await,
         ParsedCli::ManagedWorker(cli) => run_managed_worker(cli).await,
+        ParsedCli::CodexAuth(cli) => run_codex_auth_cli(cli).await,
+        ParsedCli::ArceeAuth(cli) => run_arcee_auth_cli(cli).await,
+        ParsedCli::Upgrade(cli) => run_upgrade_cli(cli).await,
     }
 }
 
@@ -364,6 +440,57 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         ssh_host: cli.ssh_host,
     };
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
+}
+
+async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
+    match cli.command {
+        Some(command) => run_codex_auth_action(codex_auth_action(command)).await,
+        None => {
+            let mut command = CodexAuthCli::command();
+            command.print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
+    match command {
+        CodexAuthCommand::Login => CodexAuthAction::Login,
+        CodexAuthCommand::Status => CodexAuthAction::Status,
+        CodexAuthCommand::Logout => CodexAuthAction::Logout,
+    }
+}
+
+async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
+    match cli.command {
+        Some(command) => run_arcee_auth_action(arcee_auth_action(command)).await,
+        None => {
+            let mut command = ArceeAuthCli::command();
+            command.print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
+    match command {
+        ArceeAuthCommand::Login => ArceeAuthAction::Login,
+        ArceeAuthCommand::Status => ArceeAuthAction::Status,
+        ArceeAuthCommand::Logout => ArceeAuthAction::Logout,
+    }
+}
+
+async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
+    run_upgrade(UpgradeRequest {
+        install_dir: cli.install_dir,
+        executable_path: Some(std::env::current_exe().context(
+            "failed to determine nac-web executable path",
+        )?),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+    .await
 }
 
 fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
@@ -492,5 +619,36 @@ thread_timeout_secs = 7200
             assert!(error.contains("arcee-auth"), "{error}");
             assert!(error.contains("arcee-api"), "{error}");
         }
+    }
+
+    #[test]
+    fn codex_auth_command_parses_subcommands() {
+        let cli = CodexAuthCli::try_parse_from(["nac-web codex-auth"]).unwrap();
+        assert!(cli.command.is_none());
+
+        let cli = CodexAuthCli::try_parse_from(["nac-web codex-auth", "status"]).unwrap();
+        assert!(matches!(cli.command, Some(CodexAuthCommand::Status)));
+    }
+
+    #[test]
+    fn arcee_auth_command_parses_subcommands() {
+        let cli = ArceeAuthCli::try_parse_from(["nac-web arcee-auth"]).unwrap();
+        assert!(cli.command.is_none());
+
+        let cli = ArceeAuthCli::try_parse_from(["nac-web arcee-auth", "login"]).unwrap();
+        assert!(matches!(cli.command, Some(ArceeAuthCommand::Login)));
+    }
+
+    #[test]
+    fn upgrade_command_parses_arguments() {
+        let cli = UpgradeCli::try_parse_from(["nac-web upgrade"]).unwrap();
+        assert!(cli.install_dir.is_none());
+
+        let cli =
+            UpgradeCli::try_parse_from(["nac-web upgrade", "--install-dir", "/tmp/test"]).unwrap();
+        assert_eq!(
+            cli.install_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/test"))
+        );
     }
 }
