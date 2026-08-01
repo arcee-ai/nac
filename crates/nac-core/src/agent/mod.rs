@@ -743,21 +743,38 @@ impl Agent {
         Ok(())
     }
 
-    /// Cancellation normalization for the session cancel path: trim a
-    /// dangling tool turn from the transcript AND the log tail, then append
-    /// and log the cancellation marker. The log tail is deleted
-    /// unconditionally (not only when the vec was trimmed): a run-task abort
-    /// cannot interrupt a `spawn_blocking` append once started, so the log
-    /// can hold a straggler row at `messages.len()` that the vec never saw —
-    /// without the delete, the marker would reuse that idx and leave
-    /// duplicate-idx rows for the restore merge. On a log error the marker
-    /// is not appended at all — deliberately: a snapshot that ends at the
-    /// trimmed length lets the next restore re-normalize the stale log tail,
-    /// while a persisted marker would cover the stale rows and resurrect
-    /// orphaned tool results into the provider view.
-    pub async fn append_cancellation_marker(&mut self) -> Result<()> {
+    /// Trim a dangling tool turn from the transcript AND the transcript log
+    /// tail. Shared by the run-failure path
+    /// (`SessionService::finish_run_once`) and the cancel path
+    /// (`Agent::append_cancellation_marker`, which additionally logs a
+    /// marker). A run that fails at the tool-result commit point leaves the
+    /// assistant tool-call message in the vec AND the log with its tool
+    /// results in neither; the agent is long-lived, so the next run would
+    /// reuse that dirty transcript and providers would reject it (assistant
+    /// tool calls with no tool results) until re-attach.
+    ///
+    /// The log tail is deleted unconditionally (not only when the vec was
+    /// trimmed): a run-task abort cannot interrupt a `spawn_blocking` append
+    /// once started, so the log can hold a straggler row at `messages.len()`
+    /// that the vec never saw — without the delete, the next append would
+    /// reuse that idx and leave duplicate-idx rows for the restore merge.
+    /// Both terminal paths treat a normalization error as best-effort: the
+    /// next restore re-normalizes the stale tail.
+    pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
         truncate_incomplete_tool_turn(&mut self.messages);
-        self.delete_log_tail(self.messages.len() as u64).await?;
+        self.delete_log_tail(self.messages.len() as u64).await
+    }
+
+    /// Cancellation normalization for the session cancel path: trim a
+    /// dangling tool turn from the transcript AND the log tail (see
+    /// [`Agent::normalize_dangling_tail`]), then append and log the
+    /// cancellation marker. On a log error the marker is not appended at
+    /// all — deliberately: a snapshot that ends at the trimmed length lets
+    /// the next restore re-normalize the stale log tail, while a persisted
+    /// marker would cover the stale rows and resurrect orphaned tool results
+    /// into the provider view.
+    pub async fn append_cancellation_marker(&mut self) -> Result<()> {
+        self.normalize_dangling_tail().await?;
         self.push_and_log(Message::Assistant {
             content: Some("[run cancelled by user]".to_string()),
             reasoning_text: None,
@@ -920,10 +937,21 @@ impl Agent {
 
         // Transcript commit point (steering): stage→ack→append. The staged
         // messages are appended to the log only after the ack is durable. On
-        // log failure the messages stay in the transcript — the ack already
-        // consumed the records, so they would never be redelivered — and the
-        // run-failure snapshot persists them.
-        self.log_transcript_tail(message_checkpoint).await?;
+        // log failure they are truncated from the vec — unlike the
+        // ack-failure path above, the ids stay staged because the ack is
+        // durable: the records keep their delivered status and are never
+        // redelivered. Keeping the messages would break the log-first
+        // invariant (the vec never holds an undurable message): the next
+        // append would use `idx = messages.len()` past the unlogged rows,
+        // leaving a permanent gap in the log that fails the restore merge
+        // and store-backed reads. The acked steering is thereby lost from
+        // the transcript — accepted: a transient echo is not worth a
+        // bricked session, and the durable steering records still show the
+        // delivery.
+        if let Err(error) = self.log_transcript_tail(message_checkpoint).await {
+            self.messages.truncate(message_checkpoint);
+            return Err(error);
+        }
 
         for record in records {
             if let Some(thread_name) = &thread_name {

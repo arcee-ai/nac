@@ -583,6 +583,148 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
 }
 
 #[tokio::test]
+async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
+    let store_path = test_store_path("normalize_failed");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+
+    // The post-failure state the run-failure path normalizes: the assistant
+    // tool-call message is in the vec AND the log; its tool results are in
+    // neither (the tool-batch log append failed atomically).
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let seeded = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+        tool_call_assistant(&["call-1"]),
+    ];
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer.append_batch("session", 0, &seeded).unwrap();
+    agent.messages = seeded;
+
+    agent.normalize_dangling_tail().await.unwrap();
+
+    assert_eq!(agent.messages.len(), 2);
+    let log = read_log(&store_path, "session");
+    assert_eq!(
+        log.len(),
+        2,
+        "the dangling log row is deleted and no marker is appended"
+    );
+    assert!(matches!(log[1].1, Message::User { .. }));
+
+    // A clean transcript is untouched: no trim, and the unconditional tail
+    // delete is a no-op when the vec and the log agree.
+    let mut clean = orchestrator_agent(store_path.clone(), "session", None);
+    clean.messages = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+        plain_assistant("answer"),
+    ];
+    clean.normalize_dangling_tail().await.unwrap();
+    assert_eq!(clean.messages.len(), 3);
+    assert_eq!(read_log(&store_path, "session").len(), 2);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn steering_log_failure_truncates_the_staged_messages() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let store_path = test_store_path("steering_log_failure");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let queued = crate::store::queue_thread_steering(
+        &store_path,
+        "session",
+        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        "run",
+        "steer now",
+    )
+    .unwrap();
+    // Inject the log failure precisely at the post-ack steering append: the
+    // staged message carries the instruction text; the prompt does not.
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_steering_log_append
+             BEFORE INSERT ON thread_events
+             WHEN NEW.event_json LIKE '%steer now%'
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected steering log failure');
+             END;",
+        )
+        .unwrap();
+    // One scripted response, for the SECOND send only: the first send fails
+    // at the steering commit point, before any model call.
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        scripted_text_response("after failure"),
+    )]);
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+
+    let error = agent.send("current").await.unwrap_err();
+    assert!(
+        error.to_string().contains("injected steering log failure"),
+        "the injected log failure must be the run failure: {error:#}"
+    );
+
+    // The staged message is truncated from the vec: the vec and the log
+    // agree at the pre-staging checkpoint (log-first invariant restored).
+    assert_eq!(agent.messages.len(), 2);
+    assert!(matches!(agent.messages[1], Message::User { ref content } if content == "current"));
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].0, 1);
+    assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
+
+    // The ack is durable: the record stays delivered and is never
+    // redelivered, even though its message left the transcript.
+    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, queued.id);
+    assert_eq!(records[0].status, "delivered");
+
+    // The next run appends contiguously from the checkpoint — no gap.
+    connection
+        .execute_batch("DROP TRIGGER fail_steering_log_append")
+        .unwrap();
+    assert_eq!(agent.send("next").await.unwrap(), "after failure");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        !agent.messages.iter().any(|message| matches!(
+            message,
+            Message::User { content } if content == "steer now"
+        )),
+        "the acked steering is not redelivered"
+    );
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[1].0, 2);
+    assert!(matches!(log[1].1, Message::User { ref content } if content == "next"));
+    assert_eq!(log[2].0, 3);
+
+    // The restore merge reads the log cleanly (the pre-fix gap failed it
+    // loudly and bricked re-attach).
+    let mut restored = orchestrator_agent(store_path.clone(), "session", None);
+    restored
+        .restore_messages_merging_log_tail(vec![Message::System {
+            content: "stored system".to_string(),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(restored.messages.len(), 4);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 

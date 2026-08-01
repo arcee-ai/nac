@@ -1670,6 +1670,9 @@ impl SessionService {
             return false;
         };
         self.expire_orchestrator_steering(run_id);
+        if matches!(outcome, RunOutcome::Failed(..)) {
+            self.normalize_failed_run_transcript().await;
+        }
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -1714,6 +1717,29 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    /// Run-failure transcript normalization: a run that fails at the
+    /// tool-result commit point leaves a dangling assistant tool-call turn
+    /// in the long-lived agent's transcript AND the transcript log (the
+    /// assistant message committed to both; its tool results are in
+    /// neither). The next run reuses this agent — restore-time
+    /// normalization only runs at session admission — and providers reject
+    /// a transcript whose assistant tool calls have no tool results, so
+    /// every subsequent run would fail at the model call until re-attach.
+    /// Trim the dangling turn from the vec and the log before the run-end
+    /// bookkeeping reads the store. Done here rather than at the failing
+    /// commit point so every commit-point failure is covered uniformly,
+    /// mirroring the cancel path's terminal normalization
+    /// (`append_cancellation_message`). Best-effort: a log failure here
+    /// must not mask the run failure; the next restore re-normalizes the
+    /// stale tail. Prompt/assistant append failures need no normalization
+    /// (log-first: those messages are in neither store).
+    async fn normalize_failed_run_transcript(&self) {
+        let mut agent = self.agent.lock().await;
+        if let Err(error) = agent.normalize_dangling_tail().await {
+            eprintln!("nac: failed to normalize transcript after run failure: {error:#}");
+        }
     }
 
     fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
@@ -3996,6 +4022,198 @@ pub(super) mod tests {
         assert_eq!(persisted.cache_read_tokens, 80);
         assert_eq!(persisted.cache_write_tokens, 15);
         assert_eq!(persisted.orchestrator_context_tokens, 715);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        // Regression test (transcript review): a run that fails at the
+        // tool-result commit point leaves the assistant tool-call message in
+        // the long-lived agent's vec AND the log with its tool results in
+        // neither. The next run reuses that agent, and providers reject a
+        // transcript whose assistant tool calls have no tool results — the
+        // run-failure path must trim the dangling turn from both stores.
+        let store_path = test_store_path("failed_run_normalizes");
+        let server = ScriptedServer::start(vec![
+            ScriptedResponse::json(
+                "200 OK",
+                serde_json::json!({
+                    "status": "completed",
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": "call-1",
+                        "name": "unknown_alpha",
+                        "arguments": "{}"
+                    }],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string(),
+            ),
+            ScriptedResponse::json(
+                "200 OK",
+                serde_json::json!({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "recovered"}]}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string(),
+            ),
+        ]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "session-failed-normalizes".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_host_path: Some(PathBuf::from("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        // Inject the log failure precisely at the tool-result commit point:
+        // only tool-kind transcript rows fail to insert (the prompt and
+        // assistant appends succeed).
+        let connection = rusqlite::Connection::open(&store_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_tool_log_appends
+                 BEFORE INSERT ON thread_events
+                 WHEN NEW.event_json LIKE '%\"kind\":\"tool\"%'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected tool batch log failure');
+                 END;",
+            )
+            .unwrap();
+
+        let mut events = parts.service.subscribe_events();
+        parts
+            .service
+            .try_submit_prompt("prompt one".to_string())
+            .unwrap();
+        let terminal = loop {
+            let envelope = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("timed out waiting for the first run's terminal event")
+                .unwrap();
+            if matches!(
+                envelope.event,
+                SessionEvent::RunFailed { .. } | SessionEvent::RunCompleted { .. }
+            ) {
+                break envelope;
+            }
+        };
+        assert!(
+            matches!(terminal.event, SessionEvent::RunFailed { .. }),
+            "the injected log failure must fail the first run: {:?}",
+            terminal.event
+        );
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+
+        // The dangling assistant tool-call turn is trimmed from the vec AND
+        // the log: both end at the failed run's prompt.
+        {
+            let agent = parts.service.agent.lock().await;
+            assert_eq!(agent.messages.len(), 2);
+            assert!(
+                matches!(agent.messages[1], Message::User { ref content } if content == "prompt one")
+            );
+        }
+        let log = crate::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_from(&session_id, 0)
+            .unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].0, 1);
+        assert!(matches!(log[0].1, Message::User { ref content } if content == "prompt one"));
+
+        // The next run reuses the same agent: with the dangling turn gone,
+        // the provider view is clean and the run completes.
+        connection
+            .execute_batch("DROP TRIGGER fail_tool_log_appends")
+            .unwrap();
+        parts
+            .service
+            .try_submit_prompt("prompt two".to_string())
+            .unwrap();
+        let terminal = loop {
+            let envelope = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("timed out waiting for the second run's terminal event")
+                .unwrap();
+            if matches!(
+                envelope.event,
+                SessionEvent::RunFailed { .. } | SessionEvent::RunCompleted { .. }
+            ) {
+                break envelope;
+            }
+        };
+        assert!(
+            matches!(
+                terminal.event,
+                SessionEvent::RunCompleted { ref response, .. } if response == "recovered"
+            ),
+            "the second run must complete once the dangling turn is trimmed: {:?}",
+            terminal.event
+        );
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+
+        let requests = server.finish();
+        assert_eq!(requests.len(), 2);
+        let second_request: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert!(
+            !second_request["input"]
+                .to_string()
+                .contains("function_call"),
+            "the second run's provider view must not carry the dangling tool call"
+        );
+        // The log stays contiguous across the normalization: prompt one@1,
+        // prompt two@2, assistant@3.
+        let log = crate::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_from(&session_id, 0)
+            .unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[1].0, 2);
+        assert!(matches!(log[1].1, Message::User { ref content } if content == "prompt two"));
+        assert_eq!(log[2].0, 3);
+        assert!(
+            matches!(log[2].1, Message::Assistant { content: Some(ref text), .. } if text == "recovered")
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
