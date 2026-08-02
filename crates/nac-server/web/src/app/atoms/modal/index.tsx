@@ -34,6 +34,12 @@ interface ModalProps {
   flush?: boolean;
   /** Grow the card to fill the viewport instead of hugging its content. */
   fullScreen?: boolean;
+  /**
+   * Drop the card entirely: no header, no padding, no surface of its own. For
+   * content that is already a framed box and only needs the scrim and the
+   * Escape / overlay handling around it.
+   */
+  chromeless?: boolean;
   /** Glyph for the close button in the mobile header, where it leads the row. */
   mobileCloseIcon?: IconName;
   className?: string;
@@ -54,6 +60,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   closeOnOverlay = true,
   flush = false,
   fullScreen = false,
+  chromeless = false,
   mobileCloseIcon = IconName.Left,
   className = "",
   children,
@@ -166,7 +173,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   );
 
   const header =
-    title || subheader || onClose ? (
+    !chromeless && (title || subheader || onClose) ? (
       chrome ? (
         <div className="shrink-0 border-b border-muted">
           {headerRow}
@@ -203,13 +210,18 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           className={cn(
             "flex flex-col shadow-2xl pointer-events-auto outline-none",
             isMobile
-              ? "slide-in-right w-full h-[100dvh] rounded-none bg-elevation-level-1"
+              ? cn(
+                  "slide-in-right w-full h-[100dvh] rounded-none",
+                  !chromeless && "bg-elevation-level-1",
+                )
               : cn(
                   "popup-bounce w-full",
                   size,
-                  flush
-                    ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
-                    : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-secondary",
+                  chromeless
+                    ? "shadow-none"
+                    : flush
+                      ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
+                      : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-secondary",
                   fullScreen &&
                     "max-w-none min-w-[calc(100vw-64px)] min-h-[calc(100vh-64px)] max-h-[calc(100vh-64px)]",
                 ),
@@ -219,8 +231,12 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           {header}
           <div
             className={cn(
-              "paragraph-medium text-basic-secondary",
-              chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
+              chromeless
+                ? "flex flex-col flex-1 min-h-0"
+                : cn(
+                    "paragraph-medium text-basic-secondary",
+                    chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
+                  ),
             )}
           >
             {children}

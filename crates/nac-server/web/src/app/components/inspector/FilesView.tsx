@@ -28,6 +28,12 @@ import {
   useWorkspaceFiles,
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
+import {
+  selectFile,
+  toggleFolder,
+  useSelectedFile,
+  useToggledFolders,
+} from "@/app/store/sessionLayoutStore";
 import type {
   ChangedFileStat,
   SessionSnapshotResponse,
@@ -50,6 +56,11 @@ const STATUS_COLOR: Record<string, string> = {
 
 const statusColor = (status: string | null) =>
   status ? (STATUS_COLOR[status.trim()[0]] ?? "text-basic-primary") : null;
+
+/** A deleted file is gone from the checkout, so its row is struck through. */
+const statusLabelClass = (status: string | null) =>
+  cn(statusColor(status), status?.trim()[0] === "D" && "line-through") ||
+  undefined;
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -114,7 +125,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           label={fileLabel(file.path)}
           active={selected === file.path}
           title={file.path}
-          labelClassName={statusColor(file.status) ?? undefined}
+          labelClassName={statusLabelClass(file.status)}
           // The status letter used to sit here; the label colour already says
           // as much, so the slot shows what kind of file it is instead.
           icon={<FileIcon path={file.path} />}
@@ -469,8 +480,10 @@ export function FilesView({
   revision?: number | null;
 }) {
   const client = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  // Shared rather than local: the same panel also renders inside the
+  // full-screen dialog, and it has to open on the file you were reading.
+  const selected = useSelectedFile();
+  const toggled = useToggledFolders();
 
   const {
     data: listing,
@@ -543,13 +556,6 @@ export function FilesView({
     return <PanelEmpty>No files in the workspace.</PanelEmpty>;
   }
 
-  const toggle = (path: string) =>
-    setToggled((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(path)) next.add(path);
-      return next;
-    });
-
   return (
     <PanelSplit
       list={
@@ -559,8 +565,8 @@ export function FilesView({
             depth={0}
             open={open}
             selected={current}
-            onToggle={toggle}
-            onSelect={setSelected}
+            onToggle={toggleFolder}
+            onSelect={selectFile}
           />
           {listing.truncated ? (
             <div className="p-1 label-micro text-basic-muted">

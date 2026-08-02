@@ -26,7 +26,7 @@ import {
   useSelectedRevision,
   useSelectedThread,
   useSelectedWorkset,
-  useSidePanelLayout,
+  useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
 import type {
   SessionSnapshotResponse,
@@ -113,8 +113,7 @@ export function SessionSideBox({
   panel,
   onPanelChange,
 }: SessionSideBoxProps) {
-  const layout = useSidePanelLayout();
-  const expanded = layout === "expanded";
+  const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
@@ -155,17 +154,20 @@ export function SessionSideBox({
               />
             </Button>
           </Tooltip>
-          <Tooltip title="Hide panel" position={TooltipPosition.BottomRight}>
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="Hide panel"
-              onClick={toggleSidePanelCollapsed}
-            >
-              <Icon iconName={IconName.CloseSidebar} />
-            </Button>
-          </Tooltip>
+          {/* Hiding has no meaning once the box covers the screen. */}
+          {expanded ? null : (
+            <Tooltip title="Hide panel" position={TooltipPosition.BottomRight}>
+              <Button
+                size={ButtonSize.Medium}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Hide panel"
+                onClick={toggleSidePanelCollapsed}
+              >
+                <Icon iconName={IconName.CloseSidebar} />
+              </Button>
+            </Tooltip>
+          )}
         </div>
       </div>
 

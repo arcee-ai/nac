@@ -1,11 +1,10 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
 
-interface RadioProps
-  extends Omit<
-    React.InputHTMLAttributes<HTMLInputElement>,
-    "type" | "onChange" | "checked"
-  > {
+interface RadioProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "type" | "onChange" | "checked"
+> {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
@@ -27,7 +26,7 @@ const Radio: React.FC<RadioProps> = ({
   <label
     className={cn(
       "flex items-start gap-2 w-fit",
-      disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+      disabled ? "cursor-not-allowed opacity-60" : "",
       className,
     )}
   >

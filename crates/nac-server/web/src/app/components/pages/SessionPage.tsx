@@ -8,6 +8,7 @@ import {
   ButtonVariant,
   Icon,
   IconName,
+  Modal,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
@@ -30,10 +31,12 @@ import {
 import { useSessions, useSessionSnapshot } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
+  resetSessionSelection,
   revealSidePanel,
-  selectRevision,
   toggleSidePanelCollapsed,
-  useSidePanelLayout,
+  toggleSidePanelExpanded,
+  useSidePanelCollapsed,
+  useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
 
 function Banner({
@@ -72,15 +75,14 @@ export default function SessionPage() {
   const { data: snapshot = null, error } = useSessionSnapshot(id);
   const { data: sessions = [] } = useSessions();
   const actions = useSessionActions();
-  const layout = useSidePanelLayout();
+  const collapsed = useSidePanelCollapsed();
+  const expanded = useSidePanelExpanded();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
 
   useEffect(() => {
     if (id) clearAttention(id);
-    // Revisions belong to one session, so carrying a selection into another
-    // would point the panels at something that is not theirs.
-    selectRevision(null);
+    resetSessionSelection();
   }, [id]);
 
   if (!id) return <Navigate to={routes.list()} replace />;
@@ -95,9 +97,6 @@ export default function SessionPage() {
   const fetchError =
     !configError && !snapshot && error ? errorMessage(error) : null;
 
-  const showSideBox = layout !== "collapsed";
-  const showChat = layout !== "expanded";
-
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
   const focusPanel = (next: SessionPanel) => {
@@ -105,13 +104,44 @@ export default function SessionPage() {
     goToPanel(next);
   };
 
+  const sideBox = (
+    <SessionSideBox
+      sessionId={id}
+      snapshot={snapshot}
+      panel={panel}
+      onPanelChange={goToPanel}
+    />
+  );
+
   return (
-    <section className="flex h-full min-h-0 bg-elevation-ground">
-      {showSideBox ? (
+    <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
+      {/* Yields the box's half of the row to the chat as the box slides away. */}
+      <div
+        className={cn(
+          "h-full shrink-0 transition-[width] duration-500 ease-in-out",
+          collapsed ? "w-0" : "w-1/2",
+        )}
+      />
+
+      {/*
+        Pinned to half the section rather than laid out in the row: a box that
+        kept its width while the row shrank would reflow its whole tree over
+        the animation, so it slides out at full size instead.
+      */}
+      <div
+        className={cn(
+          "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
+          "pt-[72px] pb-2 pl-2 pr-6",
+          "transition-transform duration-500 ease-in-out",
+          collapsed && "-translate-x-full",
+        )}
+        aria-hidden={collapsed}
+        inert={collapsed}
+      >
         <div
           className={cn(
-            "flex flex-col min-w-0 h-full pt-[72px] pb-2 pl-2",
-            showChat ? "flex-1 pr-6" : "flex-1 pr-2",
+            "flex flex-col flex-1 min-h-0 transition-opacity duration-300 ease-in-out",
+            collapsed && "opacity-0",
           )}
         >
           {configError ? (
@@ -130,50 +160,52 @@ export default function SessionPage() {
               <Banner message={fetchError} />
             </div>
           ) : null}
-          <div className="flex-1 min-h-0">
-            <SessionSideBox
-              sessionId={id}
-              snapshot={snapshot}
-              panel={panel}
-              onPanelChange={goToPanel}
-            />
+          {/* While the dialog is up it owns the panels, so this half stays
+              empty behind the scrim instead of running them twice. */}
+          <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "flex flex-col items-center flex-1 min-w-0 h-full pr-2",
+          "transition-[padding] duration-500 ease-in-out",
+          collapsed ? "pl-2" : "pl-6",
+        )}
+      >
+        <div className="flex flex-col flex-1 min-h-0 w-full max-w-[840px]">
+          <Transcript snapshot={snapshot} onFocusPanel={focusPanel} />
+          <div className="shrink-0 py-2">
+            <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
           </div>
+        </div>
+      </div>
+
+      {/* Floats where the box's own header sat, so the toggle stays put. */}
+      {collapsed ? (
+        <div className="fade absolute left-2 top-[77px] z-10">
+          <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Show panel"
+              onClick={toggleSidePanelCollapsed}
+            >
+              <Icon iconName={IconName.OpenSidebar} />
+            </Button>
+          </Tooltip>
         </div>
       ) : null}
 
-      {showChat ? (
-        <div
-          className={cn(
-            "flex flex-col items-center min-w-0 h-full pr-2",
-            showSideBox ? "flex-1 pl-6" : "flex-1 pl-2",
-          )}
-        >
-          <div className="relative flex flex-col flex-1 min-h-0 w-full max-w-[840px]">
-            {!showSideBox ? (
-              <div className="absolute left-0 top-[60px] z-10">
-                <Tooltip
-                  title="Show panel"
-                  position={TooltipPosition.BottomLeft}
-                >
-                  <Button
-                    size={ButtonSize.Small}
-                    variant={ButtonVariant.Ghost}
-                    content={ButtonContent.Icon}
-                    aria-label="Show panel"
-                    onClick={toggleSidePanelCollapsed}
-                  >
-                    <Icon iconName={IconName.OpenSidebar} />
-                  </Button>
-                </Tooltip>
-              </div>
-            ) : null}
-            <Transcript snapshot={snapshot} onFocusPanel={focusPanel} />
-            <div className="shrink-0 py-2">
-              <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal
+        open={expanded}
+        onClose={toggleSidePanelExpanded}
+        fullScreen
+        chromeless
+      >
+        <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
+      </Modal>
     </section>
   );
 }

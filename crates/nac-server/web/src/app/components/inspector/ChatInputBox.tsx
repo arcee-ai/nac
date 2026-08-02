@@ -57,7 +57,11 @@ function StatBadge({
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
-export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
+export function ChatInputBox({
+  sessionId,
+  snapshot,
+  entry,
+}: ChatInputBoxProps) {
   const [value, setValue] = useState("");
   const running = useRunning();
   const toast = useToast();
@@ -98,7 +102,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     <form
       className={cn(
         "flex flex-col gap-4 px-4 pt-4 pb-2 rounded-[8px]",
-        "bg-elevation-level-2 shadow-2xl",
+        "bg-elevation-level-1 shadow-2xl",
       )}
       onSubmit={(e) => {
         e.preventDefault();

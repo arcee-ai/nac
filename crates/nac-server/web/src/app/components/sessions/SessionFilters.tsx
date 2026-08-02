@@ -9,6 +9,7 @@ import {
   InputLeading,
   InputSize,
   IconName,
+  PopoverPlacement,
   Select,
   type SelectItem,
 } from "@/app/atoms";
@@ -67,8 +68,12 @@ function FilterRow({
         onValueChange={onValueChange}
         size={ButtonSize.Small}
         variant={ButtonVariant.Secondary}
+        // The rail is narrow, so the panel hangs from the trigger's right edge
+        // and grows inwards. As a placement rather than a class: adding
+        // `right-0` on top of the default leaves both edges pinned, which
+        // squeezes the panel to the trigger's width and spills the labels out.
+        placement={PopoverPlacement.BottomLeft}
         className="min-w-0"
-        panelClassName="right-0"
       />
     </div>
   );

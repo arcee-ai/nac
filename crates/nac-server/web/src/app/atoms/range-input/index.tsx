@@ -111,7 +111,7 @@ const RangeInput: React.FC<RangeInputProps> = ({
         "group relative h-1 w-full rounded-full outline-none touch-none select-none",
         disabled
           ? "bg-input-progress-bar-disabled cursor-not-allowed"
-          : "bg-input-progress-bar cursor-pointer",
+          : "bg-input-progress-bar cursor-auto",
         className,
       )}
       onPointerDown={onPointerDown}

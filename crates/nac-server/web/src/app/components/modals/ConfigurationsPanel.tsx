@@ -148,7 +148,9 @@ export function ConfigurationsPanel({
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
-  const [source, setSource] = useState<Source>({ kind: "new" });
+  // Null until the user picks a source themselves, so the default below can
+  // still settle once the list arrives.
+  const [picked, setPicked] = useState<Source | null>(null);
   const [provider, setProvider] = useState<ProviderChoice>("openai-responses");
   const [protocol, setProtocol] = useState<BackendKind>("openai-responses");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -158,6 +160,22 @@ export function ConfigurationsPanel({
   const [defaultModel, setDefaultModel] = useState("");
   const [filePath, setFilePath] = useState("");
   const [picking, setPicking] = useState(false);
+  // Layered over a resolved configuration; null follows what was saved.
+  const [backendOverride, setBackendOverride] = useState<BackendKind | null>(
+    null,
+  );
+  const [baseUrlOverride, setBaseUrlOverride] = useState<string | null>(null);
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
+
+  // Launching usually means reusing the setup from last time, so the newest
+  // saved configuration opens selected and only an empty list falls back to
+  // building one. The server orders by creation, hence the last entry.
+  const latestSaved = configurations.at(-1);
+  const source: Source =
+    picked ??
+    (latestSaved
+      ? { kind: "saved", configId: latestSaved.config_id }
+      : { kind: "new" });
 
   const backend: BackendKind = provider === CUSTOM ? protocol : provider;
   const needsKey = providerUsesApiKey(backend);
@@ -217,6 +235,11 @@ export function ConfigurationsPanel({
   const resolveError =
     resolvedTarget && configQuery.error ? errorMessage(configQuery.error) : "";
 
+  // A saved setup is a starting point rather than a lock: these follow what the
+  // server resolved until the user changes them for the session being created.
+  const savedBackend = backendOverride ?? resolved?.backend ?? null;
+  const savedBaseUrl = baseUrlOverride ?? resolved?.base_url ?? "";
+
   // Derived rather than stored, so a stale pick never survives a source change.
   const models =
     source.kind === "new"
@@ -227,14 +250,18 @@ export function ConfigurationsPanel({
     ? defaultModel
     : models.some((model) => model.id === configuredModel)
       ? configuredModel
-      : (models[0]?.id ?? configuredModel);
+      : (models[0]?.id ?? modelOverride ?? configuredModel);
 
-  const switchSource = (next: Source) => {
-    setSource(next);
+  /** Passing null hands the choice back to the default above. */
+  const switchSource = (next: Source | null) => {
+    setPicked(next);
     setApiKey("");
     setDefaultModel("");
-    if (next.kind !== "file") setFilePath("");
-    if (next.kind !== "new") setNameDraft(null);
+    setBackendOverride(null);
+    setBaseUrlOverride(null);
+    setModelOverride(null);
+    if (next?.kind !== "file") setFilePath("");
+    if (next?.kind !== "new") setNameDraft(null);
   };
 
   const savedRecord = configId
@@ -281,14 +308,15 @@ export function ConfigurationsPanel({
       };
     }
 
-    if (!resolved) return null;
+    if (!resolved || !savedBackend) return null;
     const model = chosenModel || resolved.model || "";
-    if (!model) return null;
+    const url = savedBaseUrl.trim();
+    if (!model || !url) return null;
     return {
       kind: "resolved",
-      backend: resolved.backend,
+      backend: savedBackend,
       model,
-      base_url: resolved.base_url,
+      base_url: url,
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
@@ -306,6 +334,8 @@ export function ConfigurationsPanel({
     validatedBaseUrl,
     chosenModel,
     resolved,
+    savedBackend,
+    savedBaseUrl,
     savedRecord,
   ]);
 
@@ -316,7 +346,9 @@ export function ConfigurationsPanel({
   const onDelete = async (id: string, label: string) => {
     try {
       await deleteConfig.mutateAsync(id);
-      if (configId === id) switchSource({ kind: "new" });
+      // Fall back to the default rather than to "Create New", so removing one
+      // of several setups lands on the next most recent.
+      if (configId === id) switchSource(null);
       toast.success(`Configuration ${label} removed`);
     } catch (error) {
       toast.error(`Failed to remove the configuration: ${errorMessage(error)}`);
@@ -365,7 +397,7 @@ export function ConfigurationsPanel({
         </div>
         <Separator />
 
-        <div className="flex flex-col gap-2 px-3 py-2">
+        <div className="flex flex-col gap-2 p-3">
           {source.kind === "file" ? (
             <>
               <ConfigRow
@@ -540,8 +572,16 @@ export function ConfigurationsPanel({
             <ResolvedRows
               resolving={resolving}
               resolved={resolved}
-              defaultModel={chosenModel}
-              onDefaultModel={setDefaultModel}
+              backend={savedBackend}
+              onBackend={setBackendOverride}
+              baseUrl={savedBaseUrl}
+              onBaseUrl={setBaseUrlOverride}
+              model={chosenModel}
+              onModel={(value) =>
+                resolved?.models.length
+                  ? setDefaultModel(value)
+                  : setModelOverride(value)
+              }
               failed={Boolean(resolveError)}
             />
           ) : null}
@@ -563,7 +603,7 @@ export function ConfigurationsPanel({
           {resolveError ? (
             <Button
               variant={ButtonVariant.Ghost}
-              size={ButtonSize.Small}
+              size={ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={() => void configQuery.refetch()}
             >
@@ -588,18 +628,31 @@ export function ConfigurationsPanel({
   );
 }
 
-/** Provider, key and model of a configuration the server already resolved. */
+/**
+ * The same rows as a fresh setup, filled in from a configuration the server
+ * resolved. Everything stays editable — an edit rides along with the session
+ * being created and leaves the stored configuration alone — except the key,
+ * which never leaves the server and so can only be shown as a stand-in.
+ */
 function ResolvedRows({
   resolving,
   resolved,
-  defaultModel,
-  onDefaultModel,
+  backend,
+  onBackend,
+  baseUrl,
+  onBaseUrl,
+  model,
+  onModel,
   failed,
 }: {
   resolving: boolean;
   resolved: ResolvedModelConfiguration | null;
-  defaultModel: string;
-  onDefaultModel: (id: string) => void;
+  backend: BackendKind | null;
+  onBackend: (backend: BackendKind) => void;
+  baseUrl: string;
+  onBaseUrl: (url: string) => void;
+  model: string;
+  onModel: (model: string) => void;
   failed: boolean;
 }) {
   if (resolving) {
@@ -612,7 +665,7 @@ function ResolvedRows({
       </div>
     );
   }
-  if (!resolved) {
+  if (!resolved || !backend) {
     return failed ? null : (
       <p className="text-micro text-basic-muted py-1">
         Pick a configuration to see its provider and models.
@@ -620,21 +673,23 @@ function ResolvedRows({
     );
   }
 
-  const usesKey = providerUsesApiKey(resolved.backend);
+  const usesKey = providerUsesApiKey(backend);
+  // A setup the server could list models for is driven by its provider; one it
+  // could not is a hand-written endpoint, so it spells out model and URL.
+  const listed = resolved.models.length > 0;
+
   return (
     <>
       <ConfigRow
         label="Provider"
         required
+        hint="Which provider the session talks to, and how it authenticates."
         control={
-          <div
-            className={cn(
-              CONTROL_WIDTH,
-              "text-right label-micro text-basic-secondary truncate",
-            )}
-          >
-            {providerLabel(resolved.backend)}
-          </div>
+          <SmallSelect
+            items={PROTOCOL_ITEMS}
+            value={backend}
+            onValueChange={(id) => onBackend(id as BackendKind)}
+          />
         }
       />
       {usesKey ? (
@@ -643,9 +698,10 @@ function ResolvedRows({
           <ConfigRow
             label="API Key"
             required
+            hint="Held by nac for this configuration; save a new setup to use a different key."
             control={
               <Input
-                inputSize={InputSize.Small}
+                inputSize={InputSize.Medium}
                 className={CONTROL_WIDTH}
                 value={MASKED_KEY}
                 isDisabled
@@ -657,28 +713,51 @@ function ResolvedRows({
         </>
       ) : null}
       <Separator />
-      <ConfigRow
-        label="Default Model"
-        hint="Model the session starts with."
-        control={
-          resolved.models.length > 0 ? (
+      {listed ? (
+        <ConfigRow
+          label="Default Model"
+          hint="Model the session starts with; the key reaches all of these."
+          control={
             <SmallSelect
               items={modelItems(resolved.models)}
-              value={defaultModel}
-              onValueChange={onDefaultModel}
+              value={model}
+              onValueChange={onModel}
             />
-          ) : (
-            <div
-              className={cn(
-                CONTROL_WIDTH,
-                "text-right label-micro text-basic-secondary truncate",
-              )}
-            >
-              {defaultModel || resolved.model || "—"}
-            </div>
-          )
-        }
-      />
+          }
+        />
+      ) : (
+        <>
+          <ConfigRow
+            label="Model"
+            required
+            hint="Model identifier the endpoint expects."
+            control={
+              <Input
+                inputSize={InputSize.Medium}
+                className={CONTROL_WIDTH}
+                placeholder="gpt-5.5"
+                value={model}
+                onChange={(event) => onModel(event.target.value)}
+              />
+            }
+          />
+          <Separator />
+          <ConfigRow
+            label="Base URL"
+            required
+            hint="Endpoint the session sends its requests to."
+            control={
+              <Input
+                inputSize={InputSize.Medium}
+                className={CONTROL_WIDTH}
+                placeholder="https://api.openai.com/v1"
+                value={baseUrl}
+                onChange={(event) => onBaseUrl(event.target.value)}
+              />
+            }
+          />
+        </>
+      )}
     </>
   );
 }
@@ -804,7 +883,7 @@ function SourceMenu({
       }
     >
       <Button
-        variant={ButtonVariant.Ghost}
+        variant={ButtonVariant.Secondary}
         size={ButtonSize.Medium}
         content={ButtonContent.IconRight}
         onClick={() => setOpen((current) => !current)}

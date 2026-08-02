@@ -13,6 +13,7 @@ import {
   InputTrailing,
   Modal,
   ModalSize,
+  PopoverPlacement,
   Select,
   type SelectItem,
   Separator,
@@ -58,11 +59,7 @@ const ADVANCED_REASONING: SelectItem[] = REASONING_OPTIONS.map((item) =>
   item.id === "" ? { ...item, label: "From configuration" } : item,
 );
 
-// The design insets the collapsible header by 8px; `.btn-medium.btn-text` wins
-// over a utility class on specificity, so the override has to be inline.
-const ADVANCED_HEADER_PADDING = { paddingInline: "8px" };
-
-// `.btn-medium.btn-icon-right` also wins on specificity, so the inset that lines
+// `.btn-medium.btn-icon-right` wins on specificity, so the inset that lines
 // the path up with the neighbouring input has to be inline too.
 const CWD_BUTTON_PADDING = { paddingInline: "8px" };
 
@@ -91,10 +88,18 @@ interface FormError {
 }
 
 /** Remounted on every open so the form always starts from the configured defaults. */
-export function LaunchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function LaunchModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const { data: storeInfo } = useStoreInfo();
   if (!open) return null;
-  return <LaunchForm defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />;
+  return (
+    <LaunchForm defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />
+  );
 }
 
 function LaunchForm({
@@ -148,7 +153,10 @@ function LaunchForm({
   const submit = async () => {
     if (busy) return;
     if (isSsh && !nullable(sshHost)) {
-      setError({ field: "sshHost", message: "An SSH host is required for a remote session." });
+      setError({
+        field: "sshHost",
+        message: "An SSH host is required for a remote session.",
+      });
       return;
     }
     if (!isSsh && !nullable(cwd)) {
@@ -158,7 +166,8 @@ function LaunchForm({
     if (!selection) {
       setError({
         field: "config",
-        message: "Complete the provider configuration before creating a session.",
+        message:
+          "Complete the provider configuration before creating a session.",
       });
       return;
     }
@@ -207,12 +216,15 @@ function LaunchForm({
       backend,
       api_key_env: apiKeyEnv,
       reasoning_effort:
-        reasoning === CLEAR_EFFORT ? null : reasoning || configuredEffort || null,
+        reasoning === CLEAR_EFFORT
+          ? null
+          : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
 
     const threshold = nullable(compaction);
-    if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
+    if (threshold !== null)
+      body.orchestrator_compaction_threshold = Number(threshold);
     if (!body.ssh_host) {
       body.sandbox = {
         enabled: mode === "sandbox",
@@ -279,9 +291,10 @@ function LaunchForm({
       value={value}
       onValueChange={onValueChange}
       disabled={disabled}
-      size={ButtonSize.Small}
+      size={ButtonSize.Medium}
       variant={ButtonVariant.Ghost}
-      panelClassName="right-0 max-h-64 overflow-auto"
+      placement={PopoverPlacement.BottomLeft}
+      panelClassName="max-h-64 overflow-auto"
     />
   );
 
@@ -316,7 +329,11 @@ function LaunchForm({
             {MODES.map((item) => (
               <Button
                 key={item.id}
-                variant={mode === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
+                variant={
+                  mode === item.id
+                    ? ButtonVariant.Primary
+                    : ButtonVariant.Secondary
+                }
                 size={ButtonSize.Medium}
                 content={ButtonContent.Text}
                 onClick={() => edit(setMode)(item.id)}
@@ -415,31 +432,30 @@ function LaunchForm({
           errorText={invalid("config") ? error?.message : undefined}
           onChange={onSelection}
         >
-          <div className="flex flex-col -mx-1">
-            <Button
-              variant={ButtonVariant.Ghost}
-              size={ButtonSize.Medium}
-              content={ButtonContent.Text}
-              className="w-full justify-start"
-              style={ADVANCED_HEADER_PADDING}
-              onClick={() => setAdvanced((open) => !open)}
-              aria-expanded={advanced}
-            >
-              <Icon iconName={IconName.Gear} size={20} className="shrink-0" />
-              <span className="flex-1 min-w-0 text-left">Advanced Configurations</span>
-              <Icon
-                iconName={advanced ? IconName.Down : IconName.Right}
-                size={20}
-                className="shrink-0"
-              />
-            </Button>
+          <div className="flex flex-col gap-2">
+            <ConfigRow
+              label="Advanced Configurations"
+              hint="Reasoning, compaction, extra headers and a first message."
+              control={
+                <Switch
+                  checked={advanced}
+                  onChange={setAdvanced}
+                  aria-label="Advanced Configurations"
+                />
+              }
+            />
 
             {advanced ? (
-              <div className="flex flex-col px-1 pt-2 gap-2">
+              <>
+                <Separator />
                 <ConfigRow
                   label="Reasoning"
                   hint="Reasoning effort passed to the model."
-                  control={smallSelect(ADVANCED_REASONING, reasoning, edit(setReasoning))}
+                  control={smallSelect(
+                    ADVANCED_REASONING,
+                    reasoning,
+                    edit(setReasoning),
+                  )}
                 />
                 <Separator />
                 <ConfigRow
@@ -447,7 +463,7 @@ function LaunchForm({
                   hint="Context size that triggers compaction; 0 disables it."
                   control={
                     <Input
-                      inputSize={InputSize.Small}
+                      inputSize={InputSize.Medium}
                       className="w-[105px]"
                       inputClassName="text-right"
                       placeholder="config.toml"
@@ -466,7 +482,7 @@ function LaunchForm({
                       hint="Image the sandbox runs; empty uses the configured default."
                       control={
                         <Input
-                          inputSize={InputSize.Small}
+                          inputSize={InputSize.Medium}
                           className="w-[181px]"
                           placeholder="python:3.13-bookworm"
                           value={sandbox.image}
@@ -480,7 +496,7 @@ function LaunchForm({
                       hint="Comma-separated GPU list, e.g. all."
                       control={
                         <Input
-                          inputSize={InputSize.Small}
+                          inputSize={InputSize.Medium}
                           className="w-[181px]"
                           placeholder="all"
                           value={sandbox.gpu}
@@ -494,7 +510,7 @@ function LaunchForm({
                       hint="Working directory inside the container."
                       control={
                         <Input
-                          inputSize={InputSize.Small}
+                          inputSize={InputSize.Medium}
                           className="w-[181px]"
                           placeholder="/workspace"
                           value={sandbox.workdir}
@@ -508,7 +524,7 @@ function LaunchForm({
                       hint="Container /dev/shm size, e.g. 1g."
                       control={
                         <Input
-                          inputSize={InputSize.Small}
+                          inputSize={InputSize.Medium}
                           className="w-[181px]"
                           placeholder="0"
                           value={sandbox.shm}
@@ -522,7 +538,7 @@ function LaunchForm({
                       hint="Comma-separated bind mounts."
                       control={
                         <Input
-                          inputSize={InputSize.Small}
+                          inputSize={InputSize.Medium}
                           className="w-[181px]"
                           placeholder="/data:/data"
                           value={sandbox.mounts}
@@ -562,7 +578,7 @@ function LaunchForm({
                   onChange={(e) => edit(setInitialPrompt)(e.target.value)}
                   textAreaClassName="h-[116px] resize-none"
                 />
-              </div>
+              </>
             ) : null}
           </div>
         </ConfigurationsPanel>

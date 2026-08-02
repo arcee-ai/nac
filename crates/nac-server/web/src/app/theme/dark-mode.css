@@ -1,6 +1,6 @@
 .dark {
   /* Background / Scrollbars */
-  --color-bg-scrollbar: var(--dark-white-100);
+  --color-bg-scrollbar: var(--white-trans-200);
   /* Background / Accent */
   --color-bg-accent-primary: var(--brand-trans-50);
   --color-bg-accent-secondary: var(--brand-trans-100);
@@ -11,7 +11,7 @@
   --color-bg-btn-primary: var(--white);
   --color-bg-btn-primary-hovered: var(--gray-50);
   --color-bg-btn-primary-pressed: var(--gray-100);
-  --color-bg-btn-primary-disabled: var(--white-trans-300);
+  --color-bg-btn-primary-disabled: var(--gray-600);
 
   --color-bg-btn-secondary: var(--white-trans-25);
   --color-bg-btn-secondary-hovered: var(--white-trans-50);
@@ -189,7 +189,7 @@
 
   /* fill / Buttons */
   --color-fill-btn-primary: var(--gray-800);
-  --color-fill-btn-primary-disabled: var(--gray-800);
+  --color-fill-btn-primary-disabled: var(--gray-500);
   --color-fill-btn-accent: var(--brand-300);
   --color-fill-btn-accent-hovered: var(--brand-200);
   --color-fill-btn-accent-pressed: var(--brand-100);
@@ -259,7 +259,7 @@
 
   /* Text / Buttons */
   --color-text-btn-primary: var(--black);
-  --color-text-btn-primary-disabled: var(--black);
+  --color-text-btn-primary-disabled: var(--gray-500);
   --color-text-btn-accent: var(--brand-300);
   --color-text-btn-accent-hovered: var(--brand-200);
   --color-text-btn-accent-pressed: var(--brand-100);

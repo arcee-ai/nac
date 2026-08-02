@@ -349,12 +349,14 @@ Prevent resizing textareas horizontally by default.
   }
 
   /*
-Set the default cursor for buttons.
+Keep the arrow on buttons. The design system draws hover states instead of
+swapping the cursor, and `.btn` already opts out, so this lines the rest of the
+app (tree rows, cards, raw buttons) up with it.
 */
 
   button,
   [role="button"] {
-    cursor: pointer;
+    cursor: default;
   }
 
   /*
