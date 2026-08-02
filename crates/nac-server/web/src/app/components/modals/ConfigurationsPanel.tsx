@@ -16,15 +16,20 @@ import {
   PopoverPlacement,
   Select,
   type SelectItem,
+  Separator,
   TabButton,
   TabButtonSize,
   TabButtonVariant,
 } from "@/app/atoms";
-import { ConfigDivider, ConfigRow } from "@/app/components/modals/ConfigRow";
+import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { cn } from "@/app/lib/cn";
-import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
+import {
+  PROVIDER_KINDS,
+  providerLabel,
+  providerUsesApiKey,
+} from "@/app/lib/providers";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
@@ -109,7 +114,9 @@ function KeyStatus({ status }: { status: Validation["status"] }) {
     <Icon
       iconName={IconName.Key}
       size={16}
-      className={cn(status === "error" ? "text-error-primary" : "text-basic-muted")}
+      className={cn(
+        status === "error" ? "text-error-primary" : "text-basic-muted",
+      )}
     />
   );
 }
@@ -182,14 +189,22 @@ export function ConfigurationsPanel({
   );
   const configQuery = useResolvedModelConfig(configId, configFile);
 
-  const validation: Validation = !(source.kind === "new" && discovers && debouncedKey)
+  const validation: Validation = !(
+    source.kind === "new" &&
+    discovers &&
+    debouncedKey
+  )
     ? { status: "idle" }
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.error
         ? { status: "error", message: errorMessage(keyQuery.error) }
         : keyQuery.data
-          ? { status: "ready", models: keyQuery.data.models, baseUrl: keyQuery.data.base_url }
+          ? {
+              status: "ready",
+              models: keyQuery.data.models,
+              baseUrl: keyQuery.data.base_url,
+            }
           : { status: "validating" };
 
   const keyValidated = validation.status === "ready";
@@ -197,12 +212,16 @@ export function ConfigurationsPanel({
 
   const resolvedTarget = Boolean(configId ?? configFile);
   const resolving = resolvedTarget && configQuery.isFetching;
-  const resolved = resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
+  const resolved =
+    resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
   const resolveError =
     resolvedTarget && configQuery.error ? errorMessage(configQuery.error) : "";
 
   // Derived rather than stored, so a stale pick never survives a source change.
-  const models = source.kind === "new" ? (keyQuery.data?.models ?? []) : (resolved?.models ?? []);
+  const models =
+    source.kind === "new"
+      ? (keyQuery.data?.models ?? [])
+      : (resolved?.models ?? []);
   const configuredModel = source.kind === "new" ? "" : (resolved?.model ?? "");
   const chosenModel = models.some((model) => model.id === defaultModel)
     ? defaultModel
@@ -319,11 +338,11 @@ export function ConfigurationsPanel({
     <div className="flex flex-col gap-1">
       <div
         className={cn(
-          "flex flex-col rounded-[8px] bg-input shadow-concave overflow-visible",
+          "flex flex-col rounded-[8px] bg-elevation-level-2 border border-muted overflow-visible",
           boxInvalid && "border border-error-primary",
         )}
       >
-        <div className="flex items-center gap-4 px-3 py-2">
+        <div className="flex items-center gap-4 px-3 py-2 bg-elevation-level-3 rounded-t-[8px] border-b border-muted">
           <div
             className={cn(
               "label-small flex-1 min-w-0 truncate",
@@ -344,7 +363,7 @@ export function ConfigurationsPanel({
             onDelete={(id, label) => void onDelete(id, label)}
           />
         </div>
-        <ConfigDivider />
+        <Separator />
 
         <div className="flex flex-col gap-2 px-3 py-2">
           {source.kind === "file" ? (
@@ -356,7 +375,7 @@ export function ConfigurationsPanel({
                 invalid={Boolean(resolveError)}
                 control={
                   <Input
-                    inputSize={InputSize.Small}
+                    inputSize={InputSize.Medium}
                     className={CONTROL_WIDTH}
                     placeholder="Select Config File"
                     trailing={InputTrailing.Button}
@@ -367,7 +386,7 @@ export function ConfigurationsPanel({
                   />
                 }
               />
-              {filePath.trim() ? <ConfigDivider /> : null}
+              {filePath.trim() ? <Separator /> : null}
             </>
           ) : null}
 
@@ -389,7 +408,7 @@ export function ConfigurationsPanel({
                   />
                 }
               />
-              <ConfigDivider />
+              <Separator />
               {provider === CUSTOM ? (
                 <>
                   <ConfigRow
@@ -404,7 +423,7 @@ export function ConfigurationsPanel({
                       />
                     }
                   />
-                  <ConfigDivider />
+                  <Separator />
                 </>
               ) : null}
               <ConfigRow
@@ -413,7 +432,7 @@ export function ConfigurationsPanel({
                 hint="How this setup is listed the next time a session is created."
                 control={
                   <Input
-                    inputSize={InputSize.Small}
+                    inputSize={InputSize.Medium}
                     className={CONTROL_WIDTH}
                     value={name}
                     onChange={(event) => setNameDraft(event.target.value)}
@@ -422,7 +441,7 @@ export function ConfigurationsPanel({
               />
               {needsKey ? (
                 <>
-                  <ConfigDivider />
+                  <Separator />
                   <ConfigRow
                     label="API Key"
                     required
@@ -430,7 +449,7 @@ export function ConfigurationsPanel({
                     hint="Stored in NAC under a generated name once the setup is saved."
                     control={
                       <Input
-                        inputSize={InputSize.Small}
+                        inputSize={InputSize.Medium}
                         className={CONTROL_WIDTH}
                         type="password"
                         autoComplete="off"
@@ -446,14 +465,14 @@ export function ConfigurationsPanel({
               ) : null}
               {provider === CUSTOM ? (
                 <>
-                  <ConfigDivider />
+                  <Separator />
                   <ConfigRow
                     label="Model"
                     required
                     hint="Model identifier the endpoint expects."
                     control={
                       <Input
-                        inputSize={InputSize.Small}
+                        inputSize={InputSize.Medium}
                         className={CONTROL_WIDTH}
                         placeholder="gpt-5.5"
                         value={modelDraft}
@@ -461,32 +480,34 @@ export function ConfigurationsPanel({
                       />
                     }
                   />
-                  <ConfigDivider />
+                  <Separator />
                   <ConfigRow
                     label="Base URL"
                     required
                     hint="Endpoint the session sends its requests to."
                     control={
                       <Input
-                        inputSize={InputSize.Small}
+                        inputSize={InputSize.Medium}
                         className={CONTROL_WIDTH}
                         placeholder="https://api.openai.com/v1"
                         value={baseUrlDraft}
-                        onChange={(event) => setBaseUrlDraft(event.target.value)}
+                        onChange={(event) =>
+                          setBaseUrlDraft(event.target.value)
+                        }
                       />
                     }
                   />
                 </>
               ) : !needsKey ? (
                 <>
-                  <ConfigDivider />
+                  <Separator />
                   <ConfigRow
                     label="Model"
                     required
                     hint="This provider signs in with a stored login, so it lists no models."
                     control={
                       <Input
-                        inputSize={InputSize.Small}
+                        inputSize={InputSize.Medium}
                         className={CONTROL_WIDTH}
                         placeholder="gpt-5.5"
                         value={modelDraft}
@@ -497,7 +518,7 @@ export function ConfigurationsPanel({
                 </>
               ) : validation.status === "ready" ? (
                 <>
-                  <ConfigDivider />
+                  <Separator />
                   <ConfigRow
                     label="Default Model"
                     hint="Model the session starts with; the key reaches all of these."
@@ -527,7 +548,7 @@ export function ConfigurationsPanel({
 
           {children ? (
             <>
-              <ConfigDivider />
+              <Separator />
               {children}
             </>
           ) : null}
@@ -536,7 +557,9 @@ export function ConfigurationsPanel({
 
       {message ? (
         <div className="flex items-start gap-2">
-          <p className="label-micro text-error-primary flex-1 min-w-0">{message}</p>
+          <p className="label-micro text-error-primary flex-1 min-w-0">
+            {message}
+          </p>
           {resolveError ? (
             <Button
               variant={ButtonVariant.Ghost}
@@ -604,14 +627,19 @@ function ResolvedRows({
         label="Provider"
         required
         control={
-          <div className={cn(CONTROL_WIDTH, "text-right label-micro text-basic-secondary truncate")}>
+          <div
+            className={cn(
+              CONTROL_WIDTH,
+              "text-right label-micro text-basic-secondary truncate",
+            )}
+          >
             {providerLabel(resolved.backend)}
           </div>
         }
       />
       {usesKey ? (
         <>
-          <ConfigDivider />
+          <Separator />
           <ConfigRow
             label="API Key"
             required
@@ -628,7 +656,7 @@ function ResolvedRows({
           />
         </>
       ) : null}
-      <ConfigDivider />
+      <Separator />
       <ConfigRow
         label="Default Model"
         hint="Model the session starts with."
@@ -640,7 +668,12 @@ function ResolvedRows({
               onValueChange={onDefaultModel}
             />
           ) : (
-            <div className={cn(CONTROL_WIDTH, "text-right label-micro text-basic-secondary truncate")}>
+            <div
+              className={cn(
+                CONTROL_WIDTH,
+                "text-right label-micro text-basic-secondary truncate",
+              )}
+            >
               {defaultModel || resolved.model || "—"}
             </div>
           )
@@ -667,7 +700,7 @@ function SmallSelect({
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      size={ButtonSize.Small}
+      size={ButtonSize.Medium}
       variant={ButtonVariant.Ghost}
       placement={PopoverPlacement.BottomLeft}
       className="max-w-[220px]"
@@ -710,8 +743,12 @@ function SourceMenu({
       content={
         <>
           <TabButton
-            size={TabButtonSize.Small}
-            variant={source === "new" ? TabButtonVariant.Accent : TabButtonVariant.Regular}
+            size={TabButtonSize.Medium}
+            variant={
+              source === "new"
+                ? TabButtonVariant.Accent
+                : TabButtonVariant.Regular
+            }
             active={source === "new"}
             onClick={() => pick({ kind: "new" })}
           >
@@ -719,8 +756,12 @@ function SourceMenu({
             <span className="text-left flex-grow">Create New</span>
           </TabButton>
           <TabButton
-            size={TabButtonSize.Small}
-            variant={source === "file" ? TabButtonVariant.Accent : TabButtonVariant.Regular}
+            size={TabButtonSize.Medium}
+            variant={
+              source === "file"
+                ? TabButtonVariant.Accent
+                : TabButtonVariant.Regular
+            }
             active={source === "file"}
             onClick={() => pick({ kind: "file" })}
           >
@@ -733,20 +774,24 @@ function SourceMenu({
           {configurations.map((entry) => (
             <div key={entry.id} className="flex items-center gap-1">
               <TabButton
-                size={TabButtonSize.Small}
+                size={TabButtonSize.Medium}
                 variant={
-                  activeId === entry.id ? TabButtonVariant.Accent : TabButtonVariant.Regular
+                  activeId === entry.id
+                    ? TabButtonVariant.Accent
+                    : TabButtonVariant.Regular
                 }
                 active={activeId === entry.id}
                 className="flex-1 min-w-0"
                 onClick={() => pick({ kind: "saved", configId: entry.id })}
               >
                 <Icon iconName={IconName.Gear} />
-                <span className="text-left flex-grow truncate">{entry.name}</span>
+                <span className="text-left flex-grow truncate">
+                  {entry.name}
+                </span>
               </TabButton>
               <Button
                 variant={ButtonVariant.TertiaryDestructive}
-                size={ButtonSize.Small}
+                size={ButtonSize.Medium}
                 content={ButtonContent.Icon}
                 aria-label={`Remove ${entry.name}`}
                 onClick={() => onDelete(entry.id, entry.name)}
@@ -760,12 +805,14 @@ function SourceMenu({
     >
       <Button
         variant={ButtonVariant.Ghost}
-        size={ButtonSize.Small}
+        size={ButtonSize.Medium}
         content={ButtonContent.IconRight}
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
       >
-        <span className="text-left flex-grow truncate max-w-[220px]">{label}</span>
+        <span className="text-left flex-grow truncate max-w-[220px]">
+          {label}
+        </span>
         <Icon
           iconName={IconName.Down}
           className={cn(

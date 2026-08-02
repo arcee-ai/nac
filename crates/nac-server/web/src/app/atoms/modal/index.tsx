@@ -85,17 +85,16 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     };
   }, [open, onClose]);
 
-  // Autofocus the first meaningful field and trap Tab within the dialog.
+  // Move focus into the dialog and trap Tab within it. The card itself takes
+  // the focus rather than the first field: landing in a text input pops up the
+  // keyboard on a phone and steals typing from someone who only meant to read.
   useEffect(() => {
     if (!open) return undefined;
     const card = cardRef.current;
     if (!card) return undefined;
     const focusables = () =>
       Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE));
-    const list = focusables();
-    const preferred =
-      list.find((el) => /input|textarea|select/i.test(el.tagName)) ?? list[0];
-    preferred?.focus();
+    card.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
@@ -103,7 +102,10 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
+      // The card holds the focus until the first Tab, and it is not one of the
+      // items, so shift-tabbing off it would escape into the browser chrome.
+      const onCard = document.activeElement === card;
+      if (e.shiftKey && (onCard || document.activeElement === first)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
@@ -123,8 +125,8 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 
   const closeButton = (iconName: IconName, leading: boolean) => (
     <Button
-      variant={ButtonVariant.Tertiary}
-      size={ButtonSize.Small}
+      variant={ButtonVariant.Ghost}
+      size={ButtonSize.Medium}
       content={ButtonContent.Icon}
       className={cn(
         "shrink-0",
@@ -197,15 +199,16 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           ref={cardRef}
           role="dialog"
           aria-modal="true"
+          tabIndex={-1}
           className={cn(
-            "flex flex-col shadow-2xl pointer-events-auto",
+            "flex flex-col shadow-2xl pointer-events-auto outline-none",
             isMobile
               ? "slide-in-right w-full h-[100dvh] rounded-none bg-elevation-level-1"
               : cn(
                   "popup-bounce w-full",
                   size,
                   flush
-                    ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-2 border border-muted"
+                    ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
                     : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-secondary",
                   fullScreen &&
                     "max-w-none min-w-[calc(100vw-64px)] min-h-[calc(100vh-64px)] max-h-[calc(100vh-64px)]",

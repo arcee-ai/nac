@@ -53,7 +53,8 @@
 .btn-primary { color: var(--color-text-btn-primary); background-color: var(--color-bg-btn-primary); box-shadow: var(--shadow-convex); }
 .btn-primary:hover { background-color: var(--color-bg-btn-primary-hovered); }
 .btn-primary:active { background-color: var(--color-bg-btn-primary-pressed); }
-.btn-primary.btn-disabled { box-shadow: none; color: var(--color-text-btn-primary-disabled); background-color: var(--color-bg-btn-primary-disabled); }
+/* Unlike the other variants, primary keeps its convex shadow while disabled. */
+.btn-primary.btn-disabled { color: var(--color-text-btn-primary-disabled); background-color: var(--color-bg-btn-primary-disabled); }
 .btn-primary.btn-disabled:hover, .btn-primary.btn-disabled:active { color: var(--color-text-btn-primary-disabled); background-color: var(--color-bg-btn-primary-disabled); }
 
 .btn-secondary { color: var(--color-text-btn-secondary); background-color: var(--color-bg-btn-secondary); box-shadow: var(--shadow-convex); }

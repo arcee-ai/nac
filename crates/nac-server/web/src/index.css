@@ -88,3 +88,9 @@ body {
   background-color: var(--color-bg-scrollbar);
   border-radius: 4px;
 }
+
+/* Where two scrollbars meet WebKit paints an opaque white square unless this
+   is set, which stands out badly against a dark surface. */
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

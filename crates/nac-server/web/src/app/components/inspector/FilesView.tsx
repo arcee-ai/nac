@@ -73,9 +73,12 @@ interface TreeProps {
 /** One level of the file tree, indented by a guide line like Figma. */
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
   return (
+    // No `w-full`: as a flex child this already stretches, and a full width on
+    // top of the indent margin would push every deep level a few pixels past
+    // the panel and raise a horizontal scrollbar for nothing.
     <div
       className={cn(
-        "flex flex-col gap-[2px] w-full",
+        "flex flex-col gap-[2px]",
         depth > 0 && "pl-1 ml-[3px] border-l border-muted",
       )}
     >

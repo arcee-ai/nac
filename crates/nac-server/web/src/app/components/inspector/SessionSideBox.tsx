@@ -122,7 +122,7 @@ export function SessionSideBox({
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
       <div className="flex items-center gap-4 pl-1 pr-2 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 h">
-        <div className="flex flex-1 min-w-0 items-center gap-3" role="tablist">
+        <div className="flex flex-1 min-w-0 items-center gap-1" role="tablist">
           {SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
               key={name}

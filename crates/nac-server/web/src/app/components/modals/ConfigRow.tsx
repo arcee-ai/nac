@@ -1,15 +1,7 @@
 import type React from "react";
 
-import { Icon, IconName, Tooltip, TooltipPosition } from "@/app/atoms";
+import { HoverHint, TooltipPosition } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
-
-export function InfoHint({ text }: { text: string }) {
-  return (
-    <Tooltip title={text} position={TooltipPosition.BottomLeft}>
-      <Icon iconName={IconName.Info} className="text-basic-muted shrink-0" />
-    </Tooltip>
-  );
-}
 
 export function FieldLabel({
   label,
@@ -24,12 +16,21 @@ export function FieldLabel({
 }) {
   return (
     <div className="flex items-center gap-1 w-full">
-      <div className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}>
+      <div
+        className={cn(
+          "label-small",
+          invalid ? "text-error-primary" : "text-basic-primary",
+        )}
+      >
         {label}
       </div>
-      {hint ? <InfoHint text={hint} /> : null}
+      {hint ? (
+        <HoverHint title={hint} position={TooltipPosition.BottomLeft} />
+      ) : null}
       {required ? (
-        <div className="flex-1 text-right text-micro text-basic-muted">Required</div>
+        <div className="flex-1 text-right text-micro text-basic-muted">
+          Required
+        </div>
       ) : null}
     </div>
   );
@@ -61,7 +62,7 @@ export function ConfigRow({
         <div
           className={cn(
             "truncate",
-            secondary ? "text-micro" : "label-micro",
+            secondary ? "text-small" : "label-small",
             invalid
               ? "text-error-primary"
               : muted
@@ -74,45 +75,11 @@ export function ConfigRow({
           {label}
           {required ? "*" : ""}
         </div>
-        {hint ? <InfoHint text={hint} /> : null}
+        {hint ? (
+          <HoverHint title={hint} position={TooltipPosition.BottomLeft} />
+        ) : null}
       </div>
       <div className="shrink-0">{control}</div>
-    </div>
-  );
-}
-
-export function ConfigDivider() {
-  return <div className="h-px w-full bg-divider-muted" />;
-}
-
-export function ConfigTextArea({
-  label,
-  help,
-  placeholder,
-  value,
-  onChange,
-  className,
-}: {
-  label: string;
-  help?: string;
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 w-full">
-      <div className="label-micro text-basic-primary">{label}</div>
-      <textarea
-        className={cn(
-          "input rounded-[4px] px-3 py-2 resize-none font-normal leading-relaxed",
-          className,
-        )}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {help ? <div className="text-micro text-basic-muted">{help}</div> : null}
     </div>
   );
 }

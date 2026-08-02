@@ -15,14 +15,11 @@ import {
   ModalSize,
   Select,
   type SelectItem,
+  Separator,
   Switch,
+  TextArea,
 } from "@/app/atoms";
-import {
-  ConfigDivider,
-  ConfigRow,
-  ConfigTextArea,
-  FieldLabel,
-} from "@/app/components/modals/ConfigRow";
+import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import {
   ConfigurationsPanel,
   type LaunchModelSelection,
@@ -444,7 +441,7 @@ function LaunchForm({
                   hint="Reasoning effort passed to the model."
                   control={smallSelect(ADVANCED_REASONING, reasoning, edit(setReasoning))}
                 />
-                <ConfigDivider />
+                <Separator />
                 <ConfigRow
                   label="Orchestrator compaction threshold"
                   hint="Context size that triggers compaction; 0 disables it."
@@ -463,7 +460,7 @@ function LaunchForm({
 
                 {mode === "sandbox" ? (
                   <>
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="Container image"
                       hint="Image the sandbox runs; empty uses the configured default."
@@ -477,7 +474,7 @@ function LaunchForm({
                         />
                       }
                     />
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="GPUs"
                       hint="Comma-separated GPU list, e.g. all."
@@ -491,7 +488,7 @@ function LaunchForm({
                         />
                       }
                     />
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="Container workdir"
                       hint="Working directory inside the container."
@@ -505,7 +502,7 @@ function LaunchForm({
                         />
                       }
                     />
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="Shared memory size"
                       hint="Container /dev/shm size, e.g. 1g."
@@ -519,7 +516,7 @@ function LaunchForm({
                         />
                       }
                     />
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="Mounts (HOST:GUEST)"
                       hint="Comma-separated bind mounts."
@@ -533,7 +530,7 @@ function LaunchForm({
                         />
                       }
                     />
-                    <ConfigDivider />
+                    <Separator />
                     <ConfigRow
                       label="Don't mount the working directory"
                       secondary
@@ -548,22 +545,22 @@ function LaunchForm({
                   </>
                 ) : null}
 
-                <ConfigDivider />
-                <ConfigTextArea
+                <Separator />
+                <TextArea
                   label="Extra headers (JSON object)"
-                  help="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
+                  hintText="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
                   placeholder='{"X-Title": "nac"}'
                   value={extraHeaders}
-                  onChange={edit(setExtraHeaders)}
-                  className="h-[108px]"
+                  onChange={(e) => edit(setExtraHeaders)(e.target.value)}
+                  textAreaClassName="h-[108px] resize-none"
                 />
-                <ConfigDivider />
-                <ConfigTextArea
+                <Separator />
+                <TextArea
                   label="Initial prompt"
                   placeholder="Send a first message right after the session is created…"
                   value={initialPrompt}
-                  onChange={edit(setInitialPrompt)}
-                  className="h-[116px]"
+                  onChange={(e) => edit(setInitialPrompt)(e.target.value)}
+                  textAreaClassName="h-[116px] resize-none"
                 />
               </div>
             ) : null}

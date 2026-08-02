@@ -14,7 +14,10 @@ import {
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
-import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
+import {
+  useRunStateSync,
+  useSessionStream,
+} from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
@@ -59,7 +62,10 @@ function Banner({
 
 /** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
-  const { sessionId, panel } = useParams<{ sessionId: string; panel?: string }>();
+  const { sessionId, panel } = useParams<{
+    sessionId: string;
+    panel?: string;
+  }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
 
@@ -86,7 +92,8 @@ export default function SessionPage() {
   const configError = entry?.summary.model_config_error;
   // The repair banner already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
-  const fetchError = !configError && !snapshot && error ? errorMessage(error) : null;
+  const fetchError =
+    !configError && !snapshot && error ? errorMessage(error) : null;
 
   const showSideBox = layout !== "collapsed";
   const showChat = layout !== "expanded";
@@ -104,14 +111,17 @@ export default function SessionPage() {
         <div
           className={cn(
             "flex flex-col min-w-0 h-full pt-[72px] pb-2 pl-2",
-            showChat ? "flex-1 max-w-[840px] pr-6" : "flex-1 pr-2",
+            showChat ? "flex-1 pr-6" : "flex-1 pr-2",
           )}
         >
           {configError ? (
             <div className="pb-2">
               <Banner
                 message={`Configuration needs repair: ${configError}`}
-                action={{ label: "Open settings", onClick: () => actions.settings(id) }}
+                action={{
+                  label: "Open settings",
+                  onClick: () => actions.settings(id),
+                }}
               />
             </div>
           ) : null}
@@ -141,7 +151,10 @@ export default function SessionPage() {
           <div className="relative flex flex-col flex-1 min-h-0 w-full max-w-[840px]">
             {!showSideBox ? (
               <div className="absolute left-0 top-[60px] z-10">
-                <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
+                <Tooltip
+                  title="Show panel"
+                  position={TooltipPosition.BottomLeft}
+                >
                   <Button
                     size={ButtonSize.Small}
                     variant={ButtonVariant.Ghost}
