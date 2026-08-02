@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 mod backend;
 mod podman;
-mod smolvm;
 mod ssh;
 
 #[cfg(test)]
@@ -20,11 +19,13 @@ pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
 
 /// Identifies which sandbox backend implementation to use.
+///
+/// Kept as an enum (currently Podman-only) so a future sandbox rework has a
+/// natural home for additional backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SandboxBackendType {
     Podman,
-    SmolVm,
 }
 
 impl Default for SandboxBackendType {
@@ -37,16 +38,14 @@ impl SandboxBackendType {
     pub fn as_str(&self) -> &'static str {
         match self {
             SandboxBackendType::Podman => "podman",
-            SandboxBackendType::SmolVm => "smolvm",
         }
     }
 
     pub fn from_str(s: &str) -> Result<Self> {
         match s {
             "podman" => Ok(Self::Podman),
-            "smolvm" => Ok(Self::SmolVm),
             other => Err(anyhow!(
-                "invalid sandbox backend '{}': expected 'podman' or 'smolvm'",
+                "invalid sandbox backend '{}': expected 'podman'",
                 other
             )),
         }
@@ -83,7 +82,6 @@ pub struct SandboxSpec {
 #[allow(private_interfaces)]
 pub enum SandboxSession {
     Podman(Arc<podman::PodmanSession>),
-    SmolVm(Arc<smolvm::SmolVmSession>),
 }
 
 impl SandboxSession {
@@ -93,11 +91,6 @@ impl SandboxSession {
                 let inner = Arc::new(podman::PodmanSession::new(spec, session_key, owner));
                 inner.ensure_ready().await?;
                 Self::Podman(inner)
-            }
-            SandboxBackendType::SmolVm => {
-                let inner = Arc::new(smolvm::SmolVmSession::new(spec, session_key, owner));
-                inner.ensure_ready().await?;
-                Self::SmolVm(inner)
             }
         };
         Ok(session)
@@ -118,7 +111,6 @@ impl SandboxSession {
     pub fn spec(&self) -> &SandboxSpec {
         match self {
             Self::Podman(inner) => inner.spec(),
-            Self::SmolVm(inner) => inner.spec(),
         }
     }
 
@@ -130,14 +122,12 @@ impl SandboxSession {
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.ensure_ready().await,
-            Self::SmolVm(inner) => inner.ensure_ready().await,
         }
     }
 
     pub fn worker_cli_args(&self) -> Vec<OsString> {
         match self {
             Self::Podman(inner) => inner.worker_cli_args(),
-            Self::SmolVm(inner) => inner.worker_cli_args(),
         }
     }
 
@@ -210,7 +200,6 @@ impl SandboxSession {
     ) -> Result<std::process::Output> {
         match self {
             Self::Podman(inner) => inner.exec(program, args, stdin).await,
-            Self::SmolVm(inner) => inner.exec(program, args, stdin).await,
         }
     }
 
@@ -222,7 +211,6 @@ impl SandboxSession {
     ) -> tokio::process::Command {
         match self {
             Self::Podman(inner) => inner.child_process_command(program, args, envs),
-            Self::SmolVm(inner) => inner.child_process_command(program, args, envs),
         }
     }
 
@@ -233,7 +221,6 @@ impl SandboxSession {
     ) -> (PtyCommandBuilder, String) {
         match self {
             Self::Podman(inner) => inner.terminal_pty_command(cwd, envs),
-            Self::SmolVm(inner) => inner.terminal_pty_command(cwd, envs),
         }
     }
 
@@ -245,14 +232,12 @@ impl SandboxSession {
     ) -> (tokio::process::Command, String) {
         match self {
             Self::Podman(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
-            Self::SmolVm(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
         }
     }
 
     pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.terminal_pipe_kill(pidfile).await,
-            Self::SmolVm(inner) => inner.terminal_pipe_kill(pidfile).await,
         }
     }
 
@@ -262,7 +247,6 @@ impl SandboxSession {
     pub async fn destroy(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.destroy().await,
-            Self::SmolVm(inner) => inner.destroy().await,
         }
     }
 
@@ -270,11 +254,6 @@ impl SandboxSession {
     pub(crate) fn new_for_test(spec: SandboxSpec) -> Self {
         match spec.backend {
             SandboxBackendType::Podman => Self::Podman(Arc::new(podman::PodmanSession::new(
-                spec,
-                "test-session".to_string(),
-                false,
-            ))),
-            SandboxBackendType::SmolVm => Self::SmolVm(Arc::new(smolvm::SmolVmSession::new(
                 spec,
                 "test-session".to_string(),
                 false,

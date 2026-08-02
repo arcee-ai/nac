@@ -273,7 +273,7 @@ struct SandboxArgs {
     #[arg(long = "sandbox-shm-size")]
     sandbox_shm_size: Option<String>,
 
-    /// Sandbox backend to use (podman or smolvm).
+    /// Sandbox backend to use (podman).
     #[arg(long = "sandbox-backend")]
     sandbox_backend: Option<String>,
 

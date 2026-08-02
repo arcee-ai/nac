@@ -769,6 +769,80 @@ mod tests {
     }
 
     #[test]
+    fn session_row_with_removed_sandbox_backend_loads_without_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("removed_sandbox_backend");
+        let snapshot = test_snapshot(
+            "legacy-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        // Simulate a row written by an older build whose sandbox backend has
+        // since been removed ("smolvm"): the stored spec must not break loads.
+        let legacy_sandbox_json = r#"{
+            "backend": "smolvm",
+            "image": "python:3.13-bookworm",
+            "workdir": "/workspace",
+            "mounts": [],
+            "gpu_devices": [],
+            "shm_size": "0",
+            "cpus": 2,
+            "memory_mib": 2048
+        }"#;
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET sandbox_json = ?1 WHERE session_id = 'legacy-sandbox'",
+            [legacy_sandbox_json],
+        )
+        .unwrap();
+        drop(conn);
+
+        let loaded = load_session(&store_path, "legacy-sandbox").unwrap();
+        assert!(loaded.sandbox_spec.is_none());
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(!summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_row_with_podman_sandbox_backend_still_loads_with_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("podman_sandbox_backend");
+        let mut snapshot = test_snapshot(
+            "podman-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        snapshot.sandbox_spec = Some(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: "python:3.13-bookworm".to_string(),
+            workdir: PathBuf::from("/workspace"),
+            mounts: Vec::new(),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "podman-sandbox").unwrap();
+        let spec = loaded.sandbox_spec.expect("podman sandbox must survive");
+        assert_eq!(spec.backend, SandboxBackendType::Podman);
+        assert_eq!(spec.image, "python:3.13-bookworm");
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn api_key_env_and_extra_headers_round_trip_through_store() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("api_key_env_headers");
