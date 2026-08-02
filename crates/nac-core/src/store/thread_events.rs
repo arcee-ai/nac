@@ -45,6 +45,8 @@ pub fn load_all_thread_events(
         return Ok(HashMap::new());
     }
     let conn = open_runtime_connection(path)?;
+    // Transcript log rows live under the reserved orchestrator target
+    // (store/transcript.rs); they must never enter the event/tile paths.
     let mut stmt = conn.prepare(
         "WITH ranked AS (
              SELECT id, thread_name, session_id, event_json, created_at,
@@ -53,22 +55,25 @@ pub fn load_all_thread_events(
                         ORDER BY id DESC
                     ) AS event_rank
              FROM thread_events
-             WHERE session_id = ?1
+             WHERE session_id = ?1 AND thread_name != ?3
          )
          SELECT id, thread_name, session_id, event_json, created_at
          FROM ranked
          WHERE event_rank <= ?2
          ORDER BY thread_name ASC, id ASC",
     )?;
-    let rows = stmt.query_map(params![session_id, per_thread_limit], |row| {
-        Ok(ThreadEventRecord {
-            id: row.get(0)?,
-            thread_name: row.get(1)?,
-            session_id: row.get(2)?,
-            event_json: row.get(3)?,
-            created_at: row.get(4)?,
-        })
-    })?;
+    let rows = stmt.query_map(
+        params![session_id, per_thread_limit, ORCHESTRATOR_STEERING_TARGET],
+        |row| {
+            Ok(ThreadEventRecord {
+                id: row.get(0)?,
+                thread_name: row.get(1)?,
+                session_id: row.get(2)?,
+                event_json: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )?;
 
     let mut grouped: HashMap<String, Vec<ThreadEventRecord>> = HashMap::new();
     for row in rows {
@@ -92,16 +97,26 @@ pub fn load_thread_events_page(
         return Ok((Vec::new(), false));
     }
     let conn = open_runtime_connection(path)?;
+    // Transcript log rows live under the reserved orchestrator target
+    // (store/transcript.rs); they must never enter the event/tile paths, even
+    // when paged directly by name.
     let mut stmt = conn.prepare(
         "SELECT id, thread_name, session_id, event_json, created_at
          FROM thread_events
          WHERE session_id = ?1 AND thread_name = ?2
+           AND thread_name != ?5
            AND (?3 IS NULL OR id < ?3)
          ORDER BY id DESC
          LIMIT ?4",
     )?;
     let rows = stmt.query_map(
-        params![session_id, thread_name, before_id, limit.saturating_add(1)],
+        params![
+            session_id,
+            thread_name,
+            before_id,
+            limit.saturating_add(1),
+            ORCHESTRATOR_STEERING_TARGET
+        ],
         |row| {
             Ok(ThreadEventRecord {
                 id: row.get(0)?,
@@ -238,6 +253,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["three", "two"]
         );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_rows_never_enter_event_loads() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "nac_thread_events_transcript_exclusion_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("store.db");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+
+        // Seed transcript log rows under the reserved orchestrator target.
+        let writer = crate::store::TranscriptLogWriter::new(&path).unwrap();
+        for (idx, content) in ["zero", "one", "two"].iter().enumerate() {
+            writer
+                .append(
+                    "session-a",
+                    idx as u64,
+                    &crate::types::Message::User {
+                        content: content.to_string(),
+                    },
+                )
+                .unwrap();
+        }
+        // Seed regular event rows.
+        append_thread_event(&path, "session-a", "worker-a", "event-a").unwrap();
+        append_thread_event(&path, "session-a", "worker-b", "event-b").unwrap();
+
+        // The transcript rows are still stored...
+        assert_eq!(writer.read_from("session-a", 0).unwrap().len(), 3);
+
+        // ...but the grouped load never surfaces them.
+        let events = load_all_thread_events(&path, "session-a", 24).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(!events.contains_key(ORCHESTRATOR_STEERING_TARGET));
+        assert_eq!(events["worker-a"].len(), 1);
+        assert_eq!(events["worker-b"].len(), 1);
+
+        // Paging the reserved name directly returns nothing.
+        let (page, has_older) =
+            load_thread_events_page(&path, "session-a", ORCHESTRATOR_STEERING_TARGET, None, 24)
+                .unwrap();
+        assert!(page.is_empty());
+        assert!(!has_older);
+
+        // Regular pages are unaffected.
+        let (page, has_older) =
+            load_thread_events_page(&path, "session-a", "worker-a", None, 24).unwrap();
+        assert!(!has_older);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].event_json, "event-a");
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

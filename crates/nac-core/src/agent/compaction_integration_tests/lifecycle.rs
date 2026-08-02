@@ -12,8 +12,22 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         .join(format!("nac_agent_compaction_store_failure_{unique}"))
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
-    // Intentionally do not create the session row: checkpoint append must
-    // fail atomically after a valid summary without activating it.
+    crate::store::insert_test_session(&store_path, "session");
+    // Inject checkpoint-persistence failure precisely: a trigger aborts
+    // checkpoint inserts while every other table keeps working. The old
+    // missing-session-row injection no longer isolates checkpoint
+    // persistence — with the transcript log dual-write, a missing session
+    // row fails the run's own log append (foreign key) before compaction.
+    crate::store::open_runtime_connection(&store_path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_checkpoint_inserts
+             BEFORE INSERT ON orchestrator_compaction_checkpoints
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected checkpoint store failure');
+             END;",
+        )
+        .unwrap();
     let server = ScriptedServer::start(vec![
         ScriptedResponse::json(
             "200 OK",
@@ -28,7 +42,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
-        Some("missing-session"),
+        Some("session"),
         Some(1),
         EventSink::channel(events_tx),
     );
@@ -63,7 +77,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
     assert!(
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
             &store_path,
-            "missing-session"
+            "session"
         )
         .unwrap()
         .is_empty()

@@ -57,6 +57,94 @@ pub(super) fn preview_tool_args(name: &str, args_str: &str) -> String {
     preview(args_str, 120)
 }
 
+fn truncate_string(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max).collect();
+        format!("{truncated}…")
+    }
+}
+
+/// Extract a short human-readable preview of the key argument for a tool call.
+/// This survives sanitization and is used by the UI for compact display.
+pub(crate) fn key_arg_preview(tool_name: &str, args_detail: Option<&str>, args_preview: &str) -> String {
+    let args_json = args_detail.unwrap_or(args_preview);
+    let Ok(obj) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return truncate_string(args_preview, 120);
+    };
+    let get_str = |key: &str| obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    match tool_name {
+        "read" | "write" | "edit" => {
+            get_str("path").unwrap_or_else(|| truncate_string(args_preview, 120))
+        }
+        "exec_command" => {
+            get_str("cmd")
+                .or_else(|| get_str("command"))
+                .unwrap_or_else(|| {
+                    let workdir = get_str("workdir").unwrap_or_default();
+                    if !workdir.is_empty() {
+                        format!("(in {})", truncate_string(&workdir, 80))
+                    } else {
+                        String::new()
+                    }
+                })
+        }
+        "write_stdin" => {
+            if let Some(session_id) = get_str("session_id") {
+                let chars = get_str("chars").map(|c| truncate_string(&c, 60)).unwrap_or_default();
+                if chars.is_empty() {
+                    format!("→ {}", truncate_string(&session_id, 40))
+                } else {
+                    format!("→ {chars}")
+                }
+            } else {
+                truncate_string(args_preview, 120)
+            }
+        }
+        "thread" => {
+            let name = get_str("name").unwrap_or_default();
+            let action = get_str("action").unwrap_or_default();
+            if !name.is_empty() && !action.is_empty() {
+                truncate_string(&format!("{name}: {action}"), 120)
+            } else if !name.is_empty() {
+                truncate_string(&name, 120)
+            } else {
+                truncate_string(args_preview, 120)
+            }
+        }
+        "thread_read" | "thread_delete" => {
+            get_str("name").unwrap_or_else(|| truncate_string(args_preview, 120))
+        }
+        "threads" => "list".to_string(),
+        "workset_define" => {
+            let id = get_str("id").unwrap_or_default();
+            let goal = get_str("goal").unwrap_or_default();
+            if !id.is_empty() && !goal.is_empty() {
+                truncate_string(&format!("{id}: {goal}"), 120)
+            } else if !id.is_empty() {
+                truncate_string(&id, 120)
+            } else {
+                truncate_string(args_preview, 120)
+            }
+        }
+        "workset_read" => {
+            get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120))
+        }
+        "workset_list" => "list".to_string(),
+        _ if tool_name.starts_with("mcp__") => {
+            for key in &["query", "path", "url", "command", "pattern", "libraryName", "name", "input"] {
+                if let Some(val) = get_str(key) {
+                    return truncate_string(&val, 120);
+                }
+            }
+            truncate_string(args_preview, 120)
+        }
+        _ => truncate_string(args_preview, 120),
+    }
+}
+
 pub(super) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     let trimmed = result.content.trim();
     if trimmed.is_empty() && !result.is_error {

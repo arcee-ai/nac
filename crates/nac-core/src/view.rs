@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn parse_status_porcelain_tracks_untracked_and_staged() {
-        let raw = "M  crates/nac-tui/src/tui/mod.rs\nA  README.md\n?? notes.txt\n";
+        let raw = "M  crates/nac-core/src/view.rs\nA  README.md\n?? notes.txt\n";
         let (counts, files) = parse_status_porcelain(raw);
 
         assert_eq!(counts.modified, 1);

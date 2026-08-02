@@ -113,6 +113,17 @@ pub fn thread_read(path: &Path, session_id: &str, thread_name: &str) -> Result<V
 }
 
 pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result<bool> {
+    // The reserved orchestrator target names transcript log rows in
+    // thread_events (store/transcript.rs) and orchestrator steering rows; it
+    // is never a deletable thread. Reject BEFORE any DELETE: the unconditional
+    // thread_events delete below would otherwise let a model-callable
+    // `thread_delete("__orchestrator__")` wipe the transcript tail while
+    // reporting "does not exist".
+    if thread_name == ORCHESTRATOR_STEERING_TARGET {
+        return Err(anyhow!(
+            "thread name '{ORCHESTRATOR_STEERING_TARGET}' is reserved and cannot be deleted"
+        ));
+    }
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute(

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 use uuid::Uuid;
 
+use crate::agent::key_arg_preview;
+
 pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
 pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
@@ -135,6 +137,8 @@ pub enum AgentEvent {
         name: String,
         args_preview: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        key_arg_preview: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         args_detail: Option<String>,
     },
     ToolCallFinished {
@@ -252,8 +256,6 @@ pub struct SubmittedUserMessageSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<SessionClientId>,
     pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub baseline_user_message_count: Option<usize>,
     pub submitted_at_epoch_ms: u64,
 }
 
@@ -282,6 +284,14 @@ pub enum SessionEvent {
     },
     SnapshotSaved {
         session_id: String,
+    },
+    /// Live-only signal that the orchestrator transcript log gained rows
+    /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
+    /// merged transcript length after the append. Emitted at each transcript
+    /// commit point so subscribers refetch the store-backed transcript
+    /// mid-run. Never persisted: the bus persists only Agent events.
+    TranscriptAppended {
+        transcript_len: u64,
     },
 }
 
@@ -624,14 +634,29 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             call_id,
             name,
             args_preview,
+            key_arg_preview: existing_key,
             args_detail,
-        } => AgentEvent::ToolCallStarted {
-            thread_name,
-            call_id,
-            args_preview: safe_tool_arguments(&name, args_detail.as_deref(), &args_preview),
-            args_detail: None,
-            name,
-        },
+        } => {
+            // Preserve an existing key_arg_preview from a prior sanitization
+            // pass so the human-readable cmd snippet survives double
+            // sanitization (emit → bus).  Only compute when absent or when
+            // the existing value is clearly not a human-readable preview
+            // (empty string or raw JSON from an older code version).
+            let key = existing_key
+                .filter(|k| !k.is_empty() && !k.starts_with('{') && !k.starts_with('['))
+                .unwrap_or_else(|| {
+                    key_arg_preview(&name, args_detail.as_deref(), &args_preview)
+                });
+            let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
+            AgentEvent::ToolCallStarted {
+                thread_name,
+                call_id,
+                args_preview: safe_args,
+                key_arg_preview: Some(key),
+                args_detail: None,
+                name,
+            }
+        }
         AgentEvent::ToolCallFinished {
             thread_name,
             call_id,
@@ -1077,6 +1102,21 @@ impl EventSink {
         }
         if let Some(channel) = &self.channel {
             let _ = channel.send(event);
+        }
+    }
+
+    /// Live-only transcript growth signal (DB-direct transcript workset,
+    /// step 3). Emitted by the agent at each transcript commit point, after
+    /// the log append commits, so session subscribers refetch the
+    /// store-backed transcript mid-run. A no-op without a bus (workers,
+    /// channel sinks, tests).
+    pub fn emit_transcript_appended(&self, transcript_len: u64) {
+        if let Some(bus) = &self.bus {
+            bus.emit_with_context(
+                SessionEvent::TranscriptAppended { transcript_len },
+                self.run_id.clone(),
+                self.client_id.clone(),
+            );
         }
     }
 }
@@ -1804,9 +1844,10 @@ mod tests {
             call_id: "call-safe".to_string(),
             name: "exec_command".to_string(),
             args_preview: "CANARY_COMMAND".to_string(),
+            key_arg_preview: None,
             args_detail: Some(
                 serde_json::json!({
-                    "cmd": "echo CANARY_COMMAND",
+                    "cmd": "echo test_safe_cmd",
                     "workdir": "/safe/work",
                     "query": "CANARY_QUERY",
                     "body": "CANARY_BODY",
@@ -1822,6 +1863,7 @@ mod tests {
             call_id: "call-write".to_string(),
             name: "write".to_string(),
             args_preview: "CANARY_WRITE".to_string(),
+            key_arg_preview: None,
             args_detail: Some(
                 serde_json::json!({
                     "path": "/safe/file.txt",
@@ -1859,6 +1901,7 @@ mod tests {
         let AgentEvent::ToolCallStarted {
             args_preview,
             args_detail,
+            key_arg_preview,
             ..
         } = channel_event
         else {
@@ -1867,7 +1910,11 @@ mod tests {
         assert!(args_detail.is_none());
         assert!(args_preview.contains("/safe/work"));
         assert!(args_preview.contains("execute"));
+        // cmd is stripped from the sanitized JSON args_preview
         assert!(!args_preview.contains("CANARY"));
+        assert!(!args_preview.contains("test_safe_cmd"));
+        // cmd IS preserved in key_arg_preview (human-readable snippet)
+        assert_eq!(key_arg_preview.as_deref(), Some("echo test_safe_cmd"));
         let AgentEvent::ToolCallStarted { args_preview, .. } = receiver.try_recv().unwrap() else {
             panic!("expected sanitized write start");
         };

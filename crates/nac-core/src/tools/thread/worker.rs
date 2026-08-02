@@ -408,6 +408,7 @@ mod tests {
             call_id: "call_123".to_string(),
             name: "exec_command".to_string(),
             args_preview: "cargo test -p nac-core".to_string(),
+            key_arg_preview: None,
             args_detail: Some(
                 r#"{"cmd":"cargo test -p nac-core","tty":false,"yield_time_ms":300000}"#
                     .to_string(),
