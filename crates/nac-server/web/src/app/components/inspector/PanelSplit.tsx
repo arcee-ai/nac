@@ -17,10 +17,12 @@ export function PanelSplit({
     // The box can be half the window or the whole of it, so the list gives up
     // width to the detail once the panel itself gets narrow.
     <div className="@container flex flex-1 min-h-0 w-full">
-      <div className="flex flex-col shrink-0 w-[208px] @max-[560px]:w-[148px] min-h-0 overflow-auto pt-4 px-1 border-r border-muted bg-elevation-level-2 [&>*]:shrink-0">
+      <div className="flex flex-col shrink-0 w-[208px] @max-[560px]:w-[148px] min-h-0 overflow-auto pt-4 px-1 border-r border-muted bg-elevation-level-1 [&>*]:shrink-0">
         {list}
       </div>
-      <div className="flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
+        {children}
+      </div>
     </div>
   );
 }

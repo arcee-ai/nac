@@ -15,3 +15,6 @@ export function useMediaQuery(query: string): boolean {
 
 /** Wide enough for the side-by-side board and inspector layout. */
 export const useIsDesktop = () => useMediaQuery("(min-width: 1024px)");
+
+/** Narrow enough that overlays should take over the screen instead of floating. */
+export const useIsMobile = () => useMediaQuery("(max-width: 768px)");

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import {
   Icon,
@@ -9,6 +9,8 @@ import {
   Loader,
   LoaderSize,
   LoaderVariant,
+  Popover,
+  PopoverPlacement,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
@@ -72,20 +74,10 @@ export function BranchPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
 
   const running = useRunning();
   const { data, isLoading, error } = useBranches(sessionId, open);
   const switchBranch = useSwitchBranch(sessionId);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const close = () => {
     setOpen(false);
@@ -111,21 +103,15 @@ export function BranchPicker({
       : null;
 
   return (
-    <div className="relative min-w-0" ref={rootRef}>
-      <button
-        type="button"
-        className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost"
-        aria-expanded={open}
-        aria-label={`Branch: ${branch}`}
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate">{branch}</span>
-      </button>
-
-      {open ? (
-        // The chip sits in the footer, so the panel has to grow upwards.
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-[300px] flex flex-col gap-1 p-2 rounded-[8px] border border-secondary bg-elevation-level-2 shadow-xl fade">
+    <Popover
+      open={open}
+      onClose={close}
+      // The chip sits in the footer, so the panel has to grow upwards.
+      placement={PopoverPlacement.TopRight}
+      size="w-[300px]"
+      className="min-w-0"
+      content={
+        <>
           <Input
             autoFocus
             inputSize={InputSize.Small}
@@ -198,8 +184,19 @@ export function BranchPicker({
               Uncommitted changes: you can branch off them, but not switch away.
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+        </>
+      }
+    >
+      <button
+        type="button"
+        className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost"
+        aria-expanded={open}
+        aria-label={`Branch: ${branch}`}
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
+        <span className="label-micro text-btn-secondary truncate">{branch}</span>
+      </button>
+    </Popover>
   );
 }

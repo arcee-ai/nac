@@ -1,82 +1,10 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AnchorPlacement, anchorClasses, anchorCoords } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 
-export enum TooltipPosition {
-  TopLeft = "top-left",
-  TopCenter = "top-center",
-  TopRight = "top-right",
-  CenterRight = "center-right",
-  BottomRight = "bottom-right",
-  BottomCenter = "bottom-center",
-  BottomLeft = "bottom-left",
-  CenterLeft = "center-left",
-}
-
-const positionClasses: Record<TooltipPosition, string> = {
-  [TooltipPosition.TopRight]: "top-[-8px] left-0 -translate-y-full",
-  [TooltipPosition.TopCenter]:
-    "top-[-8px] left-1/2 -translate-y-full -translate-x-1/2",
-  [TooltipPosition.TopLeft]: "top-[-8px] right-0 -translate-y-full",
-  [TooltipPosition.CenterLeft]:
-    "top-1/2 right-[calc(100%+8px)] -translate-y-1/2",
-  [TooltipPosition.BottomLeft]: "bottom-[-8px] right-0 translate-y-full",
-  [TooltipPosition.BottomCenter]:
-    "bottom-[-8px] left-1/2 translate-y-full -translate-x-1/2",
-  [TooltipPosition.BottomRight]: "bottom-[-8px] left-0 translate-y-full",
-  [TooltipPosition.CenterRight]:
-    "top-1/2 left-[calc(100%+8px)] -translate-y-1/2",
-};
-
-type HorizontalAnchor = "start" | "center" | "end" | "before" | "after";
-type VerticalAnchor = "above" | "below" | "middle";
-
-// Same placements expressed as anchors, for the sticky variant which computes
-// viewport coordinates instead of relying on an offset parent.
-const stickyAnchors: Record<
-  TooltipPosition,
-  { x: HorizontalAnchor; y: VerticalAnchor }
-> = {
-  [TooltipPosition.TopRight]: { x: "start", y: "above" },
-  [TooltipPosition.TopCenter]: { x: "center", y: "above" },
-  [TooltipPosition.TopLeft]: { x: "end", y: "above" },
-  [TooltipPosition.BottomRight]: { x: "start", y: "below" },
-  [TooltipPosition.BottomCenter]: { x: "center", y: "below" },
-  [TooltipPosition.BottomLeft]: { x: "end", y: "below" },
-  [TooltipPosition.CenterLeft]: { x: "before", y: "middle" },
-  [TooltipPosition.CenterRight]: { x: "after", y: "middle" },
-};
-
-const GAP = 8;
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
-
-// Keeps the box inside the viewport, which the CSS-only variant cannot do.
-function stickyCoords(
-  position: TooltipPosition,
-  trigger: DOMRect,
-  box: DOMRect,
-): { left: number; top: number } {
-  const anchor = stickyAnchors[position] ?? stickyAnchors[
-    TooltipPosition.TopCenter
-  ];
-  const left = {
-    start: trigger.left,
-    center: trigger.left + (trigger.width - box.width) / 2,
-    end: trigger.right - box.width,
-    before: trigger.left - GAP - box.width,
-    after: trigger.right + GAP,
-  }[anchor.x];
-  const top = {
-    above: trigger.top - GAP - box.height,
-    below: trigger.bottom + GAP,
-    middle: trigger.top + (trigger.height - box.height) / 2,
-  }[anchor.y];
-  return {
-    left: clamp(left, GAP, Math.max(GAP, window.innerWidth - box.width - GAP)),
-    top: clamp(top, GAP, Math.max(GAP, window.innerHeight - box.height - GAP)),
-  };
-}
+export { AnchorPlacement as TooltipPosition };
+type TooltipPosition = AnchorPlacement;
 
 const BOX_BASE =
   "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-[4px] fade";
@@ -165,7 +93,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
     if (!trigger) return undefined;
     const box = boxRef.current;
     if (box) {
-      setCoords(stickyCoords(position, trigger, box.getBoundingClientRect()));
+      setCoords(anchorCoords(position, trigger, box.getBoundingClientRect()));
     }
     // Fixed coordinates go stale once anything moves underneath.
     window.addEventListener("scroll", hide, true);
@@ -221,11 +149,11 @@ interface TooltipProps {
   children?: React.ReactNode;
 }
 
-const Tooltip: React.FC<TooltipProps> & { Position: typeof TooltipPosition } = ({
+const Tooltip: React.FC<TooltipProps> & { Position: typeof AnchorPlacement } = ({
   title = "",
   description,
   keyboardShortcuts = [],
-  position = TooltipPosition.TopCenter,
+  position = AnchorPlacement.TopCenter,
   className = "",
   boxClassName = "",
   disabled = false,
@@ -259,7 +187,7 @@ const Tooltip: React.FC<TooltipProps> & { Position: typeof TooltipPosition } = (
         className={cn(
           BOX_BASE,
           "absolute hidden group-hover:flex z-10",
-          positionClasses[position],
+          anchorClasses[position],
           boxClassName,
         )}
       />
@@ -267,6 +195,6 @@ const Tooltip: React.FC<TooltipProps> & { Position: typeof TooltipPosition } = (
   );
 };
 
-Tooltip.Position = TooltipPosition;
+Tooltip.Position = AnchorPlacement;
 
 export default Tooltip;

@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
+import { AnchorPlacement } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
+import Popover from "../popover";
 import TabButton, { TabButtonSize, TabButtonVariant } from "../tab-button";
 
 export interface SelectItem {
@@ -16,6 +18,7 @@ interface SelectProps {
   onValueChange?: (id: string) => void;
   size?: ButtonSize;
   variant?: ButtonVariant;
+  placement?: AnchorPlacement;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -28,35 +31,21 @@ const tabSizeFor: Record<ButtonSize, TabButtonSize> = {
   [ButtonSize.Large]: TabButtonSize.Large,
 };
 
-/**
- * Self-contained dropdown select. Replaces the ArceeFM Selector, which depends
- * on the Popover wrapper and its mobile bottom-sheet variant.
- */
+/** Dropdown select: a `Popover` whose panel is a list of single-choice rows. */
 const Select: React.FC<SelectProps> = ({
   items = [],
   value,
   onValueChange,
   size = ButtonSize.Medium,
   variant = ButtonVariant.Secondary,
+  placement = AnchorPlacement.BottomRight,
   placeholder = "Select...",
   disabled = false,
   className = "",
   panelClassName = "",
 }) => {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const selected = items.find((item) => item.id === value);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const select = (id: string) => {
     onValueChange?.(id);
@@ -64,13 +53,37 @@ const Select: React.FC<SelectProps> = ({
   };
 
   return (
-    <div className={cn("relative w-fit", className)} ref={rootRef}>
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      placement={placement}
+      size="min-w-full"
+      className={className}
+      panelClassName={panelClassName}
+      content={items.map((item) => (
+        <TabButton
+          key={item.id}
+          size={tabSizeFor[size]}
+          variant={
+            item.id === value
+              ? TabButtonVariant.Accent
+              : TabButtonVariant.Regular
+          }
+          active={item.id === value}
+          onClick={() => select(item.id)}
+        >
+          {item.icon ? <Icon iconName={item.icon} /> : null}
+          <span className="text-left flex-grow">{item.label}</span>
+        </TabButton>
+      ))}
+    >
       <Button
         variant={variant}
         size={size}
         disabled={disabled}
         content={ButtonContent.IconRight}
         onClick={() => !disabled && setOpen(!open)}
+        aria-expanded={open}
       >
         {selected?.icon ? <Icon iconName={selected.icon} /> : null}
         <span className="text-left flex-grow truncate">
@@ -84,33 +97,7 @@ const Select: React.FC<SelectProps> = ({
           )}
         />
       </Button>
-      {open ? (
-        <div
-          className={cn(
-            "absolute z-20 mt-1 min-w-full flex flex-col gap-1 p-2 rounded-[8px] fade",
-            "bg-elevation-level-2 shadow-2xl",
-            panelClassName,
-          )}
-        >
-          {items.map((item) => (
-            <TabButton
-              key={item.id}
-              size={tabSizeFor[size]}
-              variant={
-                item.id === value
-                  ? TabButtonVariant.Accent
-                  : TabButtonVariant.Regular
-              }
-              active={item.id === value}
-              onClick={() => select(item.id)}
-            >
-              {item.icon ? <Icon iconName={item.icon} /> : null}
-              <span className="text-left flex-grow">{item.label}</span>
-            </TabButton>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    </Popover>
   );
 };
 

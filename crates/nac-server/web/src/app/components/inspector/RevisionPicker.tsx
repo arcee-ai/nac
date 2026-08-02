@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import {
   Icon,
@@ -6,6 +6,8 @@ import {
   Loader,
   LoaderSize,
   LoaderVariant,
+  Popover,
+  PopoverPlacement,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { formatStoreTime } from "@/app/lib/format";
@@ -72,18 +74,8 @@ export function RevisionPicker({
   onSelect: (revision: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const revisions = data ?? [];
   // The list arrives newest first, so the oldest revision is number one.
@@ -98,24 +90,14 @@ export function RevisionPicker({
   };
 
   return (
-    <div className="relative min-w-0" ref={rootRef}>
-      <button
-        type="button"
-        className={cn(
-          "flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost",
-          selected != null && "text-info-primary",
-        )}
-        aria-expanded={open}
-        aria-label={`Snapshot: ${label}`}
-        onClick={() => setOpen(!open)}
-      >
-        <Icon iconName={IconName.History} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate">{label}</span>
-      </button>
-
-      {open ? (
-        // The chip sits in the footer, so the panel has to grow upwards.
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-[320px] flex flex-col gap-1 p-2 rounded-[8px] border border-secondary bg-elevation-level-2 shadow-xl fade">
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      // The chip sits in the footer, so the panel has to grow upwards.
+      placement={PopoverPlacement.TopRight}
+      className="min-w-0"
+      content={
+        <>
           <Row
             title="Working tree"
             subtitle="The files as they are right now"
@@ -154,9 +136,23 @@ export function RevisionPicker({
               ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+        </>
+      }
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost",
+          selected != null && "text-info-primary",
+        )}
+        aria-expanded={open}
+        aria-label={`Snapshot: ${label}`}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon iconName={IconName.History} size={16} className="shrink-0" />
+        <span className="label-micro text-btn-secondary truncate">{label}</span>
+      </button>
+    </Popover>
   );
 }
 

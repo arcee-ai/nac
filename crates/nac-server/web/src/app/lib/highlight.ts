@@ -147,6 +147,17 @@ async function highlightBlock(
 }
 
 /**
+ * Tokens per line for a snippet whose language is already known, for callers
+ * that have a language name rather than a path.
+ */
+export async function highlightSource(
+  language: string,
+  text: string,
+): Promise<CodeToken[][] | null> {
+  return highlightBlock(language, text);
+}
+
+/**
  * Tokens per line for a whole file. Unlike a diff this is a real document, so
  * the tokenizer sees everything it needs and only an unknown language or the
  * integrity check above can turn the colours off.

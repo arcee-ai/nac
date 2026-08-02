@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 
-import { ModelPill } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  ChatLoader,
+  Icon,
+  IconName,
+  ModelPill,
+} from "@/app/atoms";
 import { ChatBadge, CodeChangesBadge } from "@/app/components/inspector/ChatBadge";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { displayPromptFromMessageText } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
 import { buildTranscript } from "@/app/lib/transcript";
@@ -28,7 +38,7 @@ interface TranscriptProps {
 
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
- * fed by the SSE runtime store. Auto-scrolls to the bottom on new content.
+ * fed by the SSE runtime store. Follows new content unless the user scrolls up.
  */
 export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   const running = useRunning();
@@ -36,7 +46,8 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   const error = useRunError();
   const liveThreads = useLiveThreads();
   const selectedThread = useSelectedThread();
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
+    useStickToBottom();
 
   const turns = useMemo(
     () => buildTranscript(snapshot, liveThreads),
@@ -59,17 +70,6 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
     pendingText && !(last?.kind === "user" && last.text === pendingText),
   );
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // Markdown blocks settle their height after this effect runs, so measuring
-    // on the next frame is what actually lands on the newest message.
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [turns, running, activity, showPending]);
-
   const focusThread = (name: string) => {
     selectThread(name);
     onFocusPanel("threads");
@@ -80,65 +80,89 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   };
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
-      {/* The top bar is fixed over this scroll region, so the first message
-          needs to clear it. */}
-      <div className="flex flex-col gap-6 pt-[72px] pb-4 [&>*]:shrink-0">
-        {!snapshot ? (
-          <div className="text-basic-muted label-small">Loading…</div>
-        ) : null}
+    <div className="relative flex-1 min-h-0">
+      <div ref={scrollRef} className="h-full overflow-auto">
+        {/* The top bar is fixed over this scroll region, so the first message
+            needs to clear it. */}
+        <div
+          ref={contentRef}
+          className="flex flex-col gap-6 pt-[72px] pb-4 [&>*]:shrink-0"
+        >
+          {!snapshot ? (
+            <div className="text-basic-muted label-small">Loading…</div>
+          ) : null}
 
-        {snapshot && turns.length === 0 && !running && !showPending ? (
-          <div className="text-basic-muted label-small">
-            No messages yet. Type something below.
-          </div>
-        ) : null}
+          {snapshot && turns.length === 0 && !running && !showPending ? (
+            <div className="text-basic-muted label-small">
+              No messages yet. Type something below.
+            </div>
+          ) : null}
 
-        {turns.map((turn, index) =>
-          turn.kind === "user" ? (
-            <UserMessage key={turn.key} text={turn.text} />
-          ) : (
-            <ModelMessage
-              key={turn.key}
-              turn={turn}
-              model={model}
-              active={running && index === turns.length - 1}
-              selectedThread={selectedThread}
-              onSelectThread={focusThread}
-              onSelectWorkset={focusWorkset}
+          {turns.map((turn, index) =>
+            turn.kind === "user" ? (
+              <UserMessage key={turn.key} text={turn.text} />
+            ) : (
+              <ModelMessage
+                key={turn.key}
+                turn={turn}
+                model={model}
+                active={running && index === turns.length - 1}
+                selectedThread={selectedThread}
+                onSelectThread={focusThread}
+                onSelectWorkset={focusWorkset}
+              />
+            ),
+          )}
+
+          {showPending ? <UserMessage text={pendingText} pending /> : null}
+
+          {running ? (
+            <div className="flex items-center gap-3">
+              <ModelPill active />
+              {activity ? (
+                <span className="paragraph-medium text-shimmer-basic">
+                  {activity}
+                </span>
+              ) : (
+                // Before the first tool or message there is nothing to name,
+                // and the dots read better than a placeholder verb.
+                <ChatLoader />
+              )}
+            </div>
+          ) : null}
+
+          {/* The backend keeps one running diff for the workspace rather than a
+              snapshot per turn, so it belongs after the last message. */}
+          {!running && (additions || deletions) ? (
+            <ChatBadge
+              label="Snapshot"
+              trailing={
+                <CodeChangesBadge additions={additions} deletions={deletions} />
+              }
+              onClick={() => onFocusPanel("files")}
             />
-          ),
-        )}
+          ) : null}
 
-        {showPending ? <UserMessage text={pendingText} pending /> : null}
-
-        {running ? (
-          <div className="flex items-center gap-3">
-            <ModelPill active />
-            <span className="paragraph-medium text-shimmer-basic">
-              {activity || "Working…"}
-            </span>
-          </div>
-        ) : null}
-
-        {/* The backend keeps one running diff for the workspace rather than a
-            snapshot per turn, so it belongs after the last message. */}
-        {!running && (additions || deletions) ? (
-          <ChatBadge
-            label="Snapshot"
-            trailing={
-              <CodeChangesBadge additions={additions} deletions={deletions} />
-            }
-            onClick={() => onFocusPanel("files")}
-          />
-        ) : null}
-
-        {error && !running ? (
-          <div className="rounded-xl p-3 border border-error-primary bg-error-tertiary text-error-primary label-small">
-            {error}
-          </div>
-        ) : null}
+          {error && !running ? (
+            <div className="rounded-xl p-3 border border-error-primary bg-error-tertiary text-error-primary label-small">
+              {error}
+            </div>
+          ) : null}
+        </div>
       </div>
+
+      {showJumpButton ? (
+        <Button
+          variant={ButtonVariant.Secondary}
+          size={ButtonSize.Small}
+          content={ButtonContent.IconLeft}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 fade shadow-xl"
+          onClick={jumpToLatest}
+        >
+          <Icon iconName={IconName.Down} />
+          Latest
+        </Button>
+      ) : null}
     </div>
   );
 }

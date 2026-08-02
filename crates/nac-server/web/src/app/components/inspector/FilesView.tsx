@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { Icon, IconName, Loader, LoaderSize } from "@/app/atoms";
+import { FileIcon, Icon, IconName, Loader, LoaderSize } from "@/app/atoms";
 import {
   PanelEmpty,
   PanelRow,
@@ -76,7 +76,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
     <div
       className={cn(
         "flex flex-col gap-[2px] w-full",
-        depth > 0 && "pl-1 ml-[11px] border-l border-muted",
+        depth > 0 && "pl-1 ml-[3px] border-l border-muted",
       )}
     >
       {dir.dirs.map((child) => {
@@ -87,7 +87,9 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
               label={child.name}
               icon={<Chevron open={expanded} />}
               // Collapsed folders would otherwise hide where the work is.
-              labelClassName={child.hasChanges ? "text-danger-primary" : undefined}
+              labelClassName={
+                child.hasChanges ? "text-danger-primary" : undefined
+              }
               onClick={() => onToggle(child.path)}
             />
             {expanded ? (
@@ -110,16 +112,9 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           active={selected === file.path}
           title={file.path}
           labelClassName={statusColor(file.status) ?? undefined}
-          icon={
-            <span
-              className={cn(
-                "code code-micro w-4 shrink-0 text-center",
-                statusColor(file.status) ?? "text-basic-muted",
-              )}
-            >
-              {file.status?.trim()[0] ?? ""}
-            </span>
-          }
+          // The status letter used to sit here; the label colour already says
+          // as much, so the slot shows what kind of file it is instead.
+          icon={<FileIcon path={file.path} />}
           onClick={() => onSelect(file.path)}
         />
       ))}
@@ -187,14 +182,23 @@ function DiffLine({
       tone={line.kind === "insert" ? "add" : isDel ? "delete" : undefined}
       trailing={
         line.has_trailing_newline === false ? (
-          <span className="italic text-basic-muted"> No newline at end of file</span>
+          <span className="italic text-basic-muted">
+            {" "}
+            No newline at end of file
+          </span>
         ) : null
       }
     />
   );
 }
 
-function Notice({ tone, children }: { tone?: "error"; children: React.ReactNode }) {
+function Notice({
+  tone,
+  children,
+}: {
+  tone?: "error";
+  children: React.ReactNode;
+}) {
   return (
     <div
       className={cn(
@@ -216,14 +220,20 @@ function Section({
   section: WorkspaceDiffSection;
   highlighted: Map<WorkspaceDiffLine, CodeToken[]>;
 }) {
-  if (section.error) return <Notice tone="error">Error: {section.error}</Notice>;
+  if (section.error)
+    return <Notice tone="error">Error: {section.error}</Notice>;
   if (section.binary) {
-    return <Notice>Binary or non-UTF-8 content; inline hunks are unavailable.</Notice>;
+    return (
+      <Notice>
+        Binary or non-UTF-8 content; inline hunks are unavailable.
+      </Notice>
+    );
   }
   if (section.too_large) {
     return <Notice>File is too large for inline diff rendering.</Notice>;
   }
-  if (section.hunks.length === 0) return <Notice>No hunks for this section.</Notice>;
+  if (section.hunks.length === 0)
+    return <Notice>No hunks for this section.</Notice>;
 
   return (
     <>
@@ -239,29 +249,43 @@ function Section({
             </span>
           </div>
           {hunk.lines.map((line, lineIndex) => (
-            <DiffLine key={lineIndex} line={line} tokens={highlighted.get(line)} />
+            <DiffLine
+              key={lineIndex}
+              line={line}
+              tokens={highlighted.get(line)}
+            />
           ))}
         </div>
       ))}
-      {section.truncated ? <Notice>Diff was truncated by the backend.</Notice> : null}
+      {section.truncated ? (
+        <Notice>Diff was truncated by the backend.</Notice>
+      ) : null}
     </>
   );
 }
 
 /** Header shared by both panes: the file's name, with counts or size beside it. */
-function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNode }) {
+function PaneHeader({
+  path,
+  trailing,
+}: {
+  path: string;
+  trailing: React.ReactNode;
+}) {
   return (
     <div
-      className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1"
+      className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">
+        <FileIcon path={path} />
         <span className="label-micro text-btn-secondary truncate">
           {fileLabel(path)}
         </span>
-        <Icon iconName={IconName.Folder} size={16} className="shrink-0" />
       </div>
-      <div className="flex items-center gap-2 shrink-0 code code-small">{trailing}</div>
+      <div className="flex items-center gap-2 shrink-0 code code-small">
+        {trailing}
+      </div>
     </div>
   );
 }
@@ -314,9 +338,9 @@ function DiffPane({
 }
 
 function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
-  const [highlighted, setHighlighted] = useState<Map<WorkspaceDiffLine, CodeToken[]>>(
-    () => new Map(),
-  );
+  const [highlighted, setHighlighted] = useState<
+    Map<WorkspaceDiffLine, CodeToken[]>
+  >(() => new Map());
 
   // The highlighter is loaded on demand, so the diff renders as plain text
   // first and gains its colours a frame later. A map left over from another
@@ -332,7 +356,8 @@ function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
   }, [diff]);
 
   if (diff.error) return <Notice tone="error">{diff.error}</Notice>;
-  if (diff.sections.length === 0) return <Notice>No diff sections returned.</Notice>;
+  if (diff.sections.length === 0)
+    return <Notice>No diff sections returned.</Notice>;
   return (
     <>
       {diff.sections.map((section, index) => (
@@ -355,7 +380,11 @@ function FilePane({
   path: string;
   revision: number | null;
 }) {
-  const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
+  const { data, isFetching, error } = useWorkspaceFile(
+    sessionId,
+    path,
+    revision,
+  );
   // Kept next to the text it describes, so a refetch that changes the file
   // cannot pair the new lines with the old colours.
   const [highlighted, setHighlighted] = useState<{
@@ -397,9 +426,13 @@ function FilePane({
           </div>
         ) : null}
         {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
-        {data?.binary ? <Notice>Binary file; nothing to show inline.</Notice> : null}
+        {data?.binary ? (
+          <Notice>Binary file; nothing to show inline.</Notice>
+        ) : null}
         {data?.too_large ? (
-          <Notice>File is too large to display ({formatBytes(data.size)}).</Notice>
+          <Notice>
+            File is too large to display ({formatBytes(data.size)}).
+          </Notice>
         ) : null}
         {lines
           ? lines.map((content, index) => (
@@ -436,7 +469,11 @@ export function FilesView({
   const [selected, setSelected] = useState<string | null>(null);
   const [toggled, setToggled] = useState<Set<string>>(() => new Set());
 
-  const { data: listing, isLoading, error } = useWorkspaceFiles(sessionId, revision);
+  const {
+    data: listing,
+    isLoading,
+    error,
+  } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
 
   // Workspace stats are computed when the snapshot is built, so entering the
@@ -484,7 +521,9 @@ export function FilesView({
   const failure = error ?? (revision != null ? revisionChanges.error : null);
   if (revision == null && workspace?.error) {
     return (
-      <div className="p-6 label-small text-error-primary">{workspace.error}</div>
+      <div className="p-6 label-small text-error-primary">
+        {workspace.error}
+      </div>
     );
   }
   if (failure) {
@@ -564,8 +603,7 @@ function mergeStatuses(
 
   const nodes = files.map((path) => {
     const match =
-      exact.get(path) ??
-      prefixes.find((entry) => path.startsWith(entry.path));
+      exact.get(path) ?? prefixes.find((entry) => path.startsWith(entry.path));
     return {
       path,
       status: match?.status ?? null,

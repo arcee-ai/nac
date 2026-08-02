@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -12,6 +12,8 @@ import {
   InputTrailing,
   Loader,
   LoaderSize,
+  Popover,
+  PopoverPlacement,
   Select,
   type SelectItem,
   TabButton,
@@ -667,8 +669,9 @@ function SmallSelect({
       placeholder={placeholder}
       size={ButtonSize.Small}
       variant={ButtonVariant.Ghost}
+      placement={PopoverPlacement.BottomLeft}
       className="max-w-[220px]"
-      panelClassName="right-0 max-h-64 overflow-auto min-w-[220px]"
+      panelClassName="max-h-64 overflow-auto min-w-[220px]"
     />
   );
 }
@@ -690,18 +693,6 @@ function SourceMenu({
   onDelete: (id: string, name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const pick = (next: Source) => {
     onSelect(next);
@@ -709,25 +700,15 @@ function SourceMenu({
   };
 
   return (
-    <div className="relative w-fit shrink-0" ref={rootRef}>
-      <Button
-        variant={ButtonVariant.Ghost}
-        size={ButtonSize.Small}
-        content={ButtonContent.IconRight}
-        onClick={() => setOpen((current) => !current)}
-        aria-expanded={open}
-      >
-        <span className="text-left flex-grow truncate max-w-[220px]">{label}</span>
-        <Icon
-          iconName={IconName.Down}
-          className={cn(
-            "transition-transform duration-300 ease-in-out",
-            open ? "rotate-180" : "rotate-0",
-          )}
-        />
-      </Button>
-      {open ? (
-        <div className="absolute right-0 z-20 mt-1 min-w-[260px] flex flex-col gap-1 p-2 rounded-[8px] fade bg-elevation-level-2 shadow-2xl max-h-72 overflow-auto [&>*]:shrink-0">
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      placement={PopoverPlacement.BottomLeft}
+      size="min-w-[260px]"
+      className="shrink-0"
+      panelClassName="max-h-72 overflow-auto"
+      content={
+        <>
           <TabButton
             size={TabButtonSize.Small}
             variant={source === "new" ? TabButtonVariant.Accent : TabButtonVariant.Regular}
@@ -774,8 +755,25 @@ function SourceMenu({
               </Button>
             </div>
           ))}
-        </div>
-      ) : null}
-    </div>
+        </>
+      }
+    >
+      <Button
+        variant={ButtonVariant.Ghost}
+        size={ButtonSize.Small}
+        content={ButtonContent.IconRight}
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+      >
+        <span className="text-left flex-grow truncate max-w-[220px]">{label}</span>
+        <Icon
+          iconName={IconName.Down}
+          className={cn(
+            "transition-transform duration-300 ease-in-out",
+            open ? "rotate-180" : "rotate-0",
+          )}
+        />
+      </Button>
+    </Popover>
   );
 }

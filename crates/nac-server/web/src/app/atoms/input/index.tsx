@@ -2,6 +2,7 @@ import React from "react";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
+import InputWrapper from "./InputWrapper";
 
 export enum InputSize {
   Small = "input-small",
@@ -61,57 +62,6 @@ const trailingIconPos: Record<InputSize, string> = {
   [InputSize.Medium]: "top-2 right-2",
   [InputSize.Large]: "top-3 right-3",
 };
-
-interface InputWrapperProps {
-  label?: React.ReactNode;
-  required?: boolean;
-  validation?: boolean;
-  validationText?: string;
-  hintText?: string;
-  className?: string;
-  children?: React.ReactNode;
-}
-
-const InputWrapper: React.FC<InputWrapperProps> = ({
-  label,
-  required,
-  validation,
-  validationText,
-  hintText,
-  className,
-  children,
-}) => (
-  <div className={cn("flex text-left flex-col gap-1", className)}>
-    {label ? (
-      <div className="flex gap-2 items-center">
-        <label
-          className={cn(
-            "label-small",
-            validation ? "text-error-primary" : "text-basic-secondary",
-          )}
-        >
-          {label}
-        </label>
-        {required ? (
-          <div
-            className={cn(
-              "text-micro",
-              validation ? "text-error-secondary" : "text-basic-tertiary",
-            )}
-          >
-            * Required
-          </div>
-        ) : null}
-      </div>
-    ) : null}
-    {children}
-    {validation && validationText ? (
-      <p className="pt-1 text-error-primary text-micro">{validationText}</p>
-    ) : !validation && hintText ? (
-      <p className="pt-1 text-basic-muted text-micro">{hintText}</p>
-    ) : null}
-  </div>
-);
 
 interface InputProps
   extends Omit<React.ComponentPropsWithRef<"input">, "size"> {

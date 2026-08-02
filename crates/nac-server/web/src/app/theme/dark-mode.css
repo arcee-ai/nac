@@ -205,26 +205,26 @@
   --color-fill-btn-ghost-pressed: var(--white);
   --color-fill-btn-ghost-disabled: var(--white-trans-300);
 
-  --color-fill-btn-destructive: var(--red-400);
-  --color-fill-btn-destructive-hovered: var(--red-300);
-  --color-fill-btn-destructive-pressed: var(--red-200);
+  --color-fill-btn-destructive: var(--red-300);
+  --color-fill-btn-destructive-hovered: var(--red-200);
+  --color-fill-btn-destructive-pressed: var(--red-100);
   --color-fill-btn-destructive-disabled: var(--red-trans-400);
 
   /* fill / Danger */
-  --color-fill-danger-primary: var(--yellow-400);
-  --color-fill-danger-secondary: var(--yellow-500);
+  --color-fill-danger-primary: var(--yellow-300);
+  --color-fill-danger-secondary: var(--yellow-400);
   --color-fill-danger-tertiary: var(--yellow-trans-500);
   --color-fill-danger-muted: var(--yellow-trans-300);
 
   /* fill / Error */
-  --color-fill-error-primary: var(--red-400);
-  --color-fill-error-secondary: var(--red-500);
+  --color-fill-error-primary: var(--red-300);
+  --color-fill-error-secondary: var(--red-400);
   --color-fill-error-tertiary: var(--red-trans-700);
   --color-fill-error-muted: var(--red-trans-400);
 
   /* fill / Info */
-  --color-fill-info-primary: var(--blue-400);
-  --color-fill-info-secondary: var(--blue-500);
+  --color-fill-info-primary: var(--blue-300);
+  --color-fill-info-secondary: var(--blue-400);
   --color-fill-info-tertiary: var(--blue-trans-700);
   --color-fill-info-muted: var(--blue-trans-400);
 
@@ -235,8 +235,8 @@
   --color-fill-muted-inversed: var(--white-trans-300);
 
   /* fill / Success */
-  --color-fill-success-primary: var(--green-400);
-  --color-fill-success-secondary: var(--green-500);
+  --color-fill-success-primary: var(--green-300);
+  --color-fill-success-secondary: var(--green-400);
   --color-fill-success-tertiary: var(--green-trans-700);
   --color-fill-success-muted: var(--green-trans-400);
 
@@ -275,26 +275,26 @@
   --color-text-btn-ghost-pressed: var(--white);
   --color-text-btn-ghost-disabled: var(--white-trans-300);
 
-  --color-text-btn-destructive: var(--red-400);
-  --color-text-btn-destructive-hovered: var(--red-300);
-  --color-text-btn-destructive-pressed: var(--red-200);
+  --color-text-btn-destructive: var(--red-300);
+  --color-text-btn-destructive-hovered: var(--red-200);
+  --color-text-btn-destructive-pressed: var(--red-100);
   --color-text-btn-destructive-disabled: var(--red-trans-400);
 
   /* Text / Danger */
-  --color-text-danger-primary: var(--yellow-400);
-  --color-text-danger-secondary: var(--yellow-500);
+  --color-text-danger-primary: var(--yellow-300);
+  --color-text-danger-secondary: var(--yellow-400);
   --color-text-danger-tertiary: var(--yellow-trans-700);
   --color-text-danger-muted: var(--yellow-trans-400);
 
   /* Text / Error */
-  --color-text-error-primary: var(--red-400);
-  --color-text-error-secondary: var(--red-500);
+  --color-text-error-primary: var(--red-300);
+  --color-text-error-secondary: var(--red-400);
   --color-text-error-tertiary: var(--red-trans-700);
   --color-text-error-muted: var(--red-trans-400);
 
   /* Text / Info */
-  --color-text-info-primary: var(--blue-400);
-  --color-text-info-secondary: var(--blue-500);
+  --color-text-info-primary: var(--blue-300);
+  --color-text-info-secondary: var(--blue-400);
   --color-text-info-tertiary: var(--blue-trans-700);
   --color-text-info-muted: var(--blue-trans-400);
 
@@ -311,25 +311,25 @@
   --color-text-muted-inverse: var(--dark-trans-400);
 
   /* Text / Success */
-  --color-text-success-primary: var(--green-400);
-  --color-text-success-secondary: var(--green-500);
+  --color-text-success-primary: var(--green-300);
+  --color-text-success-secondary: var(--green-400);
   --color-text-success-tertiary: var(--green-trans-700);
   --color-text-success-muted: var(--green-trans-400);
 
   /* Shadows */
   --shadow-xs:
-    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
     0 1px 4px 0 rgba(7, 13, 13, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
   --shadow-sm:
-    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
     0 2px 12px 0 rgba(11, 20, 20, 0.25), 0 2px 4px 0 rgba(11, 20, 20, 0.35),
     0 0 0 1px rgba(255, 255, 255, 0.06) inset;
   --shadow-md:
-    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
     0 0 0 1px rgba(255, 255, 255, 0.04) inset,
     0 4px 20px 0 rgba(11, 20, 20, 0.3), 0 2px 6px 0 rgba(11, 20, 20, 0.35);
   --shadow-lg:
-    0 1px 0 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
     0 7px 26px 0 rgba(11, 20, 20, 0.4), 0 2px 8px 0 rgba(11, 20, 20, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.04) inset;
   --shadow-xl:

@@ -83,7 +83,7 @@ function SideBoxFooter({
   const deletions = totals?.total_deletions ?? 0;
 
   return (
-    <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-2">
+    <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-1">
       <div className="flex flex-1 min-w-0 items-center gap-[10px]">
         {repo ? <FooterChip iconName={IconName.Folder} label={repo} /> : null}
         {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
@@ -120,8 +120,8 @@ export function SessionSideBox({
   const selectedRevision = useSelectedRevision();
 
   return (
-    <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-sm">
-      <div className="flex items-center gap-4 pl-1 pr-2 pt-1 shrink-0 border-b border-muted bg-elevation-level-2">
+    <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
+      <div className="flex items-center gap-4 pl-1 pr-2 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 h">
         <div className="flex flex-1 min-w-0 items-center gap-3" role="tablist">
           {SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
@@ -142,7 +142,7 @@ export function SessionSideBox({
             position={TooltipPosition.BottomRight}
           >
             <Button
-              size={ButtonSize.Small}
+              size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
               aria-label={expanded ? "Restore split" : "Expand panel"}
@@ -157,7 +157,7 @@ export function SessionSideBox({
           </Tooltip>
           <Tooltip title="Hide panel" position={TooltipPosition.BottomRight}>
             <Button
-              size={ButtonSize.Small}
+              size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
               aria-label="Hide panel"

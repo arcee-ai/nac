@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -8,6 +8,9 @@ import {
   ButtonVariant,
   Icon,
   IconName,
+  Popover,
+  PopoverPlacement,
+  PopoverSize,
   SessionAvatar,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
@@ -20,18 +23,6 @@ export function Breadcrumbs() {
   const navigate = useNavigate();
   const { data: sessions = [] } = useSessions();
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const current = sessionId
     ? sessions.find((entry) => entry.summary.session_id === sessionId)?.summary
@@ -55,7 +46,46 @@ export function Breadcrumbs() {
             iconName={IconName.Right}
             className="text-basic-muted shrink-0"
           />
-          <div className="relative min-w-0" ref={rootRef}>
+          <Popover
+            open={open}
+            onClose={() => setOpen(false)}
+            placement={PopoverPlacement.BottomRight}
+            size={PopoverSize.Medium}
+            className="min-w-0"
+            panelClassName="max-h-[420px] overflow-auto"
+            content={
+              sessions.length === 0 ? (
+                <div className="label-small text-basic-muted px-2 py-1">
+                  No sessions
+                </div>
+              ) : (
+                sessions.map(({ summary }) => (
+                  <button
+                    key={summary.session_id}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
+                      summary.session_id === sessionId &&
+                        "bg-btn-ghost-highlighted",
+                    )}
+                    onClick={() => {
+                      setOpen(false);
+                      navigate(routes.session(summary.session_id));
+                    }}
+                  >
+                    <SessionAvatar
+                      id={summary.session_id}
+                      size={20}
+                      className="rounded-[2px]"
+                    />
+                    <span className="label-small text-basic-primary truncate">
+                      {displaySessionTitle(summary)}
+                    </span>
+                  </button>
+                ))
+              )
+            }
+          >
             <Button
               variant={ButtonVariant.Ghost}
               size={ButtonSize.Medium}
@@ -81,46 +111,7 @@ export function Breadcrumbs() {
                 )}
               />
             </Button>
-
-            {open ? (
-              <div
-                className="absolute left-0 z-30 mt-1 w-[320px] max-h-[420px] overflow-auto fade
-                           flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-2 border border-secondary shadow-xl
-                           [&>*]:shrink-0"
-              >
-                {sessions.length === 0 ? (
-                  <div className="label-small text-basic-muted px-2 py-1">
-                    No sessions
-                  </div>
-                ) : (
-                  sessions.map(({ summary }) => (
-                    <button
-                      key={summary.session_id}
-                      type="button"
-                      className={cn(
-                        "flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
-                        summary.session_id === sessionId &&
-                          "bg-btn-ghost-highlighted",
-                      )}
-                      onClick={() => {
-                        setOpen(false);
-                        navigate(routes.session(summary.session_id));
-                      }}
-                    >
-                      <SessionAvatar
-                        id={summary.session_id}
-                        size={20}
-                        className="rounded-[2px]"
-                      />
-                      <span className="label-small text-basic-primary truncate">
-                        {displaySessionTitle(summary)}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </div>
+          </Popover>
         </>
       ) : null}
     </nav>
