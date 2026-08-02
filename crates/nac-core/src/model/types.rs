@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendKind {
     #[serde(rename = "deepseek-chat")]
@@ -82,7 +82,7 @@ impl<'de> Deserialize<'de> for BackendKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
     None,
@@ -106,7 +106,7 @@ impl ReasoningEffort {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveModelSettings {
     pub(crate) backend: BackendKind,
     pub(crate) model: String,
@@ -114,6 +114,9 @@ pub struct EffectiveModelSettings {
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) api_key_env: Option<String>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
+    /// Catalog metadata resolved at construction. Adapters ignore it until
+    /// later stages (S3 cost, S4 effort maps, S6 dispatch).
+    pub(crate) resolved: catalog::ModelMetadata,
 }
 
 pub const ARCEE_AUTH_CANONICAL_BASE_URL: &str = "https://api.arcee.ai/api/v1";
@@ -168,6 +171,7 @@ impl EffectiveModelSettings {
         let model = required_nonblank_setting(model, "model")?;
         let base_url = resolve_model_base_url(backend, base_url)?;
         validate_model_reasoning_effort(backend, &model, reasoning_effort)?;
+        let resolved = catalog::resolve(backend, &model);
 
         Ok(Self {
             backend,
@@ -176,6 +180,7 @@ impl EffectiveModelSettings {
             reasoning_effort,
             api_key_env,
             extra_headers,
+            resolved,
         })
     }
 

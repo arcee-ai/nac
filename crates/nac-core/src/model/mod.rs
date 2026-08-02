@@ -20,6 +20,7 @@ mod anthropic;
 mod arcee;
 mod auth_store;
 mod backend;
+pub mod catalog;
 mod chat;
 mod chatgpt_codex;
 mod client;
@@ -31,6 +32,7 @@ mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
+pub use catalog::ModelMetadata;
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;

@@ -150,6 +150,11 @@ pub struct ModelClient {
     /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
+    /// Catalog metadata resolved with the effective settings; carried for
+    /// later stages (S3 cost, S4 effort maps, S6 dispatch). Adapters ignore
+    /// it in S0, so non-test code does not read it yet.
+    #[allow(dead_code)]
+    resolved_model: ModelMetadata,
 }
 
 impl ModelClient {
@@ -209,6 +214,7 @@ impl ModelClient {
             extra_headers: settings.extra_headers,
             arcee_credential_source,
             cache_ttl: None,
+            resolved_model: settings.resolved,
         })
     }
 
@@ -602,6 +608,7 @@ impl ModelClient {
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: None,
             cache_ttl: None,
+            resolved_model: catalog::resolve(BackendKind::OpenAiResponses, "gpt-5.5"),
         }
     }
 }
@@ -655,6 +662,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn model_client_carries_resolved_catalog_metadata() {
+        let client = test_model_client(
+            BackendKind::DeepSeekChat,
+            "https://api.deepseek.test".to_string(),
+            std::collections::BTreeMap::new(),
+        );
+        assert_eq!(client.resolved_model.id, "test-model");
+        assert_eq!(client.resolved_model.provider, BackendKind::DeepSeekChat);
+        assert_eq!(
+            client.resolved_model.api,
+            catalog::ApiKind::OpenAiCompletions
+        );
+        assert_eq!(
+            client.resolved_model.source,
+            catalog::ModelSource::ProviderDefault
+        );
+    }
+
     #[tokio::test]
     async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         let server = ScriptedServer::start(vec![ScriptedResponse::json(
@@ -690,6 +716,7 @@ mod tests {
             )]),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
+            resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
         };
         let messages = vec![
             Message::System {
@@ -803,6 +830,7 @@ mod tests {
                 extra_headers: std::collections::BTreeMap::new(),
                 arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
                 cache_ttl: None,
+                resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
             };
 
             client
@@ -848,6 +876,7 @@ mod tests {
                 )]),
                 arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
                 cache_ttl: None,
+                resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
             };
 
             let error = client
@@ -910,6 +939,7 @@ mod tests {
             extra_headers,
             arcee_credential_source: None,
             cache_ttl: None,
+            resolved_model: catalog::resolve(backend, "test-model"),
         }
     }
 
@@ -1126,6 +1156,7 @@ mod tests {
             )]),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
+            resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
         };
 
         let error = client
@@ -1223,6 +1254,7 @@ mod tests {
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
+            resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
         };
 
         let error = client
