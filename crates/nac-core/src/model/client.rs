@@ -233,16 +233,19 @@ impl ModelClient {
         // Runs once here so every adapter (and the compaction summary call)
         // inherits it; operates on the send-time copy, never the transcript.
         let messages = normalize_history(messages, &self.model_origin());
-        match self.backend {
-            BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
-            BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
-            BackendKind::TogetherChat => self.send_together_chat(messages, tools).await,
-            BackendKind::ArceeAuth | BackendKind::ArceeApi => {
-                self.send_arcee_chat(messages, tools).await
+        // S6: dispatch on the resolved catalog api (the wire protocol), not
+        // the provider id. BackendKind remains the auth/base-url/catalog axis
+        // (approved decision #1); within the completions adapter it still
+        // selects the URL join and credential style.
+        match self.resolved_model.api {
+            catalog::ApiKind::OpenAiCompletions => {
+                self.send_completions_chat(messages, tools).await
             }
-            BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
-            BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
-            BackendKind::ChatGptCodexResponses => {
+            catalog::ApiKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
+            catalog::ApiKind::AnthropicMessages => {
+                self.send_anthropic_messages(messages, tools).await
+            }
+            catalog::ApiKind::ChatGptCodexResponses => {
                 let response = chatgpt_codex::send_responses(
                     &self.client,
                     &self.base_url,
@@ -303,68 +306,34 @@ impl ModelClient {
         response
     }
 
-    async fn send_fireworks_chat(
+    /// The single OpenAI-completions-family adapter (S6): one request
+    /// builder and one parser, both driven by the resolved catalog `compat`
+    /// data. The provider axis (BackendKind) still owns the URL join and
+    /// credential style: Arcee uses its custom URL join and, for
+    /// `arcee-auth`, device-flow tokens with proactive refresh; the API-key
+    /// providers post Bearer credentials to `<base_url>/chat/completions`.
+    async fn send_completions_chat(
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/chat/completions", self.base_url);
-        let request = fireworks_chat_request(
+        let compat = &self.resolved_model.compat;
+        let request = completions_chat_request(
             &self.model,
             self.reasoning_effort,
             &messages,
             &tools,
             &self.resolved_model.thinking_level_map,
+            compat,
         );
-
-        let value = self.post_json_with_retry(&url, &request).await?;
-        Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
-    }
-
-    async fn send_together_chat(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDefinition>,
-    ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/chat/completions", self.base_url);
-        let request = together_chat_request(
-            &self.model,
-            self.reasoning_effort,
-            &messages,
-            &tools,
-            &self.resolved_model.thinking_level_map,
-        );
-
-        let value = self.post_json_with_retry(&url, &request).await?;
-        Ok(self.with_usage_cost(parse_together_chat_response(&value, &url)?))
-    }
-
-    fn arcee_chat_request(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
-        let mut request = json!({
-            "model": self.model,
-            "messages": messages
-                .iter()
-                .map(fireworks_message_to_value)
-                .collect::<Vec<_>>(),
-            "temperature": 0.0,
-        });
-
-        if !tools.is_empty() {
-            request["tools"] =
-                serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
-        }
-        request
-    }
-
-    async fn send_arcee_chat(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDefinition>,
-    ) -> Result<ModelTurnResponse> {
-        let url = arcee::chat_completions_url(&self.base_url)
-            .map_err(classify_model_configuration_error)?;
-        let request = self.arcee_chat_request(&messages, &tools);
-
+        let url = match self.backend {
+            BackendKind::ArceeAuth | BackendKind::ArceeApi => arcee::chat_completions_url(
+                &self.base_url,
+            )
+            .map_err(classify_model_configuration_error)?
+            .to_string(),
+            _ => format!("{}/chat/completions", self.base_url),
+        };
         let value = match self.backend {
             BackendKind::ArceeAuth => {
                 self.post_arcee_auth_with_refresh(url.as_str(), &request)
@@ -372,25 +341,15 @@ impl ModelClient {
             }
             _ => self.post_json_with_retry(url.as_str(), &request).await?,
         };
-        Ok(self.with_usage_cost(parse_chat_completions_response(&value, url.as_str())?))
-    }
-
-    async fn send_deepseek_chat(
-        &self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDefinition>,
-    ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/chat/completions", self.base_url);
-        let request = deepseek_chat_request(
-            &self.model,
-            self.reasoning_effort,
-            &messages,
-            &tools,
-            &self.resolved_model.thinking_level_map,
-        );
-
-        let value = self.post_json_with_retry(&url, &request).await?;
-        Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
+        let reasoning_field = compat
+            .completions_reasoning_field
+            .as_deref()
+            .unwrap_or("reasoning_content");
+        Ok(self.with_usage_cost(parse_completions_response(
+            &value,
+            url.as_str(),
+            reasoning_field,
+        )?))
     }
 
     async fn send_openai_responses(
@@ -424,6 +383,7 @@ impl ModelClient {
             &tools,
             self.cache_ttl,
             &self.resolved_model.thinking_level_map,
+            self.resolved_model.max_tokens,
         )?;
 
         let value = self.post_anthropic_json_with_retry(&url, &request).await?;
@@ -709,9 +669,19 @@ mod tests {
                 "https://api.arcee.ai".to_string(),
                 std::collections::BTreeMap::new(),
             );
-            let request = client.arcee_chat_request(&messages, &[]);
+            // Arcee's request shape comes from the shared completions builder
+            // driven by the provider's catalog compat (S6).
+            let request = completions_chat_request(
+                &client.model,
+                client.reasoning_effort,
+                &messages,
+                &[],
+                &client.resolved_model.thinking_level_map,
+                &client.resolved_model.compat,
+            );
 
             assert_eq!(request["messages"], expected_messages, "{backend}");
+            assert_eq!(request["temperature"], json!(0.0), "{backend}");
             assert!(request.get("tools").is_none(), "{backend}");
         }
     }
@@ -1010,7 +980,7 @@ mod tests {
             };
 
             client
-                .send_arcee_chat(Vec::new(), Vec::new())
+                .send_completions_chat(Vec::new(), Vec::new())
                 .await
                 .unwrap_or_else(|error| panic!("{configured_path}: {error:#}"));
             let requests = server.finish();
@@ -1056,7 +1026,7 @@ mod tests {
             };
 
             let error = client
-                .send_arcee_chat(
+                .send_completions_chat(
                     vec![Message::User {
                         content: "sensitive prompt".to_string(),
                     }],
@@ -1336,7 +1306,7 @@ mod tests {
         };
 
         let error = client
-            .send_arcee_chat(Vec::new(), Vec::new())
+            .send_completions_chat(Vec::new(), Vec::new())
             .await
             .expect_err("Host override must fail before the HTTP client runs");
 
@@ -1434,7 +1404,7 @@ mod tests {
         };
 
         let error = client
-            .send_arcee_chat(Vec::new(), Vec::new())
+            .send_completions_chat(Vec::new(), Vec::new())
             .await
             .expect_err("HTTP 400 should return an error")
             .to_string();
@@ -1929,6 +1899,74 @@ mod tests {
             ]}),
             "the orphaned call gains a synthesized interruption result"
         );
+    }
+
+    // --- S6: api-axis dispatch + catalog-driven max_tokens -------------------
+
+    #[tokio::test]
+    async fn send_turn_dispatches_on_the_resolved_api_not_the_backend() {
+        // The dispatch axis is the resolved catalog api: a client whose
+        // metadata says OpenAiResponses speaks the responses protocol even
+        // though its BackendKind is a completions provider. (Real clients
+        // always resolve api == api_kind_for(provider); the hand-mutated
+        // metadata isolates the dispatch axis.)
+        let server = ScriptedServer::start(vec![s5_openai_response()]);
+        let mut client = test_model_client(
+            BackendKind::DeepSeekChat,
+            server.base_url.clone(),
+            std::collections::BTreeMap::new(),
+        );
+        client.resolved_model.api = catalog::ApiKind::OpenAiResponses;
+        let body = s5_send_and_finish(
+            &client,
+            server,
+            vec![Message::User {
+                content: "hi".to_string(),
+            }],
+        )
+        .await;
+
+        assert!(
+            body.get("input").is_some(),
+            "the responses wire shape proves api-axis dispatch: {body}"
+        );
+        assert!(body.get("messages").is_none());
+    }
+
+    #[tokio::test]
+    async fn anthropic_max_tokens_come_from_the_resolved_catalog_metadata() {
+        // S6 intentional behavior change: the Anthropic adapter sends the
+        // per-model catalog max_tokens (models.dev limit.output) instead of
+        // the hardcoded 128_000. Values verified against Anthropic's model
+        // docs (platform.claude.com/docs/en/about-claude/models/overview).
+        for (model, expected) in [
+            ("claude-opus-4-6", 128_000_u64),
+            ("claude-sonnet-4-6", 128_000),
+            ("claude-opus-4-5", 64_000),
+            ("claude-haiku-4-5", 64_000),
+            ("claude-sonnet-4-5", 64_000),
+            ("claude-opus-4-1", 32_000),
+            // No catalog entry: the conservative fallback (was 128_000).
+            ("claude-unknown-future", 16_384),
+        ] {
+            let server = ScriptedServer::start(vec![s5_anthropic_response()]);
+            let mut client = test_model_client(
+                BackendKind::AnthropicMessages,
+                server.base_url.clone(),
+                std::collections::BTreeMap::new(),
+            );
+            client.model = model.to_string();
+            client.resolved_model = catalog::resolve(BackendKind::AnthropicMessages, model);
+            let body = s5_send_and_finish(
+                &client,
+                server,
+                vec![Message::User {
+                    content: "hi".to_string(),
+                }],
+            )
+            .await;
+            assert_eq!(body["max_tokens"], json!(expected), "{model}");
+        }
     }
 
 }

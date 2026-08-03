@@ -615,6 +615,7 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
         &[],
         None,
         &settings.resolved.thinking_level_map,
+        settings.resolved.max_tokens,
     )
     .unwrap();
     assert_eq!(request["thinking"], serde_json::json!({"type": "adaptive"}));

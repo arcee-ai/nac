@@ -34,6 +34,7 @@ mod types;
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
 pub use catalog::{spawn_overlay_refresh, ModelMetadata, ThinkingLevelMap};
+pub(crate) use catalog::{Compat, CompletionsThinkingFormat};
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
@@ -158,6 +159,18 @@ mod tests {
     /// carry for this backend/model pair (S4 adapter input).
     fn test_thinking_levels(backend: BackendKind, model: &str) -> ThinkingLevelMap {
         catalog::resolve(backend, model).thinking_level_map
+    }
+
+    /// Resolve the catalog compat a client's `resolved_model` would carry
+    /// for this backend/model pair (S6 adapter input).
+    fn test_compat(backend: BackendKind, model: &str) -> Compat {
+        catalog::resolve(backend, model).compat
+    }
+
+    /// Resolve the catalog max_tokens a client's `resolved_model` would
+    /// carry for this backend/model pair (S6 adapter input).
+    fn test_max_tokens(backend: BackendKind, model: &str) -> u64 {
+        catalog::resolve(backend, model).max_tokens
     }
 
     struct IsolatedModelEnv {
@@ -805,18 +818,36 @@ mod tests {
             content: "hi".to_string(),
         }];
 
-        let deepseek =
-            deepseek_chat_request("m", Some(ReasoningEffort::Xhigh), &messages, &[], &custom);
+        let deepseek = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::Xhigh),
+            &messages,
+            &[],
+            &custom,
+            &test_compat(BackendKind::DeepSeekChat, "m"),
+        );
         assert_eq!(deepseek["thinking"], json!({"type": "enabled"}));
         assert_eq!(deepseek["reasoning_effort"], "tier-four");
 
-        let fireworks =
-            fireworks_chat_request("m", Some(ReasoningEffort::High), &messages, &[], &custom);
+        let fireworks = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::High),
+            &messages,
+            &[],
+            &custom,
+            &test_compat(BackendKind::FireworksChat, "m"),
+        );
         assert_eq!(fireworks["reasoning_effort"], "tier-three");
         assert_eq!(fireworks["reasoning_history"], "preserved");
 
-        let together =
-            together_chat_request("m", Some(ReasoningEffort::High), &messages, &[], &custom);
+        let together = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::High),
+            &messages,
+            &[],
+            &custom,
+            &test_compat(BackendKind::TogetherChat, "m"),
+        );
         assert_eq!(together["reasoning"], json!({"enabled": true}));
         assert_eq!(together["reasoning_effort"], "tier-three");
 
@@ -834,6 +865,7 @@ mod tests {
             &[],
             None,
             &custom,
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-opus-4-6"),
         )
         .unwrap();
         assert_eq!(anthropic["thinking"], json!({"type": "adaptive"}));
@@ -1458,6 +1490,8 @@ mod tests {
         }];
         let unknown_levels =
             test_thinking_levels(BackendKind::AnthropicMessages, "claude-always-on-future");
+        let unknown_max_tokens =
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-always-on-future");
         for effort in [None, Some(ReasoningEffort::None)] {
             let request = anthropic_messages_request(
                 "claude-always-on-future",
@@ -1466,9 +1500,13 @@ mod tests {
                 &[],
                 None,
                 &unknown_levels,
+                unknown_max_tokens,
             )
             .unwrap();
-            assert_eq!(request["max_tokens"], 128000);
+            // S6: max_tokens is the resolved catalog value — the conservative
+            // 16_384 fallback for a model with no catalog entry (previously
+            // the hardcoded 128_000 for every Anthropic model).
+            assert_eq!(request["max_tokens"], 16_384);
             assert!(request.get("thinking").is_none());
             assert!(request.get("output_config").is_none());
             assert!(!request.to_string().contains("disabled"));
@@ -1488,6 +1526,7 @@ mod tests {
                 &[],
                 None,
                 &opus_levels,
+                test_max_tokens(BackendKind::AnthropicMessages, "claude-opus-4-6"),
             )
             .unwrap();
             assert_eq!(request["thinking"], json!({"type": "adaptive"}));
@@ -1518,6 +1557,7 @@ mod tests {
             }],
             Some("1h"),
             &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
         )
         .unwrap();
 
@@ -1545,6 +1585,7 @@ mod tests {
             &[],
             None,
             &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
         )
         .unwrap();
 
@@ -1587,26 +1628,29 @@ mod tests {
         assert!(openai.get("tools").is_none());
 
         for request in [
-            fireworks_chat_request(
+            completions_chat_request(
                 "model",
                 None,
                 &messages,
                 &[],
                 &test_thinking_levels(BackendKind::FireworksChat, "model"),
+                &test_compat(BackendKind::FireworksChat, "model"),
             ),
-            together_chat_request(
+            completions_chat_request(
                 "model",
                 None,
                 &messages,
                 &[],
                 &test_thinking_levels(BackendKind::TogetherChat, "model"),
+                &test_compat(BackendKind::TogetherChat, "model"),
             ),
-            deepseek_chat_request(
+            completions_chat_request(
                 "deepseek-v4-pro",
                 None,
                 &messages,
                 &[],
                 &test_thinking_levels(BackendKind::DeepSeekChat, "deepseek-v4-pro"),
+                &test_compat(BackendKind::DeepSeekChat, "deepseek-v4-pro"),
             ),
         ] {
             assert_eq!(
@@ -1623,6 +1667,7 @@ mod tests {
             &[],
             Some("1h"),
             &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
         )
         .unwrap();
         assert_eq!(anthropic["system"][0]["text"], "primary\n\nagents");
@@ -1719,6 +1764,7 @@ mod tests {
             &[],
             None,
             &test_thinking_levels(BackendKind::AnthropicMessages, "claude-opus-4-6"),
+            test_max_tokens(BackendKind::AnthropicMessages, "claude-opus-4-6"),
         )
         .unwrap();
 
@@ -1748,20 +1794,25 @@ mod tests {
             reasoning_field: None,
         }];
         let levels = test_thinking_levels(BackendKind::DeepSeekChat, "deepseek-v4-pro");
-        let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[], &levels);
+        let compat = test_compat(BackendKind::DeepSeekChat, "deepseek-v4-pro");
+        let absent =
+            completions_chat_request("deepseek-v4-pro", None, &messages, &[], &levels, &compat);
         assert!(absent.get("thinking").is_none());
         assert!(absent.get("reasoning_effort").is_none());
+        // DeepSeek's compat omits an explicit temperature.
+        assert!(absent.get("temperature").is_none());
         assert_eq!(
             absent["messages"][0]["reasoning_content"],
             "need current context"
         );
 
-        let disabled = deepseek_chat_request(
+        let disabled = completions_chat_request(
             "deepseek-v4-pro",
             Some(ReasoningEffort::None),
             &messages,
             &[],
             &levels,
+            &compat,
         );
         assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
         assert!(disabled.get("reasoning_effort").is_none());
@@ -1772,11 +1823,132 @@ mod tests {
             (ReasoningEffort::High, "high"),
             (ReasoningEffort::Xhigh, "max"),
         ] {
-            let request =
-                deepseek_chat_request("deepseek-v4-pro", Some(effort), &messages, &[], &levels);
+            let request = completions_chat_request(
+                "deepseek-v4-pro",
+                Some(effort),
+                &messages,
+                &[],
+                &levels,
+                &compat,
+            );
             assert_eq!(request["thinking"], json!({"type": "enabled"}));
             assert_eq!(request["reasoning_effort"], wire_effort);
         }
+    }
+
+    #[test]
+    fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
+        // S6 consolidation guard: a single builder, driven only by catalog
+        // compat data, reproduces the four distinct completions request
+        // shapes (DeepSeek, Fireworks, Together, Arcee) — including the
+        // per-provider reasoning replay field for unstamped (legacy)
+        // assistant messages.
+        let messages = [
+            Message::User {
+                content: "hi".to_string(),
+            },
+            Message::Assistant {
+                content: Some("prior".to_string()),
+                reasoning_text: Some("thought".to_string()),
+                reasoning_details: None,
+                tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        ];
+        let user = json!({"role": "user", "content": "hi"});
+
+        let deepseek = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::High),
+            &messages,
+            &[],
+            &test_thinking_levels(BackendKind::DeepSeekChat, "m"),
+            &test_compat(BackendKind::DeepSeekChat, "m"),
+        );
+        assert_eq!(
+            deepseek,
+            json!({
+                "model": "m",
+                "messages": [
+                    user,
+                    {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+                ],
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": "high"
+            }),
+            "DeepSeek: thinking dialect, no explicit temperature"
+        );
+
+        let fireworks = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::High),
+            &messages,
+            &[],
+            &test_thinking_levels(BackendKind::FireworksChat, "m"),
+            &test_compat(BackendKind::FireworksChat, "m"),
+        );
+        assert_eq!(
+            fireworks,
+            json!({
+                "model": "m",
+                "messages": [
+                    user,
+                    {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+                ],
+                "temperature": 0.0,
+                "reasoning_effort": "high",
+                "reasoning_history": "preserved"
+            }),
+            "Fireworks: reasoning_effort + reasoning_history dialect"
+        );
+
+        let together = completions_chat_request(
+            "m",
+            Some(ReasoningEffort::High),
+            &messages,
+            &[],
+            &test_thinking_levels(BackendKind::TogetherChat, "m"),
+            &test_compat(BackendKind::TogetherChat, "m"),
+        );
+        assert_eq!(
+            together,
+            json!({
+                "model": "m",
+                "messages": [
+                    user,
+                    {"role": "assistant", "content": "prior", "reasoning": "thought"}
+                ],
+                "temperature": 0.0,
+                "reasoning": {"enabled": true},
+                "reasoning_effort": "high",
+                "chat_template_kwargs": {"clear_thinking": false}
+            }),
+            "Together: reasoning.enabled dialect, reasoning replay field"
+        );
+
+        // Arcee accepts no explicit effort levels (its map is empty), so the
+        // effort-free shape is the only reachable one.
+        let arcee = completions_chat_request(
+            "m",
+            None,
+            &messages,
+            &[],
+            &test_thinking_levels(BackendKind::ArceeApi, "m"),
+            &test_compat(BackendKind::ArceeApi, "m"),
+        );
+        assert_eq!(
+            arcee,
+            json!({
+                "model": "m",
+                "messages": [
+                    user,
+                    {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+                ],
+                "temperature": 0.0
+            }),
+            "Arcee: no thinking dialect"
+        );
     }
 
     #[test]
@@ -1786,17 +1958,26 @@ mod tests {
         }];
 
         let fireworks_levels = test_thinking_levels(BackendKind::FireworksChat, "model");
-        let fireworks_absent =
-            fireworks_chat_request("model", None, &messages, &[], &fireworks_levels);
+        let fireworks_compat = test_compat(BackendKind::FireworksChat, "model");
+        let fireworks_absent = completions_chat_request(
+            "model",
+            None,
+            &messages,
+            &[],
+            &fireworks_levels,
+            &fireworks_compat,
+        );
         assert!(fireworks_absent.get("reasoning_effort").is_none());
         assert!(fireworks_absent.get("reasoning_history").is_none());
         assert!(fireworks_absent.get("tools").is_none());
-        let fireworks_none = fireworks_chat_request(
+        assert_eq!(fireworks_absent["temperature"], json!(0.0));
+        let fireworks_none = completions_chat_request(
             "model",
             Some(ReasoningEffort::None),
             &messages,
             &[],
             &fireworks_levels,
+            &fireworks_compat,
         );
         assert_eq!(fireworks_none["reasoning_effort"], "none");
         assert_eq!(fireworks_none["reasoning_history"], "disabled");
@@ -1805,25 +1986,39 @@ mod tests {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
         ] {
-            let request =
-                fireworks_chat_request("model", Some(effort), &messages, &[], &fireworks_levels);
+            let request = completions_chat_request(
+                "model",
+                Some(effort),
+                &messages,
+                &[],
+                &fireworks_levels,
+                &fireworks_compat,
+            );
             assert_eq!(request["reasoning_effort"], effort.as_str());
             assert_eq!(request["reasoning_history"], "preserved");
         }
 
         let together_levels = test_thinking_levels(BackendKind::TogetherChat, "model");
-        let together_absent =
-            together_chat_request("model", None, &messages, &[], &together_levels);
+        let together_compat = test_compat(BackendKind::TogetherChat, "model");
+        let together_absent = completions_chat_request(
+            "model",
+            None,
+            &messages,
+            &[],
+            &together_levels,
+            &together_compat,
+        );
         assert!(together_absent.get("reasoning").is_none());
         assert!(together_absent.get("reasoning_effort").is_none());
         assert!(together_absent.get("chat_template_kwargs").is_none());
         assert!(together_absent.get("tools").is_none());
-        let together_none = together_chat_request(
+        let together_none = completions_chat_request(
             "model",
             Some(ReasoningEffort::None),
             &messages,
             &[],
             &together_levels,
+            &together_compat,
         );
         assert_eq!(together_none["reasoning"], json!({"enabled": false}));
         assert!(together_none.get("reasoning_effort").is_none());
@@ -1832,8 +2027,14 @@ mod tests {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
         ] {
-            let request =
-                together_chat_request("model", Some(effort), &messages, &[], &together_levels);
+            let request = completions_chat_request(
+                "model",
+                Some(effort),
+                &messages,
+                &[],
+                &together_levels,
+                &together_compat,
+            );
             assert_eq!(request["reasoning"], json!({"enabled": true}));
             assert_eq!(request["reasoning_effort"], effort.as_str());
             assert_eq!(
@@ -1855,12 +2056,30 @@ mod tests {
                 parameters: json!({"type": "object"}),
             },
         }];
-        assert!(fireworks_chat_request("model", None, &messages, &tools, &fireworks_levels)
+        assert!(
+            completions_chat_request(
+                "model",
+                None,
+                &messages,
+                &tools,
+                &fireworks_levels,
+                &fireworks_compat
+            )
             .get("tools")
-            .is_some());
-        assert!(together_chat_request("model", None, &messages, &tools, &together_levels)
+            .is_some()
+        );
+        assert!(
+            completions_chat_request(
+                "model",
+                None,
+                &messages,
+                &tools,
+                &together_levels,
+                &together_compat
+            )
             .get("tools")
-            .is_some());
+            .is_some()
+        );
         assert!(openai_responses_request("model", None, &messages, &tools, &openai_levels)
             .get("tools")
             .is_some());
@@ -1919,7 +2138,7 @@ mod tests {
 
     #[test]
     fn parses_deepseek_chat_output() {
-        let parsed = parse_chat_completions_response(
+        let parsed = parse_completions_response(
             &json!({
                 "choices": [
                     {
@@ -1941,6 +2160,7 @@ mod tests {
                 }
             }),
             "https://api.deepseek.com/chat/completions",
+            "reasoning_content",
         )
         .unwrap();
 
@@ -1949,12 +2169,20 @@ mod tests {
             parsed.assistant.reasoning_text.as_deref(),
             Some("worked through it")
         );
+        assert_eq!(
+            parsed.assistant.reasoning_field.as_deref(),
+            Some("reasoning_content")
+        );
         assert!(parsed.assistant.tool_calls.is_none());
         let usage = parsed.usage.expect("usage should be parsed");
         assert_eq!(usage.input_tokens, 10);
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.cache_read_tokens, 0);
         assert_eq!(usage.cache_write_tokens, 0);
+        // S6: the unified parser reads the nested reasoning_tokens shape for
+        // every completions provider (previously DeepSeek/Fireworks/Arcee
+        // always parsed 0).
+        assert_eq!(usage.reasoning_tokens, 9);
         assert_eq!(usage.orchestrator_context_tokens, 30);
     }
 
@@ -2110,7 +2338,7 @@ mod tests {
 
     #[test]
     fn parses_chat_completions_usage_with_cached_tokens() {
-        let parsed = parse_chat_completions_response(
+        let parsed = parse_completions_response(
             &json!({
                 "choices": [{
                     "finish_reason": "stop",
@@ -2125,6 +2353,7 @@ mod tests {
                 }
             }),
             "https://api.deepseek.com/chat/completions",
+            "reasoning_content",
         )
         .unwrap();
 
@@ -2172,7 +2401,7 @@ mod tests {
 
     #[test]
     fn parses_together_chat_response() {
-        let parsed = parse_together_chat_response(
+        let parsed = parse_completions_response(
             &json!({
                 "choices": [
                     {
@@ -2193,6 +2422,7 @@ mod tests {
                 }
             }),
             "https://api.together.ai/v1/chat/completions",
+            "reasoning",
         )
         .unwrap();
 
@@ -2234,7 +2464,7 @@ mod tests {
 
     #[test]
     fn parses_together_chat_response_nested_usage() {
-        let parsed = parse_together_chat_response(
+        let parsed = parse_completions_response(
             &json!({
                 "choices": [{
                     "finish_reason": "stop",
@@ -2253,6 +2483,7 @@ mod tests {
                 }
             }),
             "https://api.together.ai/v1/chat/completions",
+            "reasoning",
         )
         .unwrap();
 

@@ -37,7 +37,7 @@ pub enum CompletionsThinkingFormat {
 
 /// Per-api quirk data; replaces per-backend code branches as the adapters are
 /// consolidated (S6).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Compat {
     /// Completions-family thinking control dialect, when the provider accepts
     /// explicit effort levels.
@@ -45,6 +45,9 @@ pub struct Compat {
     /// Response field carrying reasoning text (`reasoning_content` |
     /// `reasoning`); used for both parse and replay.
     pub completions_reasoning_field: Option<String>,
+    /// Explicit `temperature` to send on completions-family requests; `None`
+    /// omits the field (DeepSeek).
+    pub completions_temperature: Option<f64>,
 }
 
 /// Effort levels a model accepts, mapped to provider wire values.

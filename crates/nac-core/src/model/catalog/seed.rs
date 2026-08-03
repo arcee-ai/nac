@@ -75,10 +75,12 @@ fn anthropic_none_only_levels() -> ThinkingLevelMap {
 fn completions_compat(
     thinking_format: Option<CompletionsThinkingFormat>,
     reasoning_field: &str,
+    temperature: Option<f64>,
 ) -> Compat {
     Compat {
         completions_thinking_format: thinking_format,
         completions_reasoning_field: Some(reasoning_field.to_string()),
+        completions_temperature: temperature,
     }
 }
 
@@ -117,9 +119,11 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             PROVIDER_DEFAULT_MODEL_ID,
             true,
             deepseek_levels(),
+            // DeepSeek rejects an explicit temperature on reasoning models.
             completions_compat(
                 Some(CompletionsThinkingFormat::Deepseek),
                 "reasoning_content",
+                None,
             ),
         ),
         &[],
@@ -133,6 +137,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             completions_compat(
                 Some(CompletionsThinkingFormat::Fireworks),
                 "reasoning_content",
+                Some(0.0),
             ),
         ),
         &[],
@@ -144,7 +149,11 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             true,
             none_through_high_levels(),
             // Together returns reasoning text in the `reasoning` field.
-            completions_compat(Some(CompletionsThinkingFormat::Together), "reasoning"),
+            completions_compat(
+                Some(CompletionsThinkingFormat::Together),
+                "reasoning",
+                Some(0.0),
+            ),
         ),
         &[],
     );
@@ -204,7 +213,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
                 PROVIDER_DEFAULT_MODEL_ID,
                 false,
                 ThinkingLevelMap::default(),
-                completions_compat(None, "reasoning_content"),
+                completions_compat(None, "reasoning_content", Some(0.0)),
             ),
             &[],
         );

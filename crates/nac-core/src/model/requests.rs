@@ -15,7 +15,7 @@ pub(super) fn validated_wire_effort(
     })
 }
 
-pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
+pub(super) fn completions_message_to_value(message: &Message, default_reasoning_field: &str) -> Value {
     match message {
         Message::System { content } => json!({
             "role": "system",
@@ -39,9 +39,10 @@ pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
             if let Some(reasoning_text) = reasoning_text {
                 // Replay under the field the provider originally used (S5
                 // field-name discipline: together sends "reasoning", the
-                // other completions providers "reasoning_content"). Legacy
-                // messages without a stamp keep the historical default.
-                let field = reasoning_field.as_deref().unwrap_or("reasoning_content");
+                // other completions providers "reasoning_content"). Unstamped
+                // (legacy) messages fall back to the provider's catalog
+                // compat field (S6).
+                let field = reasoning_field.as_deref().unwrap_or(default_reasoning_field);
                 value[field] = Value::String(reasoning_text.clone());
             }
             if let Some(tool_calls) = tool_calls {
@@ -70,101 +71,74 @@ pub(super) fn openai_responses_tool_to_value(tool: &ToolDefinition) -> Value {
     })
 }
 
-pub(super) fn fireworks_chat_request(
+/// The single OpenAI-completions-family request builder (S6). Every
+/// per-provider difference comes from the catalog `Compat` data:
+/// `completions_reasoning_field` drives reasoning replay, an explicit
+/// `completions_temperature` is sent when the provider accepts one, and
+/// `completions_thinking_format` selects the thinking-control dialect.
+/// Effort wire values come from the catalog thinking map (S4).
+pub(super) fn completions_chat_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
     thinking_levels: &ThinkingLevelMap,
+    compat: &Compat,
 ) -> Value {
+    let default_reasoning_field = compat
+        .completions_reasoning_field
+        .as_deref()
+        .unwrap_or("reasoning_content");
     let mut request = json!({
         "model": model,
         "messages": messages
             .iter()
-            .map(fireworks_message_to_value)
+            .map(|message| completions_message_to_value(message, default_reasoning_field))
             .collect::<Vec<_>>(),
-        "temperature": 0.0,
     });
+    if let Some(temperature) = compat.completions_temperature {
+        request["temperature"] = json!(temperature);
+    }
     if !tools.is_empty() {
         request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
     }
-    match reasoning_effort {
-        None => {}
-        Some(ReasoningEffort::None) => {
-            request["reasoning_effort"] = json!("none");
-            request["reasoning_history"] = json!("disabled");
+    match (compat.completions_thinking_format, reasoning_effort) {
+        (_, None) => {}
+        (None, Some(effort)) => {
+            // Providers without a thinking dialect accept no explicit effort
+            // levels, so validation rejects every `Some` before this point.
+            debug_assert!(
+                false,
+                "reasoning effort '{}' reached a completions provider without a thinking format",
+                effort.as_str()
+            );
         }
-        Some(effort) => {
-            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
-            request["reasoning_history"] = json!("preserved");
-        }
-    }
-    request
-}
-
-pub(super) fn together_chat_request(
-    model: &str,
-    reasoning_effort: Option<ReasoningEffort>,
-    messages: &[Message],
-    tools: &[ToolDefinition],
-    thinking_levels: &ThinkingLevelMap,
-) -> Value {
-    let mut request = json!({
-        "model": model,
-        "messages": messages
-            .iter()
-            .map(fireworks_message_to_value)
-            .collect::<Vec<_>>(),
-        "temperature": 0.0,
-    });
-    if !tools.is_empty() {
-        request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
-    }
-    match reasoning_effort {
-        None => {}
-        Some(ReasoningEffort::None) => {
-            request["reasoning"] = json!({"enabled": false});
-        }
-        Some(effort) => {
-            request["reasoning"] = json!({"enabled": true});
-            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
-            request["chat_template_kwargs"] = json!({"clear_thinking": false});
-        }
-    }
-    request
-}
-
-pub(super) fn deepseek_chat_request(
-    model: &str,
-    reasoning_effort: Option<ReasoningEffort>,
-    messages: &[Message],
-    tools: &[ToolDefinition],
-    thinking_levels: &ThinkingLevelMap,
-) -> Value {
-    let mut request = json!({
-        "model": model,
-        "messages": messages
-            .iter()
-            .map(fireworks_message_to_value)
-            .collect::<Vec<_>>(),
-    });
-    match reasoning_effort {
-        None => {}
-        Some(ReasoningEffort::None) => {
+        (Some(CompletionsThinkingFormat::Deepseek), Some(ReasoningEffort::None)) => {
             request["thinking"] = json!({"type": "disabled"});
         }
-        Some(effort) => {
+        (Some(CompletionsThinkingFormat::Deepseek), Some(effort)) => {
             request["thinking"] = json!({"type": "enabled"});
             // Wire tiers come from the catalog map (DeepSeek's top tier is
             // the wire value `max` for NAC's portable `xhigh`).
             request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
         }
+        (Some(CompletionsThinkingFormat::Fireworks), Some(ReasoningEffort::None)) => {
+            request["reasoning_effort"] = json!("none");
+            request["reasoning_history"] = json!("disabled");
+        }
+        (Some(CompletionsThinkingFormat::Fireworks), Some(effort)) => {
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
+            request["reasoning_history"] = json!("preserved");
+        }
+        (Some(CompletionsThinkingFormat::Together), Some(ReasoningEffort::None)) => {
+            request["reasoning"] = json!({"enabled": false});
+        }
+        (Some(CompletionsThinkingFormat::Together), Some(effort)) => {
+            request["reasoning"] = json!({"enabled": true});
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
+            request["chat_template_kwargs"] = json!({"clear_thinking": false});
+        }
     }
-
-    if !tools.is_empty() {
-        request["tools"] = serde_json::to_value(tools).unwrap_or_else(|_| Value::Array(Vec::new()));
-    }
-
     request
 }
 

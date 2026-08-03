@@ -1,8 +1,11 @@
 use super::*;
 
 pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
-const ANTHROPIC_MAX_TOKENS: u32 = 128_000;
 
+/// `max_tokens` is the resolved catalog metadata's per-model value (S6):
+/// models.dev `limit.output` for known models (e.g. 128k for claude-opus-4-6,
+/// 64k for claude-opus-4-5/claude-haiku-4-5, 32k for claude-opus-4-1), the
+/// conservative 16_384 fallback for unknown ones.
 pub(super) fn anthropic_messages_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
@@ -10,12 +13,13 @@ pub(super) fn anthropic_messages_request(
     tools: &[ToolDefinition],
     cache_ttl: Option<&str>,
     thinking_levels: &ThinkingLevelMap,
+    max_tokens: u64,
 ) -> Result<Value> {
     validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, reasoning_effort)?;
     let (system, mut messages) = anthropic_messages_from_internal(messages)?;
     let mut request = json!({
         "model": model,
-        "max_tokens": ANTHROPIC_MAX_TOKENS,
+        "max_tokens": max_tokens,
         "messages": &messages,
     });
     match reasoning_effort {
