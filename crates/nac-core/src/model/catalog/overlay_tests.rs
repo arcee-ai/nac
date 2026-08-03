@@ -95,6 +95,12 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     // The overlay file carries the mapped entry with a fresh timestamp.
     let written: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(env.overlay_path()).unwrap()).unwrap();
+    // The payload carries no `api`, so the provider endpoint default falls
+    // back to the baseline's models.dev value.
+    assert_eq!(
+        written["providers"]["deepseek-chat"]["default_base_url"],
+        "https://api.deepseek.com"
+    );
     let entry = &written["providers"]["deepseek-chat"]["models"][NOVEL_MODEL];
     assert_eq!(entry["context_window"], 999_000);
     assert_eq!(entry["max_tokens"], 77_000);
@@ -592,9 +598,9 @@ const MODELS_DEV_FIXTURE: &str =
 /// mapping ever changes without a matching seed update, this fails loudly.
 #[test]
 fn runtime_mapper_matches_the_checked_in_baseline() {
-    let seed = seed::seed_catalog();
+    let baseline_catalog = baseline_catalog();
     let (providers, warnings, count) =
-        map_models_dev(MODELS_DEV_FIXTURE, &seed).expect("fixture maps");
+        map_models_dev(MODELS_DEV_FIXTURE, &baseline_catalog).expect("fixture maps");
     assert_eq!(count, 117, "fixture model count drifted");
     assert!(warnings.is_empty(), "{warnings:?}");
 
@@ -605,6 +611,10 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
         let actual_provider = providers
             .get(provider)
             .unwrap_or_else(|| panic!("{provider} missing from the mapped overlay"));
+        assert_eq!(
+            actual_provider.default_base_url, expected_provider.default_base_url,
+            "{provider}: runtime mapper and generator endpoint defaults drifted"
+        );
         assert_eq!(
             actual_provider.models.len(),
             expected_provider.models.len(),
@@ -621,6 +631,101 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
             );
         }
     }
+}
+
+#[test]
+fn runtime_mapper_maps_api_to_default_base_url_with_baseline_fallback() {
+    let baseline = baseline_catalog();
+    let payload = serde_json::json!({
+        "deepseek": {
+            // A moved endpoint wins and is normalized (trailing slash).
+            "api": "https://api.deepseek.example/v2/",
+            "models": { "deepseek-v9-mapper-test": {
+                "name": "Mapper Test", "reasoning": true,
+                "limit": { "context": 999_000, "output": 77_000 },
+                "cost": { "input": 1.5, "output": 6.0 }
+            } }
+        },
+        "anthropic": {
+            // No `api`: falls back to the baseline's curated SDK-default URL.
+            "models": { "claude-mapper-test": {
+                "name": "Mapper Test", "reasoning": false,
+                "limit": { "context": 200_000, "output": 64_000 },
+                "cost": { "input": 3.0, "output": 15.0 }
+            } }
+        },
+        "fireworks-ai": {
+            // Drifted `api`: warning + the baseline fallback, never a hard error.
+            "api": "not a url",
+            "models": {}
+        }
+    })
+    .to_string();
+
+    let (providers, warnings, _) = map_models_dev(&payload, &baseline).expect("payload maps");
+    assert_eq!(
+        providers[&BackendKind::DeepSeekChat].default_base_url.as_deref(),
+        Some("https://api.deepseek.example/v2")
+    );
+    assert_eq!(
+        providers[&BackendKind::AnthropicMessages]
+            .default_base_url
+            .as_deref(),
+        Some("https://api.anthropic.com")
+    );
+    assert_eq!(
+        providers[&BackendKind::FireworksChat].default_base_url.as_deref(),
+        Some("https://api.fireworks.ai/inference/v1"),
+        "invalid api degrades to the baseline value"
+    );
+    assert!(
+        warnings.iter().any(|warning| warning.contains("invalid api base URL")),
+        "{warnings:?}"
+    );
+    // The two missing providers are reported, not fatal.
+    assert!(
+        warnings.iter().any(|warning| warning.contains("togetherai")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn overlay_default_base_url_upgrades_and_never_erases() {
+    let home = TempHome::new("overlay-base-url");
+
+    // A present overlay value upgrades the provider endpoint default.
+    write_overlay(
+        home.path(),
+        "2099-01-01T00:00:00Z",
+        serde_json::json!({
+            "deepseek-chat": {
+                "default_base_url": "https://api.deepseek.example/v9",
+                "models": {}
+            }
+        }),
+    );
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        catalog.default_base_url(BackendKind::DeepSeekChat).as_deref(),
+        Some("https://api.deepseek.example/v9")
+    );
+
+    // An absent one (a pre-envelope overlay) keeps the baseline's value.
+    write_overlay(
+        home.path(),
+        "2099-01-01T00:00:00Z",
+        serde_json::json!({
+            "deepseek-chat": { "models": {} }
+        }),
+    );
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        catalog.default_base_url(BackendKind::DeepSeekChat).as_deref(),
+        Some("https://api.deepseek.com"),
+        "an overlay without the field must not erase the baseline default"
+    );
 }
 
 // ---------------------------------------------------------------------------

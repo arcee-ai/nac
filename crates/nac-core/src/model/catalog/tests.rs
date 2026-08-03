@@ -670,10 +670,18 @@ fn api_listing_serializes_the_designed_field_names() {
         .unwrap();
     assert_eq!(
         keys(anthropic),
-        ["auth", "default_limits", "id", "managed_base_url", "models"]
+        [
+            "auth",
+            "default_base_url",
+            "default_limits",
+            "id",
+            "managed_base_url",
+            "models"
+        ]
     );
     assert_eq!(anthropic["auth"], "api_key_env");
     assert!(anthropic["managed_base_url"].is_null());
+    assert_eq!(anthropic["default_base_url"], "https://api.anthropic.com");
     assert_eq!(
         keys(&anthropic["default_limits"]),
         ["context_window", "max_tokens", "supported_efforts"]
@@ -753,6 +761,64 @@ fn api_listing_supported_efforts_come_from_some_wired_map_keys() {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ]
+    );
+}
+
+#[test]
+fn api_listing_serves_catalog_default_base_urls() {
+    // Holds TEST_ENV_LOCK like the other global-catalog assertions.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let listing = api_listing();
+    let by_id = |backend: BackendKind| {
+        listing
+            .providers
+            .iter()
+            .find(|provider| provider.id == backend)
+            .unwrap()
+    };
+    // The five models.dev providers serve their endpoint defaults (the two
+    // models.dev `api` values and the three curated SDK-default URLs).
+    for (backend, expected) in [
+        (BackendKind::DeepSeekChat, "https://api.deepseek.com"),
+        (
+            BackendKind::FireworksChat,
+            "https://api.fireworks.ai/inference/v1",
+        ),
+        (BackendKind::TogetherChat, "https://api.together.xyz/v1"),
+        (BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
+        // The API ROOT: the anthropic adapter appends "/v1/messages" itself.
+        (BackendKind::AnthropicMessages, "https://api.anthropic.com"),
+    ] {
+        assert_eq!(
+            by_id(backend).default_base_url.as_deref(),
+            Some(expected),
+            "{backend}"
+        );
+    }
+    // Managed providers and arcee-api serve none: their canonical URLs stay
+    // code-side (managed_base_url) or required (arcee-api).
+    for backend in [
+        BackendKind::ArceeAuth,
+        BackendKind::ArceeApi,
+        BackendKind::ChatGptCodexResponses,
+    ] {
+        assert_eq!(by_id(backend).default_base_url, None, "{backend}");
+    }
+}
+
+#[test]
+fn generated_provider_envelope_tolerates_a_missing_default_base_url() {
+    // Pre-envelope documents (an older overlay, a hand-written fixture)
+    // still parse.
+    let parsed: data::GeneratedProvider = serde_json::from_str(r#"{"models": {}}"#).unwrap();
+    assert_eq!(parsed.default_base_url, None);
+    let parsed: data::GeneratedProvider = serde_json::from_str(
+        r#"{"default_base_url": "https://api.deepseek.com", "models": {}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.default_base_url.as_deref(),
+        Some("https://api.deepseek.com")
     );
 }
 

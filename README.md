@@ -92,7 +92,7 @@ podman machine start
 
 ## Model configuration
 
-Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` and `[compaction]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
+Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` and `[compaction]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is required too, but a genuinely absent value is materialized: the five models.dev-backed providers (`deepseek-chat`, `fireworks-chat`, `together-chat`, `openai-responses`, `anthropic-messages`) fall to their catalog endpoint default (served as `default_base_url` by `GET /models`), and the managed backends fall to their canonical URLs (`https://chatgpt.com/backend-api` for `chatgpt-codex-responses`, `https://api.arcee.ai/api/v1` for `arcee-auth`). Only `arcee-api` has no endpoint default. A present value is validated rather than replaced, and an explicit or configured `base_url` always beats the catalog default.
 
 Model selection is config-first, not environment-driven:
 

@@ -174,7 +174,9 @@ fn effective_settings_require_explicit_valid_model_tuple() {
             "model",
         ),
         (
-            Some(BackendKind::OpenAiResponses),
+            // arcee-api is the one backend with no endpoint default (no
+            // catalog default, no managed canonical URL).
+            Some(BackendKind::ArceeApi),
             Some("model".to_string()),
             None,
             "base_url",
@@ -243,7 +245,10 @@ fn managed_backends_materialize_only_absent_base_urls() {
         assert!(error.to_string().contains("must not be blank"), "{error:#}");
     }
 
-    let error = EffectiveModelSettings::from_optional(
+    // The five models.dev providers acquire their catalog endpoint default
+    // (the unlock); arcee-api — the one backend with no default at all —
+    // keeps the missing-setting error.
+    let materialized = EffectiveModelSettings::from_optional(
         Some(BackendKind::OpenAiResponses),
         Some("model".to_string()),
         None,
@@ -251,8 +256,57 @@ fn managed_backends_materialize_only_absent_base_urls() {
         None,
         std::collections::BTreeMap::new(),
     )
-    .expect_err("API-key backends must not acquire a base URL default");
+    .expect("the catalog default fills an absent base URL");
+    assert_eq!(materialized.base_url, "https://api.openai.com/v1");
+
+    let error = EffectiveModelSettings::from_optional(
+        Some(BackendKind::ArceeApi),
+        Some("model".to_string()),
+        None,
+        None,
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect_err("arcee-api must not acquire a base URL default");
     assert!(error.to_string().contains("base_url"), "{error:#}");
+}
+
+#[test]
+fn catalog_default_base_urls_materialize_for_the_models_dev_providers() {
+    for (backend, expected) in [
+        (BackendKind::DeepSeekChat, "https://api.deepseek.com"),
+        (
+            BackendKind::FireworksChat,
+            "https://api.fireworks.ai/inference/v1",
+        ),
+        (BackendKind::TogetherChat, "https://api.together.xyz/v1"),
+        (BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
+        // The API ROOT: the anthropic adapter appends "/v1/messages" itself.
+        (BackendKind::AnthropicMessages, "https://api.anthropic.com"),
+    ] {
+        let settings = EffectiveModelSettings::from_optional(
+            Some(backend),
+            Some("model".to_string()),
+            None,
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .expect("the catalog default fills an absent base URL");
+        assert_eq!(settings.base_url, expected, "{backend}");
+
+        // A caller-supplied value stays authoritative over the default.
+        let explicit = EffectiveModelSettings::from_optional(
+            Some(backend),
+            Some("model".to_string()),
+            Some("https://explicit.example/v1".to_string()),
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .expect("an explicit base URL remains accepted");
+        assert_eq!(explicit.base_url, "https://explicit.example/v1", "{backend}");
+    }
 }
 
 #[test]

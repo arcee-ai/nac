@@ -264,7 +264,17 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             .iter()
             .map(|metadata| (metadata.id.clone(), metadata.clone()))
             .collect();
-        providers.insert(default.provider, ProviderCatalog { default, models });
+        // The seed layer ships no endpoint defaults: the five models.dev
+        // providers get theirs from the generated baseline, and managed
+        // providers keep their code-side canonical URLs.
+        providers.insert(
+            default.provider,
+            ProviderCatalog {
+                default,
+                models,
+                default_base_url: None,
+            },
+        );
     };
 
     register(

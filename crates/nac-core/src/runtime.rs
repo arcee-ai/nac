@@ -1494,6 +1494,57 @@ mod tests {
     }
 
     #[test]
+    fn catalog_default_base_urls_fill_only_genuine_absence() {
+        // The merge order: request > managed-if-request-names-backend >
+        // config > catalog provider default > managed second-stage > error.
+        let mut config = NacConfig::default();
+        config.model.backend = Some(BackendKind::DeepSeekChat);
+        config.model.model = Some("deepseek-chat".to_string());
+        config.model.api_key_env = Some("DEEPSEEK_API_KEY".to_string());
+
+        // The unlock: no request/config base_url → the catalog default.
+        let settings = effective_model_settings(&ModelOptions::default(), &config)
+            .expect("the catalog default fills an absent base_url");
+        assert_eq!(settings.base_url, "https://api.deepseek.com");
+
+        // Config beats the catalog default (user-explicit beats generated).
+        config.model.base_url = Some("https://config.example/v1".to_string());
+        let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(settings.base_url, "https://config.example/v1");
+
+        // Request beats both.
+        let settings = effective_model_settings(
+            &ModelOptions {
+                api_base_url: Some("https://request.example/v1".to_string()),
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(settings.base_url, "https://request.example/v1");
+
+        // Managed providers have no catalog default; the canonical URL
+        // still materializes (second stage, config-inherited backend).
+        let mut managed = NacConfig::default();
+        managed.model.backend = Some(BackendKind::ChatGptCodexResponses);
+        managed.model.model = Some("gpt-5.6-sol".to_string());
+        let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
+        assert_eq!(
+            settings.base_url,
+            crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL
+        );
+
+        // arcee-api carries no default at all: the missing-setting error
+        // survives.
+        let mut arcee = NacConfig::default();
+        arcee.model.backend = Some(BackendKind::ArceeApi);
+        arcee.model.model = Some("trinity-mini".to_string());
+        arcee.model.api_key_env = Some("ARCEE_API_KEY".to_string());
+        let error = effective_model_settings(&ModelOptions::default(), &arcee).unwrap_err();
+        assert!(error.to_string().contains("base_url"), "{error:#}");
+    }
+
+    #[test]
     fn no_reasoning_effort_is_injected() {
         let settings =
             effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();

@@ -39,6 +39,12 @@ pub(super) struct GeneratedCatalog {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct GeneratedProvider {
+    /// Provider endpoint default (models.dev `api`, or the curated
+    /// SDK-default URLs at gen time; the overlay carries the same mapping
+    /// forward). Absent in pre-envelope documents; managed providers never
+    /// carry one (their canonical URLs stay code-side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) default_base_url: Option<String>,
     pub(super) models: BTreeMap<String, GeneratedModel>,
 }
 
@@ -100,19 +106,24 @@ pub(super) fn hydrate_entry(
 
 /// Hydrate-and-insert one provider's generated records (baseline or
 /// overlay): `compat` comes from the provider's seed default so known and
-/// unknown models of a provider stay identical.
+/// unknown models of a provider stay identical. A present
+/// `default_base_url` upgrades the provider's endpoint default; an absent
+/// one never erases the layer below's.
 pub(super) fn merge_entries(
     catalog: &mut ModelCatalog,
     provider: BackendKind,
-    models: BTreeMap<String, GeneratedModel>,
+    generated: GeneratedProvider,
     source: ModelSource,
 ) {
     let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
         debug_assert!(false, "generated provider {provider} must have a seed default");
         return;
     };
+    if generated.default_base_url.is_some() {
+        provider_catalog.default_base_url = generated.default_base_url;
+    }
     let compat = provider_catalog.default.compat.clone();
-    for (id, entry) in models {
+    for (id, entry) in generated.models {
         let metadata = hydrate_entry(provider, id, entry, &compat, source);
         provider_catalog.models.insert(metadata.id.clone(), metadata);
     }
@@ -130,6 +141,6 @@ pub(super) fn merge_generated_baseline(catalog: &mut ModelCatalog) {
         }
     };
     for (provider, generated_provider) in generated.providers {
-        merge_entries(catalog, provider, generated_provider.models, ModelSource::Baseline);
+        merge_entries(catalog, provider, generated_provider, ModelSource::Baseline);
     }
 }

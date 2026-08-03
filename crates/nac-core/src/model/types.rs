@@ -134,10 +134,15 @@ pub fn managed_backend_base_url(backend: BackendKind) -> Option<&'static str> {
 }
 
 /// Materialize and validate the base URL after the effective backend has been
-/// selected. A caller-supplied value is always authoritative (and is never
-/// replaced when invalid); only genuine absence receives a managed default.
+/// selected. A caller-supplied value (explicit or configured) is always
+/// authoritative and is never replaced when invalid; genuine absence falls
+/// to the provider's catalog endpoint default (the five models.dev
+/// providers), then the managed canonical URL, then the missing-setting
+/// error (`arcee-api` is the only backend with no default at all).
 pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) -> Result<String> {
-    let base_url = base_url.or_else(|| managed_backend_base_url(backend).map(str::to_string));
+    let base_url = base_url
+        .or_else(|| catalog::default_base_url(backend))
+        .or_else(|| managed_backend_base_url(backend).map(str::to_string));
     let base_url = required_nonblank_setting(base_url, "base_url")?;
     let parsed = Url::parse(&base_url).map_err(|error| {
         model_configuration_error(format!(

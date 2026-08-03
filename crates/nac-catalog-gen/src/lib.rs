@@ -52,6 +52,11 @@ pub const EFFORT_NAMES: [&str; 6] = ["none", "minimal", "low", "medium", "high",
 
 #[derive(Debug, Deserialize)]
 struct ModelsDevProvider {
+    /// Provider endpoint base URL (`api` in models.dev). Carried only for
+    /// providers whose SDK has no implicit default endpoint (deepseek and
+    /// fireworks-ai in the current snapshot); anthropic/openai/togetherai
+    /// omit it and are hand-seeded via `overrides.toml`.
+    api: Option<String>,
     models: BTreeMap<String, ModelsDevModel>,
 }
 
@@ -128,6 +133,14 @@ pub struct ModelDoc {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderDoc {
+    /// Default endpoint base URL for the provider: models.dev `api`, or the
+    /// curated `overrides.toml` value for the SDK-default providers.
+    /// Normalized (trimmed, no trailing slash). nac-core fills a genuinely
+    /// absent request/config `base_url` with it; managed providers carry no
+    /// default (their canonical URLs stay code-side) and never appear in
+    /// this document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_base_url: Option<String>,
     pub models: BTreeMap<String, ModelDoc>,
 }
 
@@ -166,6 +179,11 @@ struct ProviderOverride {
     /// provider. This is how the `backend.rs` matrix stays authoritative:
     /// every provider's default here transcribes its matrix row exactly.
     default_thinking_levels: Option<BTreeMap<String, String>>,
+    /// Hand-seeded endpoint default for the providers models.dev carries no
+    /// `api` for (the SDK-default endpoints). Wins over models.dev `api`
+    /// when both exist — the curated table stays authoritative, as with the
+    /// thinking-level matrix.
+    default_base_url: Option<String>,
     #[serde(default)]
     models: BTreeMap<String, ModelOverride>,
 }
@@ -195,6 +213,11 @@ impl OverridesDoc {
             if let Some(levels) = &provider_override.default_thinking_levels {
                 validate_levels(levels).with_context(|| {
                     format!("overrides.toml: providers.{provider}.default_thinking_levels")
+                })?;
+            }
+            if let Some(url) = &provider_override.default_base_url {
+                normalize_base_url(url).with_context(|| {
+                    format!("overrides.toml: providers.{provider}.default_base_url")
                 })?;
             }
             for (model, model_override) in &provider_override.models {
@@ -230,6 +253,39 @@ fn validate_levels(levels: &BTreeMap<String, String>) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Seed mapping (models.dev → pre-override entry)
 // ---------------------------------------------------------------------------
+
+/// models.dev `api` / curated override → the provider's default base URL.
+/// The curated override wins when both exist (the table stays
+/// authoritative, as with the thinking-level matrix). Values are
+/// normalized and must be absolute http(s) URLs with a host; drift fails
+/// loudly at regen time.
+fn provider_default_base_url(
+    models_dev_id: &str,
+    api: Option<&str>,
+    provider_override: Option<&ProviderOverride>,
+) -> Result<Option<String>> {
+    let curated = provider_override.and_then(|provider_override| {
+        provider_override.default_base_url.as_deref()
+    });
+    let Some(raw) = curated.or(api) else { return Ok(None) };
+    normalize_base_url(raw)
+        .with_context(|| {
+            format!("models.dev provider '{models_dev_id}': invalid api base URL '{raw}'")
+        })
+        .map(Some)
+}
+
+/// Trim, strip trailing slashes, and require an absolute http(s) URL with a
+/// host. Shared by the models.dev `api` mapping and `overrides.toml`
+/// validation so both sources emit byte-identical values.
+fn normalize_base_url(url: &str) -> Result<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let parsed = reqwest::Url::parse(trimmed).context("not a valid absolute URL")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        bail!("must be an absolute http(s) URL with a host");
+    }
+    Ok(trimmed.to_string())
+}
 
 /// Map `reasoning_options` to thinking-level seeds. Wire values `xhigh` and
 /// `max` both address nac's xhigh slot; when a model lists both, `max` (the
@@ -362,6 +418,8 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
         let provider: ModelsDevProvider = serde_json::from_value(raw_provider.clone())
             .with_context(|| format!("decoding models.dev provider '{models_dev_id}'"))?;
         let provider_override = overrides.providers.get(nac_id);
+        let default_base_url =
+            provider_default_base_url(models_dev_id, provider.api.as_deref(), provider_override)?;
         let mut models = BTreeMap::new();
         for (id, model) in &provider.models {
             let seed_map = seed_thinking_levels(models_dev_id, id, model.reasoning_options.as_deref())?;
@@ -381,7 +439,13 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
             }
             models.insert(id.clone(), entry);
         }
-        providers.insert(nac_id.to_string(), ProviderDoc { models });
+        providers.insert(
+            nac_id.to_string(),
+            ProviderDoc {
+                default_base_url,
+                models,
+            },
+        );
     }
 
     // Review signal: curated entries that matched nothing this regen.
