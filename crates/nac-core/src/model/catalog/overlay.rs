@@ -16,18 +16,15 @@
 //! baseline-older overlay is ignored at load with a typed warning.
 //!
 //! The runtime mapper deliberately does NOT read models.dev
-//! `reasoning_options`: thinking-level maps are derived from the baseline
+//! `reasoning_options`: thinking-level maps are derived from the seed
 //! catalog (exact entry → dated-snapshot family → provider default), which
-//! reproduces the generator's `overrides.toml` application exactly.
-//! Provider endpoint defaults come from models.dev `api` with a fallback
-//! to the baseline's value (the curated SDK-default URLs), mirroring the
-//! generator's override precedence. The parity test
-//! (`overlay_tests::runtime_mapper_matches_the_checked_in_baseline`) pins
-//! the two pipelines together over the recorded models.dev fixture, so
+//! reproduces the generator's `overrides.toml` application exactly. The
+//! parity test (`overlay_tests::runtime_mapper_matches_the_checked_in_baseline`)
+//! pins the two pipelines together over the recorded models.dev fixture, so
 //! relaxing `overrides.toml` without updating the seed fails loudly.
 
 use super::data::{GeneratedModel, GeneratedProvider};
-use super::{CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap};
+use super::{seed, CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap};
 use crate::model::BackendKind;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -171,7 +168,7 @@ pub(super) fn merge_overlay(
         providers.insert(provider, generated);
     }
     for (provider, generated) in providers {
-        super::data::merge_entries(catalog, provider, generated, ModelSource::Overlay);
+        super::data::merge_entries(catalog, provider, generated.models, ModelSource::Overlay);
     }
 }
 
@@ -321,8 +318,8 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
             };
         }
     };
-    let baseline = super::baseline_catalog();
-    let (providers, warnings, models) = match map_models_dev(&body, &baseline) {
+    let seed = seed::seed_catalog();
+    let (providers, warnings, models) = match map_models_dev(&body, &seed) {
         Ok(mapped) => mapped,
         Err(error) => return RefreshOutcome::Failed { error },
     };
@@ -434,11 +431,10 @@ struct ModelsDevCost {
 /// nac's five providers are consumed, and per-model failures skip the model
 /// with a warning — a partial overlay beats none, and the embedded baseline
 /// covers anything skipped. Total payload parse failure is the only hard
-/// error (nothing is written then). `baseline` is the seed + generated
-/// catalog: thinking maps and the endpoint-default fallback derive from it.
+/// error (nothing is written then).
 pub(super) fn map_models_dev(
     api_json: &str,
-    baseline: &ModelCatalog,
+    seed: &ModelCatalog,
 ) -> Result<(BTreeMap<BackendKind, GeneratedProvider>, Vec<String>, usize), String> {
     let raw: BTreeMap<String, serde_json::Value> = serde_json::from_str(api_json)
         .map_err(|error| format!("parsing models.dev payload: {error}"))?;
@@ -471,8 +467,6 @@ pub(super) fn map_models_dev(
                 continue;
             }
         };
-        let default_base_url =
-            map_default_base_url(raw_provider, baseline, provider, models_dev_id, &mut warnings);
         let mut models = BTreeMap::new();
         for (id, raw_model) in raw_models {
             let model: ModelsDevModel = match serde_json::from_value(raw_model) {
@@ -484,7 +478,7 @@ pub(super) fn map_models_dev(
                     continue;
                 }
             };
-            match map_model(baseline, provider, &id, &model) {
+            match map_model(seed, provider, &id, &model) {
                 Ok(entry) => {
                     models.insert(id.clone(), entry);
                     model_count += 1;
@@ -492,64 +486,13 @@ pub(super) fn map_models_dev(
                 Err(reason) => warnings.push(format!("{provider}/{id}: {reason}; skipped")),
             }
         }
-        providers.insert(
-            provider,
-            GeneratedProvider {
-                default_base_url,
-                models,
-            },
-        );
+        providers.insert(provider, GeneratedProvider { models });
     }
     Ok((providers, warnings, model_count))
 }
 
-/// models.dev `api` → the provider's default base URL, falling back to the
-/// baseline's value (the curated SDK-default endpoints) when models.dev
-/// omits it — mirroring the generator's `overrides.toml` precedence.
-/// Malformed values degrade to the baseline with a warning: a running nac
-/// never hard-fails on models.dev drift.
-fn map_default_base_url(
-    raw_provider: &serde_json::Value,
-    baseline: &ModelCatalog,
-    provider: BackendKind,
-    models_dev_id: &str,
-    warnings: &mut Vec<String>,
-) -> Option<String> {
-    let baseline_value = baseline.default_base_url(provider);
-    let Some(raw_api) = raw_provider.get("api") else {
-        return baseline_value;
-    };
-    let Some(api) = raw_api.as_str() else {
-        warnings.push(format!(
-            "models.dev provider '{models_dev_id}': malformed api field; using the baseline              default base URL"
-        ));
-        return baseline_value;
-    };
-    match normalize_base_url(api) {
-        Ok(url) => Some(url),
-        Err(reason) => {
-            warnings.push(format!(
-                "models.dev provider '{models_dev_id}': invalid api base URL '{api}' ({reason});                  using the baseline default base URL"
-            ));
-            baseline_value
-        }
-    }
-}
-
-/// Trim, strip trailing slashes, and require an absolute http(s) URL with a
-/// host; mirrors the generator's normalization so overlay and baseline
-/// values stay byte-identical.
-fn normalize_base_url(url: &str) -> Result<String, String> {
-    let trimmed = url.trim().trim_end_matches('/');
-    let parsed = url::Url::parse(trimmed).map_err(|error| error.to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err("must be an absolute http(s) URL with a host".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
 fn map_model(
-    baseline: &ModelCatalog,
+    seed: &ModelCatalog,
     provider: BackendKind,
     id: &str,
     model: &ModelsDevModel,
@@ -561,7 +504,7 @@ fn map_model(
         max_tokens,
         cost: map_cost(model.cost.as_ref())?,
         reasoning: model.reasoning.unwrap_or(false),
-        thinking_level_map: seed_thinking_map(baseline, provider, id),
+        thinking_level_map: seed_thinking_map(seed, provider, id),
     })
 }
 
@@ -599,15 +542,13 @@ fn map_cost(cost: Option<&ModelsDevCost>) -> Result<super::ModelCostRates, Strin
     })
 }
 
-/// Thinking maps come from the baseline catalog — exact entry, then the
+/// Thinking maps come from the seed catalog — exact entry, then the
 /// dated-snapshot family entry, then the provider default — reproducing the
 /// generator's `overrides.toml` application (provider defaults replace
 /// every models.dev-derived seed map; the two anthropic family entries keep
-/// theirs). The baseline's generated entries carry the same maps as the
-/// seed for every resolution path, so this is seed-identical.
-fn seed_thinking_map(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> ThinkingLevelMap {
-    baseline
-        .providers
+/// theirs).
+fn seed_thinking_map(seed: &ModelCatalog, provider: BackendKind, id: &str) -> ThinkingLevelMap {
+    seed.providers
         .get(&provider)
         .map(|catalog| catalog.resolve_entry(id).thinking_level_map)
         .unwrap_or_default()

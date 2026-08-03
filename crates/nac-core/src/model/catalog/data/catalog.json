@@ -1,7 +1,6 @@
 {
   "providers": {
     "anthropic-messages": {
-      "default_base_url": "https://api.anthropic.com",
       "models": {
         "claude-fable-5": {
           "display_name": "Claude Fable 5",
@@ -238,7 +237,6 @@
       }
     },
     "deepseek-chat": {
-      "default_base_url": "https://api.deepseek.com",
       "models": {
         "deepseek-chat": {
           "display_name": "DeepSeek Chat",
@@ -311,7 +309,6 @@
       }
     },
     "fireworks-chat": {
-      "default_base_url": "https://api.fireworks.ai/inference/v1",
       "models": {
         "accounts/fireworks/models/deepseek-v4-flash": {
           "display_name": "DeepSeek V4 Flash",
@@ -622,7 +619,6 @@
       }
     },
     "openai-responses": {
-      "default_base_url": "https://api.openai.com/v1",
       "models": {
         "chatgpt-image-latest": {
           "display_name": "chatgpt-image-latest",
@@ -1567,7 +1563,6 @@
       }
     },
     "together-chat": {
-      "default_base_url": "https://api.together.xyz/v1",
       "models": {
         "LiquidAI/LFM2-24B-A2B": {
           "display_name": "LFM2-24B-A2B",

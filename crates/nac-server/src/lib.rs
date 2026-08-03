@@ -2861,29 +2861,6 @@ mod tests {
             nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
         );
 
-        // Catalog endpoint defaults: present for the five models.dev
-        // providers (exact values are pinned hermetically in nac-core; a
-        // machine overlay could carry a refreshed models.dev `api`), absent
-        // for the managed providers and arcee-api.
-        for id in [
-            "anthropic-messages",
-            "deepseek-chat",
-            "fireworks-chat",
-            "openai-responses",
-            "together-chat",
-        ] {
-            assert!(
-                by_id(id)["default_base_url"].is_string(),
-                "{id} must serve a catalog default_base_url"
-            );
-        }
-        for id in ["arcee-auth", "arcee-api", "chatgpt-codex-responses"] {
-            assert!(
-                by_id(id)["default_base_url"].is_null(),
-                "{id} must not serve a catalog default_base_url"
-            );
-        }
-
         // Every provider carries `_default` limits and real entries only
         // (never the `_default` id or a synthesis-product source). Values
         // stay unpinned here: the prod nac-core build layers the machine's
@@ -4490,7 +4467,7 @@ api_key_env = "OPENAI_API_KEY"
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"arcee-api\"\nmodel = \"api-model\"\napi_key_env = \"ARCEE_API_KEY\"\n",
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"api-model\"\napi_key_env = \"OPENAI_API_KEY\"\n",
         )
         .unwrap();
         let error = manager
@@ -4499,9 +4476,7 @@ api_key_env = "OPENAI_API_KEY"
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect_err(
-                "arcee-api — the one backend with no catalog or managed endpoint default —                  must still require base_url",
-            );
+            .expect_err("non-managed backends must still require base_url");
         assert!(error.to_string().contains("base_url"), "{error:#}");
         assert_eq!(
             sessions::list_sessions(&store_path).unwrap().len(),

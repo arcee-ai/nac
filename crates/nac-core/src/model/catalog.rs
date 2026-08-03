@@ -123,12 +123,6 @@ impl std::fmt::Display for CatalogWarning {
 struct ProviderCatalog {
     default: ModelMetadata,
     models: BTreeMap<String, ModelMetadata>,
-    /// The provider's endpoint default from the generated baseline/overlay
-    /// layers (models.dev `api` or the curated SDK-default URL). `None` on
-    /// the seed layer and for managed providers, whose canonical URLs stay
-    /// code-side (`managed_backend_base_url`). Fills a genuinely absent
-    /// request/config `base_url` in `resolve_model_base_url`.
-    default_base_url: Option<String>,
 }
 
 impl ProviderCatalog {
@@ -199,13 +193,6 @@ impl ModelCatalog {
         (catalog, warnings)
     }
 
-    /// The provider's catalog endpoint default, when any applied layer
-    /// carries one (the five models.dev providers; managed providers and
-    /// `arcee-api` have none).
-    pub fn default_base_url(&self, provider: BackendKind) -> Option<String> {
-        self.providers.get(&provider)?.default_base_url.clone()
-    }
-
     /// Resolve metadata for `model` on `provider` through
     /// [`ProviderCatalog::resolve_entry`]; never fails for unknown models.
     pub fn resolve(&self, provider: BackendKind, model: &str) -> ModelMetadata {
@@ -248,23 +235,6 @@ pub(crate) fn resolve(provider: BackendKind, model: &str) -> ModelMetadata {
     current().resolve(provider, model)
 }
 
-/// The provider's catalog endpoint default via the process-global catalog.
-/// Read by `resolve_model_base_url` after the request/config merge, so a
-/// configured or explicit `base_url` always beats the generated default.
-pub(crate) fn default_base_url(provider: BackendKind) -> Option<String> {
-    current().default_base_url(provider)
-}
-
-/// The seed + generated-baseline catalog without any machine-state layer:
-/// the overlay refresh's mapping reference (thinking maps and provider
-/// endpoint defaults derive from it, reproducing the generator's
-/// `overrides.toml` application).
-pub(super) fn baseline_catalog() -> ModelCatalog {
-    let mut catalog = seed::seed_catalog();
-    data::merge_generated_baseline(&mut catalog);
-    catalog
-}
-
 /// Monotonic version of the process-global catalog; `reload` bumps it after
 /// every swap, so an overlay-refresh reload is observable to `/models`
 /// clients. The initial load is version 1.
@@ -301,7 +271,6 @@ pub fn api_listing() -> ModelListing {
             id: *provider,
             auth: provider_auth(*provider),
             managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
-            default_base_url: provider_catalog.default_base_url.clone(),
             default_limits: DefaultLimits {
                 context_window: provider_catalog.default.context_window,
                 max_tokens: provider_catalog.default.max_tokens,
