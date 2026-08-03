@@ -97,7 +97,7 @@ function bindElements() {
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
-    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
     "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
@@ -155,6 +155,7 @@ function bindEvents() {
   el.refreshLaunchDefaults.addEventListener("click", () => loadLaunchDefaultsPreview());
   el.launchApiKeyMode.addEventListener("change", () => syncLaunchApiKeyMode({ user: true }));
   el.launchBackend.addEventListener("change", () => syncLaunchApiKeyMode());
+  el.launchCompactionThreshold.addEventListener("input", () => clearCompactionThresholdHint("launch"));
   el.launchModelPicker.addEventListener("click", (event) => handleModelPickerClick(event, "launch"));
   el.launchModelPicker.addEventListener("input", (event) => handleModelPickerInput(event, "launch"));
   el.launchModelPicker.addEventListener("keydown", (event) => handleModelPickerKeydown(event, "launch"));
@@ -1047,6 +1048,9 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   requestAnimationFrame(() => el.renameSession?.focus?.({ preventScroll: true }));
   if (fetchSnapshot) loadSnapshot(sessionId, true);
   connectEventStream(sessionId);
+  // The session bar resolves display names and context windows against the
+  // model catalog; refetch on session open (deduped while in flight).
+  loadModelCatalog();
 }
 
 function showPicker(updateHash = true) {
@@ -1990,19 +1994,30 @@ function renderWorkspace() {
   const displayTitle = displaySessionTitle(summary);
   const sessionId = String(summary.session_id || state.currentId || "");
   const fullModel = String(snapshot?.metadata?.model || summary.model || "—");
+  const fullBackend = String(snapshot?.metadata?.backend || summary.backend || "");
+  const modelPresentation = sessionModelPresentation(fullBackend, fullModel);
+  const reasoningEffort = snapshot?.metadata?.reasoning_effort;
   el.sessionTitle.textContent = displayTitle;
   el.sessionTitle.title = displayTitle;
   el.renameSession.title = `Rename ${displayTitle}`;
   el.renameSession.setAttribute("aria-label", `Rename ${displayTitle}`);
   applySessionExecutionLocation(el.sessionLocation, location);
   renderConfigRepairGuidance(summary);
-  el.metricModel.textContent = shortModel(fullModel);
-  el.metricModel.title = fullModel;
-  el.metricModel.setAttribute("aria-label", `Model: ${fullModel}`);
+  el.metricModel.textContent = shortModel(modelPresentation?.displayName || fullModel);
+  const modelTitle = fullModel === "—" ? fullModel : [
+    fullModel,
+    fullBackend || null,
+    reasoningEffort ? `effort ${reasoningEffort}` : null,
+    modelPresentation?.kind === "unknown" ? "unrecognized model — conservative defaults"
+      : modelPresentation?.customized ? "customized" : null,
+  ].filter(Boolean).join(" · ");
+  el.metricModel.title = modelTitle;
+  el.metricModel.setAttribute("aria-label", `Model: ${modelTitle}`);
   const usage = displayedTokenUsage(snapshot);
   const contextTokens = orchestratorContextTokens(usage);
-  el.metricContext.textContent = formatNumber(contextTokens);
-  el.metricContext.title = contextTokens ? `${contextTokens.toLocaleString()} tokens` : "";
+  const contextMetric = contextMetricPresentation(contextTokens, modelPresentation);
+  el.metricContext.textContent = contextMetric.text;
+  el.metricContext.title = contextMetric.title;
   el.metricTokens.textContent = tokenUsageSummary(usage);
   el.metricTokens.title = tokenUsageTitle(usage);
   const timing = syncRuntimeTimer();
@@ -2070,6 +2085,33 @@ function usageRunId(snapshot, envelopes) {
 
 function orchestratorContextTokens(usage) {
   return Number(usage?.total_tokens ?? usage?.orchestrator_context_tokens ?? 0);
+}
+
+// Context metric against the catalog window: "6.8k / 200k (3%)" for known
+// models, "6.8k / 128k est." for provider-default estimates (no percent —
+// the window itself is a guess), and the pre-catalog raw count when no
+// window is resolvable. Text only, no gauge.
+function contextMetricPresentation(contextTokens, presentation) {
+  const used = formatNumber(contextTokens);
+  const window = presentation?.contextWindow || null;
+  if (!window) {
+    return { text: used, title: contextTokens ? `${contextTokens.toLocaleString()} tokens` : "" };
+  }
+  const denominator = formatNumber(window);
+  const estimateNote = presentation.estimated ? " · window estimated from provider defaults" : "";
+  if (!contextTokens) {
+    return {
+      text: `${used} / ${denominator}${presentation.estimated ? " est." : ""}`,
+      title: `context window ${window.toLocaleString()} tokens${estimateNote}`,
+    };
+  }
+  const percent = Math.round((contextTokens / window) * 100);
+  return {
+    text: presentation.estimated
+      ? `${used} / ${denominator} est.`
+      : `${used} / ${denominator} (${percent}%)`,
+    title: `${contextTokens.toLocaleString()} / ${window.toLocaleString()} tokens (${percent}%)${estimateNote}`,
+  };
 }
 
 // Cost rides the wire as micro-USD buckets (`usage.cost`, serde-defaulted on
@@ -2472,6 +2514,11 @@ function renderSessionInfo(summary = sessionEntry()?.summary, snapshot = current
   const backend = snapshot?.metadata?.backend ?? summary?.backend;
   const model = snapshot?.metadata?.model ?? summary?.model;
   const storePath = store?.store_path ?? snapshot?.metadata?.store_path;
+  const modelPresentation = sessionModelPresentation(backend, model);
+  const reasoningEffort = snapshot?.metadata?.reasoning_effort;
+  const modelSource = modelPresentation?.kind === "unknown"
+    ? "unrecognized model — conservative defaults"
+    : modelPresentation?.customized ? "customized (user override)" : null;
   const sshHost = topology.host || `Not applicable for ${topology.mode} execution`;
   return `<div class="focus-info-scroll"><section class="session-info" aria-label="Complete session identity">
     <dl class="session-info-grid">
@@ -2482,6 +2529,9 @@ function renderSessionInfo(summary = sessionEntry()?.summary, snapshot = current
       ${renderEvidenceField("Sandbox state", sandboxStateForInfo(summary, snapshot))}
       ${renderEvidenceField("Backend", backend)}
       ${renderEvidenceField("Model", model)}
+      ${modelPresentation?.displayName ? renderEvidenceField("Model name", modelPresentation.displayName) : ""}
+      ${renderEvidenceField("Reasoning effort", snapshot ? (reasoningEffort ?? "backend default") : null)}
+      ${modelSource ? renderEvidenceField("Model source", modelSource) : ""}
       ${renderEvidenceField("Store path", storePath, state.storeError ? "Store path unavailable" : undefined)}
     </dl>
   </section></div>`;
@@ -2915,7 +2965,7 @@ function renderFocusSettings() {
     ${modelFieldsHtml}
     <label class="field"><span>base url</span><input name="base_url" value="${escapeAttr(config.base_url ?? "")}"></label>
     <label class="field span-two"><span>api key environment variable</span><input name="api_key_env" value="${escapeAttr(config.api_key_env ?? "")}"><small>Enter the environment-variable name only, never a key value. Blank removes the session-specific selector.</small></label>
-    <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small></label>
+    <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small><small class="compaction-threshold-hint" data-compaction-threshold-hint hidden></small></label>
     <label class="field span-two"><span>extra headers (JSON object)</span><textarea name="extra_headers" rows="6" spellcheck="false" placeholder="{}">${escapeHtml(headers.text)}</textarea><small>Blank or <code>{}</code> removes all extra headers. Existing headers are unchanged unless this field is edited.</small></label>
     <div class="settings-actions"><span id="settingsStatus" class="form-status" role="status" aria-live="polite">${escapeHtml(saveStatus)}</span><button class="button button-primary" data-settings-submit type="submit"${saveBlocked ? " disabled" : ""}>save settings</button></div>
   </form></div>`;
@@ -5010,6 +5060,9 @@ function loadModelCatalog({ force = false } = {}) {
     }
     syncLaunchModelControls();
     syncSettingsModelControls();
+    // The session bar consumes the catalog too (display names, context
+    // windows) — re-render so its metrics pick up a fresh arrival.
+    if (state.currentId) renderWorkspace();
     return state.modelCatalog.data;
   })();
   state.modelCatalogRequest = request;
@@ -5042,6 +5095,40 @@ function resolveModelSelection(backend, modelId, catalog = state.modelCatalog.da
   const found = findCatalogModel(backendId, model, catalog);
   if (found) return { kind: "known", ...found };
   return { kind: "unknown", provider: findCatalogProvider(backendId, catalog), backend: backendId, modelId: model };
+}
+
+// Session-model resolution for display surfaces (session bar, session info,
+// compaction suggestion). Returns null when the catalog is unavailable or no
+// model is recorded — callers fall back to the raw id / raw count. Unknown
+// ids resolve through the provider's default limits and are always flagged
+// as estimates, never presented as exact catalog data.
+function sessionModelPresentation(backend, model, catalog = state.modelCatalog.data) {
+  const modelId = String(model || "").trim();
+  if (!catalog || !modelId || modelId === "—") return null;
+  const contextWindowFor = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  const resolution = resolveModelSelection(backend, modelId, catalog);
+  if (resolution.kind === "known") {
+    return {
+      kind: "known",
+      displayName: modelDisplayName(resolution.model),
+      contextWindow: contextWindowFor(resolution.model?.context_window),
+      estimated: false,
+      customized: resolution.model?.source === "user_override",
+    };
+  }
+  if (resolution.kind === "unknown") {
+    return {
+      kind: "unknown",
+      displayName: null,
+      contextWindow: contextWindowFor(resolution.provider?.default_limits?.context_window),
+      estimated: true,
+      customized: false,
+    };
+  }
+  return null;
 }
 
 // The launch "from config" selection resolved through the launch-defaults
@@ -5167,6 +5254,7 @@ function applyModelPickerSelection(scope, { backend, model }) {
   if (fields.model) fields.model.value = String(model || "");
   if (scope === "launch") syncLaunchModelDependentControls();
   else syncSettingsEffortField();
+  suggestCompactionThreshold(scope);
 }
 
 // Visible option count: filtered rows plus the custom-model escape row that
@@ -5435,6 +5523,65 @@ function handleModelPickerChange(event, scope) {
   if (scope === "launch") syncLaunchModelDependentControls();
   else syncSettingsEffortField();
   syncModelPickerCustomMeta(scope);
+  suggestCompactionThreshold(scope);
+}
+
+// --- Compaction threshold auto-suggest ---------------------------------------
+
+const COMPACTION_SUGGEST_RATIO = 0.7;
+
+// 70% of the selected model's context window in whole tokens. Unknown/custom
+// models use the provider's default window and are flagged as estimates.
+// Returns null when no window is resolvable (catalog unavailable, launch
+// "from config") — callers then leave the field and hint untouched.
+function compactionThresholdSuggestion(backend, model, catalog = state.modelCatalog.data) {
+  const presentation = sessionModelPresentation(backend, model, catalog);
+  if (!presentation?.contextWindow) return null;
+  return {
+    tokens: Math.round(presentation.contextWindow * COMPACTION_SUGGEST_RATIO),
+    contextWindow: presentation.contextWindow,
+    estimated: presentation.estimated,
+  };
+}
+
+function compactionThresholdHintText(suggestion) {
+  const context = formatNumber(suggestion.contextWindow);
+  return `suggested 70% of model context (${context}${suggestion.estimated ? " est." : ""})`;
+}
+
+function compactionThresholdControls(scope) {
+  if (scope === "settings") {
+    const form = el.focusContent?.querySelector?.("#settingsForm");
+    return {
+      field: form?.querySelector?.('[name="orchestrator_compaction_threshold"]') || null,
+      hint: form?.querySelector?.("[data-compaction-threshold-hint]") || null,
+    };
+  }
+  return { field: el.launchCompactionThreshold || null, hint: el.launchCompactionThresholdHint || null };
+}
+
+// Fires ONLY on an explicit picker model change (catalog pick, custom entry,
+// custom provider switch) — never on dialog open, prefill, or catalog
+// arrival — so stored/configured thresholds are never clobbered implicitly.
+// The field stays fully editable: a manual edit clears the hint and persists
+// until the next explicit model change re-suggests 70% of the new model.
+function suggestCompactionThreshold(scope) {
+  const selection = modelPickerSelection(scope);
+  const suggestion = compactionThresholdSuggestion(selection.backend, selection.model);
+  if (!suggestion) return;
+  const { field, hint } = compactionThresholdControls(scope);
+  if (field) field.value = String(suggestion.tokens);
+  if (hint) {
+    hint.textContent = compactionThresholdHintText(suggestion);
+    hint.hidden = false;
+  }
+}
+
+function clearCompactionThresholdHint(scope) {
+  const { hint } = compactionThresholdControls(scope);
+  if (!hint) return;
+  hint.textContent = "";
+  hint.hidden = true;
 }
 
 // --- Effort constraint + managed-field visibility ----------------------------
@@ -5582,6 +5729,7 @@ function syncSettingsModelControls() {
 
 function handleFocusInput(event) {
   if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerInput(event, "settings");
+  if (event.target?.matches?.('[name="orchestrator_compaction_threshold"]')) clearCompactionThresholdHint("settings");
 }
 
 function handleFocusKeydown(event) {

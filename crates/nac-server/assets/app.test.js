@@ -93,6 +93,9 @@ function loadApp(overrides = {}) {
       syncLaunchModelDependentControls, settingsEffortFieldHtml, syncSettingsEffortField,
       syncSettingsModelControls, customProviderOptionsHtml, modelPickerCustomMetaHtml,
       launchEffortOptionsHtml, handleFocusInput, handleFocusKeydown, handleFocusChange,
+      sessionModelPresentation, contextMetricPresentation, compactionThresholdSuggestion,
+      compactionThresholdHintText, compactionThresholdControls, suggestCompactionThreshold,
+      clearCompactionThresholdHint,
       MODEL_CATALOG_NOTICE, EFFORT_LEVELS,
     };`,
     context, { filename: "app.js" });
@@ -336,6 +339,8 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchApiKeyEnv = { value: "", disabled: true, required: false };
   uiInstance.el.launchApiKeyEnvField = { hidden: true };
   uiInstance.el.launchApiKeyHelp = { textContent: "" };
+  uiInstance.el.launchCompactionThreshold = { value: "" };
+  uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
 }
 
 function fakeElement() {
@@ -405,7 +410,7 @@ test("session opening renders the workspace and starts snapshot and SSE without 
   assert.doesNotThrow(() => isolated.openSession("release-session"));
   assert.equal(isolated.el.sessionWorkspace.hidden, false);
   assert.equal(isolated.el.promptInput.style.height, "50px");
-  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=50&include_sessions=false"]);
+  assert.deepEqual(requests, ["/sessions/release-session?message_limit=24&thread_event_limit=50&include_sessions=false", "/models"]);
   assert.equal(instances[0].url, "/sessions/release-session/events/stream?limit=512");
 });
 
@@ -3678,6 +3683,231 @@ test("launch dialog wires the model picker, manual-entry fallback, and shared ef
   assert.match(indexSource, /id="launchApiKeyModeField"/);
   assert.match(indexSource, /<select id="launchBackend" name="backend">/);
   assert.match(indexSource, /<input id="launchModel" name="model"/);
+  assert.match(indexSource, /id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden/);
+});
+
+test("session bar context metric renders the catalog window denominator", () => {
+  const catalog = modelCatalogFixture();
+  const known = ui.sessionModelPresentation("anthropic-messages", "claude-opus-4-1", catalog);
+  assert.deepEqual(plain(known), { kind: "known", displayName: "Claude Opus 4.1 (latest)",
+    contextWindow: 200000, estimated: false, customized: false });
+  let metric = ui.contextMetricPresentation(6789, known);
+  assert.equal(metric.text, "6.8k / 200k (3%)");
+  assert.equal(metric.title, "6,789 / 200,000 tokens (3%)");
+  // Unknown ids resolve through the provider default and read as estimates.
+  const unknown = ui.sessionModelPresentation("openai-responses", "gpt-5-typo", catalog);
+  assert.deepEqual(plain(unknown), { kind: "unknown", displayName: null,
+    contextWindow: 128000, estimated: true, customized: false });
+  metric = ui.contextMetricPresentation(6789, unknown);
+  assert.equal(metric.text, "6.8k / 128k est.");
+  assert.equal(metric.title, "6,789 / 128,000 tokens (5%) · window estimated from provider defaults");
+  // Catalog unavailable → the pre-catalog raw count, no regression.
+  assert.equal(ui.sessionModelPresentation("openai-responses", "gpt-5", null), null);
+  metric = ui.contextMetricPresentation(6789, null);
+  assert.equal(metric.text, "6.8k");
+  assert.equal(metric.title, "6,789 tokens");
+  metric = ui.contextMetricPresentation(0, null);
+  assert.equal(metric.text, "—");
+  assert.equal(metric.title, "");
+  // No usage yet: the numerator stays the no-data dash, the window still shows.
+  metric = ui.contextMetricPresentation(0, known);
+  assert.equal(metric.text, "— / 200k");
+  assert.equal(metric.title, "context window 200,000 tokens");
+  // A missing model never fabricates an estimate.
+  assert.equal(ui.sessionModelPresentation("openai-responses", "—", catalog), null);
+  assert.equal(ui.sessionModelPresentation("openai-responses", "", catalog), null);
+});
+
+test("session bar model metric renders display name, effort, and source badges", () => {
+  const isolated = loadApp();
+  installComposerElements(isolated, "metric-session");
+  seedCatalog(isolated);
+  const usage = { input_tokens: 100, output_tokens: 5, cache_read_tokens: 0,
+    cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 6789 };
+  const snapshotWith = (metadata) => sessionSnapshot("metric-session", {
+    metadata: { session_id: "metric-session", ...metadata },
+    response_timing: { cumulative_token_usage: usage, last_token_usage: usage },
+  });
+  isolated.state.snapshots.set("metric-session", snapshotWith({
+    model: "claude-opus-4-1", backend: "anthropic-messages", reasoning_effort: "high" }));
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.metricModel.textContent, "Claude Opus 4.1 (latest)");
+  assert.equal(isolated.el.metricModel.title, "claude-opus-4-1 · anthropic-messages · effort high");
+  assert.equal(isolated.el.metricModel.getAttribute("aria-label"),
+    "Model: claude-opus-4-1 · anthropic-messages · effort high");
+  assert.equal(isolated.el.metricContext.textContent, "6.8k / 200k (3%)");
+  assert.equal(isolated.el.metricContext.title, "6,789 / 200,000 tokens (3%)");
+  // User override: display name falls back to the id, badge reads customized.
+  isolated.state.snapshots.set("metric-session", snapshotWith({
+    model: "claude-sonnet-4-5", backend: "anthropic-messages" }));
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.metricModel.textContent, "claude-sonnet-4-5");
+  assert.equal(isolated.el.metricModel.title, "claude-sonnet-4-5 · anthropic-messages · customized");
+  assert.equal(isolated.el.metricContext.textContent, "6.8k / 1.0m (1%)");
+  // Unrecognized model: estimated window and the warning badge.
+  isolated.state.snapshots.set("metric-session", snapshotWith({
+    model: "gpt-5-typo", backend: "openai-responses" }));
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.metricModel.textContent, "gpt-5-typo");
+  assert.equal(isolated.el.metricModel.title,
+    "gpt-5-typo · openai-responses · unrecognized model — conservative defaults");
+  assert.equal(isolated.el.metricContext.textContent, "6.8k / 128k est.");
+  // Catalog unavailable: raw id, raw count, no badge — pre-catalog behavior.
+  isolated.state.modelCatalog = { status: "error", data: null, error: "boom" };
+  isolated.state.snapshots.set("metric-session", snapshotWith({
+    model: "gpt-5.1", backend: "openai-responses" }));
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.metricModel.textContent, "gpt-5.1");
+  assert.equal(isolated.el.metricModel.title, "gpt-5.1 · openai-responses");
+  assert.equal(isolated.el.metricContext.textContent, "6.8k");
+  assert.equal(isolated.el.metricContext.title, "6,789 tokens");
+});
+
+test("catalog arrival refreshes the session bar metrics", async () => {
+  const isolated = loadApp({ fetch: async (path) => {
+    if (path === "/models") return jsonResponse(modelCatalogFixture());
+    throw new Error(`unexpected fetch ${path}`);
+  } });
+  installComposerElements(isolated, "catalog-session");
+  const usage = { input_tokens: 100, output_tokens: 5, cache_read_tokens: 0,
+    cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 6789 };
+  isolated.state.snapshots.set("catalog-session", sessionSnapshot("catalog-session", {
+    metadata: { session_id: "catalog-session", model: "claude-opus-4-1", backend: "anthropic-messages" },
+    response_timing: { cumulative_token_usage: usage, last_token_usage: usage },
+  }));
+  isolated.renderWorkspace();
+  assert.equal(isolated.el.metricContext.textContent, "6.8k");
+  assert.equal(isolated.el.metricModel.textContent, "claude-opus-4-1");
+  await isolated.loadModelCatalog();
+  assert.equal(isolated.el.metricContext.textContent, "6.8k / 200k (3%)");
+  assert.equal(isolated.el.metricModel.textContent, "Claude Opus 4.1 (latest)");
+});
+
+test("session info renders the catalog display name, effort, and source lines", () => {
+  seedCatalog(ui);
+  const summary = { session_id: "info-session", cwd: "/repo", model: "stale-model",
+    backend: "stale-backend", sandboxed: false };
+  const snapshot = { metadata: { session_id: "info-session", cwd: "/repo",
+    model: "claude-opus-4-1", backend: "anthropic-messages", reasoning_effort: "high",
+    sandbox_status: "off" } };
+  let html = ui.renderSessionInfo(summary, snapshot, { store_path: "/store.db" });
+  assert.match(html, /<dt>Model name<\/dt><dd>Claude Opus 4\.1 \(latest\)<\/dd>/);
+  assert.match(html, /<dt>Reasoning effort<\/dt><dd>high<\/dd>/);
+  assert.doesNotMatch(html, /<dt>Model source<\/dt>/);
+  // User override: customized source line; no explicit effort → backend default.
+  snapshot.metadata = { ...snapshot.metadata, model: "claude-sonnet-4-5", reasoning_effort: undefined };
+  html = ui.renderSessionInfo(summary, snapshot, { store_path: "/store.db" });
+  assert.match(html, /<dt>Model name<\/dt><dd>claude-sonnet-4-5<\/dd>/);
+  assert.match(html, /<dt>Reasoning effort<\/dt><dd>backend default<\/dd>/);
+  assert.match(html, /<dt>Model source<\/dt><dd>customized \(user override\)<\/dd>/);
+  // Unrecognized model: no display-name line, warning source line instead.
+  snapshot.metadata = { ...snapshot.metadata, model: "gpt-5-typo", backend: "openai-responses" };
+  html = ui.renderSessionInfo(summary, snapshot, { store_path: "/store.db" });
+  assert.doesNotMatch(html, /<dt>Model name<\/dt>/);
+  assert.match(html, /<dt>Model source<\/dt><dd>unrecognized model — conservative defaults<\/dd>/);
+  // Catalog unavailable: catalog lines disappear, effort still renders.
+  ui.state.modelCatalog = { status: "idle", data: null, error: "" };
+  html = ui.renderSessionInfo(summary, snapshot, { store_path: "/store.db" });
+  assert.doesNotMatch(html, /<dt>Model name<\/dt>/);
+  assert.doesNotMatch(html, /<dt>Model source<\/dt>/);
+  assert.match(html, /<dt>Reasoning effort<\/dt><dd>backend default<\/dd>/);
+});
+
+test("compaction threshold auto-suggests 70% of the model context on picker model change", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Catalog pick: 70% of 200k in whole tokens, with the discoverable hint.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
+  assert.equal(isolated.el.launchCompactionThreshold.value, "140000");
+  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (200k)");
+  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, false);
+  // Changing the model again re-suggests 70% of the new model.
+  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchCompactionThreshold.value, "280000");
+  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (400k)");
+  // A manual edit clears the hint; the edited value persists across re-syncs.
+  isolated.el.launchCompactionThreshold.value = "250000";
+  isolated.clearCompactionThresholdHint("launch");
+  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, true);
+  isolated.syncLaunchModelControls();
+  assert.equal(isolated.el.launchCompactionThreshold.value, "250000");
+  // Custom/unknown model: 70% of the provider default, flagged as an estimate.
+  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.el.launchCompactionThreshold.value, "89600");
+  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (128k est.)");
+  // Switching the custom provider re-suggests from that provider's default.
+  isolated.handleModelPickerChange({ target: {
+    matches: (selector) => selector === "[data-model-picker-custom-provider]",
+    value: "arcee-auth" } }, "launch");
+  assert.equal(isolated.el.launchCompactionThreshold.value, "89600");
+  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (128k est.)");
+  // Rounding: whole tokens via Math.round; unresolvable selections suggest nothing.
+  const odd = { providers: [{ id: "odd", default_limits: { context_window: 128001 }, models: [] }] };
+  assert.deepEqual(plain(ui.compactionThresholdSuggestion("odd", "custom", odd)),
+    { tokens: 89601, contextWindow: 128001, estimated: true });
+  assert.equal(ui.compactionThresholdSuggestion("odd", "", odd), null);
+  assert.equal(ui.compactionThresholdHintText({ contextWindow: 128000, estimated: true }),
+    "suggested 70% of model context (128k est.)");
+});
+
+test("compaction auto-suggest never fires on dialog open, prefill, or catalog arrival", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Dialog sync (open / catalog arrival) leaves a typed threshold untouched.
+  isolated.el.launchCompactionThreshold.value = "64000";
+  isolated.syncLaunchModelControls();
+  assert.equal(isolated.el.launchCompactionThreshold.value, "64000");
+  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, true);
+  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "");
+  // Settings prefill renders the stored threshold with the hint dormant.
+  isolated.state.currentId = "settings-session";
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 0, status: "ready",
+    config: persistedConfig({ backend: "anthropic-messages", model: "claude-opus-4-1",
+      orchestrator_compaction_threshold: 64000 }),
+    error: null, message: "" };
+  const html = isolated.renderFocusSettings();
+  assert.match(html, /name="orchestrator_compaction_threshold"[^>]*value="64000"/);
+  assert.match(html, /data-compaction-threshold-hint hidden><\/small>/);
+});
+
+test("settings picker model change auto-suggests 70% and manual edits persist", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  const threshold = { value: "64000" };
+  const hint = { textContent: "", hidden: true };
+  const backend = { value: "openai-responses" };
+  const model = { value: "gpt-5" };
+  const form = { querySelector(selector) {
+    if (selector === '[name="backend"]') return backend;
+    if (selector === '[name="model"]') return model;
+    if (selector === '[name="orchestrator_compaction_threshold"]') return threshold;
+    if (selector === "[data-compaction-threshold-hint]") return hint;
+    return null;
+  } };
+  isolated.el.focusContent = { querySelector: (selector) => (selector === "#settingsForm" ? form : null) };
+  isolated.state.settingsPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("settings", 0);
+  assert.equal(backend.value, "anthropic-messages");
+  assert.equal(model.value, "claude-opus-4-1");
+  assert.equal(threshold.value, "140000");
+  assert.equal(hint.textContent, "suggested 70% of model context (200k)");
+  assert.equal(hint.hidden, false);
+  // A manual edit through the delegated input handler clears only the hint.
+  threshold.value = "150000";
+  isolated.handleFocusInput({ target: {
+    closest: () => null,
+    matches: (selector) => selector === '[name="orchestrator_compaction_threshold"]' } });
+  assert.equal(hint.hidden, true);
+  assert.equal(hint.textContent, "");
+  assert.equal(threshold.value, "150000");
 });
 
 test("model picker styles reuse the field, listbox, and badge tokens", () => {
@@ -3946,6 +4176,7 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
 
   assert.deepEqual(requests, [
     { path: "/sessions", method: "POST" },
+    { path: "/models", method: "GET" },
     { path: "/sessions?workspace_stats=true", method: "GET" },
   ]);
   assert.equal(requests.some(({ path, method }) => method === "GET" && path.startsWith("/sessions/created-session?")), false);
