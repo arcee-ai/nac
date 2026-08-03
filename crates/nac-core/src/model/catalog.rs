@@ -1,17 +1,21 @@
 //! Provider/model catalog: metadata resolution with never-fail fallback.
 //!
-//! S0 ships a hand-written seed catalog whose per-provider `_default` entries
-//! transcribe the `backend.rs` effort-validation matrix into data. Later
-//! stages add the generated models.dev baseline (S1), a refreshed remote
-//! overlay plus user overrides (S2), and rewire validation (S4) and adapter
-//! dispatch (S6) onto this metadata. Resolution is synchronous and
-//! local-only — no network, no credentials — so the session picker and
-//! resume paths stay credential-free.
+//! The baseline merges two checked-in sources: the hand-written seed
+//! catalog (every provider's `_default` entry, transcribing the
+//! `backend.rs` effort-validation matrix into data) and the generated
+//! models.dev baseline (S1; per-model limits, cost rates and
+//! matrix-conformant thinking maps for the five models.dev providers).
+//! Later stages add a refreshed remote overlay plus user overrides (S2),
+//! and rewire validation (S4) and adapter dispatch (S6) onto this
+//! metadata. Resolution is synchronous and local-only — no network, no
+//! credentials — so the session picker and resume paths stay
+//! credential-free.
 
 use crate::model::BackendKind;
 use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
+mod data;
 mod seed;
 #[cfg(test)]
 mod tests;
@@ -53,11 +57,15 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Load from local sources only — never network, never credentials. S0
-    /// reads the hand-written seed; S2 layers the `$NAC_HOME` overlay and
-    /// user overrides on top here.
+    /// Load from local sources only — never network, never credentials.
+    /// The hand-written seed provides every provider's `_default` entry;
+    /// the embedded generated baseline (S1) merges per-model entries on
+    /// top. S2 layers the `$NAC_HOME` overlay and user overrides on top
+    /// here.
     fn load() -> Self {
-        seed::seed_catalog()
+        let mut catalog = seed::seed_catalog();
+        data::merge_generated_baseline(&mut catalog);
+        catalog
     }
 
     /// Resolve metadata for `model` on `provider`: exact entry, then a

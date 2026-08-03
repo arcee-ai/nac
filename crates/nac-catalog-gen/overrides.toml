@@ -1,0 +1,62 @@
+# Curated overrides for the models.dev → catalog.json pipeline.
+#
+# Until S4 rewires effort validation onto catalog data, the
+# `backend.rs::validate_model_reasoning_effort` matrix is authoritative.
+# This table transcribes that matrix exactly (see nac-core's
+# `model/catalog/seed.rs`, the S0 transcription reference):
+#
+#   deepseek-chat:            none, high, xhigh (wire "max")          — backend.rs:73-76
+#   fireworks-chat:           none, low, medium, high                 — backend.rs:77-83
+#   together-chat:            none, low, medium, high                 — backend.rs:77-83
+#   openai-responses:         all six levels, verbatim                — backend.rs:84
+#   anthropic-messages:       per-family (below); unknown → none only — backend.rs:85-101
+#
+# `default_thinking_levels` replaces the models.dev-derived seed map of
+# EVERY model of the provider, so matrix behavior is preserved for current
+# and future catalog entries alike. Model entries additionally match dated
+# snapshots (`name-YYYYMMDD`, the `anthropic_model_family` rule).
+#
+# Relaxing a default here to let models.dev `reasoning_options` through for
+# specific models is the intended S4+ unlock — do it deliberately, per
+# model, after checking provider docs (the generator prints how many seed
+# maps each provider default replaced at regen time).
+#
+# Keys are nac BackendKind ids; effort keys are ReasoningEffort lowercase
+# serde names; values are provider wire values.
+
+# deepseek: none/high/xhigh for every model; xhigh is the wire tier "max"
+# (requests.rs's deepseek special case).
+[providers."deepseek-chat"]
+default_thinking_levels = { none = "none", high = "high", xhigh = "max" }
+
+# fireworks: none through high, sent verbatim.
+[providers."fireworks-chat"]
+default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+
+# together: none through high, sent verbatim.
+[providers."together-chat"]
+default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+
+# openai-responses: every level, sent verbatim (backend.rs accepts all six
+# for any model).
+[providers."openai-responses"]
+default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
+
+# anthropic: conservative none-only for every model (including families
+# newer than the matrix — opus-4-7/4-8, sonnet-5, fable-5 — whose thinking
+# schemas nac has not reviewed), except the two documented adaptive
+# families below. `none` means omission on Anthropic and is safe for every
+# family, including always-thinking models.
+[providers."anthropic-messages"]
+default_thinking_levels = { none = "none" }
+
+# claude-opus-4-6 family (incl. dated snapshots): adaptive with the
+# wire-level "max" tier (AnthropicReasoningCapabilities::AdaptiveWithMax).
+[providers."anthropic-messages".models."claude-opus-4-6"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+# claude-sonnet-4-6 family (incl. dated snapshots): adaptive, no "max"
+# (AnthropicReasoningCapabilities::Adaptive). models.dev lists a "max"
+# effort for sonnet-4-6; the matrix stays authoritative until S4.
+[providers."anthropic-messages".models."claude-sonnet-4-6"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }

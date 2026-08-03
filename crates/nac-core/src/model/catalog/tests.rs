@@ -1,6 +1,7 @@
 use super::*;
 use crate::model::{validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort};
 use crate::TEST_ENV_LOCK;
+use sha2::Digest;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -216,7 +217,10 @@ fn effective_settings_resolve_catalog_metadata_at_construction() {
     assert_eq!(settings.resolved.id, "deepseek-chat");
     assert_eq!(settings.resolved.provider, BackendKind::DeepSeekChat);
     assert_eq!(settings.resolved.api, ApiKind::OpenAiCompletions);
-    assert_eq!(settings.resolved.source, ModelSource::ProviderDefault);
+    // S1: `deepseek-chat` is a models.dev catalog entry, so resolution finds
+    // the generated baseline (real limits) instead of the provider default.
+    assert_eq!(settings.resolved.source, ModelSource::Baseline);
+    assert_eq!(settings.resolved.context_window, 1_000_000);
     assert!(
         settings
             .resolved
@@ -245,6 +249,112 @@ fn reset_for_test_reloads_the_seed_catalog() {
     reset_for_test();
     let after = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
     assert_eq!(before, after);
+}
+
+#[test]
+fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
+    // A generated entry per models.dev provider: real limits, display name,
+    // baseline source, and the provider default's compat inherited.
+    let cases = [
+        (BackendKind::DeepSeekChat, "deepseek-v4-flash", 1_000_000, 384_000),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/kimi-k2p6",
+            262_000,
+            262_000,
+        ),
+        (BackendKind::TogetherChat, "moonshotai/Kimi-K2.6", 262_144, 131_000),
+        (BackendKind::OpenAiResponses, "gpt-5.2", 400_000, 128_000),
+        (BackendKind::AnthropicMessages, "claude-opus-4-6", 1_000_000, 128_000),
+    ];
+    for (provider, model, context_window, max_tokens) in cases {
+        let metadata = resolve(provider, model);
+        assert_eq!(metadata.id, model, "{provider}");
+        assert_eq!(metadata.source, ModelSource::Baseline, "{provider}");
+        assert_eq!(metadata.context_window, context_window, "{provider}");
+        assert_eq!(metadata.max_tokens, max_tokens, "{provider}");
+        assert!(metadata.display_name.is_some(), "{provider}");
+        let default = resolve(provider, "model-with-no-catalog-entry");
+        assert_eq!(metadata.compat, default.compat, "{provider}");
+    }
+
+    // Cost rates are models.dev data: claude-opus-4-6 is $5/$25 per 1M with
+    // 0.5/6.25 cache rates (anthropic's 5-minute write premium).
+    let opus = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
+    assert_eq!(opus.cost.input, 5.0);
+    assert_eq!(opus.cost.output, 25.0);
+    assert_eq!(opus.cost.cache_read, 0.5);
+    assert_eq!(opus.cost.cache_write, 6.25);
+    assert_eq!(opus.cache_write_1h, None);
+}
+
+#[test]
+fn manifest_sha256_pins_the_embedded_catalog() {
+    let manifest = data::parse_manifest().expect("embedded manifest parses");
+    assert!(!manifest.sha256.is_empty());
+    let digest = sha2::Sha256::digest(data::GENERATED_CATALOG_JSON.as_bytes());
+    let hex = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    assert_eq!(hex, manifest.sha256, "catalog.json and manifest drifted apart");
+}
+
+#[test]
+fn generated_entries_satisfy_catalog_invariants() {
+    let catalog = current();
+    let mut entry_count = 0;
+    for (provider, provider_catalog) in &catalog.providers {
+        for (id, metadata) in &provider_catalog.models {
+            entry_count += 1;
+            assert!(!id.is_empty(), "{provider}");
+            assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
+            assert!(metadata.context_window > 0, "{provider}/{id}");
+            assert!(metadata.max_tokens > 0, "{provider}/{id}");
+            assert!(
+                metadata.max_tokens <= metadata.context_window,
+                "{provider}/{id}: max_tokens {} exceeds context_window {}",
+                metadata.max_tokens,
+                metadata.context_window
+            );
+            for rate in [
+                metadata.cost.input,
+                metadata.cost.output,
+                metadata.cost.cache_read,
+                metadata.cost.cache_write,
+            ] {
+                assert!(rate >= 0.0, "{provider}/{id}: negative rate {rate}");
+            }
+            for (effort, wire) in &metadata.thinking_level_map.0 {
+                if let Some(wire) = wire {
+                    assert!(!wire.is_empty(), "{provider}/{id}: empty wire for {}", effort.as_str());
+                }
+            }
+        }
+    }
+    // Snapshot pin: the checked-in models.dev baseline's model count. Drift
+    // fails loudly here at regen time, forcing a deliberate review.
+    assert_eq!(entry_count, 117, "models.dev snapshot model count drifted");
+}
+
+/// The S4 guard, strengthened: every generated catalog entry — not just the
+/// S0 spot-check models — must preserve the `backend.rs` validation matrix
+/// exactly, so rewiring validation onto catalog maps is behavior-neutral.
+#[test]
+fn every_generated_entry_preserves_the_validation_matrix() {
+    // Iterate the guard's entries directly: calling `resolve()` while
+    // holding the read guard would re-acquire the RwLock and can deadlock
+    // against a concurrent `reset_for_test` writer.
+    let catalog = current();
+    for (provider, provider_catalog) in &catalog.providers {
+        for (id, metadata) in &provider_catalog.models {
+            assert_eq!(metadata.id, *id, "{provider}/{id}");
+            assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
+            for effort in ALL_EFFORTS {
+                let matrix =
+                    validate_model_reasoning_effort(*provider, id, Some(effort)).is_ok();
+                let supported = metadata.thinking_level_map.is_supported(effort);
+                assert_eq!(supported, matrix, "{provider}/{id} {}", effort.as_str());
+            }
+        }
+    }
 }
 
 #[test]

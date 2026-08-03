@@ -1,6 +1,7 @@
 //! Catalog record types: the central `ModelMetadata` and its parts.
 
 use crate::model::{BackendKind, ReasoningEffort};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Context-window fallback for models with no catalog data (pi's 128k default).
@@ -53,7 +54,7 @@ pub struct Compat {
 /// unsupported. The wire emission shape for `ReasoningEffort::None` stays
 /// per-adapter (omission vs explicit disable); its map entry is a support
 /// marker only.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThinkingLevelMap(pub BTreeMap<ReasoningEffort, Option<String>>);
 
 impl ThinkingLevelMap {
@@ -75,12 +76,17 @@ impl ThinkingLevelMap {
 }
 
 /// Cost rates in USD per 1M tokens. All-zero = unknown (pi's zero-cost
-/// fallback); cost computation arrives in S3.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// fallback); cost computation arrives in S3. Missing fields deserialize as
+/// zero so partial catalog records stay loadable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModelCostRates {
+    #[serde(default)]
     pub input: f64,
+    #[serde(default)]
     pub output: f64,
+    #[serde(default)]
     pub cache_read: f64,
+    #[serde(default)]
     pub cache_write: f64,
 }
 

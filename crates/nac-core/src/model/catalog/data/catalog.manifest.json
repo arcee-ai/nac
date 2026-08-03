@@ -1,0 +1,13 @@
+{
+  "sha256": "9d7d490672243ea508e40d1ecdc9a008db658426e040f467b4c12c1c660059d0",
+  "generated_at": "2026-08-02T23:55:01Z",
+  "models_dev_url": "https://models.dev/api.json",
+  "models_dev_etag": "\"ad46bdedd3a9184b3cc74b0d51aa40af\"",
+  "model_counts": {
+    "anthropic-messages": 15,
+    "deepseek-chat": 4,
+    "fireworks-chat": 17,
+    "openai-responses": 47,
+    "together-chat": 34
+  }
+}
