@@ -95,10 +95,10 @@ function bindElements() {
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
-    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyEnv", "launchApiKeyEnvField", "launchExtraHeaders",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyEnv", "launchApiKeyEnvField", "launchExtraHeaders",
     "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchOverrides",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
-    "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
+    "sandboxMounts", "sandboxNoMount", "launchStatus",
   ]) el[id] = document.getElementById(id);
 }
 
@@ -142,7 +142,6 @@ function bindEvents() {
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
-  el.launchCompactionThreshold.addEventListener("input", () => clearCompactionThresholdHint("launch"));
   el.launchModelPicker.addEventListener("click", (event) => handleModelPickerClick(event, "launch"));
   el.launchModelPicker.addEventListener("input", (event) => handleModelPickerInput(event, "launch"));
   el.launchModelPicker.addEventListener("keydown", (event) => handleModelPickerKeydown(event, "launch"));
@@ -2952,7 +2951,7 @@ function renderFocusSettings() {
     ${modelFieldsHtml}
     <label class="field"><span>base url</span><input name="base_url" value="${escapeAttr(config.base_url ?? "")}"></label>
     <label class="field span-two"><span>api key environment variable</span><input name="api_key_env" value="${escapeAttr(config.api_key_env ?? "")}"><small>Enter the environment-variable name only, never a key value. Blank removes the session-specific selector.</small></label>
-    <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small><small class="compaction-threshold-hint" data-compaction-threshold-hint hidden></small></label>
+    <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small></label>
     <label class="field span-two"><span>extra headers (JSON object)</span><textarea name="extra_headers" rows="6" spellcheck="false" placeholder="{}">${escapeHtml(headers.text)}</textarea><small>Blank or <code>{}</code> removes all extra headers. Existing headers are unchanged unless this field is edited.</small></label>
     <div class="settings-actions"><span id="settingsStatus" class="form-status" role="status" aria-live="polite">${escapeHtml(saveStatus)}</span><button class="button button-primary" data-settings-submit type="submit"${saveBlocked ? " disabled" : ""}>save settings</button></div>
   </form></div>`;
@@ -5495,7 +5494,7 @@ const COMPACTION_SUGGEST_RATIO = 0.7;
 // 70% of the selected model's context window in whole tokens. Unknown/custom
 // models use the provider's default window and are flagged as estimates.
 // Returns null when no window is resolvable (catalog unavailable, launch
-// "from config") — callers then leave the field and hint untouched.
+// "from config") — callers then leave the field untouched.
 function compactionThresholdSuggestion(backend, model, catalog = state.modelCatalog.data) {
   const presentation = sessionModelPresentation(backend, model, catalog);
   if (!presentation?.contextWindow) return null;
@@ -5506,44 +5505,25 @@ function compactionThresholdSuggestion(backend, model, catalog = state.modelCata
   };
 }
 
-function compactionThresholdHintText(suggestion) {
-  const context = formatNumber(suggestion.contextWindow);
-  return `suggested 70% of model context (${context}${suggestion.estimated ? " est." : ""})`;
-}
-
-function compactionThresholdControls(scope) {
+function compactionThresholdField(scope) {
   if (scope === "settings") {
     const form = el.focusContent?.querySelector?.("#settingsForm");
-    return {
-      field: form?.querySelector?.('[name="orchestrator_compaction_threshold"]') || null,
-      hint: form?.querySelector?.("[data-compaction-threshold-hint]") || null,
-    };
+    return form?.querySelector?.('[name="orchestrator_compaction_threshold"]') || null;
   }
-  return { field: el.launchCompactionThreshold || null, hint: el.launchCompactionThresholdHint || null };
+  return el.launchCompactionThreshold || null;
 }
 
 // Fires ONLY on an explicit picker model change (catalog pick, custom entry,
 // custom provider switch) — never on dialog open, prefill, or catalog
 // arrival — so stored/configured thresholds are never clobbered implicitly.
-// The field stays fully editable: a manual edit clears the hint and persists
-// until the next explicit model change re-suggests 70% of the new model.
+// The field stays fully editable: a manual edit persists until the next
+// explicit model change re-suggests 70% of the new model.
 function suggestCompactionThreshold(scope) {
   const selection = modelPickerSelection(scope);
   const suggestion = compactionThresholdSuggestion(selection.backend, selection.model);
   if (!suggestion) return;
-  const { field, hint } = compactionThresholdControls(scope);
+  const field = compactionThresholdField(scope);
   if (field) field.value = String(suggestion.tokens);
-  if (hint) {
-    hint.textContent = compactionThresholdHintText(suggestion);
-    hint.hidden = false;
-  }
-}
-
-function clearCompactionThresholdHint(scope) {
-  const { hint } = compactionThresholdControls(scope);
-  if (!hint) return;
-  hint.textContent = "";
-  hint.hidden = true;
 }
 
 // --- Effort constraint + managed-field visibility ----------------------------
@@ -5686,7 +5666,6 @@ function syncSettingsModelControls() {
 
 function handleFocusInput(event) {
   if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerInput(event, "settings");
-  if (event.target?.matches?.('[name="orchestrator_compaction_threshold"]')) clearCompactionThresholdHint("settings");
 }
 
 function handleFocusKeydown(event) {
@@ -5819,7 +5798,6 @@ async function createSession(event) {
     const sessionId = snapshot.metadata.session_id;
     upsertCreatedSession(snapshot, body);
     acceptSnapshot(sessionId, snapshot);
-    const initialPrompt = el.initialPrompt.value.trim();
     el.launchDialog.close();
     el.launchForm.reset();
     resetLaunchDraftState();
@@ -5828,11 +5806,6 @@ async function createSession(event) {
     state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
     syncLaunchModelControls();
     openSession(sessionId, true, { fetchSnapshot: false });
-    if (initialPrompt) {
-      state.composerDrafts.set(sessionId, initialPrompt);
-      el.promptInput.value = initialPrompt;
-      el.commandComposer.requestSubmit();
-    }
     await loadSessions({ workspaceStats: true, preserveSessionId: sessionId });
   } catch (error) { setLaunchStatus(error.message, true); }
   finally { submit.disabled = false; }

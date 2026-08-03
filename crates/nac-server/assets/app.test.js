@@ -95,8 +95,7 @@ function loadApp(overrides = {}) {
       syncSettingsModelControls, customProviderOptionsHtml, modelPickerCustomMetaHtml,
       launchEffortOptionsHtml, handleFocusInput, handleFocusKeydown, handleFocusChange,
       sessionModelPresentation, contextMetricPresentation, compactionThresholdSuggestion,
-      compactionThresholdHintText, compactionThresholdControls, suggestCompactionThreshold,
-      clearCompactionThresholdHint,
+      compactionThresholdField, suggestCompactionThreshold,
       MODEL_CATALOG_NOTICE, EFFORT_LEVELS,
     };`,
     context, { filename: "app.js" });
@@ -377,7 +376,6 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchApiKeyEnv = { value: "" };
   uiInstance.el.launchApiKeyEnvField = { hidden: false };
   uiInstance.el.launchCompactionThreshold = { value: "" };
-  uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
   uiInstance.el.launchOverrides = { open: false };
 }
 
@@ -3797,7 +3795,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
     launchEffortField: false, launchBaseUrlField: false, launchApiKeyEnvField: false,
   }, "from config");
   // Codex pick: managed credential fields hide as whole wrappers; the effort
-  // field stays visible (all-levels); the compaction suggestion appears.
+  // field stays visible (all-levels); the compaction suggestion fills the value.
   isolated.state.launchPicker = { open: true, query: "", activeIndex: 7, custom: false };
   isolated.selectModelPickerIndex("launch", 7);
   assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
@@ -3805,7 +3803,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
     launchEffortField: false, launchBaseUrlField: true, launchApiKeyEnvField: true,
   }, "codex pick");
-  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, false, "codex pick: suggestion hint shows");
+  assert.equal(isolated.el.launchCompactionThreshold.value, "735000", "codex pick: suggestion fills the value");
   // Managed → non-managed restores every wrapper cleanly (no residue).
   isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
@@ -4082,8 +4080,13 @@ test("launch dialog wires the model picker, manual-entry fallback, and shared ef
   assert.match(indexSource, /id="launchApiKeyEnvField"/);
   assert.match(indexSource, /<select id="launchBackend" name="backend">/);
   assert.match(indexSource, /<input id="launchModel" name="model"/);
-  assert.match(indexSource, /id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden/);
-  // The deleted API-key mode machinery leaves no trace in the markup.
+  assert.match(indexSource, /<span>compaction threshold \(tokens\)<\/span><input id="launchCompactionThreshold"/);
+  // The deleted hint smalls, initial-prompt field, and API-key mode machinery
+  // leave no trace in the markup.
+  assert.doesNotMatch(indexSource, /launchCompactionThresholdHint/);
+  assert.doesNotMatch(indexSource, /compaction-threshold-hint/);
+  assert.doesNotMatch(indexSource, /initialPrompt/);
+  assert.doesNotMatch(indexSource, /initial prompt/);
   assert.doesNotMatch(indexSource, /api_key_mode/);
   assert.doesNotMatch(indexSource, /launchApiKeyMode/);
   assert.doesNotMatch(indexSource, /launchApiKeyInherit/);
@@ -4222,43 +4225,34 @@ test("compaction threshold auto-suggests 70% of the model context on picker mode
   const isolated = loadApp();
   seedCatalog(isolated);
   launchPickerElements(isolated);
-  // Catalog pick: 70% of 200k in whole tokens, with the discoverable hint.
+  // Catalog pick: 70% of 200k in whole tokens.
   isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
   assert.equal(isolated.el.launchCompactionThreshold.value, "140000");
-  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (200k)");
-  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, false);
   // Changing the model again re-suggests 70% of the new model.
   isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.el.launchCompactionThreshold.value, "280000");
-  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (400k)");
-  // A manual edit clears the hint; the edited value persists across re-syncs.
+  // A manual edit persists across re-syncs.
   isolated.el.launchCompactionThreshold.value = "250000";
-  isolated.clearCompactionThresholdHint("launch");
-  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, true);
   isolated.syncLaunchModelControls();
   assert.equal(isolated.el.launchCompactionThreshold.value, "250000");
-  // Custom/unknown model: 70% of the provider default, flagged as an estimate.
+  // Custom/unknown model: 70% of the provider default.
   isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.state.launchPicker.custom, true);
   assert.equal(isolated.el.launchCompactionThreshold.value, "89600");
-  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (128k est.)");
   // Switching the custom provider re-suggests from that provider's default.
   isolated.handleModelPickerChange({ target: {
     matches: (selector) => selector === "[data-model-picker-custom-provider]",
     value: "arcee-auth" } }, "launch");
   assert.equal(isolated.el.launchCompactionThreshold.value, "89600");
-  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "suggested 70% of model context (128k est.)");
   // Rounding: whole tokens via Math.round; unresolvable selections suggest nothing.
   const odd = { providers: [{ id: "odd", default_limits: { context_window: 128001 }, models: [] }] };
   assert.deepEqual(plain(ui.compactionThresholdSuggestion("odd", "custom", odd)),
     { tokens: 89601, contextWindow: 128001, estimated: true });
   assert.equal(ui.compactionThresholdSuggestion("odd", "", odd), null);
-  assert.equal(ui.compactionThresholdHintText({ contextWindow: 128000, estimated: true }),
-    "suggested 70% of model context (128k est.)");
 });
 
 test("compaction auto-suggest never fires on dialog open, prefill, or catalog arrival", () => {
@@ -4269,9 +4263,7 @@ test("compaction auto-suggest never fires on dialog open, prefill, or catalog ar
   isolated.el.launchCompactionThreshold.value = "64000";
   isolated.syncLaunchModelControls();
   assert.equal(isolated.el.launchCompactionThreshold.value, "64000");
-  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, true);
-  assert.equal(isolated.el.launchCompactionThresholdHint.textContent, "");
-  // Settings prefill renders the stored threshold with the hint dormant.
+  // Settings prefill renders the stored threshold.
   isolated.state.currentId = "settings-session";
   isolated.state.settingsFocus = { sessionId: "settings-session",
     requestGeneration: 0, status: "ready",
@@ -4280,21 +4272,19 @@ test("compaction auto-suggest never fires on dialog open, prefill, or catalog ar
     error: null, message: "" };
   const html = isolated.renderFocusSettings();
   assert.match(html, /name="orchestrator_compaction_threshold"[^>]*value="64000"/);
-  assert.match(html, /data-compaction-threshold-hint hidden><\/small>/);
+  assert.doesNotMatch(html, /compaction-threshold-hint/);
 });
 
 test("settings picker model change auto-suggests 70% and manual edits persist", () => {
   const isolated = loadApp();
   seedCatalog(isolated);
   const threshold = { value: "64000" };
-  const hint = { textContent: "", hidden: true };
   const backend = { value: "openai-responses" };
   const model = { value: "gpt-5" };
   const form = { querySelector(selector) {
     if (selector === '[name="backend"]') return backend;
     if (selector === '[name="model"]') return model;
     if (selector === '[name="orchestrator_compaction_threshold"]') return threshold;
-    if (selector === "[data-compaction-threshold-hint]") return hint;
     return null;
   } };
   isolated.el.focusContent = { querySelector: (selector) => (selector === "#settingsForm" ? form : null) };
@@ -4303,15 +4293,11 @@ test("settings picker model change auto-suggests 70% and manual edits persist", 
   assert.equal(backend.value, "anthropic-messages");
   assert.equal(model.value, "claude-opus-4-1");
   assert.equal(threshold.value, "140000");
-  assert.equal(hint.textContent, "suggested 70% of model context (200k)");
-  assert.equal(hint.hidden, false);
-  // A manual edit through the delegated input handler clears only the hint.
+  // A manual edit is left alone by the delegated input handler and persists.
   threshold.value = "150000";
   isolated.handleFocusInput({ target: {
     closest: () => null,
     matches: (selector) => selector === '[name="orchestrator_compaction_threshold"]' } });
-  assert.equal(hint.hidden, true);
-  assert.equal(hint.textContent, "");
   assert.equal(threshold.value, "150000");
 });
 
@@ -4514,7 +4500,7 @@ test("session creation serializes every execution mode through the exclusive req
   assert.equal(submit.disabled, false);
 });
 
-test("created snapshots initialize state without a duplicate GET while SSE, prompts, and list refreshes continue", async () => {
+test("created snapshots initialize state without a duplicate GET while SSE and list refreshes continue", async () => {
   const timeline = [];
   const requests = [];
   const timers = [];
@@ -4575,8 +4561,6 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   isolated.el.sandboxWorkdir = { value: "", disabled: false };
   isolated.el.sandboxShm = { value: "", disabled: false };
   isolated.el.sandboxMounts = { value: "", disabled: false };
-  isolated.el.initialPrompt = { value: "start immediately" };
-  isolated.el.commandComposer = { requestSubmit() { timeline.push("initial-prompt"); } };
   isolated.state.workspaceDiffs.set("created-session:src/old.js", { status: "ready" });
   isolated.state.pendingEchoes.set("created-session", {
     run_id: "preexisting", content: "created prompt",
@@ -4592,8 +4576,7 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   assert.equal(requests.some(({ path, method }) => method === "GET" && path.startsWith("/sessions/created-session?")), false);
   assert.equal(instances.length, 1);
   assert.equal(instances[0].url, "/sessions/created-session/events/stream?limit=512");
-  assert.ok(timeline.indexOf(`sse:${instances[0].url}`) < timeline.indexOf("initial-prompt"));
-  assert.ok(timeline.indexOf("initial-prompt") < timeline.indexOf("GET:/sessions?workspace_stats=true"));
+  assert.ok(timeline.indexOf(`sse:${instances[0].url}`) < timeline.indexOf("GET:/sessions?workspace_stats=true"));
   assert.equal(isolated.state.currentId, "created-session");
   assert.deepEqual(plain(isolated.state.snapshots.get("created-session")), snapshot);
   assert.deepEqual(plain(isolated.state.messageWindows.get("created-session")), {
@@ -4603,14 +4586,13 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   assert.equal(isolated.state.workspaceDiffs.has("created-session:src/old.js"), false);
   assert.equal(isolated.state.pendingEchoes.has("created-session"), false);
   assert.equal(isolated.state.sessions[0].summary.session_id, "created-session");
-  assert.equal(isolated.el.promptInput.value, "start immediately");
   assert.equal(isolated.el.launchDialog.closed, true);
   assert.equal(submit.disabled, false);
 
   instances[0].emit("replay_boundary", { replay_boundary_sequence_id: 0 });
   instances[0].emit("session_event", {
     session_id: "created-session", sequence_id: 1, run_id: "created-run",
-    event: { type: "run_started", prompt_preview: "start immediately", started_at_epoch_ms: 100 },
+    event: { type: "run_started", prompt_preview: "created prompt", started_at_epoch_ms: 100 },
   });
   await flushPromises();
   assert.equal(isolated.state.events.get("created-session").length, 1);

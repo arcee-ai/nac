@@ -127,7 +127,7 @@
           <div id="launchModelPicker" class="field model-picker span-two" hidden></div>
           <p id="launchModelCatalogNotice" class="model-catalog-notice span-two" hidden>model catalog unavailable — manual entry</p>
           <label class="field" id="launchEffortField"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="inherit">inherit (from config)</option><option value="unset">unset (backend default)</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select><small id="launchEffortHelp">Inherit omits the field; unset explicitly clears configured effort.</small></label>
-          <label class="field"><span>orchestrator compaction threshold</span><input id="launchCompactionThreshold" name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" placeholder="from config"><small>Absolute token count. Blank uses the server default; 0 disables compaction.</small><small id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden></small></label>
+          <label class="field"><span>compaction threshold (tokens)</span><input id="launchCompactionThreshold" name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" placeholder="from config"></label>
           <details id="launchOverrides" class="launch-overrides span-two">
             <summary><span>overrides</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></summary>
             <div class="field-grid nested-grid">
@@ -144,7 +144,6 @@
             <label class="field span-two"><span>mounts</span><input id="sandboxMounts" autocomplete="off" placeholder="host:container, host:container" disabled></label>
             <label class="checkbox-field span-two"><input id="sandboxNoMount" type="checkbox" disabled><span>do not mount the current working directory</span></label>
           </div>
-          <label class="field span-two"><span>initial prompt</span><textarea id="initialPrompt" rows="3" placeholder="optional"></textarea></label>
         </div>
         <footer class="modal-actions"><div id="launchStatus" class="form-status" role="status"></div><button class="button button-primary" type="submit">create session</button></footer>
       </form>
@@ -152,6 +151,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=quality-45" defer></script>
+    <script src="/assets/app.js?v=quality-46" defer></script>
   </body>
 </html>
