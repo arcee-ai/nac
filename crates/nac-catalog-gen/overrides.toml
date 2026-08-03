@@ -1,31 +1,35 @@
 # Curated overrides for the models.dev → catalog.json pipeline.
 #
-# Until S4 rewires effort validation onto catalog data, the
-# `backend.rs::validate_model_reasoning_effort` matrix is authoritative.
-# This table transcribes that matrix exactly (see nac-core's
-# `model/catalog/seed.rs`, the S0 transcription reference):
+# Effort validation reads these maps through the catalog: this table
+# transcribes the pre-S4 `backend.rs::validate_model_reasoning_effort`
+# matrix exactly, so validation behavior is unchanged for every model the
+# matrix covered. The authoritative historical reference is the hand-written
+# `pre_s4_matrix_accepts` / `pre_s4_anthropic_family` transcription in
+# nac-core's `model/catalog/tests.rs`; the guard tests assert the catalog
+# data and validation each equal that transcription:
 #
-#   deepseek-chat:            none, high, xhigh (wire "max")          — backend.rs:73-76
-#   fireworks-chat:           none, low, medium, high                 — backend.rs:77-83
-#   together-chat:            none, low, medium, high                 — backend.rs:77-83
-#   openai-responses:         all six levels, verbatim                — backend.rs:84
-#   anthropic-messages:       per-family (below); unknown → none only — backend.rs:85-101
+#   deepseek-chat:            none, high, xhigh (wire "max")
+#   fireworks-chat:           none, low, medium, high
+#   together-chat:            none, low, medium, high
+#   openai-responses:         all six levels, verbatim
+#   anthropic-messages:       per-family (below); unknown → none only
 #
 # `default_thinking_levels` replaces the models.dev-derived seed map of
 # EVERY model of the provider, so matrix behavior is preserved for current
 # and future catalog entries alike. Model entries additionally match dated
-# snapshots (`name-YYYYMMDD`, the `anthropic_model_family` rule).
+# snapshots (`name-YYYYMMDD`, the catalog's generic dated-snapshot family
+# rule).
 #
 # Relaxing a default here to let models.dev `reasoning_options` through for
-# specific models is the intended S4+ unlock — do it deliberately, per
-# model, after checking provider docs (the generator prints how many seed
-# maps each provider default replaced at regen time).
+# specific models is the intended unlock — do it deliberately, per model,
+# after checking provider docs (the generator prints how many seed maps
+# each provider default replaced at regen time). Per-deployment relaxations
+# can also ride `$NAC_HOME/models.json` without regenerating the baseline.
 #
 # Keys are nac BackendKind ids; effort keys are ReasoningEffort lowercase
 # serde names; values are provider wire values.
 
-# deepseek: none/high/xhigh for every model; xhigh is the wire tier "max"
-# (requests.rs's deepseek special case).
+# deepseek: none/high/xhigh for every model; xhigh is the wire tier "max".
 [providers."deepseek-chat"]
 default_thinking_levels = { none = "none", high = "high", xhigh = "max" }
 
@@ -37,8 +41,8 @@ default_thinking_levels = { none = "none", low = "low", medium = "medium", high 
 [providers."together-chat"]
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
 
-# openai-responses: every level, sent verbatim (backend.rs accepts all six
-# for any model).
+# openai-responses: every level, sent verbatim (the pre-S4 matrix accepted
+# all six for any model).
 [providers."openai-responses"]
 default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
 
@@ -51,12 +55,12 @@ default_thinking_levels = { none = "none", minimal = "minimal", low = "low", med
 default_thinking_levels = { none = "none" }
 
 # claude-opus-4-6 family (incl. dated snapshots): adaptive with the
-# wire-level "max" tier (AnthropicReasoningCapabilities::AdaptiveWithMax).
+# wire-level "max" tier (the pre-S4 matrix's AdaptiveWithMax family).
 [providers."anthropic-messages".models."claude-opus-4-6"]
 thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
 
 # claude-sonnet-4-6 family (incl. dated snapshots): adaptive, no "max"
-# (AnthropicReasoningCapabilities::Adaptive). models.dev lists a "max"
-# effort for sonnet-4-6; the matrix stays authoritative until S4.
+# (the pre-S4 matrix's Adaptive family). models.dev lists a "max" effort
+# for sonnet-4-6; the curated matrix stays authoritative.
 [providers."anthropic-messages".models."claude-sonnet-4-6"]
 thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }

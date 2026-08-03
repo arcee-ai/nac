@@ -151,8 +151,7 @@ pub struct ModelClient {
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
     /// Catalog metadata resolved with the effective settings; drives
-    /// per-response cost (S3), effort wire translation (S4) and, in S6,
-    /// dispatch.
+    /// per-response cost, effort wire translation, and api-axis dispatch.
     resolved_model: ModelMetadata,
 }
 

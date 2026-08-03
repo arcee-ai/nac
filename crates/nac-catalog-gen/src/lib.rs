@@ -5,8 +5,8 @@
 //! map each model to a seed entry (`limit` → context/max-tokens with the
 //! 128k/16k fallbacks, `cost` → rates, `reasoning_options` → thinking-level
 //! seeds) → apply the curated `overrides.toml` (which replicates the
-//! `backend.rs` effort-validation matrix exactly until S4 rewires
-//! validation) → emit `catalog.json` + `catalog.manifest.json`.
+//! pre-S4 `backend.rs` effort-validation matrix exactly; validation now
+//! reads these maps) → emit `catalog.json` + `catalog.manifest.json`.
 //!
 //! The output is checked in and loaded by nac-core via `include_str!`; no
 //! build-time or runtime network exists anywhere outside this tool.
@@ -415,8 +415,9 @@ fn apply_overrides(
 ) {
     let Some(provider_override) = provider_override else { return };
     // The provider default replaces nearly every seed map by design (the
-    // matrix is authoritative until S4), so replacements are not noted
-    // per-model; the binary prints a per-provider replacement summary.
+    // curated matrix, not models.dev reasoning_options, stays authoritative),
+    // so replacements are not noted per-model; the binary prints a
+    // per-provider replacement summary.
     if let Some(levels) = &provider_override.default_thinking_levels {
         entry.thinking_level_map = to_wire_map(levels);
     }

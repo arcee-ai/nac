@@ -13,8 +13,7 @@ pub const FALLBACK_MAX_TOKENS: u64 = 16_384;
 ///
 /// `BackendKind` remains the config-facing provider id (auth, catalog and
 /// base-url policy); `ApiKind` names the request/response adapter family.
-/// Stage S6 switches `ModelClient::send_turn` dispatch from backend to this
-/// axis; in S0 it is data only.
+/// `ModelClient::send_turn` dispatches on this axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiKind {
     OpenAiCompletions,
@@ -35,8 +34,8 @@ pub enum CompletionsThinkingFormat {
     Together,
 }
 
-/// Per-api quirk data; replaces per-backend code branches as the adapters are
-/// consolidated (S6).
+/// Per-api quirk data; drives the consolidated completions builder/parser in
+/// place of per-backend code branches.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Compat {
     /// Completions-family thinking control dialect, when the provider accepts
@@ -79,8 +78,8 @@ impl ThinkingLevelMap {
 }
 
 /// Cost rates in USD per 1M tokens. All-zero = unknown (pi's zero-cost
-/// fallback); cost computation arrives in S3. Missing fields deserialize as
-/// zero so partial catalog records stay loadable.
+/// fallback); `calculate_cost` bills unknown pricing as zero. Missing fields
+/// deserialize as zero so partial catalog records stay loadable.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModelCostRates {
     #[serde(default)]

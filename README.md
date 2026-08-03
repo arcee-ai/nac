@@ -176,6 +176,38 @@ url = "https://mcp.grep.app"
 
 Supported MCP transports right now are `stdio` and `streamable_http`. Stdio servers can provide `command`, `args`, and `env`; streamable HTTP servers provide `url` and optional `headers`. MCP string values support `${ENV_VAR}` expansion.
 
+## Model catalog, overrides, and cost
+
+NAC ships an embedded model catalog generated from [models.dev](https://models.dev): per-model context windows, maximum output tokens, pricing per 1M tokens, and supported reasoning effort levels for the `deepseek-chat`, `fireworks-chat`, `together-chat`, `openai-responses`, and `anthropic-messages` backends (`arcee-auth`/`arcee-api` and `chatgpt-codex-responses` entries are maintained by hand). Effort validation, Anthropic `max_tokens`, and per-response cost all read this catalog. A model the catalog does not know resolves from its provider's default entry with conservative fallbacks (128k context, 16k max output, zero cost), so unknown models keep working.
+
+At startup, `nac-web` spawns a fire-and-forget background refresh that revalidates the catalog against models.dev with the stored ETag, at most once every 4 hours. A changed payload is mapped into `$NAC_HOME/model-catalog/overlay.json` (atomic write) and loaded over the embedded baseline; a `304` defers the next check, and any failure leaves the cached overlay and baseline untouched and retries on the next start. The refresh never blocks model calls, and resolution, picker, resume, and validation paths never perform network I/O — offline operation always works from the cached overlay and the embedded baseline. A corrupt overlay, or one older than the embedded baseline, is ignored with a warning. `MODELS_DEV_URL` can point the refresh at a mirror.
+
+Per-deployment overrides live in `$NAC_HOME/models.json` (`~/.config/nac/models.json` by default):
+
+```json
+{
+  "overrides": [
+    {
+      "provider": "anthropic-messages",
+      "model": "claude-haiku-4-5",
+      "set": { "thinking_level_map": { "none": "none", "high": "high" } }
+    },
+    {
+      "provider": "openai-responses",
+      "model": "my-local-model",
+      "set": { "context_window": 262144, "max_tokens": 32768 }
+    }
+  ]
+}
+```
+
+- `provider` is a backend id; `model` is an exact model id, or `_default` to patch the provider-wide fallback entry. An unknown id derives its base metadata from the dated-snapshot family entry or the provider default before patching, so overriding a model the catalog does not know yet — for example one served by a custom `base_url` — is the supported self-unblock path.
+- `set` accepts `display_name`, `context_window`, `max_tokens`, `cost` (`input`/`output`/`cache_read`/`cache_write` per 1M tokens), `cache_write_1h`, `reasoning`, and `thinking_level_map`. The wire protocol (`api`) and adapter quirks (`compat`) are not patchable.
+- `thinking_level_map` replaces the model's whole effort map; keys are effort levels (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) and values are provider wire values. This is how effort validation is relaxed per model — the first override above lets `claude-haiku-4-5` accept `high`.
+- Precedence is user overrides over the runtime overlay over the embedded baseline over the provider default over the fallback. A malformed file degrades to a warning with the baseline still usable; invalid entries are skipped individually with warnings.
+
+Every model response carries a dollar cost in its token usage, computed from catalog pricing as `tokens × rate` per input/output/cache-read/cache-write bucket (micro-USD, rounded half-up per response). Anthropic 1-hour cache writes bill at the `cache_write_1h` rate (default 2× the input rate); unknown pricing bills zero rather than failing. Cost rides in the `TokenUsageUpdated` event's `usage.cost` and accumulates into the session's persisted token accounting; the dashboard does not display it yet.
+
 ## Managed credentials and endpoints
 
 ### ChatGPT Codex OAuth
