@@ -3612,6 +3612,85 @@ test("managed providers render their seeded models with pricing and managed-fiel
   assert.equal(isolated.el.launchEffortField.hidden, true);
 });
 
+// Regression: a codex pick rendered "an empty box with a half hidden button"
+// above the picker. Two layers of coverage:
+//   1. JS state — hiding is wrapper-level only (the <label class="field"> that
+//      CONTAINS the control), so a control can never be left half-shown inside
+//      a hidden field. Assert the full visibility map of every launch field.
+//   2. CSS (next test) — .field-grid rows are max-content so height pressure
+//      scrolls the grid instead of starving the launch-defaults preview track.
+function assertLaunchVisibilityMap(uiInstance, expected, context) {
+  const wrappers = ["launchModelPicker", "launchModelFallback", "launchModelCatalogNotice",
+    "launchEffortField", "launchBaseUrlField", "launchApiKeyModeField", "launchApiKeyEnvField"];
+  for (const id of wrappers) {
+    assert.equal(uiInstance.el[id].hidden, expected[id], `${context}: ${id} wrapper visibility`);
+  }
+  // The bare controls must never carry their own hidden state — only wrappers
+  // are hidden, so a field and its control can never disagree (no half-hidden
+  // control inside a visible field, no visible control inside a hidden field).
+  for (const id of ["launchBaseUrl", "launchApiKeyMode", "launchApiKeyEnv", "launchEffort"]) {
+    assert.equal(uiInstance.el[id].hidden, undefined, `${context}: ${id} control is never hidden directly`);
+  }
+}
+
+test("codex and arcee picks hide whole field wrappers, never half-hidden controls", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.syncLaunchModelControls();
+  // Baseline (from config): every field wrapper visible except the fallback,
+  // the notice, and the named-only API key env field.
+  assertLaunchVisibilityMap(isolated, {
+    launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
+    launchEffortField: false, launchBaseUrlField: false, launchApiKeyModeField: false,
+    launchApiKeyEnvField: true,
+  }, "from config");
+  // Codex pick: managed credential fields hide as whole wrappers; the effort
+  // field stays visible (all-levels); the compaction suggestion appears.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 7, custom: false };
+  isolated.selectModelPickerIndex("launch", 7);
+  assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
+  assertLaunchVisibilityMap(isolated, {
+    launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
+    launchEffortField: false, launchBaseUrlField: true, launchApiKeyModeField: true,
+    launchApiKeyEnvField: true,
+  }, "codex pick");
+  assert.equal(isolated.el.launchCompactionThresholdHint.hidden, false, "codex pick: suggestion hint shows");
+  // Managed → non-managed restores every wrapper cleanly (no residue).
+  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assertLaunchVisibilityMap(isolated, {
+    launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
+    launchEffortField: false, launchBaseUrlField: false, launchApiKeyModeField: false,
+    launchApiKeyEnvField: true,
+  }, "restored to anthropic");
+  // Arcee pick: managed wrappers hide AND the effort field hides (empty
+  // supported_efforts) — again as whole wrappers.
+  isolated.state.launchPicker = { open: true, query: "trinity-mini", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assertLaunchVisibilityMap(isolated, {
+    launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
+    launchEffortField: true, launchBaseUrlField: true, launchApiKeyModeField: true,
+    launchApiKeyEnvField: true,
+  }, "arcee pick");
+});
+
+test("launch dialog grid rows are content-sized so height pressure scrolls instead of clipping fields", () => {
+  // .field-grid is the launch dialog's scroll container (overflow: auto) with
+  // a max-height-constrained flex parent. With auto rows, scroll-container
+  // grid items (.launch-default-preview has overflow: hidden) have a zero
+  // automatic minimum, so track sizing starved the preview first under height
+  // pressure — it collapsed to a sliver and clipped its header/refresh button
+  // above the model picker. max-content rows never compress; the grid scrolls.
+  const rule = redesignSource.match(/\.field-grid \{[^}]*\}/);
+  assert.ok(rule, ".field-grid rule exists");
+  assert.match(rule[0], /grid-auto-rows: max-content;/,
+    "field-grid rows must be max-content so the launch-defaults preview is never starved");
+  assert.match(rule[0], /overflow: auto;/, "field-grid remains the dialog's scroll container");
+  assert.match(redesignSource, /\.launch-default-preview \{ overflow: hidden;/,
+    "preview keeps its border-radius clipping (the scroll-container property that starved auto rows)");
+});
+
 test("launch API-key inherit option names the configured selector, or its absence", () => {
   const isolated = loadApp();
   seedCatalog(isolated);

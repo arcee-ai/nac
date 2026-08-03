@@ -965,7 +965,13 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .execution-modes span { min-width: 74px; display: block; padding: 8px 13px; border: 1px solid #303030; border-radius: var(--r-md); background: #0f0f0f; color: var(--ink-muted); text-align: center; }
 .execution-modes input:checked + span { border-color: #707070; background: #242424; color: var(--ink); }
 .execution-modes input:focus-visible + span { outline: 2px solid var(--paper); outline-offset: 2px; }
-.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 18px 22px 22px; overflow: auto; }
+/* Rows are always content-sized: under height pressure (small viewports, or
+   the open model picker adding ~270px) the grid scrolls instead of
+   compressing tracks. With auto rows, scroll-container items like
+   .launch-default-preview (overflow: hidden) have a zero automatic minimum,
+   so track sizing starved them first — the preview collapsed to a sliver and
+   clipped its header/refresh button above the picker. */
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 16px; padding: 18px 22px 22px; overflow: auto; }
 .nested-grid { padding: 0; }
 .launch-default-preview { overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
 .launch-default-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-bottom: 1px solid #252525; }
