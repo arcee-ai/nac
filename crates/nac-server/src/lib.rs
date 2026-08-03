@@ -121,6 +121,10 @@ pub struct LaunchModelDefaults {
     pub configured_model: Option<String>,
     /// Configured reasoning effort, if any.
     pub configured_reasoning_effort: Option<ReasoningEffort>,
+    /// Configured credential selector NAME (never the value): lets the
+    /// launch dialog render which environment variable the inherited
+    /// selection reads.
+    pub configured_api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -542,6 +546,7 @@ impl SessionManager {
             configured_model_base_url,
             configured_model: config.model.model.clone(),
             configured_reasoning_effort: config.model.reasoning_effort,
+            configured_api_key_env: config.model.api_key_env.clone(),
         })
     }
 
@@ -2790,7 +2795,7 @@ mod tests {
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\n",
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\napi_key_env = \"MY_OPENAI_KEY\"\n",
         )
         .unwrap();
         let defaults = manager.launch_model_defaults(request()).unwrap();
@@ -2799,9 +2804,15 @@ mod tests {
             defaults.configured_reasoning_effort,
             Some(ReasoningEffort::High)
         );
+        // The selector NAME is served (never the variable's value).
+        assert_eq!(
+            defaults.configured_api_key_env.as_deref(),
+            Some("MY_OPENAI_KEY")
+        );
         let serialized = serde_json::to_value(defaults).unwrap();
         assert_eq!(serialized["configured_model"], "gpt-5.2");
         assert_eq!(serialized["configured_reasoning_effort"], "high");
+        assert_eq!(serialized["configured_api_key_env"], "MY_OPENAI_KEY");
 
         // Without a configured model/effort the additive fields serialize as
         // null (older frontends ignore them either way).
@@ -2813,9 +2824,11 @@ mod tests {
         let defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(defaults.configured_model, None);
         assert_eq!(defaults.configured_reasoning_effort, None);
+        assert_eq!(defaults.configured_api_key_env, None);
         let serialized = serde_json::to_value(defaults).unwrap();
         assert!(serialized["configured_model"].is_null());
         assert!(serialized["configured_reasoning_effort"].is_null());
+        assert!(serialized["configured_api_key_env"].is_null());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2880,6 +2893,22 @@ mod tests {
             .expect("the embedded baseline's claude-opus-4-6 entry");
         assert!(opus["supported_efforts"].is_array());
         assert_eq!(opus["reasoning"], true);
+
+        // The hand-seeded providers serve their maintained entries too.
+        for (provider, model_id) in [
+            ("arcee-auth", "trinity-large-thinking"),
+            ("arcee-api", "trinity-large-thinking"),
+            ("chatgpt-codex-responses", "gpt-5.6-sol"),
+        ] {
+            assert!(
+                by_id(provider)["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m["id"] == model_id),
+                "the seed's {model_id} entry must reach the {provider} listing"
+            );
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

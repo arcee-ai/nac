@@ -3,13 +3,21 @@
 //! The per-provider `_default` entries transcribe the pre-S4 validation
 //! matrix into data; since S4, `backend.rs::validate_model_reasoning_effort`
 //! resolves these maps (unknown models keep the conservative matrix
-//! behavior). Context windows, max tokens and cost rates deliberately keep
-//! the conservative fallbacks — real values arrive with the generated
-//! models.dev baseline in S1.
+//! behavior). The five models.dev-backed providers keep conservative
+//! fallback limits/cost on their seeds — real values arrive with the
+//! generated models.dev baseline.
+//!
+//! arcee-auth/arcee-api and chatgpt-codex-responses are absent from
+//! models.dev, so their known-model entries are maintained by hand here
+//! (`codex_seed_models`/`arcee_seed_models`): limits and pricing come from
+//! the providers' own documentation (the codex entries reference the
+//! overlapping models.dev openai baseline values). Every entry's thinking
+//! map still matches the provider's matrix behavior exactly — codex
+//! all-levels verbatim, arcee rejects every explicit effort.
 
 use super::{
-    api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelMetadata, ModelSource,
-    ProviderCatalog, ThinkingLevelMap, PROVIDER_DEFAULT_MODEL_ID,
+    api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
+    ModelSource, ProviderCatalog, ThinkingLevelMap, FALLBACK_MAX_TOKENS, PROVIDER_DEFAULT_MODEL_ID,
 };
 use crate::model::{BackendKind, ReasoningEffort};
 use std::collections::BTreeMap;
@@ -103,6 +111,152 @@ fn entry(
     entry
 }
 
+fn rates(input: f64, output: f64, cache_read: f64, cache_write: f64) -> ModelCostRates {
+    ModelCostRates {
+        input,
+        output,
+        cache_read,
+        cache_write,
+    }
+}
+
+/// A hand-maintained known-model entry for the providers models.dev does
+/// not cover: documented display name, limits, and pricing over the shared
+/// `entry` base.
+fn seeded_model(
+    provider: BackendKind,
+    id: &str,
+    display_name: &str,
+    context_window: u64,
+    max_tokens: u64,
+    cost: ModelCostRates,
+    reasoning: bool,
+    thinking_level_map: ThinkingLevelMap,
+    compat: Compat,
+) -> ModelMetadata {
+    let mut model = entry(provider, id, reasoning, thinking_level_map, compat);
+    model.display_name = Some(display_name.to_string());
+    model.context_window = context_window;
+    model.max_tokens = max_tokens;
+    model.cost = cost;
+    model
+}
+
+/// chatgpt-codex-responses known models: OpenAI's documented Codex lineup
+/// for ChatGPT sign-in (developers.openai.com/codex/models — Sol/Terra/Luna,
+/// gpt-5.6, and the Pro-tier Spark preview; deprecated codex models are
+/// deliberately omitted). Limits and pricing reference the overlapping
+/// models.dev openai baseline entries; ChatGPT-sign-in usage is
+/// subscription-billed, so the rates are the API-equivalent prices. Effort
+/// maps stay all-levels verbatim per the matrix.
+fn codex_seed_models() -> Vec<ModelMetadata> {
+    let provider = BackendKind::ChatGptCodexResponses;
+    let model = |id: &str,
+                 display_name: &str,
+                 context_window: u64,
+                 max_tokens: u64,
+                 cost: ModelCostRates| {
+        seeded_model(
+            provider,
+            id,
+            display_name,
+            context_window,
+            max_tokens,
+            cost,
+            true,
+            all_levels(),
+            Compat::default(),
+        )
+    };
+    vec![
+        model(
+            "gpt-5.6-sol",
+            "GPT-5.6 Sol",
+            1_050_000,
+            128_000,
+            rates(5.0, 30.0, 0.5, 6.25),
+        ),
+        model(
+            "gpt-5.6-terra",
+            "GPT-5.6 Terra",
+            1_050_000,
+            128_000,
+            rates(2.0, 12.0, 0.2, 2.5),
+        ),
+        model(
+            "gpt-5.6-luna",
+            "GPT-5.6 Luna",
+            1_050_000,
+            128_000,
+            rates(0.2, 1.2, 0.02, 0.25),
+        ),
+        model("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, rates(5.0, 30.0, 0.5, 6.25)),
+        model(
+            "gpt-5.3-codex-spark",
+            "GPT-5.3 Codex Spark",
+            128_000,
+            32_000,
+            rates(1.75, 14.0, 0.175, 0.0),
+        ),
+    ]
+}
+
+/// Arcee known models (shared by arcee-auth and arcee-api): the Trinity
+/// lineup from Arcee's own docs (docs.arcee.ai/get-started/models-overview
+/// and /pricing). `trinity-large-thinking` is the documented hosted API id
+/// (also the README's example); the other two ids follow the same
+/// lowercase-hyphen convention from the pricing page's model names. Context
+/// windows use Arcee's stated hosted value (128k; the Large models support
+/// more when self-hosted — patch via models.json where a deployment allows
+/// it). Max output is undocumented except trinity-large-thinking's 80k
+/// (Vercel AI Gateway's arcee-ai integration); the others keep the
+/// conservative fallback. Cache pricing is undocumented (zero = unknown).
+/// Effort maps stay empty per the matrix: Arcee accepts no explicit effort
+/// levels. `reasoning` marks the thinking variant's reasoning_content
+/// output; it accepts no effort knob.
+fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
+    let model = |id: &str,
+                 display_name: &str,
+                 max_tokens: u64,
+                 cost: ModelCostRates,
+                 reasoning: bool| {
+        seeded_model(
+            provider,
+            id,
+            display_name,
+            128_000,
+            max_tokens,
+            cost,
+            reasoning,
+            ThinkingLevelMap::default(),
+            completions_compat(None, "reasoning_content", Some(0.0)),
+        )
+    };
+    vec![
+        model(
+            "trinity-large-thinking",
+            "Trinity-Large-Thinking",
+            80_000,
+            rates(0.25, 0.80, 0.0, 0.0),
+            true,
+        ),
+        model(
+            "trinity-mini",
+            "Trinity-Mini",
+            FALLBACK_MAX_TOKENS,
+            rates(0.045, 0.15, 0.0, 0.0),
+            false,
+        ),
+        model(
+            "trinity-large-preview",
+            "Trinity-Large-Preview",
+            FALLBACK_MAX_TOKENS,
+            rates(0.45, 0.15, 0.0, 0.0),
+            false,
+        ),
+    ]
+}
+
 pub(super) fn seed_catalog() -> ModelCatalog {
     let mut providers: BTreeMap<BackendKind, ProviderCatalog> = BTreeMap::new();
     let mut register = |default: ModelMetadata, known: &[ModelMetadata]| {
@@ -175,7 +329,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             all_levels(),
             Compat::default(),
         ),
-        &[],
+        &codex_seed_models(),
     );
     register(
         // Unknown Anthropic models stay conservative (none-only), matching
@@ -215,7 +369,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
                 ThinkingLevelMap::default(),
                 completions_compat(None, "reasoning_content", Some(0.0)),
             ),
-            &[],
+            &arcee_seed_models(backend),
         );
     }
 

@@ -281,6 +281,93 @@ fn reset_for_test_reloads_the_seed_catalog() {
 }
 
 #[test]
+fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
+    // The models.dev-absent providers serve hand-maintained entries (seed.rs
+    // documents the provenance of every value). These pins make seed edits
+    // deliberate.
+    let codex_cases = [
+        ("gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000, 128_000, 5.0, 30.0),
+        ("gpt-5.6-terra", "GPT-5.6 Terra", 1_050_000, 128_000, 2.0, 12.0),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000, 128_000, 0.2, 1.2),
+        ("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, 5.0, 30.0),
+        (
+            "gpt-5.3-codex-spark",
+            "GPT-5.3 Codex Spark",
+            128_000,
+            32_000,
+            1.75,
+            14.0,
+        ),
+    ];
+    for (id, display_name, context_window, max_tokens, input, output) in codex_cases {
+        let metadata = resolve(BackendKind::ChatGptCodexResponses, id);
+        assert_eq!(metadata.id, id, "{id}");
+        assert_eq!(metadata.source, ModelSource::Baseline, "{id}");
+        assert_eq!(metadata.display_name.as_deref(), Some(display_name), "{id}");
+        assert_eq!(metadata.context_window, context_window, "{id}");
+        assert_eq!(metadata.max_tokens, max_tokens, "{id}");
+        assert_eq!(metadata.cost.input, input, "{id}");
+        assert_eq!(metadata.cost.output, output, "{id}");
+        assert!(metadata.reasoning, "{id}");
+        // Codex matrix behavior: every effort level, sent verbatim.
+        for effort in ALL_EFFORTS {
+            assert_eq!(
+                metadata.thinking_level_map.wire_value(effort),
+                Some(effort.as_str()),
+                "{id} {}",
+                effort.as_str()
+            );
+        }
+    }
+
+    let arcee_cases = [
+        (
+            "trinity-large-thinking",
+            "Trinity-Large-Thinking",
+            80_000,
+            0.25,
+            0.80,
+            true,
+        ),
+        ("trinity-mini", "Trinity-Mini", 16_384, 0.045, 0.15, false),
+        (
+            "trinity-large-preview",
+            "Trinity-Large-Preview",
+            16_384,
+            0.45,
+            0.15,
+            false,
+        ),
+    ];
+    for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
+        for (id, display_name, max_tokens, input, output, reasoning) in &arcee_cases {
+            let metadata = resolve(backend, id);
+            assert_eq!(metadata.id, *id, "{backend}/{id}");
+            assert_eq!(metadata.source, ModelSource::Baseline, "{backend}/{id}");
+            assert_eq!(
+                metadata.display_name.as_deref(),
+                Some(*display_name),
+                "{backend}/{id}"
+            );
+            // Arcee's stated hosted context window.
+            assert_eq!(metadata.context_window, 128_000, "{backend}/{id}");
+            assert_eq!(metadata.max_tokens, *max_tokens, "{backend}/{id}");
+            assert_eq!(metadata.cost.input, *input, "{backend}/{id}");
+            assert_eq!(metadata.cost.output, *output, "{backend}/{id}");
+            // Cache pricing is undocumented (zero = unknown).
+            assert_eq!(metadata.cost.cache_read, 0.0, "{backend}/{id}");
+            assert_eq!(metadata.cost.cache_write, 0.0, "{backend}/{id}");
+            assert_eq!(metadata.reasoning, *reasoning, "{backend}/{id}");
+            // Arcee matrix behavior: no explicit effort levels accepted.
+            assert!(metadata.thinking_level_map.0.is_empty(), "{backend}/{id}");
+            // The completions compat matches the provider default.
+            let default = resolve(backend, "model-with-no-catalog-entry");
+            assert_eq!(metadata.compat, default.compat, "{backend}/{id}");
+        }
+    }
+}
+
+#[test]
 fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
     // A generated entry per models.dev provider: real limits, display name,
     // baseline source, and the provider default's compat inherited.
@@ -362,9 +449,11 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: the checked-in models.dev baseline's model count. Drift
-    // fails loudly here at regen time, forcing a deliberate review.
-    assert_eq!(entry_count, 117, "models.dev snapshot model count drifted");
+    // Snapshot pin: the checked-in models.dev baseline's model count (117)
+    // plus the hand-seeded arcee/codex entries (5 codex + 3 arcee x 2
+    // providers = 11). Drift fails loudly here at regen/seed-edit time,
+    // forcing a deliberate review.
+    assert_eq!(entry_count, 128, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -695,10 +784,11 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 117, "models.dev snapshot model count drifted");
+    assert_eq!(total, 128, "catalog model count drifted");
 
-    // Seed-only providers still appear, with empty model lists and their
-    // `_default` limits (the frontend's custom-model path reads those).
+    // The hand-seeded providers serve their maintained entries (the picker's
+    // model lists) while their `_default` limits stay conservative fallbacks
+    // (the frontend's custom-model path reads those).
     for backend in [
         BackendKind::ArceeAuth,
         BackendKind::ArceeApi,
@@ -709,13 +799,35 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             .iter()
             .find(|provider| provider.id == backend)
             .unwrap();
-        assert!(provider.models.is_empty(), "{backend}");
+        assert!(!provider.models.is_empty(), "{backend}");
         assert_eq!(
             provider.default_limits.context_window,
             FALLBACK_CONTEXT_WINDOW,
             "{backend}"
         );
     }
+    for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
+        let provider = listing
+            .providers
+            .iter()
+            .find(|provider| provider.id == backend)
+            .unwrap();
+        assert_eq!(provider.models.len(), 3, "{backend}");
+        assert!(
+            provider
+                .models
+                .iter()
+                .any(|model| model.id == "trinity-large-thinking"),
+            "{backend}"
+        );
+    }
+    let codex = listing
+        .providers
+        .iter()
+        .find(|provider| provider.id == BackendKind::ChatGptCodexResponses)
+        .unwrap();
+    assert_eq!(codex.models.len(), 5);
+    assert!(codex.models.iter().any(|model| model.id == "gpt-5.6-sol"));
 }
 
 #[test]
