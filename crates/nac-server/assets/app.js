@@ -42,8 +42,6 @@ const state = {
   launchDefaultsGeneration: 0,
   launchDefaultsTimer: null,
   launchDefaultsPreview: { status: "idle", data: null, error: "", request: null },
-  launchApiKeyModeManual: false,
-  launchApiKeyAutoManaged: false,
   modelCatalog: { status: "idle", data: null, error: "" },
   modelCatalogRequest: null,
   launchPicker: { open: false, query: "", activeIndex: 0, custom: false },
@@ -97,8 +95,8 @@ function bindElements() {
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
-    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchApiKeyInheritOption", "launchApiKeyInheritNote", "launchExtraHeaders",
-    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField", "launchAdvanced",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyEnv", "launchApiKeyEnvField", "launchExtraHeaders",
+    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchOverrides",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
   ]) el[id] = document.getElementById(id);
@@ -144,8 +142,6 @@ function bindEvents() {
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
-  el.launchApiKeyMode.addEventListener("change", () => syncLaunchApiKeyMode({ user: true }));
-  el.launchBackend.addEventListener("change", () => syncLaunchApiKeyMode());
   el.launchCompactionThreshold.addEventListener("input", () => clearCompactionThresholdHint("launch"));
   el.launchModelPicker.addEventListener("click", (event) => handleModelPickerClick(event, "launch"));
   el.launchModelPicker.addEventListener("input", (event) => handleModelPickerInput(event, "launch"));
@@ -4806,8 +4802,6 @@ function resetLaunchDraftState() {
   const rootCwd = String(state.store?.root_cwd || "");
   state.launchMode = "local";
   state.launchCwdDrafts = { localSandbox: rootCwd, ssh: null };
-  state.launchApiKeyModeManual = false;
-  state.launchApiKeyAutoManaged = false;
   if (el.launchCwd) el.launchCwd.value = rootCwd;
 }
 
@@ -4827,11 +4821,10 @@ function openLaunchDialog() {
   state.launchCwdDrafts = transition.drafts;
   el.launchCwd.value = transition.cwd;
   syncLaunchExecutionFields(mode);
-  syncLaunchApiKeyMode();
   state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
-  // The Advanced disclosure (credential/endpoint overrides) always reopens
+  // The overrides disclosure (endpoint/credential overrides) always reopens
   // collapsed — the common path stays short.
-  if (el.launchAdvanced) el.launchAdvanced.open = false;
+  if (el.launchOverrides) el.launchOverrides.open = false;
   loadModelCatalog();
   syncLaunchModelControls();
   el.launchDialog.showModal();
@@ -4940,7 +4933,6 @@ async function requestLaunchDefaultsPreview(context, generation) {
     const data = await apiPost("/sessions/launch-defaults", request.body);
     if (generation !== state.launchDefaultsGeneration) return null;
     state.launchDefaultsPreview = { status: "ready", data: data || {}, error: "", request: request.body };
-    syncLaunchApiKeyMode();
     // The resolved "from config" label and the inherited effort constraint
     // depend on the configured model — refresh them without disturbing an
     // open picker.
@@ -4953,17 +4945,6 @@ async function requestLaunchDefaultsPreview(context, generation) {
     return null;
   }
 }
-
-const MANAGED_LAUNCH_BACKENDS = {
-  "arcee-auth": {
-    canonicalUrl: "https://api.arcee.ai/api/v1",
-    credentialLabel: "server-stored Arcee login",
-  },
-  "chatgpt-codex-responses": {
-    canonicalUrl: "https://chatgpt.com/backend-api",
-    credentialLabel: "server-stored ChatGPT login",
-  },
-};
 
 // --- Model catalog + picker -------------------------------------------------
 // The catalog (GET /models) powers the model picker in the launch dialog and
@@ -5131,7 +5112,7 @@ function modelSourceBadgeHtml(source) {
 // how auth works. A provider the server computed `no_credential` for (GET
 // /models, per request) gets a warning badge whose title carries the fix
 // path: the conventional env var for API-key providers (the custom-selector
-// escape lives in the launch dialog's Advanced disclosure; settings has its
+// escape lives in the launch dialog's overrides disclosure; settings has its
 // own api-key field), or the login command verbatim for managed providers.
 function providerAuthBadgeHtml(provider, scope) {
   if (provider?.auth_status !== "no_credential") return "";
@@ -5139,7 +5120,7 @@ function providerAuthBadgeHtml(provider, scope) {
   const fix = provider.managed_base_url
     ? hint || "log in to this provider"
     : hint
-      ? `set the ${hint} environment variable or choose a custom selector in ${scope === "settings" ? "settings" : "Advanced"}`
+      ? `set the ${hint} environment variable or choose a custom selector in ${scope === "settings" ? "settings" : "overrides"}`
       : "no credential detected";
   return `<span class="model-picker-badge is-warning" title="${escapeAttr(fix)}">no credential detected</span>`;
 }
@@ -5607,23 +5588,18 @@ function syncLaunchEffortControl() {
 }
 
 // Known models on managed backends (managed_base_url from the catalog) need
-// neither a base URL nor an API key selector — hide both. The API key mode
-// value itself stays with syncLaunchApiKeyMode's auto-managed state machine.
+// neither a base URL nor an API key variable — hide both override fields and
+// clear any typed values so a hidden field can never submit an override.
 function syncLaunchManagedFieldVisibility() {
-  if (!el.launchBaseUrlField || !el.launchApiKeyModeField) return;
+  if (!el.launchBaseUrlField || !el.launchApiKeyEnvField) return;
   const provider = state.modelCatalog.data ? findCatalogProvider(String(el.launchBackend?.value || "")) : null;
   const managed = Boolean(provider?.managed_base_url);
   el.launchBaseUrlField.hidden = managed;
-  el.launchApiKeyModeField.hidden = managed;
+  el.launchApiKeyEnvField.hidden = managed;
   if (managed) {
     if (el.launchBaseUrl) el.launchBaseUrl.value = "";
-    if (el.launchApiKeyEnvField) el.launchApiKeyEnvField.hidden = true;
-    if (el.launchApiKeyEnv) {
-      el.launchApiKeyEnv.disabled = true;
-      el.launchApiKeyEnv.required = false;
-    }
+    if (el.launchApiKeyEnv) el.launchApiKeyEnv.value = "";
   }
-  syncLaunchApiKeyMode();
 }
 
 function syncLaunchModelDependentControls() {
@@ -5721,84 +5697,6 @@ function handleFocusChange(event) {
   if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerChange(event, "settings");
 }
 
-const LAUNCH_API_KEY_HELP = "Inherit omits this field; no environment selector explicitly clears it. Managed stored-login backends default to no environment selector.";
-const LAUNCH_API_KEY_INHERIT_LABEL = "inherit configured selector";
-
-// "Inherit" means config.toml's single [model].api_key_env selector for EVERY
-// backend, so the option names it (launch-defaults' configured_api_key_env).
-// Only the selector NAME is ever shown — the value is secret and never
-// leaves the server. A ready preview with no selector says so explicitly;
-// before the preview arrives the label stays generic.
-function launchApiKeyInheritLabel(preview = state.launchDefaultsPreview) {
-  if (preview?.status !== "ready") return LAUNCH_API_KEY_INHERIT_LABEL;
-  const selector = String(preview.data?.configured_api_key_env || "").trim();
-  return selector
-    ? `${LAUNCH_API_KEY_INHERIT_LABEL} (${selector})`
-    : `${LAUNCH_API_KEY_INHERIT_LABEL} (none configured)`;
-}
-
-// Provider-mismatch caution for the inherit mode: the configured selector was
-// chosen for the configured backend, so picking a model from a DIFFERENT
-// provider deserves a visible check. Known catalog picks only (custom models
-// already carry the unrecognized-model badge), only with a named selector
-// (the label already covers the "none configured" case), and never for
-// managed backends — their API-key controls are hidden and stored logins
-// supply credentials.
-function launchApiKeyInheritNoteText() {
-  if (String(el.launchApiKeyMode?.value || "inherit") !== "inherit") return null;
-  const preview = state.launchDefaultsPreview;
-  if (preview?.status !== "ready") return null;
-  const configuredBackend = String(preview.data?.configured_model_backend || "");
-  if (!configuredBackend || !String(preview.data?.configured_api_key_env || "").trim()) return null;
-  const selection = modelPickerSelection("launch");
-  const resolution = resolveModelSelection(selection.backend, selection.model);
-  if (resolution.kind !== "known") return null;
-  if (resolution.provider.managed_base_url) return null;
-  if (resolution.provider.id === configuredBackend) return null;
-  return `configured for ${configuredBackend} — check it applies to ${resolution.provider.id}`;
-}
-
-function syncLaunchApiKeyMode({ user = false } = {}) {
-  if (!el.launchApiKeyMode) return;
-  if (user) {
-    state.launchApiKeyModeManual = true;
-    state.launchApiKeyAutoManaged = false;
-  }
-  const configuredBackend = state.launchDefaultsPreview?.status === "ready"
-    ? state.launchDefaultsPreview.data?.configured_model_backend
-    : null;
-  const effectiveBackend = String(el.launchBackend?.value || configuredBackend || "");
-  const managedDefaults = MANAGED_LAUNCH_BACKENDS[effectiveBackend] || null;
-  if (!user && !state.launchApiKeyModeManual && managedDefaults && el.launchApiKeyMode.value === "inherit") {
-    el.launchApiKeyMode.value = "none";
-    state.launchApiKeyAutoManaged = true;
-  } else if (!user && state.launchApiKeyAutoManaged && !managedDefaults) {
-    el.launchApiKeyMode.value = "inherit";
-    state.launchApiKeyAutoManaged = false;
-  }
-  const named = el.launchApiKeyMode.value === "named";
-  if (el.launchApiKeyEnvField) el.launchApiKeyEnvField.hidden = !named;
-  el.launchApiKeyEnv.disabled = !named;
-  el.launchApiKeyEnv.required = named;
-  if (el.launchApiKeyHelp) {
-    if (state.launchApiKeyAutoManaged && managedDefaults) {
-      el.launchApiKeyHelp.textContent = `No environment selector was selected automatically because ${managedDefaults.credentialLabel} supplies credentials. Choose another mode to override this.`;
-    } else if (state.launchApiKeyModeManual && managedDefaults) {
-      el.launchApiKeyHelp.textContent = `${LAUNCH_API_KEY_HELP} Your explicit credential mode is preserved for this managed backend.`;
-    } else {
-      el.launchApiKeyHelp.textContent = LAUNCH_API_KEY_HELP;
-    }
-  }
-  if (el.launchApiKeyInheritOption) {
-    el.launchApiKeyInheritOption.textContent = launchApiKeyInheritLabel();
-  }
-  if (el.launchApiKeyInheritNote) {
-    const note = launchApiKeyInheritNoteText();
-    el.launchApiKeyInheritNote.textContent = note || "";
-    el.launchApiKeyInheritNote.hidden = !note;
-  }
-}
-
 function buildLaunchSessionRequest(values) {
   const mode = String(values?.mode || "local");
   if (!["local", "sandbox", "ssh"].includes(mode)) throw new Error(`Unsupported execution mode: ${mode}`);
@@ -5828,13 +5726,11 @@ function buildLaunchSessionRequest(values) {
   if (reasoningMode === "unset") body.reasoning_effort = null;
   else if (reasoningMode !== "inherit") body.reasoning_effort = reasoningMode;
 
-  const apiKeyMode = String(values?.api_key_mode || "inherit");
-  if (apiKeyMode === "none") body.api_key_env = null;
-  else if (apiKeyMode === "named") {
-    const selector = String(values?.api_key_env || "").trim();
-    if (!selector) throw new Error("Enter an API key environment variable name");
-    body.api_key_env = selector;
-  } else if (apiKeyMode !== "inherit") throw new Error(`Unsupported API key mode: ${apiKeyMode}`);
+  // Overrides contract: an empty API key variable is omitted (the normal
+  // config resolution applies); a filled one overrides the configured
+  // selector for the new session. There is no explicit-clear case.
+  const apiKeySelector = String(values?.api_key_env || "").trim();
+  if (apiKeySelector) body.api_key_env = apiKeySelector;
 
   const headerText = String(values?.extra_headers || "").trim();
   if (headerText) {
@@ -5900,7 +5796,6 @@ async function createSession(event) {
       model: el.launchModel.value,
       base_url: el.launchBaseUrl.value,
       orchestrator_compaction_threshold: el.launchCompactionThreshold?.value ?? "",
-      api_key_mode: el.launchApiKeyMode.value,
       api_key_env: el.launchApiKeyEnv.value,
       extra_headers: el.launchExtraHeaders.value,
       sandbox: {
@@ -5931,7 +5826,6 @@ async function createSession(event) {
     syncLaunchExecutionFields("local");
     state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
     state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
-    syncLaunchApiKeyMode();
     syncLaunchModelControls();
     openSession(sessionId, true, { fetchSnapshot: false });
     if (initialPrompt) {

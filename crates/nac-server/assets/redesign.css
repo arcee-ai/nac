@@ -917,7 +917,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .model-picker-custom-note { color: var(--ink-soft); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
 .model-picker-back { padding: 0; border: 0; background: none; color: var(--attention); font: inherit; cursor: pointer; text-decoration: underline; }
 .model-catalog-notice { margin: 0; color: var(--danger); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
-.api-key-inherit-note { color: var(--danger); }
 
 .modal { font-family: var(--sans); }
 .modal-header .icon-button { width: 34px; height: 34px; border-color: var(--line-strong); border-radius: var(--r-md); background: var(--surface-hover); color: var(--ink-soft); }
@@ -973,18 +972,19 @@ body.session-reordering { cursor: grabbing; user-select: none; }
    them first — fields collapsed to slivers and clipped their content. */
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 16px; padding: 18px 22px 22px; overflow: auto; }
 .nested-grid { padding: 0; }
-/* The launch dialog's Advanced disclosure: credential and endpoint overrides
-   (base url, API-key mode/env, extra headers) collapse behind a <details> so
-   the common path stays short. Fields inside work exactly as always — the
+/* The launch dialog's overrides disclosure: endpoint and credential overrides
+   (base url, API key variable, extra headers) collapse behind a <details> so
+   the common path stays short. Empty fields do nothing; filled fields
+   override the normal resolution. Fields inside work exactly as always — the
    collapse is visual only, nothing is disabled or skipped on submit. */
-.launch-advanced { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
-.launch-advanced > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; list-style: none; color: var(--ink-muted); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; cursor: pointer; }
-.launch-advanced > summary::-webkit-details-marker { display: none; }
-.launch-advanced > summary:hover { color: var(--ink-soft); }
-.launch-advanced > summary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform 140ms ease; }
-.launch-advanced[open] > summary { border-bottom: 1px solid var(--line); }
-.launch-advanced[open] > summary svg { transform: rotate(180deg); }
-.launch-advanced > .nested-grid { padding: 14px 12px 12px; overflow: visible; }
+.launch-overrides { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.launch-overrides > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; list-style: none; color: var(--ink-muted); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; cursor: pointer; }
+.launch-overrides > summary::-webkit-details-marker { display: none; }
+.launch-overrides > summary:hover { color: var(--ink-soft); }
+.launch-overrides > summary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform 140ms ease; }
+.launch-overrides[open] > summary { border-bottom: 1px solid var(--line); }
+.launch-overrides[open] > summary svg { transform: rotate(180deg); }
+.launch-overrides > .nested-grid { padding: 14px 12px 12px; overflow: visible; }
 .modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 22px 22px; }
 .modal-actions .button, .settings-actions .button { min-width: 132px; font-family: var(--sans); }
 .form-status { min-height: 18px; color: var(--ink-muted); font: var(--fs-sm)/var(--lh-tight) var(--mono); }

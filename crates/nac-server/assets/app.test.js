@@ -78,7 +78,6 @@ function loadApp(overrides = {}) {
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
       loadLaunchDefaultsPreview, openLaunchDialog,
-      syncLaunchApiKeyMode, launchApiKeyInheritLabel, launchApiKeyInheritNoteText,
       buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
@@ -222,7 +221,7 @@ function sessionListEntry(sessionId, overrides = {}) {
 
 function launchValues(overrides = {}) {
   return { mode: "local", reasoning_mode: "inherit",
-    api_key_mode: "inherit", extra_headers: "", ...overrides, };
+    api_key_env: "", extra_headers: "", ...overrides, };
 }
 
 function workspaceFixture(overrides = {}) {
@@ -375,16 +374,11 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchEffortHelp = { textContent: "" };
   uiInstance.el.launchBaseUrl = { value: "" };
   uiInstance.el.launchBaseUrlField = { hidden: false };
-  uiInstance.el.launchApiKeyMode = { value: "inherit" };
-  uiInstance.el.launchApiKeyModeField = { hidden: false };
-  uiInstance.el.launchApiKeyEnv = { value: "", disabled: true, required: false };
-  uiInstance.el.launchApiKeyEnvField = { hidden: true };
-  uiInstance.el.launchApiKeyHelp = { textContent: "" };
-  uiInstance.el.launchApiKeyInheritOption = { textContent: "" };
-  uiInstance.el.launchApiKeyInheritNote = { textContent: "", hidden: true };
+  uiInstance.el.launchApiKeyEnv = { value: "" };
+  uiInstance.el.launchApiKeyEnvField = { hidden: false };
   uiInstance.el.launchCompactionThreshold = { value: "" };
   uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
-  uiInstance.el.launchAdvanced = { open: false };
+  uiInstance.el.launchOverrides = { open: false };
 }
 
 // --- Picker click bubbling shim --------------------------------------------
@@ -3467,13 +3461,13 @@ test("picker badges mark no-credential providers on group headers and the closed
   seedCatalog(isolated);
   launchPickerElements(isolated);
   // The helper itself: ready providers render nothing; the API-key fix path
-  // names the conventional var and the custom-selector escape (Advanced in
-  // launch, the form's own api-key field in settings); managed providers
-  // carry the login command verbatim.
+  // names the conventional var and the custom-selector escape (the overrides
+  // disclosure in launch, the form's own api-key field in settings); managed
+  // providers carry the login command verbatim.
   const [anthropic, openai, arcee] = modelCatalogFixture().providers;
   assert.equal(isolated.providerAuthBadgeHtml(anthropic, "launch"), "");
   assert.match(isolated.providerAuthBadgeHtml(openai, "launch"),
-    /title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced"/);
+    /title="set the OPENAI_API_KEY environment variable or choose a custom selector in overrides"/);
   assert.match(isolated.providerAuthBadgeHtml(openai, "settings"),
     /choose a custom selector in settings"/);
   assert.match(isolated.providerAuthBadgeHtml(arcee, "launch"),
@@ -3484,7 +3478,7 @@ test("picker badges mark no-credential providers on group headers and the closed
   // the fix path; ready providers close the header right after the name.
   isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
   const open = isolated.renderModelPickerHtml("launch", { backend: "", model: "" });
-  assert.match(open, /model-picker-group" role="presentation">openai-responses<span class="model-picker-badge is-warning" title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced">no credential detected<\/span>/);
+  assert.match(open, /model-picker-group" role="presentation">openai-responses<span class="model-picker-badge is-warning" title="set the OPENAI_API_KEY environment variable or choose a custom selector in overrides">no credential detected<\/span>/);
   assert.match(open, /model-picker-group" role="presentation">arcee-auth<span class="model-picker-badge is-warning" title="nac-web arcee-auth login">no credential detected<\/span>/);
   assert.match(open, /model-picker-group" role="presentation">anthropic-messages<\/div>/);
   assert.match(open, /model-picker-group" role="presentation">chatgpt-codex-responses<\/div>/);
@@ -3493,7 +3487,7 @@ test("picker badges mark no-credential providers on group headers and the closed
   assert.equal(isolated.el.launchBackend.value, "openai-responses");
   assert.equal(isolated.el.launchModel.value, "gpt-5.1");
   // The closed toggle carries the same badge for the selected provider…
-  assert.match(isolated.el.launchModelPicker.innerHTML, /title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced"/);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /title="set the OPENAI_API_KEY environment variable or choose a custom selector in overrides"/);
   assert.match(isolated.el.launchModelPicker.innerHTML, /no credential detected/);
   // …and a ready provider shows none.
   isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
@@ -3557,24 +3551,33 @@ test("a persistent Custom model row is pinned to the bottom of the open list", (
   assert.equal(isolated.state.launchPicker.custom, true);
 });
 
-test("launch dialog groups credential overrides behind a collapsed Advanced disclosure", () => {
-  // Markup: base url, API-key mode/env (with the inherit label + mismatch
-  // note riding along), and extra headers live inside the disclosure…
-  assert.match(indexSource, /<details id="launchAdvanced" class="launch-advanced span-two">/);
-  assert.match(indexSource, /<summary><span>advanced<\/span>/);
-  const advancedStart = indexSource.indexOf('<details id="launchAdvanced"');
-  const advanced = indexSource.slice(advancedStart, indexSource.indexOf("</details>", advancedStart));
-  for (const id of ["launchBaseUrlField", "launchApiKeyModeField", "launchApiKeyInheritOption",
-    "launchApiKeyInheritNote", "launchApiKeyEnvField", "launchExtraHeaders"]) {
-    assert.match(advanced, new RegExp(`id="${id}"`), `${id} rides inside the Advanced disclosure`);
+test("launch dialog groups endpoint and credential fields behind a collapsed overrides disclosure", () => {
+  // Markup: base url, the single API key variable field, and extra headers
+  // live inside the disclosure…
+  assert.match(indexSource, /<details id="launchOverrides" class="launch-overrides span-two">/);
+  assert.match(indexSource, /<summary><span>overrides<\/span>/);
+  const overridesStart = indexSource.indexOf('<details id="launchOverrides"');
+  const overrides = indexSource.slice(overridesStart, indexSource.indexOf("</details>", overridesStart));
+  for (const id of ["launchBaseUrlField", "launchApiKeyEnvField", "launchExtraHeaders"]) {
+    assert.match(overrides, new RegExp(`id="${id}"`), `${id} rides inside the overrides disclosure`);
   }
   // …collapsed by default (no `open` attribute)…
-  assert.doesNotMatch(indexSource, /<details id="launchAdvanced"[^>]*\bopen\b/);
+  assert.doesNotMatch(indexSource, /<details id="launchOverrides"[^>]*\bopen\b/);
   // …while the picker, effort, and compaction threshold stay visible above.
-  const before = indexSource.slice(0, advancedStart);
+  const before = indexSource.slice(0, overridesStart);
   for (const id of ["launchModelPicker", "launchEffortField", "launchCompactionThreshold"]) {
     assert.match(before, new RegExp(`id="${id}"`), `${id} stays visible outside the disclosure`);
   }
+  // The overrides contract is "empty does nothing, filled overrides" — the
+  // section carries no inherit vocabulary, no mode select, and no hint lines.
+  assert.doesNotMatch(overrides, /inherit/i);
+  assert.doesNotMatch(overrides, /api_key_mode/);
+  assert.doesNotMatch(overrides, /<small/);
+  assert.doesNotMatch(overrides, /<select/);
+  // The API key control is one free-text field, visible and enabled.
+  assert.match(overrides, /<label id="launchApiKeyEnvField" class="field"><span>API key variable<\/span><input id="launchApiKeyEnv" name="api_key_env"/);
+  assert.doesNotMatch(overrides, /id="launchApiKeyEnv"[^>]*\bdisabled\b/);
+  assert.doesNotMatch(overrides, /id="launchApiKeyEnvField"[^>]*\bhidden\b/);
   // Reopening the dialog resets the disclosure to collapsed.
   const isolated = loadApp({ fetch: async (path) =>
     path === "/models" ? jsonResponse(modelCatalogFixture()) : jsonResponse({}),
@@ -3589,17 +3592,17 @@ test("launch dialog groups credential overrides behind a collapsed Advanced disc
   isolated.el.launchSshHost = { value: "", disabled: true, required: false };
   isolated.el.sandboxFields = { hidden: true, inert: true };
   isolated.el.launchDialog = { showModal() {} };
-  isolated.el.launchAdvanced = { open: true };
+  isolated.el.launchOverrides = { open: true };
   isolated.openLaunchDialog();
-  assert.equal(isolated.el.launchAdvanced.open, false);
+  assert.equal(isolated.el.launchOverrides.open, false);
   // The disclosure styling follows the details idiom (hidden marker,
   // rotating chevron, microcopy summary).
-  const summaryRule = redesignSource.match(/\.launch-advanced > summary \{[^}]*\}/);
-  assert.ok(summaryRule, "launch-advanced summary rule exists");
+  const summaryRule = redesignSource.match(/\.launch-overrides > summary \{[^}]*\}/);
+  assert.ok(summaryRule, "launch-overrides summary rule exists");
   assert.match(summaryRule[0], /text-transform: uppercase;/);
   assert.match(summaryRule[0], /list-style: none;/);
-  assert.match(redesignSource, /\.launch-advanced > summary::-webkit-details-marker \{ display: none; \}/);
-  assert.match(redesignSource, /\.launch-advanced\[open\] > summary svg \{ transform: rotate\(180deg\); \}/);
+  assert.match(redesignSource, /\.launch-overrides > summary::-webkit-details-marker \{ display: none; \}/);
+  assert.match(redesignSource, /\.launch-overrides\[open\] > summary svg \{ transform: rotate\(180deg\); \}/);
 });
 
 test("custom model state renders an editable id, provider select, and conservative-defaults hint", () => {
@@ -3699,20 +3702,26 @@ test("managed backend selections hide base url and API key controls", () => {
   seedCatalog(isolated);
   launchPickerElements(isolated);
   isolated.el.launchBaseUrl.value = "https://stale.example.test";
+  isolated.el.launchApiKeyEnv.value = "STALE_KEY";
   isolated.state.launchPicker = { open: true, query: "arcee", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.el.launchBackend.value, "arcee-auth");
   assert.equal(isolated.el.launchBaseUrlField.hidden, true);
-  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyEnvField.hidden, true);
+  // Hidden override fields are cleared so they can never submit an override.
   assert.equal(isolated.el.launchBaseUrl.value, "");
-  assert.equal(isolated.el.launchApiKeyMode.value, "none");
+  assert.equal(isolated.el.launchApiKeyEnv.value, "");
+  assert.equal(Object.hasOwn(isolated.buildLaunchSessionRequest(launchValues({
+    backend: "arcee-auth", model: "trinity-mini",
+    base_url: isolated.el.launchBaseUrl.value,
+    api_key_env: isolated.el.launchApiKeyEnv.value,
+  })), "api_key_env"), false, "a hidden managed API key field submits nothing");
   assert.equal(isolated.el.launchEffortField.hidden, true);
   // Switching back to an api-key provider restores the controls.
   isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.el.launchBaseUrlField.hidden, false);
-  assert.equal(isolated.el.launchApiKeyModeField.hidden, false);
-  assert.equal(isolated.el.launchApiKeyMode.value, "inherit");
+  assert.equal(isolated.el.launchApiKeyEnvField.hidden, false);
   // A custom model on a managed provider hides them too.
   isolated.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
   isolated.handleModelPickerChange({ target: {
@@ -3736,15 +3745,13 @@ test("managed providers render their seeded models with pricing and managed-fiel
   assert.match(open, /model-picker-option-hint">128k ctx · \$0\.25\/\$0\.8 per 1M/);
   assert.match(open, /model-picker-option-name">GPT-5\.6 Sol/);
   assert.match(open, /model-picker-option-hint">1\.1m ctx · \$5\/\$30 per 1M/);
-  // A codex pick hides the managed credential fields, auto-selects no
-  // environment selector, and constrains effort to the all-levels list
-  // (codex accepts every level verbatim).
+  // A codex pick hides the managed credential override fields and constrains
+  // effort to the all-levels list (codex accepts every level verbatim).
   isolated.selectModelPickerIndex("launch", 7);
   assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
   assert.equal(isolated.el.launchModel.value, "gpt-5.6-sol");
   assert.equal(isolated.el.launchBaseUrlField.hidden, true);
-  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
-  assert.equal(isolated.el.launchApiKeyMode.value, "none");
+  assert.equal(isolated.el.launchApiKeyEnvField.hidden, true);
   assert.equal(isolated.el.launchEffortField.hidden, false);
   assert.match(isolated.el.launchEffort.innerHTML, /value="minimal">minimal/);
   assert.match(isolated.el.launchEffort.innerHTML, /value="xhigh">xhigh/);
@@ -3753,7 +3760,7 @@ test("managed providers render their seeded models with pricing and managed-fiel
   isolated.state.launchPicker = { open: true, query: "trinity-large-thinking", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assert.equal(isolated.el.launchModel.value, "trinity-large-thinking");
-  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyEnvField.hidden, true);
   assert.equal(isolated.el.launchEffortField.hidden, true);
 });
 
@@ -3766,14 +3773,14 @@ test("managed providers render their seeded models with pricing and managed-fiel
 //      scrolls the grid instead of starving the launch-defaults preview track.
 function assertLaunchVisibilityMap(uiInstance, expected, context) {
   const wrappers = ["launchModelPicker", "launchModelFallback", "launchModelCatalogNotice",
-    "launchEffortField", "launchBaseUrlField", "launchApiKeyModeField", "launchApiKeyEnvField"];
+    "launchEffortField", "launchBaseUrlField", "launchApiKeyEnvField"];
   for (const id of wrappers) {
     assert.equal(uiInstance.el[id].hidden, expected[id], `${context}: ${id} wrapper visibility`);
   }
   // The bare controls must never carry their own hidden state — only wrappers
   // are hidden, so a field and its control can never disagree (no half-hidden
   // control inside a visible field, no visible control inside a hidden field).
-  for (const id of ["launchBaseUrl", "launchApiKeyMode", "launchApiKeyEnv", "launchEffort"]) {
+  for (const id of ["launchBaseUrl", "launchApiKeyEnv", "launchEffort"]) {
     assert.equal(uiInstance.el[id].hidden, undefined, `${context}: ${id} control is never hidden directly`);
   }
 }
@@ -3783,12 +3790,11 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   seedCatalog(isolated);
   launchPickerElements(isolated);
   isolated.syncLaunchModelControls();
-  // Baseline (from config): every field wrapper visible except the fallback,
-  // the notice, and the named-only API key env field.
+  // Baseline (from config): every field wrapper visible except the fallback
+  // and the notice.
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
-    launchEffortField: false, launchBaseUrlField: false, launchApiKeyModeField: false,
-    launchApiKeyEnvField: true,
+    launchEffortField: false, launchBaseUrlField: false, launchApiKeyEnvField: false,
   }, "from config");
   // Codex pick: managed credential fields hide as whole wrappers; the effort
   // field stays visible (all-levels); the compaction suggestion appears.
@@ -3797,8 +3803,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
-    launchEffortField: false, launchBaseUrlField: true, launchApiKeyModeField: true,
-    launchApiKeyEnvField: true,
+    launchEffortField: false, launchBaseUrlField: true, launchApiKeyEnvField: true,
   }, "codex pick");
   assert.equal(isolated.el.launchCompactionThresholdHint.hidden, false, "codex pick: suggestion hint shows");
   // Managed → non-managed restores every wrapper cleanly (no residue).
@@ -3806,8 +3811,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   isolated.selectModelPickerIndex("launch", 0);
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
-    launchEffortField: false, launchBaseUrlField: false, launchApiKeyModeField: false,
-    launchApiKeyEnvField: true,
+    launchEffortField: false, launchBaseUrlField: false, launchApiKeyEnvField: false,
   }, "restored to anthropic");
   // Arcee pick: managed wrappers hide AND the effort field hides (empty
   // supported_efforts) — again as whole wrappers.
@@ -3815,8 +3819,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   isolated.selectModelPickerIndex("launch", 0);
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
-    launchEffortField: true, launchBaseUrlField: true, launchApiKeyModeField: true,
-    launchApiKeyEnvField: true,
+    launchEffortField: true, launchBaseUrlField: true, launchApiKeyEnvField: true,
   }, "arcee pick");
 });
 
@@ -3832,86 +3835,6 @@ test("launch dialog grid rows are content-sized so height pressure scrolls inste
   assert.match(rule[0], /grid-auto-rows: max-content;/,
     "field-grid rows must be max-content so dialog fields are never starved");
   assert.match(rule[0], /overflow: auto;/, "field-grid remains the dialog's scroll container");
-});
-
-test("launch API-key inherit option names the configured selector, or its absence", () => {
-  const isolated = loadApp();
-  seedCatalog(isolated);
-  launchPickerElements(isolated);
-  // Before the preview arrives the label stays generic.
-  isolated.syncLaunchApiKeyMode();
-  assert.equal(isolated.el.launchApiKeyInheritOption.textContent, "inherit configured selector");
-  // A ready preview names the configured selector (the NAME is not secret;
-  // the value never leaves the server).
-  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "anthropic-messages",
-      configured_api_key_env: "ANTHROPIC_API_KEY" } };
-  isolated.syncLaunchApiKeyMode();
-  assert.equal(isolated.el.launchApiKeyInheritOption.textContent,
-    "inherit configured selector (ANTHROPIC_API_KEY)");
-  // An explicit null reads as "none configured", never a blank parenthetical.
-  isolated.state.launchDefaultsPreview.data.configured_api_key_env = null;
-  isolated.syncLaunchApiKeyMode();
-  assert.equal(isolated.el.launchApiKeyInheritOption.textContent,
-    "inherit configured selector (none configured)");
-  // The helper itself: whitespace-only counts as unset; non-ready previews
-  // stay generic.
-  assert.equal(isolated.launchApiKeyInheritLabel({ status: "ready",
-    data: { configured_api_key_env: "  " } }), "inherit configured selector (none configured)");
-  assert.equal(isolated.launchApiKeyInheritLabel({ status: "loading", data: null }),
-    "inherit configured selector");
-});
-
-test("launch API-key inherit note warns only on a named-selector provider mismatch", () => {
-  const isolated = loadApp();
-  seedCatalog(isolated);
-  launchPickerElements(isolated);
-  const readyWith = (data) => {
-    isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data };
-  };
-  readyWith({ configured_model_backend: "anthropic-messages",
-    configured_api_key_env: "ANTHROPIC_API_KEY" });
-  // Same provider as the configured backend: no note.
-  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
-  assert.equal(isolated.el.launchApiKeyInheritNote.textContent, "");
-  // A different provider names both backends, and updates on model change.
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, false);
-  assert.equal(isolated.el.launchApiKeyInheritNote.textContent,
-    "configured for anthropic-messages — check it applies to openai-responses");
-  // Named/none modes hide the note; returning to inherit restores it.
-  isolated.el.launchApiKeyMode.value = "named";
-  isolated.syncLaunchApiKeyMode({ user: true });
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
-  isolated.el.launchApiKeyMode.value = "inherit";
-  isolated.syncLaunchApiKeyMode({ user: true });
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, false);
-  // Managed backends never show it (their API-key controls are hidden and
-  // stored logins supply credentials) — even with a manual inherit choice.
-  isolated.state.launchPicker = { open: true, query: "trinity", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBackend.value, "arcee-auth");
-  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
-  // Custom/unknown models carry their own badge instead.
-  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.state.launchPicker.custom, true);
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
-  // The note requires a named selector — the "(none configured)" label
-  // already covers the unset case.
-  readyWith({ configured_model_backend: "anthropic-messages", configured_api_key_env: null });
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
-  // No configured backend at all → nothing to mismatch against.
-  readyWith({ configured_api_key_env: "SOME_KEY" });
-  isolated.syncLaunchApiKeyMode();
-  assert.equal(isolated.launchApiKeyInheritNoteText(), null);
 });
 
 test("model picker keyboard navigation wraps, selects, enters custom, and closes", () => {
@@ -4156,12 +4079,16 @@ test("launch dialog wires the model picker, manual-entry fallback, and shared ef
   assert.match(indexSource, /id="launchModelCatalogNotice"[^>]*hidden>model catalog unavailable — manual entry/);
   assert.match(indexSource, /id="launchEffortField"/);
   assert.match(indexSource, /id="launchBaseUrlField"/);
-  assert.match(indexSource, /id="launchApiKeyModeField"/);
-  assert.match(indexSource, /<option id="launchApiKeyInheritOption" value="inherit">inherit configured selector<\/option>/);
-  assert.match(indexSource, /<small id="launchApiKeyInheritNote" class="api-key-inherit-note" hidden><\/small>/);
+  assert.match(indexSource, /id="launchApiKeyEnvField"/);
   assert.match(indexSource, /<select id="launchBackend" name="backend">/);
   assert.match(indexSource, /<input id="launchModel" name="model"/);
   assert.match(indexSource, /id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden/);
+  // The deleted API-key mode machinery leaves no trace in the markup.
+  assert.doesNotMatch(indexSource, /api_key_mode/);
+  assert.doesNotMatch(indexSource, /launchApiKeyMode/);
+  assert.doesNotMatch(indexSource, /launchApiKeyInherit/);
+  assert.doesNotMatch(indexSource, /inherit configured selector/);
+  assert.doesNotMatch(indexSource, /api-key-inherit-note/);
 });
 
 test("session bar context metric renders the catalog window denominator", () => {
@@ -4393,9 +4320,12 @@ test("model picker styles reuse the field, listbox, and badge tokens", () => {
     ".model-picker-option:hover, .model-picker-option.is-active",
     ".model-picker-badge.is-warning", ".model-picker-custom-row",
     ".model-picker-custom-persistent", ".model-picker-group", ".model-catalog-notice",
-    ".api-key-inherit-note", ".launch-advanced"]) {
+    ".launch-overrides"]) {
     assert.ok(redesignSource.includes(rule), rule);
   }
+  // The deleted API-key mode styling leaves no trace in the stylesheet.
+  assert.ok(!redesignSource.includes(".api-key-inherit-note"), ".api-key-inherit-note removed");
+  assert.ok(!redesignSource.includes(".launch-advanced"), ".launch-advanced renamed to .launch-overrides");
   assert.match(redesignSource, /\.field input, \.field select, \.field textarea, \.model-picker-filter/);
 });
 
@@ -4469,15 +4399,15 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
       mounts: "/hidden:/hidden", },
   }))), { cwd: "/repo" });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({
-    cwd: "/repo", reasoning_mode: "unset", api_key_mode: "none",
+    cwd: "/repo", reasoning_mode: "unset",
     orchestrator_compaction_threshold: "0",
     extra_headers: "{}", }))), { cwd: "/repo", reasoning_effort: null,
-    api_key_env: null, orchestrator_compaction_threshold: null, extra_headers: null, });
+    orchestrator_compaction_threshold: null, extra_headers: null, });
   assert.deepEqual(plain(ui.buildLaunchSessionRequest(launchValues({ mode: "ssh",
     cwd: "~/work", ssh_host: " deploy@example.test ",
     backend: " arcee-api ", model: " coder ",
     base_url: " https://api.example.test/v1 ",
-    reasoning_mode: "minimal", api_key_mode: "named",
+    reasoning_mode: "minimal",
     api_key_env: " ARCEE_API_KEY ",
     orchestrator_compaction_threshold: "64000",
     extra_headers: '{"X-Trace":"yes"}',
@@ -4505,9 +4435,16 @@ scenario("Launch modes and defaults", "launch request construction preserves omi
   }
   assert.equal(Object.hasOwn(ui.buildLaunchSessionRequest(launchValues()), "reasoning_effort"), false);
   assert.equal(ui.buildLaunchSessionRequest(launchValues({ reasoning_mode: "unset" })).reasoning_effort, null);
-  assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
-    api_key_mode: "named", api_key_env: " ",
-  })), /API key environment variable name/);
+  // The overrides contract: an empty or whitespace-only API key variable is
+  // omitted (never an explicit-clear null — that case was dropped); a filled
+  // one submits trimmed.
+  assert.equal(Object.hasOwn(ui.buildLaunchSessionRequest(launchValues()), "api_key_env"), false);
+  assert.equal(Object.hasOwn(ui.buildLaunchSessionRequest(launchValues({
+    api_key_env: " ",
+  })), "api_key_env"), false);
+  assert.equal(ui.buildLaunchSessionRequest(launchValues({
+    api_key_env: " MY_KEY ",
+  })).api_key_env, "MY_KEY");
   assert.throws(() => ui.buildLaunchSessionRequest(launchValues({
     extra_headers: '{"X":7}',
   })), /must be a string/);
@@ -4534,8 +4471,7 @@ test("session creation serializes every execution mode through the exclusive req
   isolated.el.launchModel = { value: "model" };
   isolated.el.launchBaseUrl = { value: "https://api.example.test" };
   isolated.el.launchCompactionThreshold = { value: "64000" };
-  isolated.el.launchApiKeyMode = { value: "none" };
-  isolated.el.launchApiKeyEnv = { value: "HIDDEN_KEY" };
+  isolated.el.launchApiKeyEnv = { value: "" };
   isolated.el.launchExtraHeaders = { value: "" };
   isolated.el.sandboxNoMount = { checked: true };
   isolated.el.sandboxImage = { value: "hidden-image" };
@@ -4548,10 +4484,9 @@ test("session creation serializes every execution mode through the exclusive req
     cwd: "/local/repo", backend: "openai-responses", model: "model",
     base_url: "https://api.example.test",
     orchestrator_compaction_threshold: 64000,
-    reasoning_effort: null, api_key_env: null, });
+    reasoning_effort: null, });
   isolated.el.launchForm.mode = "sandbox";
   isolated.el.launchEffort.value = "none";
-  isolated.el.launchApiKeyMode.value = "named";
   isolated.el.launchApiKeyEnv.value = "SANDBOX_KEY";
   await isolated.createSession({ preventDefault() {} });
   const sandboxBody = JSON.parse(requests[1].options.body);
@@ -4566,7 +4501,7 @@ test("session creation serializes every execution mode through the exclusive req
   isolated.el.launchCwd.value = "";
   isolated.el.launchSshHost.value = " deploy@example.test ";
   isolated.el.launchEffort.value = "minimal";
-  isolated.el.launchApiKeyMode.value = "inherit";
+  isolated.el.launchApiKeyEnv.value = "";
   await isolated.createSession({ preventDefault() {} });
   const sshBody = JSON.parse(requests[2].options.body);
   assert.equal(sshBody.cwd, "~");
@@ -4631,8 +4566,7 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   isolated.el.launchEffort = { value: "inherit" };
   isolated.el.launchModel = { value: "model" };
   isolated.el.launchBaseUrl = { value: "" };
-  isolated.el.launchApiKeyMode = { value: "inherit" };
-  isolated.el.launchApiKeyEnv = { value: "", disabled: false, required: false };
+  isolated.el.launchApiKeyEnv = { value: "" };
   isolated.el.launchExtraHeaders = { value: "" };
   isolated.el.sandboxFields = { hidden: false, inert: false };
   isolated.el.sandboxNoMount = { checked: false, disabled: false };
@@ -4757,38 +4691,6 @@ test("launch-default request failures land in the error state", async () => {
   await isolated.loadLaunchDefaultsPreview({ mode: "local", cwd: "/missing", sshHost: "" });
   assert.equal(isolated.state.launchDefaultsPreview.status, "error");
   assert.match(isolated.state.launchDefaultsPreview.error, /invalid local <cwd>/);
-});
-
-scenario("Launch modes and defaults", "managed defaults safely select no-env while explicit API-key mode remains user controlled", () => {
-  ui.el.launchBackend = { value: "" };
-  ui.el.launchApiKeyMode = { value: "inherit" };
-  ui.el.launchApiKeyEnvField = { hidden: false };
-  ui.el.launchApiKeyEnv = { disabled: false, required: false };
-  ui.el.launchApiKeyHelp = fakeElement();
-  ui.state.launchDefaultsPreview = { status: "ready",
-    data: { configured_model_backend: "arcee-auth", configured_model_base_url: "https://api.arcee.ai/api/v1" },
-  };
-  ui.syncLaunchApiKeyMode();
-  assert.equal(ui.el.launchApiKeyMode.value, "none");
-  assert.equal(ui.el.launchApiKeyEnvField.hidden, true);
-  assert.equal(ui.el.launchApiKeyEnv.disabled, true);
-  assert.match(ui.el.launchApiKeyHelp.textContent, /selected automatically because server-stored Arcee login supplies credentials/);
-  ui.state.launchDefaultsPreview.data.configured_model_backend = "openai-responses";
-  ui.syncLaunchApiKeyMode();
-  assert.equal(ui.el.launchApiKeyMode.value, "inherit");
-  ui.el.launchApiKeyMode.value = "named";
-  ui.syncLaunchApiKeyMode({ user: true });
-  assert.equal(ui.el.launchApiKeyEnvField.hidden, false);
-  assert.equal(ui.el.launchApiKeyEnv.disabled, false);
-  assert.equal(ui.el.launchApiKeyEnv.required, true);
-  ui.state.launchDefaultsPreview.data.configured_model_backend = "arcee-auth";
-  ui.syncLaunchApiKeyMode();
-  assert.equal(ui.el.launchApiKeyMode.value, "named", "managed defaults must not replace explicit credential intent");
-  assert.match(ui.el.launchApiKeyHelp.textContent, /explicit credential mode is preserved/);
-  ui.el.launchApiKeyMode.value = "inherit";
-  ui.syncLaunchApiKeyMode({ user: true });
-  ui.syncLaunchApiKeyMode();
-  assert.equal(ui.el.launchApiKeyMode.value, "inherit", "an explicitly selected inherit mode remains authoritative");
 });
 
 test("session cards expose authoritative local, sandbox, and exact SSH topology", () => {
