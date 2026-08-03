@@ -1629,6 +1629,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn resume_picker_and_selection_perform_no_network() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let server = crate::model::test_http::ScriptedServer::start_unexpected_request_server(
+            std::time::Duration::from_millis(300),
+        );
+        let original_url = std::env::var_os("MODELS_DEV_URL");
+        unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
+        let key_name = "NAC_MISSING_NETWORK_FREE_PICKER_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::remove_var(key_name) };
+
+        let root = temp_store_path("network_free_picker")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        store::initialize(&store_path).unwrap();
+        sessions::create_session(
+            &store_path,
+            &sessions::new_snapshot(
+                "network-free-session".to_string(),
+                root.clone(),
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+
+        let picker = build_resume_picker_config(
+            ResumeOptions {
+                lookup_cwd: root.clone(),
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                ..ResumeOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("picker startup must not touch the network");
+        // The selection path resolves model settings and catalog metadata
+        // locally (it fails on the missing credential, never on network).
+        let error = match build_resume_config_for_session(
+            picker.store_path,
+            "network-free-session",
+            &NacConfig::default(),
+            picker.lookup_cwd,
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("selection without a credential must fail locally"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(key_name), "{error:#}");
+
+        match original_url {
+            Some(value) => unsafe { std::env::set_var("MODELS_DEV_URL", value) },
+            None => unsafe { std::env::remove_var("MODELS_DEV_URL") },
+        }
+        match original_key {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+        let _ = std::fs::remove_dir_all(root);
+        let requests = server.finish();
+        assert!(
+            requests.is_empty(),
+            "resume/picker paths must not touch the network: {requests:?}"
+        );
+    }
+
     #[test]
     fn parse_extra_headers_json_requires_valid_object() {
         assert!(parse_extra_headers_json("").is_err());

@@ -374,6 +374,9 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
     })?;
+    // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
+    // ETag-revalidated, never on picker/resume/validation paths).
+    nac_core::model::spawn_overlay_refresh();
     let info = manager.store_info();
     eprintln!("nac-web listening on http://{}", cli.bind);
     eprintln!("store: {}", info.store_path.display());
@@ -381,6 +384,10 @@ async fn run_server(cli: ServerCli) -> Result<()> {
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
+    // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
+    // the sidecar, so usually a no-op read. Keeps the overlay fresh for
+    // worker-heavy usage even when the server is not running.
+    nac_core::model::spawn_overlay_refresh();
     let launch_cwd = std::env::current_dir()?;
     let workspace_cwd = match (&cli.ssh_host, &cli.workspace_cwd) {
         (Some(_), Some(remote_cwd)) => remote_cwd.clone(),

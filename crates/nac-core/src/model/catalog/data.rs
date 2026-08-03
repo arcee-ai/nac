@@ -16,57 +16,86 @@
 //! default, so known and unknown models of a provider stay identical at
 //! adapter-consolidation time (S6). `cache_write_1h` is not models.dev
 //! data; S3's cost computation applies the 2x-input default when `None`.
+//!
+//! The same record shape backs the S2 runtime overlay (`overlay.rs`), which
+//! reuses [`hydrate_entry`] with `ModelSource::Overlay`.
 
 use super::{api_kind_for, ModelCatalog, ModelMetadata, ModelSource};
 use crate::model::BackendKind;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The embedded generated baseline.
 pub(crate) const GENERATED_CATALOG_JSON: &str = include_str!("data/catalog.json");
-/// The sidecar manifest. Test-only until S2's overlay refresh reads the
-/// models.dev ETag for revalidation.
-#[cfg(test)]
+/// The sidecar manifest: the overlay refresh revalidates models.dev with
+/// the recorded ETag and the stale-overlay guard compares overlay
+/// `generated_at` against the baseline's.
 pub(crate) const GENERATED_MANIFEST_JSON: &str = include_str!("data/catalog.manifest.json");
 
 #[derive(Debug, Deserialize)]
-struct GeneratedCatalog {
-    providers: BTreeMap<BackendKind, GeneratedProvider>,
+pub(super) struct GeneratedCatalog {
+    pub(super) providers: BTreeMap<BackendKind, GeneratedProvider>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GeneratedProvider {
-    models: BTreeMap<String, GeneratedModel>,
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct GeneratedProvider {
+    pub(super) models: BTreeMap<String, GeneratedModel>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GeneratedModel {
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct GeneratedModel {
     #[serde(default)]
-    display_name: Option<String>,
-    context_window: u64,
-    max_tokens: u64,
+    pub(super) display_name: Option<String>,
+    pub(super) context_window: u64,
+    pub(super) max_tokens: u64,
     #[serde(default)]
-    cost: super::ModelCostRates,
+    pub(super) cost: super::ModelCostRates,
     #[serde(default)]
-    reasoning: bool,
+    pub(super) reasoning: bool,
     #[serde(default)]
-    thinking_level_map: super::ThinkingLevelMap,
+    pub(super) thinking_level_map: super::ThinkingLevelMap,
 }
 
-/// Sidecar manifest fields the catalog tests pin to the embedded JSON.
-#[cfg(test)]
+/// Sidecar manifest fields: the sha pins the embedded pair (tests), the
+/// timestamp drives the stale-overlay guard, and the ETag seeds overlay
+/// revalidation when no sidecar exists yet.
 #[derive(Debug, Deserialize)]
 pub(crate) struct GeneratedManifest {
+    #[allow(dead_code)] // asserted by the manifest hash test only
     pub(crate) sha256: String,
-    #[allow(dead_code)] // documented provenance; asserted in later stages
     pub(crate) generated_at: String,
-    #[allow(dead_code)] // S2's overlay refresh revalidates with this ETag
     pub(crate) models_dev_etag: Option<String>,
 }
 
-#[cfg(test)]
 pub(crate) fn parse_manifest() -> Result<GeneratedManifest, serde_json::Error> {
     serde_json::from_str(GENERATED_MANIFEST_JSON)
+}
+
+/// Hydrate a generated/overlay record into full metadata: provider and api
+/// come from the provider key, `compat` is inherited from the provider's
+/// seed default (known and unknown models stay identical for S6), and
+/// `cache_write_1h` stays unset (S3 applies the 2x-input default).
+pub(super) fn hydrate_entry(
+    provider: BackendKind,
+    id: String,
+    entry: GeneratedModel,
+    compat: &super::Compat,
+    source: ModelSource,
+) -> ModelMetadata {
+    ModelMetadata {
+        id,
+        provider,
+        api: api_kind_for(provider),
+        display_name: entry.display_name,
+        context_window: entry.context_window,
+        max_tokens: entry.max_tokens,
+        cost: entry.cost,
+        cache_write_1h: None,
+        reasoning: entry.reasoning,
+        thinking_level_map: entry.thinking_level_map,
+        compat: compat.clone(),
+        source,
+    }
 }
 
 /// Merge the embedded generated baseline over the seed catalog. Never
@@ -85,21 +114,9 @@ pub(super) fn merge_generated_baseline(catalog: &mut ModelCatalog) {
             debug_assert!(false, "generated provider {provider} must have a seed default");
             continue;
         };
+        let compat = provider_catalog.default.compat.clone();
         for (id, entry) in generated_provider.models {
-            let metadata = ModelMetadata {
-                id,
-                provider,
-                api: api_kind_for(provider),
-                display_name: entry.display_name,
-                context_window: entry.context_window,
-                max_tokens: entry.max_tokens,
-                cost: entry.cost,
-                cache_write_1h: None,
-                reasoning: entry.reasoning,
-                thinking_level_map: entry.thinking_level_map,
-                compat: provider_catalog.default.compat.clone(),
-                source: ModelSource::Baseline,
-            };
+            let metadata = hydrate_entry(provider, id, entry, &compat, ModelSource::Baseline);
             provider_catalog.models.insert(metadata.id.clone(), metadata);
         }
     }

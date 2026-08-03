@@ -245,6 +245,9 @@ fn resolution_is_sync_local_and_credential_free() {
 
 #[test]
 fn reset_for_test_reloads_the_seed_catalog() {
+    // Serializes with the S2 refresh tests: this reloads the process-global
+    // catalog, which must not race a refresh test's overlay reload.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let before = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
     reset_for_test();
     let after = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
@@ -339,6 +342,9 @@ fn generated_entries_satisfy_catalog_invariants() {
 /// exactly, so rewiring validation onto catalog maps is behavior-neutral.
 #[test]
 fn every_generated_entry_preserves_the_validation_matrix() {
+    // Holds TEST_ENV_LOCK for the same reason as
+    // `generated_entries_satisfy_catalog_invariants`.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     // Iterate the guard's entries directly: calling `resolve()` while
     // holding the read guard would re-acquire the RwLock and can deadlock
     // against a concurrent `reset_for_test` writer.
