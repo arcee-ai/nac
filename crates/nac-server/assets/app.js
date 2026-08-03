@@ -98,7 +98,7 @@ function bindElements() {
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchApiKeyInheritOption", "launchApiKeyInheritNote", "launchExtraHeaders",
-    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
+    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchBaseUrlInheritNote", "launchApiKeyModeField",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
   ]) el[id] = document.getElementById(id);
@@ -147,6 +147,7 @@ function bindEvents() {
   el.launchApiKeyMode.addEventListener("change", () => syncLaunchApiKeyMode({ user: true }));
   el.launchBackend.addEventListener("change", () => syncLaunchApiKeyMode());
   el.launchCompactionThreshold.addEventListener("input", () => clearCompactionThresholdHint("launch"));
+  el.launchBaseUrl.addEventListener("input", () => syncLaunchBaseUrlField());
   el.launchModelPicker.addEventListener("click", (event) => handleModelPickerClick(event, "launch"));
   el.launchModelPicker.addEventListener("input", (event) => handleModelPickerInput(event, "launch"));
   el.launchModelPicker.addEventListener("keydown", (event) => handleModelPickerKeydown(event, "launch"));
@@ -5595,12 +5596,61 @@ function syncLaunchManagedFieldVisibility() {
       el.launchApiKeyEnv.required = false;
     }
   }
+  syncLaunchBaseUrlField();
   syncLaunchApiKeyMode();
 }
 
 function syncLaunchModelDependentControls() {
   syncLaunchEffortControl();
   syncLaunchManagedFieldVisibility();
+}
+
+// --- Launch base URL inherit clarity ----------------------------------------
+// A blank base_url inherits through the backend merge chain (request > config
+// > catalog provider default > managed). The placeholder names the catalog's
+// provider endpoint default (ProviderListing.default_base_url) so that inherit
+// is visible before submit; providers without one (managed, or an
+// unresolvable custom provider) and the launch "from config" selection keep
+// the generic placeholder.
+function launchBaseUrlPlaceholder() {
+  const selection = modelPickerSelection("launch");
+  const resolution = resolveModelSelection(selection.backend, selection.model);
+  const provider = resolution.kind === "known" || resolution.kind === "unknown"
+    ? resolution.provider
+    : null;
+  const defaultUrl = String(provider?.default_base_url || "").trim();
+  return defaultUrl ? `default: ${defaultUrl}` : "from config";
+}
+
+// Provider-mismatch caution for a blank base_url, mirroring
+// launchApiKeyInheritNoteText: config.toml's [model].base_url was chosen for
+// the configured backend and still wins over the catalog default, so a
+// cross-provider pick can silently inherit an endpoint that speaks the wrong
+// provider's API. Known catalog picks only (custom models already carry the
+// unrecognized-model badge), never managed (the field is hidden there), and
+// only when a configured URL exists to mismatch against.
+function launchBaseUrlInheritNoteText() {
+  if (String(el.launchBaseUrl?.value || "").trim()) return null;
+  const preview = state.launchDefaultsPreview;
+  if (preview?.status !== "ready") return null;
+  const configuredBackend = String(preview.data?.configured_model_backend || "");
+  const configuredUrl = String(preview.data?.configured_model_base_url || "").trim();
+  if (!configuredBackend || !configuredUrl) return null;
+  const selection = modelPickerSelection("launch");
+  const resolution = resolveModelSelection(selection.backend, selection.model);
+  if (resolution.kind !== "known") return null;
+  if (resolution.provider.managed_base_url) return null;
+  if (resolution.provider.id === configuredBackend) return null;
+  return `configured for ${configuredBackend} (${configuredUrl}) — check it applies to ${resolution.provider.id}`;
+}
+
+function syncLaunchBaseUrlField() {
+  if (el.launchBaseUrl) el.launchBaseUrl.placeholder = launchBaseUrlPlaceholder();
+  if (el.launchBaseUrlInheritNote) {
+    const note = launchBaseUrlInheritNoteText();
+    el.launchBaseUrlInheritNote.textContent = note || "";
+    el.launchBaseUrlInheritNote.hidden = !note;
+  }
 }
 
 // Toggles the launch dialog between the picker (catalog ready / loading) and
