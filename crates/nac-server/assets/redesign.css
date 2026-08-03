@@ -900,7 +900,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .model-picker-badge.is-warning { border-color: var(--danger-border); color: var(--danger); }
 .model-picker-open { display: grid; gap: 6px; }
 .model-picker-list { max-height: 264px; overflow: auto; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); }
-.model-picker-group { padding: 8px 9px 4px; color: var(--ink-faint); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
+.model-picker-group { display: flex; align-items: center; gap: 6px; padding: 8px 9px 4px; color: var(--ink-faint); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
 .model-picker-option { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 9px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--ink-soft); text-align: left; cursor: pointer; }
 .model-picker-option:hover, .model-picker-option.is-active { background: var(--surface-hover); }
 .model-picker-option-name { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--ink); font-size: var(--fs-md); text-overflow: ellipsis; white-space: nowrap; }
@@ -908,6 +908,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .model-picker-option-hint { color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); white-space: nowrap; }
 .model-picker-custom-row { color: var(--attention); }
 .model-picker-custom-row .model-picker-option-name { color: var(--attention); }
+.model-picker-custom-persistent { border-top: 1px solid var(--line); }
 .model-picker-empty { padding: 10px; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
 .model-picker-custom { display: grid; gap: 8px; }
 .model-picker-custom-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
@@ -972,6 +973,18 @@ body.session-reordering { cursor: grabbing; user-select: none; }
    them first — fields collapsed to slivers and clipped their content. */
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 16px; padding: 18px 22px 22px; overflow: auto; }
 .nested-grid { padding: 0; }
+/* The launch dialog's Advanced disclosure: credential and endpoint overrides
+   (base url, API-key mode/env, extra headers) collapse behind a <details> so
+   the common path stays short. Fields inside work exactly as always — the
+   collapse is visual only, nothing is disabled or skipped on submit. */
+.launch-advanced { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.launch-advanced > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; list-style: none; color: var(--ink-muted); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; cursor: pointer; }
+.launch-advanced > summary::-webkit-details-marker { display: none; }
+.launch-advanced > summary:hover { color: var(--ink-soft); }
+.launch-advanced > summary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform 140ms ease; }
+.launch-advanced[open] > summary { border-bottom: 1px solid var(--line); }
+.launch-advanced[open] > summary svg { transform: rotate(180deg); }
+.launch-advanced > .nested-grid { padding: 14px 12px 12px; overflow: visible; }
 .modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 22px 22px; }
 .modal-actions .button, .settings-actions .button { min-width: 132px; font-family: var(--sans); }
 .form-status { min-height: 18px; color: var(--ink-muted); font: var(--fs-sm)/var(--lh-tight) var(--mono); }

@@ -98,7 +98,7 @@ function bindElements() {
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchApiKeyInheritOption", "launchApiKeyInheritNote", "launchExtraHeaders",
-    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
+    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField", "launchAdvanced",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
   ]) el[id] = document.getElementById(id);
@@ -4829,6 +4829,9 @@ function openLaunchDialog() {
   syncLaunchExecutionFields(mode);
   syncLaunchApiKeyMode();
   state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
+  // The Advanced disclosure (credential/endpoint overrides) always reopens
+  // collapsed — the common path stays short.
+  if (el.launchAdvanced) el.launchAdvanced.open = false;
   loadModelCatalog();
   syncLaunchModelControls();
   el.launchDialog.showModal();
@@ -5124,6 +5127,23 @@ function modelSourceBadgeHtml(source) {
   return "";
 }
 
+// Auth status is a HINT only — it never blocks selection and never changes
+// how auth works. A provider the server computed `no_credential` for (GET
+// /models, per request) gets a warning badge whose title carries the fix
+// path: the conventional env var for API-key providers (the custom-selector
+// escape lives in the launch dialog's Advanced disclosure; settings has its
+// own api-key field), or the login command verbatim for managed providers.
+function providerAuthBadgeHtml(provider, scope) {
+  if (provider?.auth_status !== "no_credential") return "";
+  const hint = String(provider?.auth_hint || "").trim();
+  const fix = provider.managed_base_url
+    ? hint || "log in to this provider"
+    : hint
+      ? `set the ${hint} environment variable or choose a custom selector in ${scope === "settings" ? "settings" : "Advanced"}`
+      : "no credential detected";
+  return `<span class="model-picker-badge is-warning" title="${escapeAttr(fix)}">no credential detected</span>`;
+}
+
 function modelPickerRows(query, catalog = state.modelCatalog.data) {
   const needle = String(query || "").trim().toLowerCase();
   const rows = [];
@@ -5188,11 +5208,12 @@ function applyModelPickerSelection(scope, { backend, model }) {
   suggestCompactionThreshold(scope);
 }
 
-// Visible option count: filtered rows plus the custom-model escape row that
-// appears whenever a query is typed (it is the zero-results escape hatch).
+// Visible option count: filtered rows, plus the custom-model escape row
+// whenever a query is typed, plus the persistent "Custom model…" row pinned
+// to the bottom of the list.
 function modelPickerOptionCount(scope) {
   const picker = modelPickerState(scope);
-  return modelPickerRows(picker.query).length + (String(picker.query || "").trim() ? 1 : 0);
+  return modelPickerRows(picker.query).length + (String(picker.query || "").trim() ? 1 : 0) + 1;
 }
 
 function renderModelPickerHtml(scope, selection = modelPickerSelection(scope)) {
@@ -5216,21 +5237,22 @@ function renderModelPickerClosedHtml(scope, selection) {
   if (resolution.kind === "known") {
     primary = modelDisplayName(resolution.model);
     secondary = resolution.provider.id;
-    badge = modelSourceBadgeHtml(resolution.model.source);
+    badge = modelSourceBadgeHtml(resolution.model.source) + providerAuthBadgeHtml(resolution.provider, scope);
   } else if (resolution.kind === "unknown") {
     primary = resolution.modelId || "custom model";
     secondary = resolution.backend || "";
-    badge = MODEL_PICKER_UNRECOGNIZED_BADGE;
+    badge = MODEL_PICKER_UNRECOGNIZED_BADGE + providerAuthBadgeHtml(resolution.provider, scope);
   } else if (scope === "launch") {
     const configured = launchConfiguredResolution();
     if (configured?.kind === "known") {
       const effort = state.launchDefaultsPreview?.data?.configured_reasoning_effort;
       primary = `from config: ${modelDisplayName(configured.model)}`;
       secondary = configured.provider.id + (effort ? ` · ${effort}` : "");
+      badge = providerAuthBadgeHtml(configured.provider, scope);
     } else if (configured?.kind === "unknown") {
       primary = `from config: ${configured.modelId}`;
       secondary = configured.backend || "";
-      badge = MODEL_PICKER_UNRECOGNIZED_BADGE;
+      badge = MODEL_PICKER_UNRECOGNIZED_BADGE + providerAuthBadgeHtml(configured.provider, scope);
     }
   }
   return `<button type="button" id="${ids.toggle}" class="model-picker-toggle" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="${ids.list}" aria-label="Model picker" data-model-picker-toggle="${scope}"><span class="model-picker-toggle-label">${escapeHtml(primary)}</span>${secondary ? `<span class="model-picker-toggle-provider">${escapeHtml(secondary)}</span>` : ""}${badge}<span class="model-picker-caret" aria-hidden="true">▾</span></button>`;
@@ -5253,7 +5275,7 @@ function renderModelPickerListHtml(scope) {
   rows.forEach((row, index) => {
     if (row.provider.id !== lastProvider) {
       lastProvider = row.provider.id;
-      parts.push(`<div class="model-picker-group" role="presentation">${escapeHtml(row.provider.id)}</div>`);
+      parts.push(`<div class="model-picker-group" role="presentation">${escapeHtml(row.provider.id)}${providerAuthBadgeHtml(row.provider, scope)}</div>`);
     }
     const active = index === picker.activeIndex;
     parts.push(`<button type="button" id="${ids.option(index)}" class="model-picker-option${active ? " is-active" : ""}" role="option" aria-selected="${active}" tabindex="-1" data-model-picker-option="${index}"><span class="model-picker-option-name">${escapeHtml(modelDisplayName(row.model))}${modelSourceBadgeHtml(row.model.source)}</span><span class="model-picker-option-id">${escapeHtml(row.model.id)}</span><span class="model-picker-option-hint">${escapeHtml(modelRowHint(row.model))}</span></button>`);
@@ -5266,6 +5288,12 @@ function renderModelPickerListHtml(scope) {
   } else if (!rows.length) {
     parts.push('<div class="model-picker-empty">Type to filter the catalog, or enter a custom model id.</div>');
   }
+  // The persistent custom entry point, pinned to the bottom of the list so
+  // the escape hatch is discoverable even with a full result set. It enters
+  // the custom state exactly like the zero-results escape row above.
+  const customIndex = rows.length + (query ? 1 : 0);
+  const customActive = picker.activeIndex === customIndex;
+  parts.push(`<button type="button" id="${ids.option(customIndex)}" class="model-picker-option model-picker-custom-row model-picker-custom-persistent${customActive ? " is-active" : ""}" role="option" aria-selected="${customActive}" tabindex="-1" data-model-picker-custom="${scope}"><span class="model-picker-option-name">Custom model…</span></button>`);
   return parts.join("");
 }
 

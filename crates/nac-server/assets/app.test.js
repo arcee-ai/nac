@@ -77,7 +77,7 @@ function loadApp(overrides = {}) {
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
-      loadLaunchDefaultsPreview,
+      loadLaunchDefaultsPreview, openLaunchDialog,
       syncLaunchApiKeyMode, launchApiKeyInheritLabel, launchApiKeyInheritNoteText,
       buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
@@ -85,7 +85,7 @@ function loadApp(overrides = {}) {
       loadModelCatalog, catalogProviders, findCatalogProvider, findCatalogModel,
       resolveModelSelection, launchConfiguredResolution, selectionEffortLevels,
       modelDisplayName, formatModelContextWindow, formatModelCostHint, modelRowHint,
-      modelSourceBadgeHtml, modelPickerRows, modelPickerOptionCount, renderModelPickerHtml,
+      modelSourceBadgeHtml, providerAuthBadgeHtml, modelPickerRows, modelPickerOptionCount, renderModelPickerHtml,
       renderModelPickerListHtml, syncModelPicker, syncModelPickerList, openModelPicker,
       closeModelPicker, selectModelPickerIndex, enterModelPickerCustom, exitModelPickerCustom,
       handleModelPickerClick, handleModelPickerInput, handleModelPickerKeydown,
@@ -278,6 +278,7 @@ function settingsViewElements(uiInstance) {
 function modelCatalogFixture() {
   return { catalog_version: 3, providers: [
     { id: "anthropic-messages", auth: "api_key_env", managed_base_url: null,
+      auth_status: "ready", auth_hint: null,
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "low", "medium", "high"] },
       models: [
@@ -295,6 +296,7 @@ function modelCatalogFixture() {
           source: "user_override" },
       ] },
     { id: "openai-responses", auth: "api_key_env", managed_base_url: null,
+      auth_status: "no_credential", auth_hint: "OPENAI_API_KEY",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "low", "medium", "high"] },
       models: [
@@ -311,6 +313,7 @@ function modelCatalogFixture() {
       ] },
     { id: "arcee-auth", auth: "managed_arcee",
       managed_base_url: "https://api.arcee.ai/api/v1",
+      auth_status: "no_credential", auth_hint: "nac-web arcee-auth login",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: [] },
       models: [
@@ -329,6 +332,7 @@ function modelCatalogFixture() {
       ] },
     { id: "chatgpt-codex-responses", auth: "codex_oauth",
       managed_base_url: "https://chatgpt.com/backend-api",
+      auth_status: "ready", auth_hint: null,
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"] },
       models: [
@@ -380,6 +384,7 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchApiKeyInheritNote = { textContent: "", hidden: true };
   uiInstance.el.launchCompactionThreshold = { value: "" };
   uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
+  uiInstance.el.launchAdvanced = { open: false };
 }
 
 // --- Picker click bubbling shim --------------------------------------------
@@ -3457,6 +3462,146 @@ test("open model picker renders grouped options and the custom escape row", () =
   assert.match(list, /aria-selected="true"/);
 });
 
+test("picker badges mark no-credential providers on group headers and the closed toggle", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // The helper itself: ready providers render nothing; the API-key fix path
+  // names the conventional var and the custom-selector escape (Advanced in
+  // launch, the form's own api-key field in settings); managed providers
+  // carry the login command verbatim.
+  const [anthropic, openai, arcee] = modelCatalogFixture().providers;
+  assert.equal(isolated.providerAuthBadgeHtml(anthropic, "launch"), "");
+  assert.match(isolated.providerAuthBadgeHtml(openai, "launch"),
+    /title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced"/);
+  assert.match(isolated.providerAuthBadgeHtml(openai, "settings"),
+    /choose a custom selector in settings"/);
+  assert.match(isolated.providerAuthBadgeHtml(arcee, "launch"),
+    /title="nac-web arcee-auth login"/);
+  assert.match(isolated.providerAuthBadgeHtml({ auth_status: "no_credential", auth_hint: null, managed_base_url: null }, "launch"),
+    /title="no credential detected"/);
+  // Group headers in the open list: badged providers carry the badge with
+  // the fix path; ready providers close the header right after the name.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  const open = isolated.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(open, /model-picker-group" role="presentation">openai-responses<span class="model-picker-badge is-warning" title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced">no credential detected<\/span>/);
+  assert.match(open, /model-picker-group" role="presentation">arcee-auth<span class="model-picker-badge is-warning" title="nac-web arcee-auth login">no credential detected<\/span>/);
+  assert.match(open, /model-picker-group" role="presentation">anthropic-messages<\/div>/);
+  assert.match(open, /model-picker-group" role="presentation">chatgpt-codex-responses<\/div>/);
+  // Rows stay selectable — the badge is informational, never blocking.
+  isolated.selectModelPickerIndex("launch", 2);
+  assert.equal(isolated.el.launchBackend.value, "openai-responses");
+  assert.equal(isolated.el.launchModel.value, "gpt-5.1");
+  // The closed toggle carries the same badge for the selected provider…
+  assert.match(isolated.el.launchModelPicker.innerHTML, /title="set the OPENAI_API_KEY environment variable or choose a custom selector in Advanced"/);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /no credential detected/);
+  // …and a ready provider shows none.
+  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
+  assert.doesNotMatch(isolated.el.launchModelPicker.innerHTML, /model-picker-badge/);
+  // Launch "from config" badges the configured model's provider too.
+  isolated.el.launchBackend.value = "";
+  isolated.el.launchModel.value = "";
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "openai-responses", configured_model: "gpt-5.1" } };
+  const fromConfig = isolated.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(fromConfig, /from config: GPT-5\.1/);
+  assert.match(fromConfig, /no credential detected/);
+  // An unrecognized model on a no-credential provider shows both badges.
+  const unknown = isolated.renderModelPickerHtml("launch", { backend: "openai-responses", model: "gpt-5-typo" });
+  assert.match(unknown, /unrecognized model — conservative defaults/);
+  assert.match(unknown, /no credential detected/);
+  // The settings list renders the same badges with settings wording.
+  isolated.state.settingsPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  const settingsOpen = isolated.renderModelPickerHtml("settings", { backend: "", model: "" });
+  assert.match(settingsOpen, /choose a custom selector in settings/);
+  assert.match(settingsOpen, /title="nac-web arcee-auth login"/);
+});
+
+test("a persistent Custom model row is pinned to the bottom of the open list", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  let list = isolated.renderModelPickerListHtml("launch");
+  // Always visible — even with a full result set — and pinned after the
+  // last catalog row as a real listbox option.
+  assert.match(list, /Custom model…/);
+  assert.ok(list.indexOf("Custom model…") > list.indexOf("gpt-5.3-codex-spark"),
+    "the persistent row renders after the last catalog row");
+  assert.match(list, /id="launchModelPickerOption10"[^>]*role="option"[^>]*data-model-picker-custom="launch"/);
+  assert.doesNotMatch(list, /Use custom model/);
+  assert.equal(isolated.modelPickerOptionCount("launch"), 11);
+  // With a query the zero-results escape row stays, and the persistent row
+  // follows it.
+  isolated.state.launchPicker.query = "gpt";
+  list = isolated.renderModelPickerListHtml("launch");
+  assert.match(list, /Use custom model &#34;gpt&#34; →/);
+  assert.ok(list.indexOf("Custom model…") > list.indexOf("Use custom model"),
+    "the persistent row follows the escape row");
+  assert.equal(isolated.modelPickerOptionCount("launch"), 7);
+  // Clicking it enters the custom state exactly like the escape row; with
+  // no query typed the current model id is kept for editing.
+  isolated.el.launchBackend.value = "anthropic-messages";
+  isolated.el.launchModel.value = "claude-opus-4-1";
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  isolated.handleModelPickerClick({ stopPropagation() {}, target: {
+    closest: (selector) => (selector === "[data-model-picker-custom]" ? {} : null) } }, "launch");
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.state.launchPicker.open, false);
+  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
+  // Keyboard: Enter on the persistent row's index does the same.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 10, custom: false };
+  isolated.handleModelPickerKeydown({ key: "Enter", preventDefault() {}, stopPropagation() {} }, "launch");
+  assert.equal(isolated.state.launchPicker.custom, true);
+});
+
+test("launch dialog groups credential overrides behind a collapsed Advanced disclosure", () => {
+  // Markup: base url, API-key mode/env (with the inherit label + mismatch
+  // note riding along), and extra headers live inside the disclosure…
+  assert.match(indexSource, /<details id="launchAdvanced" class="launch-advanced span-two">/);
+  assert.match(indexSource, /<summary><span>advanced<\/span>/);
+  const advancedStart = indexSource.indexOf('<details id="launchAdvanced"');
+  const advanced = indexSource.slice(advancedStart, indexSource.indexOf("</details>", advancedStart));
+  for (const id of ["launchBaseUrlField", "launchApiKeyModeField", "launchApiKeyInheritOption",
+    "launchApiKeyInheritNote", "launchApiKeyEnvField", "launchExtraHeaders"]) {
+    assert.match(advanced, new RegExp(`id="${id}"`), `${id} rides inside the Advanced disclosure`);
+  }
+  // …collapsed by default (no `open` attribute)…
+  assert.doesNotMatch(indexSource, /<details id="launchAdvanced"[^>]*\bopen\b/);
+  // …while the picker, effort, and compaction threshold stay visible above.
+  const before = indexSource.slice(0, advancedStart);
+  for (const id of ["launchModelPicker", "launchEffortField", "launchCompactionThreshold"]) {
+    assert.match(before, new RegExp(`id="${id}"`), `${id} stays visible outside the disclosure`);
+  }
+  // Reopening the dialog resets the disclosure to collapsed.
+  const isolated = loadApp({ fetch: async (path) =>
+    path === "/models" ? jsonResponse(modelCatalogFixture()) : jsonResponse({}),
+    FormData: class { constructor() {} get() { return "local"; } } });
+  launchPickerElements(isolated);
+  isolated.el.launchStatus = { textContent: "", classList: { remove() {} } };
+  isolated.el.launchCwd = { value: "", dataset: {}, placeholder: "", focus() {} };
+  isolated.el.launchCwdLabel = { textContent: "" };
+  isolated.el.launchForm = {};
+  isolated.el.launchExecutionModes = { dataset: {} };
+  isolated.el.launchSshField = { hidden: true, inert: true };
+  isolated.el.launchSshHost = { value: "", disabled: true, required: false };
+  isolated.el.sandboxFields = { hidden: true, inert: true };
+  isolated.el.launchDialog = { showModal() {} };
+  isolated.el.launchAdvanced = { open: true };
+  isolated.openLaunchDialog();
+  assert.equal(isolated.el.launchAdvanced.open, false);
+  // The disclosure styling follows the details idiom (hidden marker,
+  // rotating chevron, microcopy summary).
+  const summaryRule = redesignSource.match(/\.launch-advanced > summary \{[^}]*\}/);
+  assert.ok(summaryRule, "launch-advanced summary rule exists");
+  assert.match(summaryRule[0], /text-transform: uppercase;/);
+  assert.match(summaryRule[0], /list-style: none;/);
+  assert.match(redesignSource, /\.launch-advanced > summary::-webkit-details-marker \{ display: none; \}/);
+  assert.match(redesignSource, /\.launch-advanced\[open\] > summary svg \{ transform: rotate\(180deg\); \}/);
+});
+
 test("custom model state renders an editable id, provider select, and conservative-defaults hint", () => {
   seedCatalog(ui);
   ui.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
@@ -3778,6 +3923,11 @@ test("model picker keyboard navigation wraps, selects, enters custom, and closes
   isolated.handleModelPickerKeydown(key("ArrowDown"), "launch");
   assert.equal(isolated.state.launchPicker.activeIndex, 1);
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
+  assert.equal(isolated.state.launchPicker.activeIndex, 0);
+  // Wrapping past the top lands on the persistent "Custom model…" row (the
+  // last option), then steps up into the catalog rows.
+  isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
+  assert.equal(isolated.state.launchPicker.activeIndex, 10);
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
   assert.equal(isolated.state.launchPicker.activeIndex, 9);
   isolated.handleModelPickerKeydown(key("Enter"), "launch");
@@ -4242,7 +4392,8 @@ test("model picker styles reuse the field, listbox, and badge tokens", () => {
   for (const rule of [".model-picker-toggle", ".model-picker-list",
     ".model-picker-option:hover, .model-picker-option.is-active",
     ".model-picker-badge.is-warning", ".model-picker-custom-row",
-    ".model-picker-group", ".model-catalog-notice", ".api-key-inherit-note"]) {
+    ".model-picker-custom-persistent", ".model-picker-group", ".model-catalog-notice",
+    ".api-key-inherit-note", ".launch-advanced"]) {
     assert.ok(redesignSource.includes(rule), rule);
   }
   assert.match(redesignSource, /\.field input, \.field select, \.field textarea, \.model-picker-filter/);
