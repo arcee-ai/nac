@@ -385,11 +385,19 @@ impl ModelClient {
         let api_key = self.api_key.as_str();
         let user_agent = format!("nac/{}", env!("CARGO_PKG_VERSION"));
         let user_agent = user_agent.as_str();
+        // Skip a built-in header the user has overridden via extra_headers; reqwest
+        // appends, so adding both would emit duplicate header lines.
+        let set_user_agent = !self.extra_headers_contains("user-agent");
+        let set_client = !self.extra_headers_contains("x-arcee-client");
         self.post_json_with_retry_headers(url, body, |request| {
+            let mut request = request.header("Authorization", format!("Bearer {api_key}"));
+            if set_user_agent {
+                request = request.header("User-Agent", user_agent);
+            }
+            if set_client {
+                request = request.header("X-Arcee-Client", "nac-cli");
+            }
             request
-                .header("Authorization", format!("Bearer {api_key}"))
-                .header("User-Agent", user_agent)
-                .header("X-Arcee-Client", "nac-cli")
         })
         .await
     }
@@ -472,7 +480,7 @@ impl ModelClient {
 
         for attempt in 0..10 {
             let mut request = self.client.post(url);
-            if !self.extra_headers_override_content_type() {
+            if !self.extra_headers_contains("content-type") {
                 request = request.header("Content-Type", "application/json");
             }
             let response = match self
@@ -575,10 +583,13 @@ impl ModelClient {
         Err(last_error)
     }
 
-    fn extra_headers_override_content_type(&self) -> bool {
+    /// Whether the configured extra_headers already set `name` (case-insensitive).
+    /// Built-in defaults skip a header the user has overridden, because reqwest
+    /// appends headers — adding both would emit duplicate lines, not an override.
+    fn extra_headers_contains(&self, name: &str) -> bool {
         self.extra_headers
             .keys()
-            .any(|name| name.eq_ignore_ascii_case("content-type"))
+            .any(|key| key.eq_ignore_ascii_case(name))
     }
 
     fn apply_extra_headers(
@@ -786,6 +797,43 @@ mod tests {
         assert_eq!(
             body["tools"],
             serde_json::to_value(&tools).expect("tool definitions serialize")
+        );
+    }
+
+    #[tokio::test]
+    async fn arcee_api_builtin_headers_defer_to_configured_extra_headers() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]
+            })
+            .to_string(),
+        )]);
+        let extra_headers = std::collections::BTreeMap::from([
+            ("User-Agent".to_string(), "custom-agent/9".to_string()),
+            ("X-Arcee-Client".to_string(), "custom-client".to_string()),
+        ]);
+        let client = test_model_client(BackendKind::ArceeApi, server.base_url.clone(), extra_headers);
+
+        client
+            .send_arcee_chat(Vec::new(), Vec::new())
+            .await
+            .expect("configured header override should succeed");
+        let requests = server.finish();
+
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        // Built-in defaults are skipped when overridden — exactly one line each,
+        // carrying the user's value rather than a duplicate.
+        assert_eq!(request.header_counts.get("user-agent"), Some(&1));
+        assert_eq!(request.header_counts.get("x-arcee-client"), Some(&1));
+        assert_eq!(
+            request.headers.get("user-agent").map(String::as_str),
+            Some("custom-agent/9")
+        );
+        assert_eq!(
+            request.headers.get("x-arcee-client").map(String::as_str),
+            Some("custom-client")
         );
     }
 
