@@ -173,7 +173,7 @@ struct ProviderOverride {
 #[derive(Debug, Default, Deserialize)]
 struct ModelOverride {
     /// Replaces the seed map for this model and its dated snapshots
-    /// (`name-YYYYMMDD`, the `backend.rs::anthropic_model_family` rule).
+    /// (`name-YYYYMMDD`, nac-core's `catalog::dated_snapshot_family` rule).
     thinking_levels: Option<BTreeMap<String, String>>,
     reasoning: Option<bool>,
     display_name: Option<String>,
@@ -457,8 +457,8 @@ fn to_wire_map(levels: &BTreeMap<String, String>) -> BTreeMap<String, Option<Str
         .collect()
 }
 
-/// Strip a `-YYYYMMDD` dated-snapshot suffix, mirroring
-/// `backend.rs::anthropic_model_family` and nac-core's catalog resolution.
+/// Strip a `-YYYYMMDD` dated-snapshot suffix, mirroring nac-core's
+/// `catalog::dated_snapshot_family` resolution rule.
 fn dated_snapshot_family(model: &str) -> Option<&str> {
     let (base, snapshot) = model.rsplit_once('-')?;
     (snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())).then_some(base)

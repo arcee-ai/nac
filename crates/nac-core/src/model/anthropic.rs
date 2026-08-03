@@ -9,6 +9,7 @@ pub(super) fn anthropic_messages_request(
     messages: &[Message],
     tools: &[ToolDefinition],
     cache_ttl: Option<&str>,
+    thinking_levels: &ThinkingLevelMap,
 ) -> Result<Value> {
     validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, reasoning_effort)?;
     let (system, mut messages) = anthropic_messages_from_internal(messages)?;
@@ -18,14 +19,14 @@ pub(super) fn anthropic_messages_request(
         "messages": &messages,
     });
     match reasoning_effort {
+        // `none` means omission on Anthropic; it is safe for every family.
         None | Some(ReasoningEffort::None) => {}
-        Some(ReasoningEffort::Xhigh) => {
-            request["thinking"] = json!({"type": "adaptive"});
-            request["output_config"] = json!({"effort": "max"});
-        }
         Some(effort) => {
             request["thinking"] = json!({"type": "adaptive"});
-            request["output_config"] = json!({"effort": effort.as_str()});
+            // Wire tiers come from the catalog map (the adaptive-with-max
+            // families map NAC's `xhigh` to Anthropic's wire tier `max`).
+            request["output_config"] =
+                json!({"effort": validated_wire_effort(thinking_levels, effort)});
         }
     }
 

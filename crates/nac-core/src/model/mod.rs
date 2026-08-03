@@ -32,7 +32,7 @@ mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
-pub use catalog::{spawn_overlay_refresh, ModelMetadata};
+pub use catalog::{spawn_overlay_refresh, ModelMetadata, ThinkingLevelMap};
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
@@ -151,6 +151,12 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Resolve the catalog thinking map a client's `resolved_model` would
+    /// carry for this backend/model pair (S4 adapter input).
+    fn test_thinking_levels(backend: BackendKind, model: &str) -> ThinkingLevelMap {
+        catalog::resolve(backend, model).thinking_level_map
+    }
 
     struct IsolatedModelEnv {
         original: Vec<(&'static str, Option<OsString>)>,
@@ -717,6 +723,119 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn validation_error_messages_are_preserved_verbatim() {
+        // S4 derives the "supported values" list from the model's catalog
+        // map; the user-facing error strings are byte-identical to the
+        // pre-S4 matrix errors.
+        let cases: &[(BackendKind, &str, ReasoningEffort, &str)] = &[
+            (
+                BackendKind::DeepSeekChat,
+                "model",
+                ReasoningEffort::Low,
+                "invalid model configuration: reasoning effort 'low' is not supported by backend 'deepseek-chat'; supported values: none, high, or xhigh",
+            ),
+            (
+                BackendKind::FireworksChat,
+                "model",
+                ReasoningEffort::Xhigh,
+                "invalid model configuration: reasoning effort 'xhigh' is not supported by backend 'fireworks-chat'; supported values: none, low, medium, or high",
+            ),
+            (
+                BackendKind::TogetherChat,
+                "model",
+                ReasoningEffort::Minimal,
+                "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'together-chat'; supported values: none, low, medium, or high",
+            ),
+            (
+                BackendKind::AnthropicMessages,
+                "claude-opus-4-6",
+                ReasoningEffort::Minimal,
+                "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'anthropic-messages' for Anthropic model 'claude-opus-4-6'; supported values: none, low, medium, high, or xhigh",
+            ),
+            (
+                BackendKind::AnthropicMessages,
+                "claude-sonnet-4-6",
+                ReasoningEffort::Xhigh,
+                "invalid model configuration: reasoning effort 'xhigh' is not supported by backend 'anthropic-messages' for Anthropic model 'claude-sonnet-4-6'; supported values: none, low, medium, or high",
+            ),
+            (
+                BackendKind::AnthropicMessages,
+                "claude-opus-4-5",
+                ReasoningEffort::High,
+                "invalid model configuration: reasoning effort 'high' is not supported by backend 'anthropic-messages' for Anthropic model 'claude-opus-4-5'; supported values: none only",
+            ),
+            (
+                BackendKind::AnthropicMessages,
+                "claude-opus-4-6-latest",
+                ReasoningEffort::High,
+                "invalid model configuration: reasoning effort 'high' is not supported by backend 'anthropic-messages' for Anthropic model 'claude-opus-4-6-latest'; supported values: none only",
+            ),
+            (
+                BackendKind::ArceeAuth,
+                "model",
+                ReasoningEffort::None,
+                "invalid model configuration: reasoning effort 'none' is not supported by backend 'arcee-auth'; supported values: no explicit effort levels",
+            ),
+        ];
+        for (backend, model, effort, expected) in cases {
+            let error = validate_model_reasoning_effort(*backend, model, Some(*effort))
+                .expect_err("case must be rejected");
+            assert_eq!(error.to_string(), *expected, "{backend} {model}");
+        }
+    }
+
+    #[test]
+    fn adapters_translate_effort_through_the_catalog_map() {
+        // The wire value comes from the passed catalog map, not from adapter
+        // code: a custom map with non-standard wire tiers flows through
+        // every completions/responses/anthropic builder. (requests.rs and
+        // anthropic.rs carry no "max" literal; DeepSeek's and Anthropic's
+        // top tiers are data.)
+        let custom = ThinkingLevelMap(std::collections::BTreeMap::from([
+            (ReasoningEffort::None, Some("none".to_string())),
+            (ReasoningEffort::High, Some("tier-three".to_string())),
+            (ReasoningEffort::Xhigh, Some("tier-four".to_string())),
+        ]));
+        let messages = [Message::User {
+            content: "hi".to_string(),
+        }];
+
+        let deepseek =
+            deepseek_chat_request("m", Some(ReasoningEffort::Xhigh), &messages, &[], &custom);
+        assert_eq!(deepseek["thinking"], json!({"type": "enabled"}));
+        assert_eq!(deepseek["reasoning_effort"], "tier-four");
+
+        let fireworks =
+            fireworks_chat_request("m", Some(ReasoningEffort::High), &messages, &[], &custom);
+        assert_eq!(fireworks["reasoning_effort"], "tier-three");
+        assert_eq!(fireworks["reasoning_history"], "preserved");
+
+        let together =
+            together_chat_request("m", Some(ReasoningEffort::High), &messages, &[], &custom);
+        assert_eq!(together["reasoning"], json!({"enabled": true}));
+        assert_eq!(together["reasoning_effort"], "tier-three");
+
+        let openai =
+            openai_responses_request("m", Some(ReasoningEffort::Xhigh), &messages, &[], &custom);
+        assert_eq!(openai["reasoning"]["effort"], "tier-four");
+
+        // claude-opus-4-6 supports xhigh in the baseline catalog, so the
+        // builder's defense-in-depth validation passes; the custom map then
+        // drives the emitted wire tier.
+        let anthropic = anthropic_messages_request(
+            "claude-opus-4-6",
+            Some(ReasoningEffort::Xhigh),
+            &messages,
+            &[],
+            None,
+            &custom,
+        )
+        .unwrap();
+        assert_eq!(anthropic["thinking"], json!({"type": "adaptive"}));
+        assert_eq!(anthropic["output_config"]["effort"], "tier-four");
     }
 
     #[test]
@@ -1335,25 +1454,40 @@ mod tests {
         let messages = [Message::User {
             content: "read a file".to_string(),
         }];
+        let unknown_levels =
+            test_thinking_levels(BackendKind::AnthropicMessages, "claude-always-on-future");
         for effort in [None, Some(ReasoningEffort::None)] {
-            let request =
-                anthropic_messages_request("claude-always-on-future", effort, &messages, &[], None)
-                    .unwrap();
+            let request = anthropic_messages_request(
+                "claude-always-on-future",
+                effort,
+                &messages,
+                &[],
+                None,
+                &unknown_levels,
+            )
+            .unwrap();
             assert_eq!(request["max_tokens"], 128000);
             assert!(request.get("thinking").is_none());
             assert!(request.get("output_config").is_none());
             assert!(!request.to_string().contains("disabled"));
         }
 
+        let opus_levels = test_thinking_levels(BackendKind::AnthropicMessages, "claude-opus-4-6");
         for (effort, wire_effort) in [
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
             (ReasoningEffort::Xhigh, "max"),
         ] {
-            let request =
-                anthropic_messages_request("claude-opus-4-6", Some(effort), &messages, &[], None)
-                    .unwrap();
+            let request = anthropic_messages_request(
+                "claude-opus-4-6",
+                Some(effort),
+                &messages,
+                &[],
+                None,
+                &opus_levels,
+            )
+            .unwrap();
             assert_eq!(request["thinking"], json!({"type": "adaptive"}));
             assert_eq!(request["output_config"], json!({"effort": wire_effort}));
         }
@@ -1381,6 +1515,7 @@ mod tests {
                 },
             }],
             Some("1h"),
+            &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
         )
         .unwrap();
 
@@ -1407,6 +1542,7 @@ mod tests {
             }],
             &[],
             None,
+            &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
         )
         .unwrap();
 
@@ -1438,14 +1574,38 @@ mod tests {
             },
         ];
 
-        let openai = openai_responses_request("model", None, &messages, &[]);
+        let openai = openai_responses_request(
+            "model",
+            None,
+            &messages,
+            &[],
+            &test_thinking_levels(BackendKind::OpenAiResponses, "model"),
+        );
         assert_eq!(openai["input"], serde_json::to_value(&messages).unwrap());
         assert!(openai.get("tools").is_none());
 
         for request in [
-            fireworks_chat_request("model", None, &messages, &[]),
-            together_chat_request("model", None, &messages, &[]),
-            deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]),
+            fireworks_chat_request(
+                "model",
+                None,
+                &messages,
+                &[],
+                &test_thinking_levels(BackendKind::FireworksChat, "model"),
+            ),
+            together_chat_request(
+                "model",
+                None,
+                &messages,
+                &[],
+                &test_thinking_levels(BackendKind::TogetherChat, "model"),
+            ),
+            deepseek_chat_request(
+                "deepseek-v4-pro",
+                None,
+                &messages,
+                &[],
+                &test_thinking_levels(BackendKind::DeepSeekChat, "deepseek-v4-pro"),
+            ),
         ] {
             assert_eq!(
                 request["messages"],
@@ -1454,9 +1614,15 @@ mod tests {
             assert!(request.get("tools").is_none());
         }
 
-        let anthropic =
-            anthropic_messages_request("claude-sonnet-4-6", None, &messages, &[], Some("1h"))
-                .unwrap();
+        let anthropic = anthropic_messages_request(
+            "claude-sonnet-4-6",
+            None,
+            &messages,
+            &[],
+            Some("1h"),
+            &test_thinking_levels(BackendKind::AnthropicMessages, "claude-sonnet-4-6"),
+        )
+        .unwrap();
         assert_eq!(anthropic["system"][0]["text"], "primary\n\nagents");
         assert_eq!(anthropic["messages"].as_array().unwrap().len(), 3);
         assert_eq!(anthropic["messages"][0]["content"], "historical checkpoint");
@@ -1548,6 +1714,7 @@ mod tests {
             ],
             &[],
             None,
+            &test_thinking_levels(BackendKind::AnthropicMessages, "claude-opus-4-6"),
         )
         .unwrap();
 
@@ -1574,7 +1741,8 @@ mod tests {
             reasoning_details: None,
             tool_calls: None,
         }];
-        let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]);
+        let levels = test_thinking_levels(BackendKind::DeepSeekChat, "deepseek-v4-pro");
+        let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[], &levels);
         assert!(absent.get("thinking").is_none());
         assert!(absent.get("reasoning_effort").is_none());
         assert_eq!(
@@ -1587,15 +1755,19 @@ mod tests {
             Some(ReasoningEffort::None),
             &messages,
             &[],
+            &levels,
         );
         assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
         assert!(disabled.get("reasoning_effort").is_none());
 
+        // The wire tier `max` for `xhigh` comes from the catalog map, not
+        // from adapter code (requests.rs carries no "max" literal).
         for (effort, wire_effort) in [
             (ReasoningEffort::High, "high"),
             (ReasoningEffort::Xhigh, "max"),
         ] {
-            let request = deepseek_chat_request("deepseek-v4-pro", Some(effort), &messages, &[]);
+            let request =
+                deepseek_chat_request("deepseek-v4-pro", Some(effort), &messages, &[], &levels);
             assert_eq!(request["thinking"], json!({"type": "enabled"}));
             assert_eq!(request["reasoning_effort"], wire_effort);
         }
@@ -1607,12 +1779,19 @@ mod tests {
             content: "hi".into(),
         }];
 
-        let fireworks_absent = fireworks_chat_request("model", None, &messages, &[]);
+        let fireworks_levels = test_thinking_levels(BackendKind::FireworksChat, "model");
+        let fireworks_absent =
+            fireworks_chat_request("model", None, &messages, &[], &fireworks_levels);
         assert!(fireworks_absent.get("reasoning_effort").is_none());
         assert!(fireworks_absent.get("reasoning_history").is_none());
         assert!(fireworks_absent.get("tools").is_none());
-        let fireworks_none =
-            fireworks_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
+        let fireworks_none = fireworks_chat_request(
+            "model",
+            Some(ReasoningEffort::None),
+            &messages,
+            &[],
+            &fireworks_levels,
+        );
         assert_eq!(fireworks_none["reasoning_effort"], "none");
         assert_eq!(fireworks_none["reasoning_history"], "disabled");
         for effort in [
@@ -1620,18 +1799,26 @@ mod tests {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
         ] {
-            let request = fireworks_chat_request("model", Some(effort), &messages, &[]);
+            let request =
+                fireworks_chat_request("model", Some(effort), &messages, &[], &fireworks_levels);
             assert_eq!(request["reasoning_effort"], effort.as_str());
             assert_eq!(request["reasoning_history"], "preserved");
         }
 
-        let together_absent = together_chat_request("model", None, &messages, &[]);
+        let together_levels = test_thinking_levels(BackendKind::TogetherChat, "model");
+        let together_absent =
+            together_chat_request("model", None, &messages, &[], &together_levels);
         assert!(together_absent.get("reasoning").is_none());
         assert!(together_absent.get("reasoning_effort").is_none());
         assert!(together_absent.get("chat_template_kwargs").is_none());
         assert!(together_absent.get("tools").is_none());
-        let together_none =
-            together_chat_request("model", Some(ReasoningEffort::None), &messages, &[]);
+        let together_none = together_chat_request(
+            "model",
+            Some(ReasoningEffort::None),
+            &messages,
+            &[],
+            &together_levels,
+        );
         assert_eq!(together_none["reasoning"], json!({"enabled": false}));
         assert!(together_none.get("reasoning_effort").is_none());
         for effort in [
@@ -1639,7 +1826,8 @@ mod tests {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
         ] {
-            let request = together_chat_request("model", Some(effort), &messages, &[]);
+            let request =
+                together_chat_request("model", Some(effort), &messages, &[], &together_levels);
             assert_eq!(request["reasoning"], json!({"enabled": true}));
             assert_eq!(request["reasoning_effort"], effort.as_str());
             assert_eq!(
@@ -1648,7 +1836,8 @@ mod tests {
             );
         }
 
-        let openai_absent = openai_responses_request("model", None, &messages, &[]);
+        let openai_levels = test_thinking_levels(BackendKind::OpenAiResponses, "model");
+        let openai_absent = openai_responses_request("model", None, &messages, &[], &openai_levels);
         assert!(openai_absent.get("reasoning").is_none());
         assert!(openai_absent.get("tools").is_none());
 
@@ -1660,13 +1849,13 @@ mod tests {
                 parameters: json!({"type": "object"}),
             },
         }];
-        assert!(fireworks_chat_request("model", None, &messages, &tools)
+        assert!(fireworks_chat_request("model", None, &messages, &tools, &fireworks_levels)
             .get("tools")
             .is_some());
-        assert!(together_chat_request("model", None, &messages, &tools)
+        assert!(together_chat_request("model", None, &messages, &tools, &together_levels)
             .get("tools")
             .is_some());
-        assert!(openai_responses_request("model", None, &messages, &tools)
+        assert!(openai_responses_request("model", None, &messages, &tools, &openai_levels)
             .get("tools")
             .is_some());
         for effort in [
@@ -1677,7 +1866,8 @@ mod tests {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ] {
-            let request = openai_responses_request("model", Some(effort), &messages, &[]);
+            let request =
+                openai_responses_request("model", Some(effort), &messages, &[], &openai_levels);
             assert_eq!(request["reasoning"]["effort"], effort.as_str());
         }
     }

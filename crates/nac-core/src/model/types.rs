@@ -114,8 +114,9 @@ pub struct EffectiveModelSettings {
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) api_key_env: Option<String>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
-    /// Catalog metadata resolved at construction. Adapters ignore it until
-    /// later stages (S3 cost, S4 effort maps, S6 dispatch).
+    /// Catalog metadata resolved at construction. Drives per-response cost
+    /// (S3) and effort validation/translation (S4); dispatch consolidation
+    /// arrives in S6.
     pub(crate) resolved: catalog::ModelMetadata,
 }
 

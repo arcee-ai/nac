@@ -258,9 +258,11 @@ pub async fn send_responses(
     reasoning_effort: Option<ReasoningEffort>,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    thinking_levels: &ThinkingLevelMap,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
-    let request = codex_responses_request(model, reasoning_effort, &messages, &tools);
+    let request =
+        codex_responses_request(model, reasoning_effort, &messages, &tools, thinking_levels);
     let auth = fresh_auth(client).await?;
 
     match post_codex_json_with_retry(client, &url, &request, &auth).await {
@@ -486,6 +488,7 @@ fn codex_responses_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let (instructions, input) = codex_instructions_and_input(messages);
     let mut request = json!({
@@ -515,7 +518,7 @@ fn codex_responses_request(
 
     if let Some(effort) = reasoning_effort {
         request["reasoning"] = json!({
-            "effort": effort.as_str(),
+            "effort": validated_wire_effort(thinking_levels, effort),
         });
         request["include"] = json!(["reasoning.encrypted_content"]);
     }
@@ -1650,7 +1653,9 @@ mod tests {
                 content: "hello".to_string(),
             },
         ];
-        let absent = codex_responses_request("gpt-5.5", None, &messages, &[]);
+        let levels = catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.5")
+            .thinking_level_map;
+        let absent = codex_responses_request("gpt-5.5", None, &messages, &[], &levels);
         assert_eq!(absent["model"], "gpt-5.5");
         assert_eq!(
             absent["instructions"],
@@ -1678,6 +1683,7 @@ mod tests {
                     parameters: json!({"type": "object"}),
                 },
             }],
+            &levels,
         );
         assert!(with_tools.get("tools").is_some());
         assert_eq!(with_tools["tool_choice"], "auto");
@@ -1691,10 +1697,19 @@ mod tests {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ] {
-            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[]);
+            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[], &levels);
             assert_eq!(request["reasoning"]["effort"], effort.as_str());
             assert_eq!(request["include"][0], "reasoning.encrypted_content");
         }
+
+        // The wire value comes from the passed catalog map, not adapter code.
+        let custom = ThinkingLevelMap(std::collections::BTreeMap::from([(
+            ReasoningEffort::Xhigh,
+            Some("tier-four".to_string()),
+        )]));
+        let request =
+            codex_responses_request("gpt-5.5", Some(ReasoningEffort::Xhigh), &messages, &[], &custom);
+        assert_eq!(request["reasoning"]["effort"], "tier-four");
     }
 
     #[test]

@@ -1,5 +1,20 @@
 use super::*;
 
+/// Wire value for an effort level that passed catalog validation (S4).
+/// `EffectiveModelSettings` construction rejects unsupported levels, so a
+/// missing map entry here means validation was bypassed — a bug.
+pub(super) fn validated_wire_effort(
+    thinking_levels: &ThinkingLevelMap,
+    effort: ReasoningEffort,
+) -> &str {
+    thinking_levels.wire_value(effort).unwrap_or_else(|| {
+        panic!(
+            "reasoning effort '{}' passed validation without a catalog wire value",
+            effort.as_str()
+        )
+    })
+}
+
 pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
     match message {
         Message::System { content } => json!({
@@ -54,6 +69,7 @@ pub(super) fn fireworks_chat_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let mut request = json!({
         "model": model,
@@ -73,7 +89,7 @@ pub(super) fn fireworks_chat_request(
             request["reasoning_history"] = json!("disabled");
         }
         Some(effort) => {
-            request["reasoning_effort"] = json!(effort.as_str());
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
             request["reasoning_history"] = json!("preserved");
         }
     }
@@ -85,6 +101,7 @@ pub(super) fn together_chat_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let mut request = json!({
         "model": model,
@@ -104,7 +121,7 @@ pub(super) fn together_chat_request(
         }
         Some(effort) => {
             request["reasoning"] = json!({"enabled": true});
-            request["reasoning_effort"] = json!(effort.as_str());
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
             request["chat_template_kwargs"] = json!({"clear_thinking": false});
         }
     }
@@ -116,6 +133,7 @@ pub(super) fn deepseek_chat_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let mut request = json!({
         "model": model,
@@ -129,20 +147,12 @@ pub(super) fn deepseek_chat_request(
         Some(ReasoningEffort::None) => {
             request["thinking"] = json!({"type": "disabled"});
         }
-        Some(ReasoningEffort::High) => {
+        Some(effort) => {
             request["thinking"] = json!({"type": "enabled"});
-            request["reasoning_effort"] = json!("high");
+            // Wire tiers come from the catalog map (DeepSeek's top tier is
+            // the wire value `max` for NAC's portable `xhigh`).
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
         }
-        Some(ReasoningEffort::Xhigh) => {
-            request["thinking"] = json!({"type": "enabled"});
-            // DeepSeek names its top wire-level tier `max`; NAC's portable
-            // public enum names the equivalent tier `xhigh`.
-            request["reasoning_effort"] = json!("max");
-        }
-        Some(unsupported) => unreachable!(
-            "EffectiveModelSettings rejected unsupported DeepSeek effort {}",
-            unsupported.as_str()
-        ),
     }
 
     if !tools.is_empty() {
@@ -157,6 +167,7 @@ pub(super) fn openai_responses_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let mut request = json!({
         "model": model,
@@ -174,7 +185,7 @@ pub(super) fn openai_responses_request(
         request["parallel_tool_calls"] = json!(true);
     }
     if let Some(effort) = reasoning_effort {
-        request["reasoning"] = json!({"effort": effort.as_str()});
+        request["reasoning"] = json!({"effort": validated_wire_effort(thinking_levels, effort)});
         request["include"] = json!(["reasoning.encrypted_content"]);
     }
     request

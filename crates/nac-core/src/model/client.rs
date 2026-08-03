@@ -151,7 +151,8 @@ pub struct ModelClient {
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
     /// Catalog metadata resolved with the effective settings; drives
-    /// per-response cost (S3) and later stages (S4 effort maps, S6 dispatch).
+    /// per-response cost (S3), effort wire translation (S4) and, in S6,
+    /// dispatch.
     resolved_model: ModelMetadata,
 }
 
@@ -245,6 +246,7 @@ impl ModelClient {
                     self.reasoning_effort,
                     messages,
                     tools,
+                    &self.resolved_model.thinking_level_map,
                 )
                 .await?;
                 Ok(self.with_usage_cost(response))
@@ -293,7 +295,13 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = fireworks_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
+        let request = fireworks_chat_request(
+            &self.model,
+            self.reasoning_effort,
+            &messages,
+            &tools,
+            &self.resolved_model.thinking_level_map,
+        );
 
         let value = self.post_json_with_retry(&url, &request).await?;
         Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
@@ -305,7 +313,13 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = together_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
+        let request = together_chat_request(
+            &self.model,
+            self.reasoning_effort,
+            &messages,
+            &tools,
+            &self.resolved_model.thinking_level_map,
+        );
 
         let value = self.post_json_with_retry(&url, &request).await?;
         Ok(self.with_usage_cost(parse_together_chat_response(&value, &url)?))
@@ -353,7 +367,13 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = deepseek_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
+        let request = deepseek_chat_request(
+            &self.model,
+            self.reasoning_effort,
+            &messages,
+            &tools,
+            &self.resolved_model.thinking_level_map,
+        );
 
         let value = self.post_json_with_retry(&url, &request).await?;
         Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
@@ -365,8 +385,13 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/responses", self.base_url);
-        let request =
-            openai_responses_request(&self.model, self.reasoning_effort, &messages, &tools);
+        let request = openai_responses_request(
+            &self.model,
+            self.reasoning_effort,
+            &messages,
+            &tools,
+            &self.resolved_model.thinking_level_map,
+        );
 
         let value = self.post_json_with_retry(&url, &request).await?;
         Ok(self.with_usage_cost(parse_openai_responses_response(&value, &url)?))
@@ -384,6 +409,7 @@ impl ModelClient {
             &messages,
             &tools,
             self.cache_ttl,
+            &self.resolved_model.thinking_level_map,
         )?;
 
         let value = self.post_anthropic_json_with_retry(&url, &request).await?;

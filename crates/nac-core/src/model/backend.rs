@@ -18,48 +18,32 @@ fn api_key_backend(backend: BackendKind) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnthropicReasoningCapabilities {
-    /// Model family supports adaptive thinking and low/medium/high effort.
-    Adaptive,
-    /// Model family additionally supports Anthropic's wire-level `max` effort.
-    AdaptiveWithMax,
-    /// The configured model is not known to support this request schema.
-    NoneOnly,
-}
-
-/// Match a documented Anthropic family name or one of its dated snapshots.
-///
-/// Deliberately do not treat arbitrary suffixes (including `-latest`) as known:
-/// new aliases and older models must be reviewed before NAC emits thinking
-/// controls for them.
-fn anthropic_model_family(model: &str, family: &str) -> bool {
-    model == family
-        || model
-            .strip_prefix(family)
-            .and_then(|suffix| suffix.strip_prefix('-'))
-            .is_some_and(|snapshot| {
-                snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())
-            })
-}
-
-fn anthropic_reasoning_capabilities(model: &str) -> AnthropicReasoningCapabilities {
-    if anthropic_model_family(model, "claude-opus-4-6") {
-        AnthropicReasoningCapabilities::AdaptiveWithMax
-    } else if anthropic_model_family(model, "claude-sonnet-4-6") {
-        AnthropicReasoningCapabilities::Adaptive
-    } else {
-        // Older and unknown models may use a different thinking schema (for
-        // example, manual budget_tokens) or may keep thinking always on.
-        AnthropicReasoningCapabilities::NoneOnly
+/// Human-readable supported-effort list for validation errors, derived from
+/// the model's catalog thinking map ("none, high, or xhigh"; "none only";
+/// "no explicit effort levels" for an empty map).
+fn supported_effort_values(map: &ThinkingLevelMap) -> String {
+    let supported = map
+        .0
+        .iter()
+        .filter(|(_, wire)| wire.is_some())
+        .map(|(effort, _)| effort.as_str())
+        .collect::<Vec<_>>();
+    match supported.as_slice() {
+        [] => "no explicit effort levels".to_string(),
+        [only] => format!("{only} only"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
     }
 }
 
-/// Validate effort values against the selected backend and model request schema.
+/// Validate effort values against the model's catalog thinking map (S4).
 ///
-/// No backend receives an application-selected default. Anthropic is checked at
-/// model-family granularity because adaptive thinking and effort tiers are not
-/// portable across Claude generations.
+/// Known models resolve to their catalog entry (dated snapshots resolve
+/// through their family entry); unknown models resolve to the provider's
+/// `_default` entry, which encodes the conservative pre-S4 validation
+/// matrix, so unknown models keep the historical conservative rejection.
+/// No backend receives an application-selected default, and an explicitly
+/// configured effort is rejected — never clamped — when the map does not
+/// support it.
 pub fn validate_model_reasoning_effort(
     backend: BackendKind,
     model: &str,
@@ -69,62 +53,18 @@ pub fn validate_model_reasoning_effort(
         return Ok(());
     };
 
-    let supported = match backend {
-        BackendKind::DeepSeekChat => matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
-        ),
-        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        ),
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
-        BackendKind::AnthropicMessages => match anthropic_reasoning_capabilities(model) {
-            // `none` means omission on Anthropic. It is safe for every family,
-            // including models whose adaptive thinking is always on.
-            _ if effort == ReasoningEffort::None => true,
-            AnthropicReasoningCapabilities::AdaptiveWithMax => matches!(
-                effort,
-                ReasoningEffort::Low
-                    | ReasoningEffort::Medium
-                    | ReasoningEffort::High
-                    | ReasoningEffort::Xhigh
-            ),
-            AnthropicReasoningCapabilities::Adaptive => matches!(
-                effort,
-                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
-            ),
-            AnthropicReasoningCapabilities::NoneOnly => false,
-        },
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
-    };
-    if supported {
+    let map = &catalog::resolve(backend, model).thinking_level_map;
+    if map.is_supported(effort) {
         return Ok(());
     }
 
+    let allowed = supported_effort_values(map);
     if backend == BackendKind::AnthropicMessages {
-        let allowed = match anthropic_reasoning_capabilities(model) {
-            AnthropicReasoningCapabilities::AdaptiveWithMax => "none, low, medium, high, or xhigh",
-            AnthropicReasoningCapabilities::Adaptive => "none, low, medium, or high",
-            AnthropicReasoningCapabilities::NoneOnly => "none only",
-        };
         return Err(model_configuration_error(format!(
             "invalid model configuration: reasoning effort '{}' is not supported by backend '{}' for Anthropic model '{}'; supported values: {}",
             effort.as_str(), backend, model, allowed
         )));
     }
-
-    let allowed = match backend {
-        BackendKind::DeepSeekChat => "none, high, or xhigh",
-        BackendKind::FireworksChat | BackendKind::TogetherChat => "none, low, medium, or high",
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => "no explicit effort levels",
-        BackendKind::OpenAiResponses
-        | BackendKind::ChatGptCodexResponses
-        | BackendKind::AnthropicMessages => unreachable!(),
-    };
     Err(model_configuration_error(format!(
         "invalid model configuration: reasoning effort '{}' is not supported by backend '{}'; supported values: {}",
         effort.as_str(), backend, allowed

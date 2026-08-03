@@ -2,6 +2,7 @@ use super::*;
 use crate::model::{validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort};
 use crate::TEST_ENV_LOCK;
 use sha2::Digest;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,6 +64,9 @@ impl Drop for EnvGuard {
             }
         }
         let _ = std::fs::remove_dir_all(&self.home);
+        // No-op for tests that never opted in; panic-safe reset for the
+        // ones that enabled the machine-state layers.
+        set_env_layers_for_test(false);
         reset_for_test();
     }
 }
@@ -108,6 +112,65 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
     }
 }
 
+/// Independent transcription of the pre-S4 `backend.rs` validation matrix.
+/// Since S4, `validate_model_reasoning_effort` itself reads the catalog
+/// maps; the matrix guards compare against this hand-written reference so
+/// they keep proving the data reproduces the historical behavior instead of
+/// vacuously comparing the map against itself.
+fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
+    match provider {
+        BackendKind::DeepSeekChat => matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
+        ),
+        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        ),
+        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
+        BackendKind::AnthropicMessages => {
+            // `none` (omission) was safe for every family, including models
+            // whose adaptive thinking is always on.
+            if effort == ReasoningEffort::None {
+                return true;
+            }
+            if pre_s4_anthropic_family(model, "claude-opus-4-6") {
+                matches!(
+                    effort,
+                    ReasoningEffort::Low
+                        | ReasoningEffort::Medium
+                        | ReasoningEffort::High
+                        | ReasoningEffort::Xhigh
+                )
+            } else if pre_s4_anthropic_family(model, "claude-sonnet-4-6") {
+                matches!(
+                    effort,
+                    ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
+                )
+            } else {
+                // Older and unknown models stayed conservative.
+                false
+            }
+        }
+        BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
+    }
+}
+
+/// The pre-S4 `backend.rs::anthropic_model_family` rule: exact family name
+/// or a `-YYYYMMDD` dated snapshot only (never `-latest` or other suffixes).
+fn pre_s4_anthropic_family(model: &str, family: &str) -> bool {
+    model == family
+        || model
+            .strip_prefix(family)
+            .and_then(|suffix| suffix.strip_prefix('-'))
+            .is_some_and(|snapshot| {
+                snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())
+            })
+}
+
 #[test]
 fn seed_maps_transcribe_the_validation_matrix_exactly() {
     let models = [
@@ -124,10 +187,17 @@ fn seed_maps_transcribe_the_validation_matrix_exactly() {
         for model in models {
             let metadata = resolve(provider, model);
             for effort in ALL_EFFORTS {
-                let matrix =
-                    validate_model_reasoning_effort(provider, model, Some(effort)).is_ok();
+                let matrix = pre_s4_matrix_accepts(provider, model, effort);
                 let catalog = metadata.thinking_level_map.is_supported(effort);
                 assert_eq!(catalog, matrix, "{provider} {model} {}", effort.as_str());
+                // S4: validation itself is map-driven; it must agree with
+                // the independent matrix transcription.
+                assert_eq!(
+                    validate_model_reasoning_effort(provider, model, Some(effort)).is_ok(),
+                    matrix,
+                    "{provider} {model} {}",
+                    effort.as_str()
+                );
             }
         }
     }
@@ -341,9 +411,12 @@ fn generated_entries_satisfy_catalog_invariants() {
     assert_eq!(entry_count, 117, "models.dev snapshot model count drifted");
 }
 
-/// The S4 guard, strengthened: every generated catalog entry — not just the
-/// S0 spot-check models — must preserve the `backend.rs` validation matrix
-/// exactly, so rewiring validation onto catalog maps is behavior-neutral.
+/// The S4 guard: every generated catalog entry — not just the S0 spot-check
+/// models — must preserve the pre-S4 validation matrix exactly, proving that
+/// rewiring validation onto catalog maps was behavior-neutral for every
+/// matrix-covered model. Compared against the independent
+/// `pre_s4_matrix_accepts` transcription: since S4, validation reads the
+/// same maps, so validating against itself would prove nothing.
 #[test]
 fn every_generated_entry_preserves_the_validation_matrix() {
     // Holds TEST_ENV_LOCK for the same reason as
@@ -351,20 +424,201 @@ fn every_generated_entry_preserves_the_validation_matrix() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     // Iterate the guard's entries directly: calling `resolve()` while
     // holding the read guard would re-acquire the RwLock and can deadlock
-    // against a concurrent `reset_for_test` writer.
+    // against a concurrent `reset_for_test` writer. (`validate_model_...`
+    // re-resolves through the global catalog; that nested read is safe here
+    // because every writer is serialized by TEST_ENV_LOCK, which this test
+    // holds.)
     let catalog = current();
     for (provider, provider_catalog) in &catalog.providers {
         for (id, metadata) in &provider_catalog.models {
             assert_eq!(metadata.id, *id, "{provider}/{id}");
             assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
             for effort in ALL_EFFORTS {
-                let matrix =
-                    validate_model_reasoning_effort(*provider, id, Some(effort)).is_ok();
+                let matrix = pre_s4_matrix_accepts(*provider, id, effort);
                 let supported = metadata.thinking_level_map.is_supported(effort);
                 assert_eq!(supported, matrix, "{provider}/{id} {}", effort.as_str());
+                assert_eq!(
+                    validate_model_reasoning_effort(*provider, id, Some(effort)).is_ok(),
+                    matrix,
+                    "{provider}/{id} {}",
+                    effort.as_str()
+                );
             }
         }
     }
+}
+
+#[test]
+fn thinking_level_map_lookup_semantics() {
+    let map = ThinkingLevelMap(BTreeMap::from([
+        (ReasoningEffort::None, Some("none".to_string())),
+        (ReasoningEffort::High, Some("max".to_string())),
+        (ReasoningEffort::Low, None),
+    ]));
+    // present + Some = supported, with the wire value.
+    assert_eq!(map.wire_value(ReasoningEffort::High), Some("max"));
+    assert!(map.is_supported(ReasoningEffort::High));
+    assert!(!map.is_explicitly_unsupported(ReasoningEffort::High));
+    // present + None = explicitly unsupported (documents always-thinking
+    // models); distinct from absent.
+    assert_eq!(map.wire_value(ReasoningEffort::Low), None);
+    assert!(!map.is_supported(ReasoningEffort::Low));
+    assert!(map.is_explicitly_unsupported(ReasoningEffort::Low));
+    // absent = unsupported, but not explicitly.
+    assert_eq!(map.wire_value(ReasoningEffort::Xhigh), None);
+    assert!(!map.is_supported(ReasoningEffort::Xhigh));
+    assert!(!map.is_explicitly_unsupported(ReasoningEffort::Xhigh));
+}
+
+#[test]
+fn validation_resolves_dated_snapshot_families_from_catalog_data() {
+    // No code names this snapshot: it resolves through the family entry's
+    // data map (the generic `-YYYYMMDD` rule over catalog entries).
+    validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-opus-4-6-20260301",
+        Some(ReasoningEffort::Xhigh),
+    )
+    .expect("dated snapshot inherits the family map from catalog data");
+    let metadata = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6-20260301");
+    assert_eq!(
+        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        Some("max")
+    );
+
+    // The sonnet family caps at high, through the same data path.
+    validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-sonnet-4-6-20260217",
+        Some(ReasoningEffort::High),
+    )
+    .expect("sonnet dated snapshot accepts high");
+    let error = validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-sonnet-4-6-20260217",
+        Some(ReasoningEffort::Xhigh),
+    )
+    .expect_err("the sonnet family map has no xhigh tier");
+    assert!(
+        error.to_string().contains("claude-sonnet-4-6-20260217"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn unknown_models_keep_the_conservative_provider_default_rejection() {
+    // Unknown Anthropic models: only `none` (omission) is accepted.
+    validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-never-seen-2099",
+        Some(ReasoningEffort::None),
+    )
+    .expect("none stays safe for unknown Anthropic models");
+    for effort in [
+        ReasoningEffort::Minimal,
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+        ReasoningEffort::Xhigh,
+    ] {
+        validate_model_reasoning_effort(
+            BackendKind::AnthropicMessages,
+            "claude-never-seen-2099",
+            Some(effort),
+        )
+        .expect_err("unknown Anthropic models stay conservative");
+    }
+
+    // Unknown deepseek models keep the provider default map.
+    validate_model_reasoning_effort(
+        BackendKind::DeepSeekChat,
+        "deepseek-never-seen",
+        Some(ReasoningEffort::Xhigh),
+    )
+    .expect("the provider default allows xhigh");
+    validate_model_reasoning_effort(
+        BackendKind::DeepSeekChat,
+        "deepseek-never-seen",
+        Some(ReasoningEffort::Low),
+    )
+    .expect_err("the provider default rejects low");
+
+    // Arcee rejects every explicit effort, including none.
+    validate_model_reasoning_effort(
+        BackendKind::ArceeApi,
+        "arcee-never-seen",
+        Some(ReasoningEffort::None),
+    )
+    .expect_err("arcee accepts no explicit effort levels");
+}
+
+#[test]
+fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
+    // The S4 unlock, end to end: a `$NAC_HOME/models.json` override relaxes
+    // a model's effort levels; validation and the adapter wire value both
+    // follow the overridden data. Pre-S4, the hardcoded matrix rejected
+    // every non-none effort for claude-haiku-4-5.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let env = EnvGuard::new("s4-unlock");
+    std::fs::write(
+        env.home.join("models.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "overrides": [
+                {
+                    "provider": "anthropic-messages",
+                    "model": "claude-haiku-4-5",
+                    "set": { "thinking_level_map": { "none": "none", "high": "high" } }
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    set_env_layers_for_test(true);
+    reset_for_test();
+
+    validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-haiku-4-5",
+        Some(ReasoningEffort::High),
+    )
+    .expect("the user override relaxes validation");
+    let error = validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-haiku-4-5",
+        Some(ReasoningEffort::Xhigh),
+    )
+    .expect_err("levels outside the override map stay rejected");
+    assert!(error.to_string().contains("claude-haiku-4-5"), "{error:#}");
+    assert!(error.to_string().contains("none, or high"), "{error:#}");
+
+    // EffectiveModelSettings construction accepts the relaxed level and
+    // carries the overridden map into the client-facing metadata.
+    let settings = EffectiveModelSettings::new(
+        BackendKind::AnthropicMessages,
+        "claude-haiku-4-5".to_string(),
+        "https://api.anthropic.com".to_string(),
+        Some(ReasoningEffort::High),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect("the relaxed effort constructs effective settings");
+    assert_eq!(settings.resolved.source, ModelSource::UserOverride);
+
+    // The adapter emits the override's wire value.
+    let request = crate::model::anthropic::anthropic_messages_request(
+        "claude-haiku-4-5",
+        Some(ReasoningEffort::High),
+        &[crate::types::Message::User {
+            content: "hi".to_string(),
+        }],
+        &[],
+        None,
+        &settings.resolved.thinking_level_map,
+    )
+    .unwrap();
+    assert_eq!(request["thinking"], serde_json::json!({"type": "adaptive"}));
+    assert_eq!(request["output_config"], serde_json::json!({"effort": "high"}));
 }
 
 #[test]

@@ -16,8 +16,9 @@
 //! (pi's buildFallbackModel pattern). Resolution is synchronous and
 //! local-only — no network, no credentials — so the session picker and
 //! resume paths stay credential-free; the overlay refresh only ever runs
-//! as a fire-and-forget task spawned from server/CLI startup. Later stages
-//! rewire validation (S4) and adapter dispatch (S6) onto this metadata.
+//! as a fire-and-forget task spawned from server/CLI startup. Validation
+//! (S4) and adapter effort translation read these maps; adapter dispatch
+//! consolidation (S6) follows.
 
 use crate::model::BackendKind;
 use std::collections::BTreeMap;
@@ -163,10 +164,10 @@ impl ModelCatalog {
     }
 
     /// Resolve metadata for `model` on `provider`: exact entry, then a
-    /// dated-snapshot family match (`name-YYYYMMDD` → `name`, mirroring
-    /// `backend.rs::anthropic_model_family`), then a clone of the provider's
-    /// `_default` entry with the id swapped in (pi's buildFallbackModel
-    /// pattern).
+    /// dated-snapshot family match (`name-YYYYMMDD` → `name`, the pre-S4
+    /// `backend.rs` Anthropic family rule, now generic), then a clone of the
+    /// provider's `_default` entry with the id swapped in (pi's
+    /// buildFallbackModel pattern).
     pub fn resolve(&self, provider: BackendKind, model: &str) -> ModelMetadata {
         let Some(catalog) = self.providers.get(&provider) else {
             // Unreachable while every provider ships a seed `_default` entry;
@@ -195,8 +196,9 @@ impl ModelCatalog {
     }
 }
 
-/// Strip a `-YYYYMMDD` dated-snapshot suffix, the family-matching rule in
-/// `backend.rs::anthropic_model_family`.
+/// Strip a `-YYYYMMDD` dated-snapshot suffix — the family-matching rule
+/// `backend.rs` used for Anthropic families before S4, now generic over
+/// every provider's catalog entries.
 pub(super) fn dated_snapshot_family(model: &str) -> Option<&str> {
     let (base, snapshot) = model.rsplit_once('-')?;
     (snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())).then_some(base)

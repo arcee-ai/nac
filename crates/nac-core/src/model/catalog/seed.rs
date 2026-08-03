@@ -1,11 +1,11 @@
 //! Hand-written seed catalog.
 //!
-//! The per-provider `_default` entries transcribe the validation matrix in
-//! `backend.rs` (`validate_model_reasoning_effort`) into data; the matrix
-//! stays authoritative until S4 rewires validation onto these maps. Context
-//! windows, max tokens and cost rates deliberately keep the conservative
-//! fallbacks — real values arrive with the generated models.dev baseline in
-//! S1.
+//! The per-provider `_default` entries transcribe the pre-S4 validation
+//! matrix into data; since S4, `backend.rs::validate_model_reasoning_effort`
+//! resolves these maps (unknown models keep the conservative matrix
+//! behavior). Context windows, max tokens and cost rates deliberately keep
+//! the conservative fallbacks — real values arrive with the generated
+//! models.dev baseline in S1.
 
 use super::{
     api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelMetadata, ModelSource,
@@ -169,8 +169,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
         &[],
     );
     register(
-        // Unknown Anthropic models stay conservative (NoneOnly), matching
-        // `anthropic_reasoning_capabilities`.
+        // Unknown Anthropic models stay conservative (none-only), matching
+        // the pre-S4 validation matrix.
         entry(
             BackendKind::AnthropicMessages,
             PROVIDER_DEFAULT_MODEL_ID,
