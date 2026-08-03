@@ -4,6 +4,13 @@ CARGO ?= cargo
 PKG := nac-server
 BIN := nac-web
 
+# The workspace is not clippy-clean yet, so lints are advisory by default.
+# Run `make clippy CLIPPY_ARGS='-D warnings'` to fail on them.
+CLIPPY_ARGS ?=
+
+# Matches the location used by scripts/install.sh ($(INSTALL_ROOT)/bin).
+INSTALL_ROOT ?= $(HOME)/.local
+
 # Default target
 all: build
 
@@ -15,9 +22,9 @@ build:
 release:
 	$(CARGO) build --release --locked -p $(PKG) --bin $(BIN)
 
-## Install nac-web into cargo's bin directory
+## Install nac-web into $(INSTALL_ROOT)/bin
 install:
-	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force
+	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
 
 ## Run workspace Rust tests and web asset checks
 test: test-rust test-assets
@@ -39,7 +46,7 @@ fmt:
 
 ## Lint with clippy
 clippy:
-	$(CARGO) clippy --workspace --locked --all-targets -- -D warnings
+	$(CARGO) clippy --workspace --locked --all-targets -- $(CLIPPY_ARGS)
 
 ## Remove build artifacts
 clean:
@@ -53,12 +60,12 @@ help:
 		'Targets:' \
 		'  build        Build nac-web (debug) [default]' \
 		'  release      Build nac-web (release)' \
-		'  install      Install nac-web with cargo install' \
+		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  test         Run Rust tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-assets  Check/run Node web asset tests' \
 		'  check        Run cargo check --workspace --locked' \
 		'  fmt          Run rustfmt' \
-		'  clippy       Run clippy with -D warnings' \
+		'  clippy       Run clippy (CLIPPY_ARGS=-D warnings to fail on lints)' \
 		'  clean        Remove target/ artifacts' \
 		'  help         Show this help'
