@@ -418,12 +418,13 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   height: calc(100dvh - 72px);
   display: grid;
   grid-template-columns: min(780px, 48vw) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
 .overview-rail {
-  grid-row: 1 / span 2;
+  grid-row: 1;
+  grid-column: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -462,7 +463,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .expand-button svg { width: 13px; height: 13px; stroke-width: 1.6; }
 
 
-.thread-canvas { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+.thread-canvas { grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 
 .thread-board {
   min-height: 0;
@@ -566,7 +567,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 
 .session-layout.is-focused > .overview-rail,
 .session-layout.is-focused > .thread-canvas { display: none; }
-.session-layout.is-focused > .composer { grid-column: 1 / -1; }
 
 .focus-panel {
   grid-row: 1;
@@ -846,19 +846,19 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .composer {
   --composer-control-height: 40px;
   position: relative;
-  grid-column: 2;
+  flex: none;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0,1fr) auto;
+  grid-template-columns: minmax(0,1fr) auto;
   align-items: end;
   gap: 8px;
-  padding: 10px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
 
 .composer textarea {
-  grid-column: 2;
+  grid-column: 1;
   width: 100%;
   max-height: 134px;
   min-height: var(--composer-control-height);
@@ -874,10 +874,10 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 
 .composer textarea::placeholder { color: var(--ink-soft); font: inherit; }
 .composer textarea:focus { border-color: #666; }
-.composer-send { grid-column: 3; width: var(--composer-control-height); height: var(--composer-control-height); align-self: end; display: grid; place-items: center; padding: 0; border-radius: var(--r-md); background: var(--paper); color: #111; }
+.composer-send { grid-column: 2; width: var(--composer-control-height); height: var(--composer-control-height); align-self: end; display: grid; place-items: center; padding: 0; border-radius: var(--r-md); background: var(--paper); color: #111; }
 .composer-send:hover { background: #fff; }
 .composer-send:disabled { opacity: 0.4; cursor: wait; }
-.composer-target { grid-column: 1; height: var(--composer-control-height); display: inline-flex; align-items: center; gap: 7px; padding: 0 9px 0 11px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: #171717; white-space: nowrap; }
+.composer-target { grid-column: 1 / -1; width: fit-content; max-width: 100%; height: var(--composer-control-height); display: inline-flex; align-items: center; gap: 7px; padding: 0 9px 0 11px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: #171717; white-space: nowrap; }
 .composer-target span { color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); text-transform: uppercase; }
 .composer-target strong { max-width: 170px; overflow: hidden; font: var(--fs-base)/var(--lh-none) var(--mono); text-overflow: ellipsis; }
 .composer-target button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: #252525; color: var(--ink-soft); cursor: pointer; }
@@ -1016,24 +1016,21 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   .picker-bar { position: relative; }
   .session-browser { padding-top: 18px; }
   /* Mobile view switch: below this breakpoint the workspace shows one pane at
-     a time — the orchestrator chat or the thread canvas — toggled by the
-     .view-toggle button in the session bar. .session-layout carries
-     .is-threads-view while the threads pane is active; without it the chat
-     pane is active. The active pane fills the layout height and scrolls
-     internally, so the page itself never scrolls and the composer stays
-     visible at the bottom in both views. */
+     a time — the orchestrator chat (with its composer) or the thread canvas —
+     toggled by the .view-toggle button in the session bar. .session-layout
+     carries .is-threads-view while the threads pane is active; without it the
+     chat pane is active. The active pane fills the layout height and scrolls
+     internally, so the page itself never scrolls. */
   .view-toggle { display: inline-flex; }
   .session-bar { grid-template-columns: auto minmax(140px,1fr) auto auto auto auto; }
-  .session-layout { height: calc(100dvh - 112px); grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+  .session-layout { height: calc(100dvh - 112px); grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
   .session-layout > .overview-rail, .session-layout > .thread-canvas { grid-row: 1; grid-column: 1; }
   .session-layout:not(.is-threads-view) > .thread-canvas { display: none; }
   .session-layout.is-threads-view > .overview-rail { display: none; }
   .session-layout.is-focused > .focus-panel { grid-row: 1; }
-  .session-layout.is-focused > .composer { position: relative; grid-row: 2; }
   .overview-rail { border-right: 0; }
   .config-repair-notice { grid-column: 1 / -1; }
   .rail-section { border-right: 1px solid var(--line); }
-  .composer { grid-row: 2; grid-column: 1; }
   .focus-panel.is-thread .focus-content { overflow: auto; }
   .focus-panel.is-thread .focus-thread-layout { display: grid; height: auto; min-height: 100%; grid-template-columns: 1fr; grid-template-rows: minmax(260px, auto) auto; }
   .focus-panel.is-thread .focus-activity { min-height: 260px; max-height: 52dvh; display: block; border-right: 0; border-bottom: 1px solid var(--line); }

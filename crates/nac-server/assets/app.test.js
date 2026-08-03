@@ -293,13 +293,22 @@ function installComposerElements(uiInstance, sessionId, draft = "") {
   return uiInstance;
 }
 
-test("production shell preserves privacy and mobile chat-only access", () => {
+test("production shell keeps the composer inside the orchestrator pane", () => {
   for (const id of ["sessionPicker", "sessionWorkspace", "focusPanel", "promptInput"]) {
     assert.match(indexSource, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(indexSource, /Session Events/i);
+  const railStart = indexSource.indexOf('<aside class="overview-rail"');
+  const railEnd = indexSource.indexOf("</aside>", railStart);
+  const composerStart = indexSource.indexOf('<form id="commandComposer"', railStart);
+  assert.ok(railStart >= 0 && railEnd > railStart, "the orchestrator pane is present");
+  assert.ok(composerStart > railStart && composerStart < railEnd,
+    "the composer is structurally part of the orchestrator pane");
   assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\)/s);
   assert.match(redesignSource, /\.orchestrator-chat-content \{/);
+  assert.match(redesignSource, /\.overview-rail \{[^}]*display: flex;[^}]*flex-direction: column;/s);
+  assert.match(redesignSource, /\.composer \{[^}]*flex: none;/s,
+    "the composer forms the fixed footer of the orchestrator pane");
 });
 
 test("session opening renders the workspace and starts snapshot and SSE without removed-surface references", () => {
@@ -4030,7 +4039,7 @@ test("mobile view switch CSS: toggle hidden on desktop, panes swap below the 780
 });
 
 test("desktop workspace layout rules are unchanged by the mobile view switch", () => {
-  assert.match(redesignSource, /\.session-layout \{\s*height: calc\(100dvh - 72px\);\s*display: grid;\s*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\);\s*grid-template-rows: minmax\(0, 1fr\) auto;\s*overflow: hidden;\s*\}/);
+  assert.match(redesignSource, /\.session-layout \{\s*height: calc\(100dvh - 72px\);\s*display: grid;\s*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\);\s*grid-template-rows: minmax\(0, 1fr\);\s*overflow: hidden;\s*\}/);
   assert.match(redesignSource, /@media \(max-width: 1060px\) \{\s*\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto; \}/,
     "the 1060px session-bar grid keeps its five tracks");
   assert.doesNotMatch(redesignSource.slice(0, redesignSource.indexOf("@media")), /is-threads-view/,
