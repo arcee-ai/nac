@@ -1,6 +1,9 @@
 use super::test_support::EnvGuard;
 use super::*;
-use crate::model::{validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort};
+use crate::model::{
+    validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort,
+    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
+};
 use crate::TEST_ENV_LOCK;
 use sha2::Digest;
 use std::collections::BTreeMap;
@@ -511,4 +514,217 @@ fn sparse_metadata_carries_the_documented_fallbacks() {
     assert!(!metadata.reasoning);
     assert!(metadata.thinking_level_map.0.is_empty());
     assert_eq!(metadata.source, ModelSource::Fallback);
+}
+
+#[test]
+fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
+    // Provider set, auth requirements and managed base URLs derive from the
+    // backend kind, not from catalog data — this test needs no env lock.
+    let listing = api_listing();
+    let providers = listing
+        .providers
+        .iter()
+        .map(|provider| {
+            (
+                provider.id,
+                provider.auth,
+                provider.managed_base_url.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        providers,
+        vec![
+            (BackendKind::DeepSeekChat, ProviderAuth::ApiKeyEnv, None),
+            (BackendKind::FireworksChat, ProviderAuth::ApiKeyEnv, None),
+            (BackendKind::TogetherChat, ProviderAuth::ApiKeyEnv, None),
+            (BackendKind::OpenAiResponses, ProviderAuth::ApiKeyEnv, None),
+            (
+                BackendKind::ChatGptCodexResponses,
+                ProviderAuth::CodexOauth,
+                Some(CHATGPT_CODEX_CANONICAL_BASE_URL)
+            ),
+            (BackendKind::AnthropicMessages, ProviderAuth::ApiKeyEnv, None),
+            (
+                BackendKind::ArceeAuth,
+                ProviderAuth::ManagedArcee,
+                Some(ARCEE_AUTH_CANONICAL_BASE_URL)
+            ),
+            (BackendKind::ArceeApi, ProviderAuth::ApiKeyEnv, None),
+        ]
+    );
+}
+
+#[test]
+fn api_listing_serializes_the_designed_field_names() {
+    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
+    // refresh tests transiently reload the global with Overlay entries.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let listing = serde_json::to_value(api_listing()).expect("listing serializes");
+    let keys = |value: &serde_json::Value| {
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>()
+    };
+    // serde_json objects are BTreeMap-backed: keys serialize sorted.
+    assert_eq!(keys(&listing), ["catalog_version", "providers"]);
+    assert!(listing["catalog_version"].as_u64().unwrap() >= 1);
+
+    let anthropic = listing["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "anthropic-messages")
+        .unwrap();
+    assert_eq!(
+        keys(anthropic),
+        ["auth", "default_limits", "id", "managed_base_url", "models"]
+    );
+    assert_eq!(anthropic["auth"], "api_key_env");
+    assert!(anthropic["managed_base_url"].is_null());
+    assert_eq!(
+        keys(&anthropic["default_limits"]),
+        ["context_window", "max_tokens", "supported_efforts"]
+    );
+
+    let opus = anthropic["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "claude-opus-4-6")
+        .unwrap();
+    assert_eq!(
+        keys(opus),
+        [
+            "context_window",
+            "cost",
+            "display_name",
+            "id",
+            "max_tokens",
+            "reasoning",
+            "source",
+            "supported_efforts"
+        ]
+    );
+    assert_eq!(keys(&opus["cost"]), ["cache_read", "cache_write", "input", "output"]);
+    assert_eq!(opus["display_name"], "Claude Opus 4.6");
+    assert_eq!(opus["context_window"], 1_000_000);
+    assert_eq!(opus["max_tokens"], 128_000);
+    assert_eq!(opus["cost"]["input"], 5.0);
+    assert_eq!(opus["cost"]["output"], 25.0);
+    assert_eq!(opus["reasoning"], true);
+    assert_eq!(opus["source"], "baseline");
+    assert_eq!(
+        opus["supported_efforts"],
+        serde_json::json!(["none", "low", "medium", "high", "xhigh"])
+    );
+}
+
+#[test]
+fn api_listing_supported_efforts_come_from_some_wired_map_keys() {
+    // Derivation and canonical ordering; present+None keys are excluded.
+    let map = ThinkingLevelMap(BTreeMap::from([
+        (ReasoningEffort::Xhigh, Some("max".to_string())),
+        (ReasoningEffort::None, Some("none".to_string())),
+        (ReasoningEffort::Low, None),
+        (ReasoningEffort::High, Some("high".to_string())),
+    ]));
+    assert_eq!(
+        map.supported_efforts(),
+        vec![
+            ReasoningEffort::None,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh
+        ]
+    );
+
+    // Wire values stay internal: claude-opus-4-6's xhigh maps to the wire
+    // tier "max", but the listing reports the effort level.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let listing = api_listing();
+    let anthropic = listing
+        .providers
+        .iter()
+        .find(|provider| provider.id == BackendKind::AnthropicMessages)
+        .unwrap();
+    let opus = anthropic
+        .models
+        .iter()
+        .find(|model| model.id == "claude-opus-4-6")
+        .unwrap();
+    assert_eq!(
+        opus.supported_efforts,
+        vec![
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ]
+    );
+}
+
+#[test]
+fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
+    // Holds TEST_ENV_LOCK for the same reason as the other global-catalog
+    // assertions (transient Overlay entries from the refresh tests).
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let listing = api_listing();
+    assert_eq!(listing.providers.len(), 8);
+    let mut total = 0;
+    for provider in &listing.providers {
+        // `_default` is served as default_limits, never as a model entry;
+        // ProviderDefault/Fallback synthesis products never appear.
+        assert!(
+            provider
+                .models
+                .iter()
+                .all(|model| model.id != PROVIDER_DEFAULT_MODEL_ID),
+            "{}",
+            provider.id
+        );
+        assert!(provider.default_limits.context_window > 0, "{}", provider.id);
+        assert!(provider.default_limits.max_tokens > 0, "{}", provider.id);
+        for model in &provider.models {
+            // The test-build global catalog is seed + embedded baseline.
+            assert_eq!(model.source, ModelSource::Baseline, "{}", model.id);
+        }
+        total += provider.models.len();
+    }
+    // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
+    assert_eq!(total, 117, "models.dev snapshot model count drifted");
+
+    // Seed-only providers still appear, with empty model lists and their
+    // `_default` limits (the frontend's custom-model path reads those).
+    for backend in [
+        BackendKind::ArceeAuth,
+        BackendKind::ArceeApi,
+        BackendKind::ChatGptCodexResponses,
+    ] {
+        let provider = listing
+            .providers
+            .iter()
+            .find(|provider| provider.id == backend)
+            .unwrap();
+        assert!(provider.models.is_empty(), "{backend}");
+        assert_eq!(
+            provider.default_limits.context_window,
+            FALLBACK_CONTEXT_WINDOW,
+            "{backend}"
+        );
+    }
+}
+
+#[test]
+fn catalog_version_bumps_on_reload() {
+    // Serializes with the S2 refresh tests: they reload the process-global
+    // catalog (bumping the version) via EnvGuard::drop.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let before = api_listing().catalog_version;
+    reset_for_test();
+    let after = api_listing().catalog_version;
+    assert_eq!(after, before + 1);
 }

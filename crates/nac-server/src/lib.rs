@@ -28,7 +28,8 @@ use nac_core::{
     events::{SessionEventEnvelope, SessionReplayGap},
     model::{
         managed_backend_base_url, resolve_model_base_url, validate_model_configuration,
-        BackendKind, EffectiveModelSettings, ModelConfigurationError, ReasoningEffort,
+        BackendKind, EffectiveModelSettings, ModelConfigurationError, ModelListing,
+        ReasoningEffort,
     },
     runtime::{
         self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
@@ -115,6 +116,11 @@ pub struct LaunchModelDefaults {
     /// Effective configured base URL after applying the managed-backend-only
     /// fixed URL invariant. Other incomplete backends remain `None`.
     pub configured_model_base_url: Option<String>,
+    /// Configured model id; lets the launch dialog render the inherited
+    /// "from config" selection resolved against the model catalog.
+    pub configured_model: Option<String>,
+    /// Configured reasoning effort, if any.
+    pub configured_reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -534,6 +540,8 @@ impl SessionManager {
         Ok(LaunchModelDefaults {
             configured_model_backend,
             configured_model_base_url,
+            configured_model: config.model.model.clone(),
+            configured_reasoning_effort: config.model.reasoning_effort,
         })
     }
 
@@ -1237,6 +1245,7 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/launch-defaults",
             post(launch_model_defaults_handler),
         )
+        .route("/models", get(models_handler))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/order", put(reorder_sessions_handler))
         .route(
@@ -1356,6 +1365,13 @@ async fn launch_model_defaults_handler(
 ) -> std::result::Result<Json<LaunchModelDefaults>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     Ok(Json(manager.launch_model_defaults(request)?))
+}
+
+/// The model catalog listing for the frontend picker: every provider with
+/// auth requirements, managed base URL, `_default` limits and real entries.
+/// Reads the process-global catalog; synchronous, local-only, never fails.
+async fn models_handler() -> Json<ModelListing> {
+    Json(nac_core::model::api_listing())
 }
 
 async fn list_sessions(
@@ -2757,6 +2773,114 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    #[test]
+    fn launch_defaults_carry_the_configured_model_and_effort() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("launch_defaults_model_effort");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let request = || LaunchModelDefaultsRequest {
+            cwd: Some(root.clone()),
+            ssh_host: None,
+        };
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\n",
+        )
+        .unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(
+            defaults.configured_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+        let serialized = serde_json::to_value(defaults).unwrap();
+        assert_eq!(serialized["configured_model"], "gpt-5.2");
+        assert_eq!(serialized["configured_reasoning_effort"], "high");
+
+        // Without a configured model/effort the additive fields serialize as
+        // null (older frontends ignore them either way).
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"openai-responses\"\n",
+        )
+        .unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model, None);
+        assert_eq!(defaults.configured_reasoning_effort, None);
+        let serialized = serde_json::to_value(defaults).unwrap();
+        assert!(serialized["configured_model"].is_null());
+        assert!(serialized["configured_reasoning_effort"].is_null());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_serves_the_catalog_listing() {
+        let root = temp_root("models_endpoint");
+        let app = router(test_manager(&root));
+        let response = get_response(app, "/models", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+
+        assert!(body["catalog_version"].as_u64().unwrap() >= 1);
+        let providers = body["providers"].as_array().unwrap();
+        assert_eq!(providers.len(), 8);
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+
+        // Auth requirements and managed base URLs derive from the backend
+        // kind, so they are exact regardless of the machine's catalog layers.
+        assert_eq!(by_id("anthropic-messages")["auth"], "api_key_env");
+        assert!(by_id("anthropic-messages")["managed_base_url"].is_null());
+        assert_eq!(by_id("arcee-api")["auth"], "api_key_env");
+        assert_eq!(by_id("arcee-auth")["auth"], "managed_arcee");
+        assert_eq!(
+            by_id("arcee-auth")["managed_base_url"],
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["managed_base_url"],
+            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
+        );
+
+        // Every provider carries `_default` limits and real entries only
+        // (never the `_default` id or a synthesis-product source). Values
+        // stay unpinned here: the prod nac-core build layers the machine's
+        // overlay/models.json, which may patch them — exact values are
+        // pinned hermetically by the nac-core catalog tests.
+        for provider in providers {
+            let limits = &provider["default_limits"];
+            assert!(limits["context_window"].as_u64().unwrap() > 0);
+            assert!(limits["max_tokens"].as_u64().unwrap() > 0);
+            assert!(limits["supported_efforts"].is_array());
+            for model in provider["models"].as_array().unwrap() {
+                assert_ne!(model["id"], "_default");
+                assert!(
+                    ["baseline", "overlay", "user_override"]
+                        .contains(&model["source"].as_str().unwrap()),
+                    "unexpected model source: {}",
+                    model["source"]
+                );
+                assert!(model["context_window"].as_u64().unwrap() > 0);
+                assert!(model["max_tokens"].as_u64().unwrap() > 0);
+            }
+        }
+
+        // Baseline entries are always present: the overlay/user layers patch
+        // or add, never remove.
+        let anthropic_models = by_id("anthropic-messages")["models"].as_array().unwrap();
+        let opus = anthropic_models
+            .iter()
+            .find(|m| m["id"] == "claude-opus-4-6")
+            .expect("the embedded baseline's claude-opus-4-6 entry");
+        assert!(opus["supported_efforts"].is_array());
+        assert_eq!(opus["reasoning"], true);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

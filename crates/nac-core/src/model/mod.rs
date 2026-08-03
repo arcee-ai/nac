@@ -33,7 +33,7 @@ mod types;
 
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
-pub use catalog::spawn_overlay_refresh;
+pub use catalog::{api_listing, spawn_overlay_refresh, ModelListing};
 pub(crate) use catalog::{Compat, CompletionsThinkingFormat, ModelMetadata, ThinkingLevelMap};
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;

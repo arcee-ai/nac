@@ -20,9 +20,10 @@
 //! (S4) and adapter effort translation read these maps; adapter dispatch
 //! consolidation (S6) follows.
 
-use crate::model::BackendKind;
+use crate::model::{managed_backend_base_url, BackendKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
 mod data;
@@ -41,8 +42,9 @@ mod user_overrides;
 
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
-    ApiKind, Compat, CompletionsThinkingFormat, ModelCostRates, ModelMetadata, ModelSource,
-    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ApiKind, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates, ModelEntry,
+    ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing, ThinkingLevelMap,
+    FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -233,6 +235,80 @@ pub(crate) fn resolve(provider: BackendKind, model: &str) -> ModelMetadata {
     current().resolve(provider, model)
 }
 
+/// Monotonic version of the process-global catalog; `reload` bumps it after
+/// every swap, so an overlay-refresh reload is observable to `/models`
+/// clients. The initial load is version 1.
+static CATALOG_VERSION: AtomicU64 = AtomicU64::new(1);
+
+fn catalog_version() -> u64 {
+    CATALOG_VERSION.load(Ordering::SeqCst)
+}
+
+/// Auth requirements for a provider, derived from the same split
+/// `validate_backend_api_key_env` enforces.
+fn provider_auth(provider: BackendKind) -> ProviderAuth {
+    if crate::model::backend::api_key_backend(provider) {
+        return ProviderAuth::ApiKeyEnv;
+    }
+    match provider {
+        BackendKind::ArceeAuth => ProviderAuth::ManagedArcee,
+        BackendKind::ChatGptCodexResponses => ProviderAuth::CodexOauth,
+        other => unreachable!("non-API-key backend '{other}' has managed auth"),
+    }
+}
+
+/// Build the `GET /models` listing from the process-global catalog: every
+/// provider with its auth requirements, managed base URL, `_default` limits
+/// and real entries. Synthesis products (ProviderDefault/Fallback) never
+/// enter the `models` map by construction; the source filter pins that
+/// contract at the boundary. Synchronous and local-only, like resolution.
+pub fn api_listing() -> ModelListing {
+    let catalog = current();
+    let providers = catalog
+        .providers
+        .iter()
+        .map(|(provider, provider_catalog)| ProviderListing {
+            id: *provider,
+            auth: provider_auth(*provider),
+            managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
+            default_limits: DefaultLimits {
+                context_window: provider_catalog.default.context_window,
+                max_tokens: provider_catalog.default.max_tokens,
+                supported_efforts: provider_catalog
+                    .default
+                    .thinking_level_map
+                    .supported_efforts(),
+            },
+            models: provider_catalog
+                .models
+                .values()
+                .filter(|metadata| {
+                    matches!(
+                        metadata.source,
+                        ModelSource::Baseline
+                            | ModelSource::Overlay
+                            | ModelSource::UserOverride
+                    )
+                })
+                .map(|metadata| ModelEntry {
+                    id: metadata.id.clone(),
+                    display_name: metadata.display_name.clone(),
+                    context_window: metadata.context_window,
+                    max_tokens: metadata.max_tokens,
+                    cost: metadata.cost,
+                    reasoning: metadata.reasoning,
+                    supported_efforts: metadata.thinking_level_map.supported_efforts(),
+                    source: metadata.source,
+                })
+                .collect(),
+        })
+        .collect();
+    ModelListing {
+        catalog_version: catalog_version(),
+        providers,
+    }
+}
+
 /// Reload the process-global catalog from local sources. S2's overlay
 /// refresh calls this after writing a new overlay; tests pair it with
 /// `TEST_ENV_LOCK` for isolation.
@@ -242,6 +318,7 @@ pub(crate) fn reload() {
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *catalog = ModelCatalog::load();
+    CATALOG_VERSION.fetch_add(1, Ordering::SeqCst);
 }
 
 /// Reload the process-global catalog from local sources. Test-isolation hook

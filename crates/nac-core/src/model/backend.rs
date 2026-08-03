@@ -6,7 +6,7 @@ fn is_valid_env_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-fn api_key_backend(backend: BackendKind) -> bool {
+pub(crate) fn api_key_backend(backend: BackendKind) -> bool {
     matches!(
         backend,
         BackendKind::DeepSeekChat
@@ -23,10 +23,9 @@ fn api_key_backend(backend: BackendKind) -> bool {
 /// "no explicit effort levels" for an empty map).
 fn supported_effort_values(map: &ThinkingLevelMap) -> String {
     let supported = map
-        .0
+        .supported_efforts()
         .iter()
-        .filter(|(_, wire)| wire.is_some())
-        .map(|(effort, _)| effort.as_str())
+        .map(|effort| effort.as_str())
         .collect::<Vec<_>>();
     match supported.as_slice() {
         [] => "no explicit effort levels".to_string(),

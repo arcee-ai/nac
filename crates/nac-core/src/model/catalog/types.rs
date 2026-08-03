@@ -74,9 +74,20 @@ impl ThinkingLevelMap {
     /// `None`), as opposed to merely absent. Currently consumed by tests;
     /// it documents the user-override `null` wire-value case, which neither
     /// the seed catalog nor the generator ever produces.
-    #[allow(dead_code)] // test-consumed until the planned /models endpoint
+    #[allow(dead_code)] // test-consumed; the /models listing reads supported_efforts
     pub fn is_explicitly_unsupported(&self, effort: ReasoningEffort) -> bool {
         matches!(self.0.get(&effort), Some(None))
+    }
+
+    /// The supported effort levels (keys with a wire value), in canonical
+    /// effort order. The `/models` listing derives its per-model effort
+    /// options from this; the wire values stay internal.
+    pub fn supported_efforts(&self) -> Vec<ReasoningEffort> {
+        self.0
+            .iter()
+            .filter(|(_, wire)| wire.is_some())
+            .map(|(effort, _)| *effort)
+            .collect()
     }
 }
 
@@ -95,8 +106,11 @@ pub struct ModelCostRates {
     pub cache_write: f64,
 }
 
-/// Where the metadata for a resolved model came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where the metadata for a resolved model came from. Served by the
+/// `/models` listing (snake_case wire names) — the frontend badges
+/// user-overridden and unrecognized (provider-default) models from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModelSource {
     /// Checked-in baseline catalog (S0 seed; generated models.dev data in S1).
     Baseline,
@@ -118,8 +132,8 @@ pub struct ModelMetadata {
     pub id: String,
     pub provider: BackendKind,
     pub api: ApiKind,
-    /// Human-facing name from models.dev. Currently consumed by tests; the
-    /// planned frontend `/models` endpoint is the production consumer.
+    /// Human-facing name from models.dev. Served by the `/models` listing
+    /// (`api_listing`); the frontend picker renders it in place of the id.
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
@@ -128,15 +142,14 @@ pub struct ModelMetadata {
     /// computation time (S3).
     pub cache_write_1h: Option<f64>,
     /// Whether the model reasons at all (models.dev `reasoning` flag).
-    /// Currently consumed by tests; the planned frontend `/models` endpoint
-    /// is the production consumer. Effort validation reads
+    /// Served by the `/models` listing (`api_listing`); the frontend hides
+    /// the effort picker for non-reasoning models. Effort validation reads
     /// `thinking_level_map` instead.
     pub reasoning: bool,
     pub thinking_level_map: ThinkingLevelMap,
     pub compat: Compat,
-    /// Which catalog layer produced this metadata. Currently consumed by
-    /// tests; the planned frontend `/models` endpoint is the production
-    /// consumer.
+    /// Which catalog layer produced this metadata. Served by the `/models`
+    /// listing (`api_listing`); the frontend badges non-baseline sources.
     pub source: ModelSource,
 }
 
@@ -170,4 +183,60 @@ impl ModelMetadata {
             source,
         }
     }
+}
+/// How a provider authenticates, as served by `GET /models`: auth
+/// *requirements* (drives picker field visibility and hints), not status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuth {
+    /// API key read from the environment variable named by `api_key_env`.
+    ApiKeyEnv,
+    /// Managed Arcee device-flow auth (`arcee_auth.json`).
+    ManagedArcee,
+    /// Stored ChatGPT/Codex OAuth (`auth.json`).
+    CodexOauth,
+}
+
+/// A provider `_default` entry's limits and effort support, as served by
+/// `GET /models`: powers the frontend's unrecognized-model badge, estimated
+/// context gauge and custom-model effort list without a second resolve call.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DefaultLimits {
+    pub context_window: u64,
+    pub max_tokens: u64,
+    pub supported_efforts: Vec<ReasoningEffort>,
+}
+
+/// One real catalog entry as served by `GET /models` (never a
+/// ProviderDefault/Fallback synthesis product).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModelEntry {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub context_window: u64,
+    pub max_tokens: u64,
+    pub cost: ModelCostRates,
+    pub reasoning: bool,
+    pub supported_efforts: Vec<ReasoningEffort>,
+    pub source: ModelSource,
+}
+
+/// One provider group in the `GET /models` listing.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ProviderListing {
+    pub id: BackendKind,
+    pub auth: ProviderAuth,
+    pub managed_base_url: Option<String>,
+    pub default_limits: DefaultLimits,
+    pub models: Vec<ModelEntry>,
+}
+
+/// The full catalog listing served by `GET /models`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModelListing {
+    /// Monotonic version of the process-global catalog, bumped on every
+    /// reload (the initial load is version 1). Debugging/future-staleness
+    /// surface only; v1 attaches no cache semantics.
+    pub catalog_version: u64,
+    pub providers: Vec<ProviderListing>,
 }
