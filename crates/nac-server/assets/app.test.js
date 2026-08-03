@@ -45,7 +45,7 @@ function loadApp(overrides = {}) {
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
-      renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch,
+      renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch, renderWorkerUsage,
       renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
       formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
@@ -61,7 +61,7 @@ function loadApp(overrides = {}) {
       reconcilePendingEcho, effectivePendingMessages,
       responseDurationAssignments, runTimingPresentation, updateRuntimeMetric,
       threadCycleSeed, displaySessionTitle, shortId, basename, shortModel, formatNumber,
-      formatTokenCount, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
+      formatTokenCount, formatCostMicros, backendOptions, renderFocusMarkdown, renderMarkdownImageToken,
       safeMarkdownHref, renderMarkdownLinkOpen, renderMarkdownLinkClose,
       displayedTokenUsage, usageRunId, orchestratorContextTokens, tokenUsageSummary,
       tokenUsageTitle, effortOptions, escapeHtml, rawHeadersFromConfig, settingsValuesFromConfig,
@@ -2694,10 +2694,12 @@ test("session telemetry preserves old UI token semantics and folds live model-ca
   const usage = ui.displayedTokenUsage(snapshot, "session", events);
   assert.deepEqual(plain(usage), { input_tokens: 160,
     output_tokens: 32, cache_read_tokens: 63, cache_write_tokens: 11,
-    reasoning_tokens: 13, total_tokens: 700, });
+    reasoning_tokens: 13, total_tokens: 700,
+    cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
+    last_cost_micros: null, });
   assert.equal(ui.orchestratorContextTokens(usage), 700);
-  assert.equal(ui.tokenUsageSummary(usage), "↑160 R63 ↓32");
-  assert.equal(ui.tokenUsageTitle(usage), "input 160 · cache read 63 · output 32");
+  assert.equal(ui.tokenUsageSummary(usage), "↑160 R63 ↓32 · —");
+  assert.equal(ui.tokenUsageTitle(usage), "input 160 · cache read 63 · output 32 · cost —");
 });
 
 test("completed replay events do not double-count persisted token usage", () => {
@@ -2714,7 +2716,79 @@ test("completed replay events do not double-count persisted token usage", () => 
   assert.equal(ui.usageRunId(snapshot, events), null);
   assert.deepEqual(plain(ui.displayedTokenUsage(snapshot, "session", events)), {
     input_tokens: 100, output_tokens: 20, cache_read_tokens: 40,
-    cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 500, });
+    cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 500,
+    cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
+    last_cost_micros: null, });
+});
+
+test("session telemetry accumulates micro-USD cost across the active run", () => {
+  const snapshot = { active_run: { run_id: "run-live" },
+    response_timing: {
+      cumulative_token_usage: { input_tokens: 100, output_tokens: 20,
+        cache_read_tokens: 40, total_tokens: 500,
+        cost: { input: 100_000, output: 200_000, cache_read: 10_000, cache_write: 20_000, total: 330_000 } },
+      last_token_usage: { input_tokens: 100, output_tokens: 20,
+        cache_read_tokens: 40, total_tokens: 500,
+        cost: { input: 10_000, output: 20_000, cache_read: 0, cache_write: 0, total: 30_000 } },
+    }, };
+  const events = [
+    { run_id: "older-run", event: { type: "agent", event: {
+      type: "token_usage_updated", thread_name: null,
+      usage: { input_tokens: 999, output_tokens: 999, total_tokens: 999,
+        cost: { input: 999_999, output: 0, cache_read: 0, cache_write: 0, total: 999_999 } },
+    } } }, { run_id: "run-live", event: { type: "agent", event: {
+      type: "token_usage_updated", thread_name: null,
+      usage: { input_tokens: 10, output_tokens: 2, cache_read_tokens: 3, total_tokens: 600,
+        cost: { input: 60_000, output: 100_000, cache_read: 10_000, cache_write: 10_000, total: 180_000 } },
+    } } }, { run_id: "run-live", event: { type: "agent", event: {
+      type: "token_usage_updated", thread_name: "research/ui",
+      usage: { input_tokens: 20, output_tokens: 4, cache_read_tokens: 8, total_tokens: 240,
+        cost: { input: 10_000, output: 10_000, cache_read: 0, cache_write: 0, total: 20_000 } },
+    } } }, { run_id: "run-live", event: { type: "agent", event: {
+      type: "token_usage_updated", thread_name: null,
+      usage: { input_tokens: 5, output_tokens: 1, total_tokens: 700 },
+    } } }, ];
+  const usage = ui.displayedTokenUsage(snapshot, "session", events);
+  assert.deepEqual(plain(usage.cost), {
+    input: 170_000, output: 310_000, cache_read: 20_000, cache_write: 30_000, total: 530_000 });
+  assert.equal(usage.last_cost_micros, 30_000);
+  assert.equal(ui.tokenUsageSummary(usage), "↑135 R51 ↓27 · $0.53");
+  assert.equal(ui.tokenUsageTitle(usage),
+    "input 135 · cache read 51 · output 27 · cost $0.53 (input $0.17 · cache read $0.02 · cache write $0.03 · output $0.31) · last response $0.03");
+});
+
+test("formatCostMicros renders unknown pricing as a dash and never rounds to $0.00", () => {
+  assert.equal(ui.formatCostMicros(0), "—");
+  assert.equal(ui.formatCostMicros(undefined), "—");
+  assert.equal(ui.formatCostMicros(null), "—");
+  assert.equal(ui.formatCostMicros(NaN), "—");
+  assert.equal(ui.formatCostMicros(-5), "—");
+  assert.equal(ui.formatCostMicros(420_000), "$0.42");
+  assert.equal(ui.formatCostMicros(1_000_000), "$1.00");
+  assert.equal(ui.formatCostMicros(4_200_000), "$4.20");
+  assert.equal(ui.formatCostMicros(123_456), "$0.12");
+  assert.equal(ui.formatCostMicros(10_000), "$0.01");
+  assert.equal(ui.formatCostMicros(9_999), "$0.01");
+  assert.equal(ui.formatCostMicros(9_990), "$0.00999");
+  assert.equal(ui.formatCostMicros(4_200), "$0.0042");
+  assert.equal(ui.formatCostMicros(420), "$0.00042");
+  assert.equal(ui.formatCostMicros(1), "$0.000001");
+});
+
+test("worker usage panel renders a cost row with the same unknown-pricing rule", () => {
+  const priced = ui.renderWorkerUsage({ provenance: "persisted", kind: "thread_finished",
+    usage: { input_tokens: 10, cache_read_tokens: 2, output_tokens: 5, total_tokens: 100,
+      cost: { input: 170_000, output: 310_000, cache_read: 20_000, cache_write: 30_000, total: 530_000 } } });
+  assert.match(priced, /<dt>Cost<\/dt><dd>\$0\.53<\/dd>/);
+  const zeroCost = ui.renderWorkerUsage({ provenance: "persisted", kind: "thread_finished",
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 100,
+      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 } } });
+  assert.match(zeroCost, /<dt>Cost<\/dt><dd>—<\/dd>/);
+  const legacyEvent = ui.renderWorkerUsage({ provenance: "persisted", kind: "thread_finished",
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 100 } });
+  assert.match(legacyEvent, /<dt>Cost<\/dt><dd>—<\/dd>/);
+  const unavailable = ui.renderWorkerUsage(null);
+  assert.match(unavailable, /<dt>Cost<\/dt><dd><span class="evidence-unavailable">Unavailable<\/span><\/dd>/);
 });
 
 scenario("Settings values and safety", "settings consumes valid raw headers and preserves malformed persisted text", () => {

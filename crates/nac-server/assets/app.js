@@ -2008,6 +2008,7 @@ function displayedTokenUsage(snapshot, sessionId = state.currentId, envelopes = 
   const persisted = snapshot?.response_timing?.cumulative_token_usage
     || snapshot?.response_timing?.last_token_usage
     || null;
+  const lastTokenUsage = snapshot?.response_timing?.last_token_usage || null;
   const usage = {
     input_tokens: Number(persisted?.input_tokens || 0),
     output_tokens: Number(persisted?.output_tokens || 0),
@@ -2015,7 +2016,10 @@ function displayedTokenUsage(snapshot, sessionId = state.currentId, envelopes = 
     cache_write_tokens: Number(persisted?.cache_write_tokens || 0),
     reasoning_tokens: Number(persisted?.reasoning_tokens || 0),
     total_tokens: orchestratorContextTokens(persisted),
+    cost: zeroTokenCostMicros(),
+    last_cost_micros: lastTokenUsage ? Number(lastTokenUsage?.cost?.total || 0) : null,
   };
+  addTokenCostMicros(usage.cost, persisted);
   let hasUsage = Boolean(persisted);
   const sessionEvents = envelopes || state.events.get(sessionId) || [];
   const activeRunId = usageRunId(snapshot, sessionEvents);
@@ -2030,6 +2034,7 @@ function displayedTokenUsage(snapshot, sessionId = state.currentId, envelopes = 
     usage.cache_read_tokens += Number(event.usage.cache_read_tokens || 0);
     usage.cache_write_tokens += Number(event.usage.cache_write_tokens || 0);
     usage.reasoning_tokens += Number(event.usage.reasoning_tokens || 0);
+    addTokenCostMicros(usage.cost, event.usage);
     if (event.thread_name == null) usage.total_tokens = orchestratorContextTokens(event.usage);
     hasUsage = true;
   }
@@ -2053,18 +2058,55 @@ function orchestratorContextTokens(usage) {
   return Number(usage?.total_tokens ?? usage?.orchestrator_context_tokens ?? 0);
 }
 
+// Cost rides the wire as micro-USD buckets (`usage.cost`, serde-defaulted on
+// the Rust side, so old events/snapshots may lack it — missing reads as zero,
+// and all-zero means unknown pricing, never "free").
+function zeroTokenCostMicros() {
+  return { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 };
+}
+
+function addTokenCostMicros(target, usage) {
+  const cost = usage?.cost;
+  if (!cost) return;
+  target.input += Number(cost.input || 0);
+  target.output += Number(cost.output || 0);
+  target.cache_read += Number(cost.cache_read || 0);
+  target.cache_write += Number(cost.cache_write || 0);
+  target.total += Number(cost.total || 0);
+}
+
 function tokenUsageSummary(usage) {
   if (!usage) return "—";
   const parts = [`↑${formatTokenCount(usage.input_tokens)}`];
   if (Number(usage.cache_read_tokens || 0) > 0) parts.push(`R${formatTokenCount(usage.cache_read_tokens)}`);
   parts.push(`↓${formatTokenCount(usage.output_tokens)}`);
-  return parts.join(" ");
+  return `${parts.join(" ")} · ${formatCostMicros(usage.cost?.total)}`;
 }
 
 function tokenUsageTitle(usage) {
   if (!usage) return "";
   const exact = (value) => Number(value || 0).toLocaleString();
-  return `input ${exact(usage.input_tokens)} · cache read ${exact(usage.cache_read_tokens)} · output ${exact(usage.output_tokens)}`;
+  const parts = [
+    `input ${exact(usage.input_tokens)}`,
+    `cache read ${exact(usage.cache_read_tokens)}`,
+    `output ${exact(usage.output_tokens)}`,
+  ];
+  const cost = usage.cost;
+  if (cost && Number(cost.total || 0) > 0) {
+    const buckets = [
+      ["input", cost.input],
+      ["cache read", cost.cache_read],
+      ["cache write", cost.cache_write],
+      ["output", cost.output],
+    ].map(([label, value]) => `${label} ${formatCostMicros(value)}`).join(" · ");
+    parts.push(`cost ${formatCostMicros(cost.total)} (${buckets})`);
+  } else {
+    parts.push("cost —");
+  }
+  if (usage.last_cost_micros !== null && usage.last_cost_micros !== undefined) {
+    parts.push(`last response ${formatCostMicros(usage.last_cost_micros)}`);
+  }
+  return parts.join(" · ");
 }
 
 function worksetsPresentation(snapshot) {
@@ -3513,11 +3555,13 @@ function latestThreadEvidence(entries, type) {
 function renderWorkerUsage(usageEvidence) {
   const usage = usageEvidence?.usage;
   const metric = (label, value) => `<div><dt>${escapeHtml(label)}</dt><dd>${usage ? Number(value || 0).toLocaleString() : `<span class="evidence-unavailable">Unavailable</span>`}</dd></div>`;
+  const costMetric = `<div><dt>Cost</dt><dd>${usage ? escapeHtml(formatCostMicros(usage.cost?.total)) : `<span class="evidence-unavailable">Unavailable</span>`}</dd></div>`;
   return `<section class="worker-usage"><div class="thread-evidence-heading"><h4>Token usage</h4></div><dl>
     ${metric("Input", usage?.input_tokens)}
     ${metric("Cache read", usage?.cache_read_tokens)}
     ${metric("Output", usage?.output_tokens)}
     ${metric("Context", usage ? orchestratorContextTokens(usage) : null)}
+    ${costMetric}
   </dl></section>`;
 }
 
@@ -5124,6 +5168,18 @@ function formatTokenCount(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number) || number <= 0) return "0";
   return formatNumber(number);
+}
+
+// Micro-USD → display dollars. All-zero (or missing/invalid) renders "—",
+// NEVER $0.00: zero means unknown pricing, not free. Precision rule:
+// ≥ $0.01 → cents ($0.42, $4.20); < $0.01 → 3 significant digits
+// ($0.0042, $0.00042, $0.000001) so tiny amounts never round to $0.00.
+function formatCostMicros(micros) {
+  const value = Math.round(Number(micros));
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  const dollars = value / 1_000_000;
+  if (dollars >= 0.01) return `$${dollars.toFixed(2)}`;
+  return `$${Number(dollars.toPrecision(3)).toString()}`;
 }
 
 function formatRuntime(value) {
