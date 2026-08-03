@@ -324,6 +324,7 @@ pub(super) fn parse_anthropic_messages_response(
                 .saturating_add(output_tokens)
                 .saturating_add(cache_read)
                 .saturating_add(cache_write),
+            cost: TokenCostMicros::default(),
         }
     });
 

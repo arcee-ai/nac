@@ -302,6 +302,10 @@ fn manifest_sha256_pins_the_embedded_catalog() {
 
 #[test]
 fn generated_entries_satisfy_catalog_invariants() {
+    // Serializes with the S2 refresh tests: they transiently reload the
+    // process-global catalog with Overlay-sourced entries, which would break
+    // the `source == Baseline` assertion below.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let catalog = current();
     let mut entry_count = 0;
     for (provider, provider_catalog) in &catalog.providers {

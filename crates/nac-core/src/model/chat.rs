@@ -45,6 +45,7 @@ pub(super) fn parse_chat_completions_response(
             cache_write_tokens: 0,
             reasoning_tokens: 0,
             orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            cost: TokenCostMicros::default(),
         }
     });
 
@@ -127,6 +128,7 @@ pub(super) fn parse_together_chat_response(
             cache_write_tokens: 0,
             reasoning_tokens,
             orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            cost: TokenCostMicros::default(),
         }
     });
 

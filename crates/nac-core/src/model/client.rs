@@ -150,10 +150,8 @@ pub struct ModelClient {
     /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
-    /// Catalog metadata resolved with the effective settings; carried for
-    /// later stages (S3 cost, S4 effort maps, S6 dispatch). Adapters ignore
-    /// it in S0, so non-test code does not read it yet.
-    #[allow(dead_code)]
+    /// Catalog metadata resolved with the effective settings; drives
+    /// per-response cost (S3) and later stages (S4 effort maps, S6 dispatch).
     resolved_model: ModelMetadata,
 }
 
@@ -240,7 +238,7 @@ impl ModelClient {
             BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
             BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
             BackendKind::ChatGptCodexResponses => {
-                chatgpt_codex::send_responses(
+                let response = chatgpt_codex::send_responses(
                     &self.client,
                     &self.base_url,
                     &self.model,
@@ -248,7 +246,8 @@ impl ModelClient {
                     messages,
                     tools,
                 )
-                .await
+                .await?;
+                Ok(self.with_usage_cost(response))
             }
         }
     }
@@ -273,6 +272,21 @@ impl ModelClient {
         &self.extra_headers
     }
 
+    /// Attach per-response cost computed from the resolved catalog metadata
+    /// (S3). Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
+    /// the metadata's 1h rate — 2x input when the catalog has no explicit
+    /// value; everything else bills at the standard rates. Unknown pricing
+    /// (all-zero rates) yields zero cost, never an error.
+    fn with_usage_cost(&self, mut response: ModelTurnResponse) -> ModelTurnResponse {
+        if let Some(usage) = response.usage.as_mut() {
+            let cache_write_1h_rate = (self.cache_ttl == Some("1h")
+                && self.resolved_model.api == catalog::ApiKind::AnthropicMessages)
+            .then(|| self.resolved_model.cache_write_1h_rate());
+            usage.cost = calculate_cost(&self.resolved_model.cost, cache_write_1h_rate, usage);
+        }
+        response
+    }
+
     async fn send_fireworks_chat(
         &self,
         messages: Vec<Message>,
@@ -282,7 +296,7 @@ impl ModelClient {
         let request = fireworks_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
-        parse_chat_completions_response(&value, &url)
+        Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
     }
 
     async fn send_together_chat(
@@ -294,7 +308,7 @@ impl ModelClient {
         let request = together_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
-        parse_together_chat_response(&value, &url)
+        Ok(self.with_usage_cost(parse_together_chat_response(&value, &url)?))
     }
 
     fn arcee_chat_request(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
@@ -330,7 +344,7 @@ impl ModelClient {
             }
             _ => self.post_json_with_retry(url.as_str(), &request).await?,
         };
-        parse_chat_completions_response(&value, url.as_str())
+        Ok(self.with_usage_cost(parse_chat_completions_response(&value, url.as_str())?))
     }
 
     async fn send_deepseek_chat(
@@ -342,7 +356,7 @@ impl ModelClient {
         let request = deepseek_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
-        parse_chat_completions_response(&value, &url)
+        Ok(self.with_usage_cost(parse_chat_completions_response(&value, &url)?))
     }
 
     async fn send_openai_responses(
@@ -355,7 +369,7 @@ impl ModelClient {
             openai_responses_request(&self.model, self.reasoning_effort, &messages, &tools);
 
         let value = self.post_json_with_retry(&url, &request).await?;
-        parse_openai_responses_response(&value, &url)
+        Ok(self.with_usage_cost(parse_openai_responses_response(&value, &url)?))
     }
 
     async fn send_anthropic_messages(
@@ -373,7 +387,7 @@ impl ModelClient {
         )?;
 
         let value = self.post_anthropic_json_with_retry(&url, &request).await?;
-        parse_anthropic_messages_response(&value, &url)
+        Ok(self.with_usage_cost(parse_anthropic_messages_response(&value, &url)?))
     }
 
     async fn post_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
@@ -679,6 +693,128 @@ mod tests {
             client.resolved_model.source,
             catalog::ModelSource::ProviderDefault
         );
+    }
+
+    fn anthropic_cost_test_client(server_url: &str, cache_ttl: Option<&'static str>) -> ModelClient {
+        let mut client = test_model_client(
+            BackendKind::AnthropicMessages,
+            server_url.to_string(),
+            std::collections::BTreeMap::new(),
+        );
+        client.model = "claude-opus-4-6".to_string();
+        client.resolved_model = catalog::resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
+        client.with_cache_ttl(cache_ttl)
+    }
+
+    fn anthropic_usage_server() -> ScriptedServer {
+        ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "content": [{"type": "text", "text": "done"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_input_tokens": 200,
+                    "cache_creation_input_tokens": 32
+                }
+            })
+            .to_string(),
+        )])
+    }
+
+    #[tokio::test]
+    async fn send_turn_attaches_catalog_cost_to_the_usage() {
+        let server = anthropic_usage_server();
+        let client = anthropic_cost_test_client(&server.base_url, None);
+
+        let response = client
+            .send_turn(
+                vec![Message::User {
+                    content: "hi".to_string(),
+                }],
+                vec![],
+            )
+            .await
+            .expect("anthropic response should parse");
+        server.finish();
+
+        // claude-opus-4-6 catalog rates ($/1M): 5 / 25 / 0.5 / 6.25; 5-minute
+        // cache writes bill at the standard cache_write rate.
+        let usage = response.usage.expect("usage should parse");
+        assert_eq!(usage.cost.input, 500);
+        assert_eq!(usage.cost.output, 1_250);
+        assert_eq!(usage.cost.cache_read, 100);
+        assert_eq!(usage.cost.cache_write, 200);
+        assert_eq!(usage.cost.total, 2_050);
+    }
+
+    #[tokio::test]
+    async fn orchestrator_1h_cache_writes_bill_at_the_1h_rate() {
+        let server = anthropic_usage_server();
+        let client = anthropic_cost_test_client(&server.base_url, Some("1h"));
+
+        let response = client
+            .send_turn(
+                vec![Message::User {
+                    content: "hi".to_string(),
+                }],
+                vec![],
+            )
+            .await
+            .expect("anthropic response should parse");
+        server.finish();
+
+        // The catalog carries no explicit 1h rate, so the 2x-input default
+        // applies: 32 tokens x $10/1M = 320 micros (vs 200 at the 5-min rate).
+        let usage = response.usage.expect("usage should parse");
+        assert_eq!(usage.cost.cache_write, 320);
+        assert_eq!(usage.cost.total, 2_170);
+    }
+
+    #[tokio::test]
+    async fn unknown_pricing_yields_zero_cost_not_an_error() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {"content": "done", "tool_calls": null}
+                }],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150
+                }
+            })
+            .to_string(),
+        )]);
+        // "test-model" resolves through the provider default: zero (unknown)
+        // rates.
+        let client = test_model_client(
+            BackendKind::DeepSeekChat,
+            server.base_url.clone(),
+            std::collections::BTreeMap::new(),
+        );
+        assert_eq!(
+            client.resolved_model.cost,
+            catalog::ModelCostRates::default()
+        );
+
+        let response = client
+            .send_turn(
+                vec![Message::User {
+                    content: "hi".to_string(),
+                }],
+                vec![],
+            )
+            .await
+            .expect("deepseek response should parse");
+        server.finish();
+
+        let usage = response.usage.expect("usage should parse");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.cost, TokenCostMicros::default());
     }
 
     #[tokio::test]

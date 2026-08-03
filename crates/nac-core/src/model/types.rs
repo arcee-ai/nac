@@ -228,6 +228,75 @@ pub struct AssistantTurn {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+/// Per-response cost in micro-USD (1e-6 USD), stored as u64 so `TokenUsage`
+/// stays `Eq`. All-zero = unknown pricing (pi's zero-cost fallback). `total`
+/// is the saturating sum of the four buckets, stored so consumers read it
+/// directly. Missing fields deserialize as zero so partial records stay
+/// loadable.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenCostMicros {
+    #[serde(default)]
+    pub input: u64,
+    #[serde(default)]
+    pub output: u64,
+    #[serde(default)]
+    pub cache_read: u64,
+    #[serde(default)]
+    pub cache_write: u64,
+    #[serde(default)]
+    pub total: u64,
+}
+
+impl TokenCostMicros {
+    pub(crate) fn add_saturating(&mut self, other: &Self) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.total = self.total.saturating_add(other.total);
+    }
+}
+
+/// Pure per-response cost: `cost_micros = tokens × rate_per_mtok` exactly
+/// (rates are $/1M tokens, and $ × 1e6 = tokens × rate). Rounding happens
+/// once, at the f64→u64 conversion, half away from zero (== half-up for
+/// these non-negative values); results saturate at u64::MAX. Non-finite or
+/// negative rates bill as zero: unknown pricing never errors.
+///
+/// `cache_write_1h_rate` replaces the standard cache-write rate for
+/// Anthropic 1-hour-TTL writes; `None` bills writes at `rates.cache_write`.
+pub(crate) fn calculate_cost(
+    rates: &catalog::ModelCostRates,
+    cache_write_1h_rate: Option<f64>,
+    usage: &TokenUsage,
+) -> TokenCostMicros {
+    fn micros(tokens: u64, rate_per_mtok: f64) -> u64 {
+        if tokens == 0 || !rate_per_mtok.is_finite() || rate_per_mtok <= 0.0 {
+            return 0;
+        }
+        // f64→u64 `as` saturates at u64::MAX and maps NaN to 0.
+        (tokens as f64 * rate_per_mtok).round() as u64
+    }
+    let input = micros(usage.input_tokens, rates.input);
+    let output = micros(usage.output_tokens, rates.output);
+    let cache_read = micros(usage.cache_read_tokens, rates.cache_read);
+    let cache_write = micros(
+        usage.cache_write_tokens,
+        cache_write_1h_rate.unwrap_or(rates.cache_write),
+    );
+    let total = input
+        .saturating_add(output)
+        .saturating_add(cache_read)
+        .saturating_add(cache_write);
+    TokenCostMicros {
+        input,
+        output,
+        cache_read,
+        cache_write,
+        total,
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TokenUsage {
     pub input_tokens: u64,
@@ -239,6 +308,11 @@ pub struct TokenUsage {
     /// Current context window size from the last ordinary orchestrator call.
     #[serde(rename = "total_tokens")]
     pub orchestrator_context_tokens: u64,
+    /// Per-response cost computed from catalog rates when the response was
+    /// parsed; zero when pricing is unknown. Serde-additive: rows persisted
+    /// before S3 deserialize with zero cost.
+    #[serde(default)]
+    pub cost: TokenCostMicros,
 }
 
 impl TokenUsage {
@@ -253,6 +327,7 @@ impl TokenUsage {
             .cache_write_tokens
             .saturating_add(other.cache_write_tokens);
         self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+        self.cost.add_saturating(&other.cost);
     }
 
     pub(crate) fn replace_context(&mut self, context_tokens: u64) {

@@ -127,6 +127,12 @@ pub struct ModelMetadata {
 }
 
 impl ModelMetadata {
+    /// 1-hour-TTL cache-write rate ($/1M tokens); defaults to 2x the input
+    /// rate (pi's rule) when the catalog carries no explicit value.
+    pub fn cache_write_1h_rate(&self) -> f64 {
+        self.cache_write_1h.unwrap_or(2.0 * self.cost.input)
+    }
+
     /// Conservative metadata with the fallback limits (128k context, 16k max
     /// output), zero (unknown) cost and no reasoning controls.
     pub(crate) fn sparse(

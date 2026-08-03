@@ -284,6 +284,7 @@ mod tests {
                 cache_write_tokens: 0,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 150,
+                cost: crate::model::TokenCostMicros::default(),
             }),
             None,
             Some(crate::model::TokenUsage {
@@ -293,6 +294,7 @@ mod tests {
                 cache_write_tokens: 10,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 330,
+                cost: crate::model::TokenCostMicros::default(),
             }),
         ];
         create_session(&store_path, &snapshot).unwrap();
@@ -960,6 +962,7 @@ mod tests {
                 cache_write_tokens: 4,
                 reasoning_tokens: 5,
                 orchestrator_context_tokens: 42,
+                cost: crate::model::TokenCostMicros::default(),
             })];
             completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
 
@@ -1713,6 +1716,7 @@ mod tests {
                     cache_write_tokens: 4,
                     reasoning_tokens: 5,
                     orchestrator_context_tokens: 42,
+                    cost: crate::model::TokenCostMicros::default(),
                 }),
             ],
         });

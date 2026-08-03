@@ -4278,6 +4278,7 @@ pub(super) mod tests {
             cache_write_tokens: 15,
             reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros::default(),
         };
         assert!(
             parts
@@ -4392,6 +4393,7 @@ pub(super) mod tests {
             cache_write_tokens: 15,
             reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros::default(),
         };
         assert!(
             parts
