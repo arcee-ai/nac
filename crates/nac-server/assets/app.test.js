@@ -78,7 +78,8 @@ function loadApp(overrides = {}) {
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
-      syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
+      syncLaunchApiKeyMode, launchApiKeyInheritLabel, launchApiKeyInheritNoteText,
+      buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
       loadModelCatalog, catalogProviders, findCatalogProvider, findCatalogModel,
@@ -271,6 +272,9 @@ function settingsViewElements(uiInstance) {
 
 // Mirrors the GET /models wire shape (Phase 1 DTOs): kebab-case provider ids,
 // snake_case auth/source, $/1M cost rates, server-derived supported_efforts.
+// The managed providers carry a representative subset of the hand-seeded
+// arcee/codex entries (catalog/seed.rs) so the picker tests cover real seeded
+// models: arcee effort-free (empty supported_efforts) and codex all-levels.
 function modelCatalogFixture() {
   return { catalog_version: 3, providers: [
     { id: "anthropic-messages", auth: "api_key_env", managed_base_url: null,
@@ -310,10 +314,42 @@ function modelCatalogFixture() {
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: [] },
       models: [
-        { id: "arcee-large", display_name: "Arcee Large",
-          context_window: 128000, max_tokens: 8192,
-          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+        { id: "trinity-large-thinking", display_name: "Trinity-Large-Thinking",
+          context_window: 128000, max_tokens: 80000,
+          cost: { input: 0.25, output: 0.8, cache_read: 0, cache_write: 0 },
+          reasoning: true, supported_efforts: [], source: "baseline" },
+        { id: "trinity-mini", display_name: "Trinity-Mini",
+          context_window: 128000, max_tokens: 16384,
+          cost: { input: 0.045, output: 0.15, cache_read: 0, cache_write: 0 },
           reasoning: false, supported_efforts: [], source: "baseline" },
+        { id: "trinity-large-preview", display_name: "Trinity-Large-Preview",
+          context_window: 128000, max_tokens: 16384,
+          cost: { input: 0.45, output: 0.15, cache_read: 0, cache_write: 0 },
+          reasoning: false, supported_efforts: [], source: "baseline" },
+      ] },
+    { id: "chatgpt-codex-responses", auth: "codex_oauth",
+      managed_base_url: "https://chatgpt.com/backend-api",
+      default_limits: { context_window: 128000, max_tokens: 16384,
+        supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"] },
+      models: [
+        { id: "gpt-5.6-sol", display_name: "GPT-5.6 Sol",
+          context_window: 1050000, max_tokens: 128000,
+          cost: { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25 },
+          reasoning: true,
+          supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
+          source: "baseline" },
+        { id: "gpt-5.6-luna", display_name: "GPT-5.6 Luna",
+          context_window: 1050000, max_tokens: 128000,
+          cost: { input: 0.2, output: 1.2, cache_read: 0.02, cache_write: 0.25 },
+          reasoning: true,
+          supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
+          source: "baseline" },
+        { id: "gpt-5.3-codex-spark", display_name: "GPT-5.3 Codex Spark",
+          context_window: 128000, max_tokens: 32000,
+          cost: { input: 1.75, output: 14, cache_read: 0.175, cache_write: 0 },
+          reasoning: true,
+          supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
+          source: "baseline" },
       ] },
   ] };
 }
@@ -340,6 +376,8 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchApiKeyEnv = { value: "", disabled: true, required: false };
   uiInstance.el.launchApiKeyEnvField = { hidden: true };
   uiInstance.el.launchApiKeyHelp = { textContent: "" };
+  uiInstance.el.launchApiKeyInheritOption = { textContent: "" };
+  uiInstance.el.launchApiKeyInheritNote = { textContent: "", hidden: true };
   uiInstance.el.launchCompactionThreshold = { value: "" };
   uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
 }
@@ -3319,7 +3357,7 @@ test("model catalog loads once, keeps stale data on refresh failure, and only de
   const data = await isolated.loadModelCatalog();
   assert.deepEqual(calls, ["/models"]);
   assert.equal(isolated.state.modelCatalog.status, "ready");
-  assert.equal(data.providers.length, 3);
+  assert.equal(data.providers.length, 4);
   // Concurrent calls share the in-flight request.
   const first = isolated.loadModelCatalog();
   const second = isolated.loadModelCatalog();
@@ -3330,7 +3368,7 @@ test("model catalog loads once, keeps stale data on refresh failure, and only de
   fail = true;
   const stale = await isolated.loadModelCatalog({ force: true });
   assert.equal(isolated.state.modelCatalog.status, "ready");
-  assert.equal(stale.providers.length, 3);
+  assert.equal(stale.providers.length, 4);
   // A first-load failure degrades to manual entry.
   const fresh = loadApp({ fetch: async () => errorResponse(500, { error: "boom" }) });
   const none = await fresh.loadModelCatalog();
@@ -3341,10 +3379,11 @@ test("model catalog loads once, keeps stale data on refresh failure, and only de
 
 test("model picker rows filter across display name, id, and provider", () => {
   seedCatalog(ui);
-  assert.equal(ui.modelPickerRows("").length, 5);
+  assert.equal(ui.modelPickerRows("").length, 10);
   assert.equal(ui.modelPickerRows("claude").length, 2);
   assert.equal(ui.modelPickerRows("GPT-5 mini").length, 1);
-  assert.equal(ui.modelPickerRows("arcee").length, 1);
+  assert.equal(ui.modelPickerRows("arcee").length, 3);
+  assert.equal(ui.modelPickerRows("codex").length, 3);
   assert.equal(ui.modelPickerRows("zzz").length, 0);
   const [first] = ui.modelPickerRows("opus");
   assert.equal(first.provider.id, "anthropic-messages");
@@ -3409,7 +3448,7 @@ test("open model picker renders grouped options and the custom escape row", () =
   assert.doesNotMatch(open, /Use custom model/);
   ui.state.launchPicker.query = "gpt";
   let list = ui.renderModelPickerListHtml("launch");
-  assert.equal(occurrences(list, /model-picker-option-id/g), 2);
+  assert.equal(occurrences(list, /model-picker-option-id/g), 5);
   assert.match(list, /Use custom model &#34;gpt&#34; →/);
   ui.state.launchPicker.query = "zzz";
   list = ui.renderModelPickerListHtml("launch");
@@ -3538,6 +3577,140 @@ test("managed backend selections hide base url and API key controls", () => {
   assert.equal(isolated.el.launchBaseUrlField.hidden, true);
 });
 
+test("managed providers render their seeded models with pricing and managed-field hiding", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Grouping, display names, and pricing rows for the hand-seeded entries.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  const open = isolated.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(open, /model-picker-group" role="presentation">arcee-auth/);
+  assert.match(open, /model-picker-group" role="presentation">chatgpt-codex-responses/);
+  assert.match(open, /model-picker-option-name">Trinity-Large-Thinking/);
+  assert.match(open, /model-picker-option-id">trinity-large-thinking/);
+  assert.match(open, /model-picker-option-hint">128k ctx · \$0\.25\/\$0\.8 per 1M/);
+  assert.match(open, /model-picker-option-name">GPT-5\.6 Sol/);
+  assert.match(open, /model-picker-option-hint">1\.1m ctx · \$5\/\$30 per 1M/);
+  // A codex pick hides the managed credential fields, auto-selects no
+  // environment selector, and constrains effort to the all-levels list
+  // (codex accepts every level verbatim).
+  isolated.selectModelPickerIndex("launch", 7);
+  assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
+  assert.equal(isolated.el.launchModel.value, "gpt-5.6-sol");
+  assert.equal(isolated.el.launchBaseUrlField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyMode.value, "none");
+  assert.equal(isolated.el.launchEffortField.hidden, false);
+  assert.match(isolated.el.launchEffort.innerHTML, /value="minimal">minimal/);
+  assert.match(isolated.el.launchEffort.innerHTML, /value="xhigh">xhigh/);
+  // An arcee pick hides the effort field entirely — the matrix accepts no
+  // explicit level (empty supported_efforts), even on the thinking variant.
+  isolated.state.launchPicker = { open: true, query: "trinity-large-thinking", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchModel.value, "trinity-large-thinking");
+  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+});
+
+test("launch API-key inherit option names the configured selector, or its absence", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Before the preview arrives the label stays generic.
+  isolated.syncLaunchApiKeyMode();
+  assert.equal(isolated.el.launchApiKeyInheritOption.textContent, "inherit configured selector");
+  // A ready preview names the configured selector (the NAME is not secret;
+  // the value never leaves the server).
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "anthropic-messages",
+      configured_api_key_env: "ANTHROPIC_API_KEY" } };
+  isolated.syncLaunchApiKeyMode();
+  assert.equal(isolated.el.launchApiKeyInheritOption.textContent,
+    "inherit configured selector (ANTHROPIC_API_KEY)");
+  // An explicit null reads as "none configured", never a blank parenthetical.
+  isolated.state.launchDefaultsPreview.data.configured_api_key_env = null;
+  isolated.syncLaunchApiKeyMode();
+  assert.equal(isolated.el.launchApiKeyInheritOption.textContent,
+    "inherit configured selector (none configured)");
+  // The helper itself: whitespace-only counts as unset; non-ready previews
+  // stay generic.
+  assert.equal(isolated.launchApiKeyInheritLabel({ status: "ready",
+    data: { configured_api_key_env: "  " } }), "inherit configured selector (none configured)");
+  assert.equal(isolated.launchApiKeyInheritLabel({ status: "loading", data: null }),
+    "inherit configured selector");
+});
+
+test("launch defaults preview names the configured API key selector", () => {
+  seedCatalog(ui);
+  const named = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "anthropic-messages",
+      configured_api_key_env: "MY_ANTHROPIC_KEY" } });
+  assert.match(named, /<dt>Configured API key selector<\/dt><dd>MY_ANTHROPIC_KEY<\/dd>/);
+  const unset = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "anthropic-messages", configured_api_key_env: null } });
+  assert.match(unset, /<dt>Configured API key selector<\/dt><dd>None configured<\/dd>/);
+  // Servers predating the field omit the row entirely.
+  const legacy = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "anthropic-messages" } });
+  assert.doesNotMatch(legacy, /Configured API key selector/);
+  // Defensive: a selector name still passes through escaping.
+  const escaped = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_api_key_env: "KEY<>" } });
+  assert.match(escaped, /KEY&lt;&gt;/);
+});
+
+test("launch API-key inherit note warns only on a named-selector provider mismatch", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  const readyWith = (data) => {
+    isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data };
+  };
+  readyWith({ configured_model_backend: "anthropic-messages",
+    configured_api_key_env: "ANTHROPIC_API_KEY" });
+  // Same provider as the configured backend: no note.
+  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
+  assert.equal(isolated.el.launchApiKeyInheritNote.textContent, "");
+  // A different provider names both backends, and updates on model change.
+  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, false);
+  assert.equal(isolated.el.launchApiKeyInheritNote.textContent,
+    "configured for anthropic-messages — check it applies to openai-responses");
+  // Named/none modes hide the note; returning to inherit restores it.
+  isolated.el.launchApiKeyMode.value = "named";
+  isolated.syncLaunchApiKeyMode({ user: true });
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
+  isolated.el.launchApiKeyMode.value = "inherit";
+  isolated.syncLaunchApiKeyMode({ user: true });
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, false);
+  // Managed backends never show it (their API-key controls are hidden and
+  // stored logins supply credentials) — even with a manual inherit choice.
+  isolated.state.launchPicker = { open: true, query: "trinity", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchBackend.value, "arcee-auth");
+  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
+  // Custom/unknown models carry their own badge instead.
+  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
+  // The note requires a named selector — the "(none configured)" label
+  // already covers the unset case.
+  readyWith({ configured_model_backend: "anthropic-messages", configured_api_key_env: null });
+  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchApiKeyInheritNote.hidden, true);
+  // No configured backend at all → nothing to mismatch against.
+  readyWith({ configured_api_key_env: "SOME_KEY" });
+  isolated.syncLaunchApiKeyMode();
+  assert.equal(isolated.launchApiKeyInheritNoteText(), null);
+});
+
 test("model picker keyboard navigation wraps, selects, enters custom, and closes", () => {
   const isolated = loadApp();
   seedCatalog(isolated);
@@ -3548,9 +3721,9 @@ test("model picker keyboard navigation wraps, selects, enters custom, and closes
   assert.equal(isolated.state.launchPicker.activeIndex, 1);
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
-  assert.equal(isolated.state.launchPicker.activeIndex, 4);
+  assert.equal(isolated.state.launchPicker.activeIndex, 9);
   isolated.handleModelPickerKeydown(key("Enter"), "launch");
-  assert.equal(isolated.el.launchModel.value, "arcee-large");
+  assert.equal(isolated.el.launchModel.value, "gpt-5.3-codex-spark");
   assert.equal(isolated.state.launchPicker.open, false);
   // Enter on the custom escape row collapses into the custom state.
   isolated.state.launchPicker = { open: true, query: "my-model", activeIndex: 0, custom: false };
@@ -3796,6 +3969,8 @@ test("launch dialog wires the model picker, manual-entry fallback, and shared ef
   assert.match(indexSource, /id="launchEffortField"/);
   assert.match(indexSource, /id="launchBaseUrlField"/);
   assert.match(indexSource, /id="launchApiKeyModeField"/);
+  assert.match(indexSource, /<option id="launchApiKeyInheritOption" value="inherit">inherit configured selector<\/option>/);
+  assert.match(indexSource, /<small id="launchApiKeyInheritNote" class="api-key-inherit-note" hidden><\/small>/);
   assert.match(indexSource, /<select id="launchBackend" name="backend">/);
   assert.match(indexSource, /<input id="launchModel" name="model"/);
   assert.match(indexSource, /id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden/);
@@ -4029,7 +4204,7 @@ test("model picker styles reuse the field, listbox, and badge tokens", () => {
   for (const rule of [".model-picker-toggle", ".model-picker-list",
     ".model-picker-option:hover, .model-picker-option.is-active",
     ".model-picker-badge.is-warning", ".model-picker-custom-row",
-    ".model-picker-group", ".model-catalog-notice"]) {
+    ".model-picker-group", ".model-catalog-notice", ".api-key-inherit-note"]) {
     assert.ok(redesignSource.includes(rule), rule);
   }
   assert.match(redesignSource, /\.field input, \.field select, \.field textarea, \.model-picker-filter/);

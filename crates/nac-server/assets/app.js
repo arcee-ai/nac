@@ -97,7 +97,7 @@ function bindElements() {
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
-    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
+    "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchApiKeyInheritOption", "launchApiKeyInheritNote", "launchExtraHeaders",
     "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
@@ -5001,6 +5001,10 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
     ? `<div><dt>Configured model</dt><dd>${escapeHtml(configuredModelLabel)}</dd></div>
     <div><dt>Configured effort</dt><dd>${escapeHtml(configuredEffort || "unset (backend default)")}</dd></div>` : "";
   const managed = managedLaunchDefaults(data.configured_model_backend, data.configured_model_base_url);
+  // The selector NAME is not secret (the value is) — name it so "inherit"
+  // is concrete. The key is absent only on servers predating the field.
+  const apiKeyEnvRow = Object.hasOwn(data, "configured_api_key_env")
+    ? `<div><dt>Configured API key selector</dt><dd>${escapeHtml(data.configured_api_key_env == null ? "None configured" : String(data.configured_api_key_env))}</dd></div>` : "";
   const managedHtml = managed ? `<div class="launch-managed-behavior">
     <strong>Managed backend behavior</strong>
     <p>${managed.usesCanonicalUrl
@@ -5012,6 +5016,7 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
     <div><dt>Configured backend</dt><dd>${escapeHtml(backend)}</dd></div>
     <div><dt>Configured base URL</dt><dd>${escapeHtml(baseUrl)}</dd></div>
     ${configuredRows}
+    ${apiKeyEnvRow}
   </dl>${managedHtml}<p class="launch-default-scope">Preview only — session creation validates these settings.</p>`;
 }
 
@@ -5756,6 +5761,41 @@ function handleFocusChange(event) {
 }
 
 const LAUNCH_API_KEY_HELP = "Inherit omits this field; no environment selector explicitly clears it. Managed stored-login backends default to no environment selector.";
+const LAUNCH_API_KEY_INHERIT_LABEL = "inherit configured selector";
+
+// "Inherit" means config.toml's single [model].api_key_env selector for EVERY
+// backend, so the option names it (launch-defaults' configured_api_key_env).
+// Only the selector NAME is ever shown — the value is secret and never
+// leaves the server. A ready preview with no selector says so explicitly;
+// before the preview arrives the label stays generic.
+function launchApiKeyInheritLabel(preview = state.launchDefaultsPreview) {
+  if (preview?.status !== "ready") return LAUNCH_API_KEY_INHERIT_LABEL;
+  const selector = String(preview.data?.configured_api_key_env || "").trim();
+  return selector
+    ? `${LAUNCH_API_KEY_INHERIT_LABEL} (${selector})`
+    : `${LAUNCH_API_KEY_INHERIT_LABEL} (none configured)`;
+}
+
+// Provider-mismatch caution for the inherit mode: the configured selector was
+// chosen for the configured backend, so picking a model from a DIFFERENT
+// provider deserves a visible check. Known catalog picks only (custom models
+// already carry the unrecognized-model badge), only with a named selector
+// (the label already covers the "none configured" case), and never for
+// managed backends — their API-key controls are hidden and stored logins
+// supply credentials.
+function launchApiKeyInheritNoteText() {
+  if (String(el.launchApiKeyMode?.value || "inherit") !== "inherit") return null;
+  const preview = state.launchDefaultsPreview;
+  if (preview?.status !== "ready") return null;
+  const configuredBackend = String(preview.data?.configured_model_backend || "");
+  if (!configuredBackend || !String(preview.data?.configured_api_key_env || "").trim()) return null;
+  const selection = modelPickerSelection("launch");
+  const resolution = resolveModelSelection(selection.backend, selection.model);
+  if (resolution.kind !== "known") return null;
+  if (resolution.provider.managed_base_url) return null;
+  if (resolution.provider.id === configuredBackend) return null;
+  return `configured for ${configuredBackend} — check it applies to ${resolution.provider.id}`;
+}
 
 function syncLaunchApiKeyMode({ user = false } = {}) {
   if (!el.launchApiKeyMode) return;
@@ -5787,6 +5827,14 @@ function syncLaunchApiKeyMode({ user = false } = {}) {
     } else {
       el.launchApiKeyHelp.textContent = LAUNCH_API_KEY_HELP;
     }
+  }
+  if (el.launchApiKeyInheritOption) {
+    el.launchApiKeyInheritOption.textContent = launchApiKeyInheritLabel();
+  }
+  if (el.launchApiKeyInheritNote) {
+    const note = launchApiKeyInheritNoteText();
+    el.launchApiKeyInheritNote.textContent = note || "";
+    el.launchApiKeyInheritNote.hidden = !note;
   }
 }
 
