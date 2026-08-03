@@ -184,6 +184,23 @@ impl ModelMetadata {
         }
     }
 }
+
+/// Whether a provider has a usable credential right now, as served by
+/// `GET /models`. A picker HINT only — it never changes how auth works:
+/// API-key providers still read only the exact `api_key_env` selector and
+/// managed providers still read only their stored credential file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthStatus {
+    /// A usable credential exists: the provider's conventional env var or
+    /// the configured selector names a set variable (API-key providers), or
+    /// a stored credential file exists and parses (managed providers).
+    Ready,
+    /// No usable credential found; `auth_hint` carries the conventional
+    /// env var name or the login command.
+    NoCredential,
+}
+
 /// How a provider authenticates, as served by `GET /models`: auth
 /// *requirements* (drives picker field visibility and hints), not status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -226,6 +243,14 @@ pub struct ModelEntry {
 pub struct ProviderListing {
     pub id: BackendKind,
     pub auth: ProviderAuth,
+    /// Computed per request from the process environment and the managed
+    /// credential files — never baked into the catalog.
+    pub auth_status: AuthStatus,
+    /// The conventional credential env var name (API-key providers) or the
+    /// login command (managed providers) when `auth_status` is
+    /// `no_credential`; `None` when ready or when no conventional name is
+    /// known.
+    pub auth_hint: Option<String>,
     pub managed_base_url: Option<String>,
     pub default_limits: DefaultLimits,
     pub models: Vec<ModelEntry>,

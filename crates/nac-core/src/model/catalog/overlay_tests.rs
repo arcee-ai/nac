@@ -21,6 +21,7 @@ const NOVEL_MODEL: &str = "deepseek-v9-overlay-test";
 fn novel_model_payload() -> String {
     serde_json::json!({
         "deepseek": {
+            "env": ["DEEPSEEK_OVERLAY_KEY"],
             "models": {
                 NOVEL_MODEL: {
                     "name": "DeepSeek V9 Overlay Test",
@@ -95,6 +96,11 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     // The overlay file carries the mapped entry with a fresh timestamp.
     let written: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(env.overlay_path()).unwrap()).unwrap();
+    // The provider-level credential hint rides the same envelope.
+    assert_eq!(
+        written["providers"]["deepseek-chat"]["credential_env_var"],
+        "DEEPSEEK_OVERLAY_KEY"
+    );
     let entry = &written["providers"]["deepseek-chat"]["models"][NOVEL_MODEL];
     assert_eq!(entry["context_window"], 999_000);
     assert_eq!(entry["max_tokens"], 77_000);
@@ -112,7 +118,14 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert!(sidecar.fetched_at_unix <= unix_now());
     assert_eq!(sidecar.url, server_url);
 
-    // The process-global catalog reloaded with the overlay entry.
+    // The process-global catalog reloaded with the overlay entry, and the
+    // overlay's credential env var upgraded the provider's hint metadata.
+    assert_eq!(
+        current().providers[&BackendKind::DeepSeekChat]
+            .credential_env_var
+            .as_deref(),
+        Some("DEEPSEEK_OVERLAY_KEY")
+    );
     let metadata = resolve(BackendKind::DeepSeekChat, NOVEL_MODEL);
     assert_eq!(metadata.source, ModelSource::Overlay);
     assert_eq!(metadata.context_window, 999_000);
@@ -606,6 +619,10 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
             .get(provider)
             .unwrap_or_else(|| panic!("{provider} missing from the mapped overlay"));
         assert_eq!(
+            actual_provider.credential_env_var, expected_provider.credential_env_var,
+            "{provider}: credential env var mapping drifted"
+        );
+        assert_eq!(
             actual_provider.models.len(),
             expected_provider.models.len(),
             "{provider}"
@@ -621,6 +638,70 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
             );
         }
     }
+}
+
+#[test]
+fn runtime_mapper_maps_credential_env_var_tolerantly() {
+    let seed = seed::seed_catalog();
+    let payload = serde_json::json!({
+        "deepseek": {"env": ["DEEPSEEK_TEST_KEY", "SECONDARY_KEY"], "models": {}},
+        "fireworks-ai": {"models": {}},
+        "togetherai": {"env": [], "models": {}},
+        "openai": {"env": "not-a-list", "models": {}},
+        "anthropic": {"env": ["not a valid name!!"], "models": {}}
+    })
+    .to_string();
+    let (providers, warnings, _) = map_models_dev(&payload, &seed).expect("payload maps");
+    let var = |provider: BackendKind| providers[&provider].credential_env_var.as_deref();
+    // The first entry wins; missing and empty lists map to None silently.
+    assert_eq!(var(BackendKind::DeepSeekChat), Some("DEEPSEEK_TEST_KEY"));
+    assert_eq!(var(BackendKind::FireworksChat), None);
+    assert_eq!(var(BackendKind::TogetherChat), None);
+    // Malformed lists and invalid names warn and map to None (the merge
+    // keeps the baseline's value) instead of failing the provider.
+    assert_eq!(var(BackendKind::OpenAiResponses), None);
+    assert_eq!(var(BackendKind::AnthropicMessages), None);
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("malformed env list")), "{warnings:?}");
+    assert!(
+        warnings.iter().any(|w| w.contains("invalid credential env var name")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn overlay_credential_env_var_upgrades_and_never_erases() {
+    // A present overlay value replaces the baseline's; an absent one keeps
+    // it (older overlays predate the field).
+    let home = TempHome::new("credential-env-merge");
+    let generated_at = data::parse_manifest().unwrap().generated_at;
+    write_overlay(
+        home.path(),
+        &generated_at,
+        serde_json::json!({
+            "deepseek-chat": {
+                "credential_env_var": "DEEPSEEK_UPGRADED_KEY",
+                "models": {}
+            },
+            "fireworks-chat": {
+                "models": {}
+            }
+        }),
+    );
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        catalog.providers[&BackendKind::DeepSeekChat]
+            .credential_env_var
+            .as_deref(),
+        Some("DEEPSEEK_UPGRADED_KEY")
+    );
+    assert_eq!(
+        catalog.providers[&BackendKind::FireworksChat]
+            .credential_env_var
+            .as_deref(),
+        Some("FIREWORKS_API_KEY")
+    );
 }
 
 // ---------------------------------------------------------------------------

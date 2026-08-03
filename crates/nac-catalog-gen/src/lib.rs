@@ -4,8 +4,10 @@
 //! recorded fixture in tests) → extract nac's five models.dev providers →
 //! map each model to a seed entry (`limit` → context/max-tokens with the
 //! 128k/16k fallbacks, `cost` → rates, `reasoning_options` → thinking-level
-//! seeds) → apply the curated `overrides.toml` (which replicates the
-//! pre-S4 `backend.rs` effort-validation matrix exactly; validation now
+//! seeds, provider `env` → the conventional credential variable name, which
+//! is status-only metadata for the `/models` auth hint and never changes
+//! how auth works) → apply the curated `overrides.toml` (which replicates
+//! the pre-S4 `backend.rs` effort-validation matrix exactly; validation now
 //! reads these maps) → emit `catalog.json` + `catalog.manifest.json`.
 //!
 //! The output is checked in and loaded by nac-core via `include_str!`; no
@@ -52,6 +54,11 @@ pub const EFFORT_NAMES: [&str; 6] = ["none", "minimal", "low", "medium", "high",
 
 #[derive(Debug, Deserialize)]
 struct ModelsDevProvider {
+    /// Conventional credential environment variable names (status-only
+    /// metadata for the `/models` auth hint); the first entry is the
+    /// conventional name. Absent for providers models.dev does not key by
+    /// env var.
+    env: Option<Vec<String>>,
     models: BTreeMap<String, ModelsDevModel>,
 }
 
@@ -128,6 +135,12 @@ pub struct ModelDoc {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderDoc {
+    /// The provider's conventional credential environment variable name
+    /// (models.dev `env`'s first entry). Status-only metadata: nac's auth
+    /// model stays the explicit `api_key_env` selector; this only powers
+    /// the `/models` auth-status hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_env_var: Option<String>,
     pub models: BTreeMap<String, ModelDoc>,
 }
 
@@ -230,6 +243,31 @@ fn validate_levels(levels: &BTreeMap<String, String>) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Seed mapping (models.dev → pre-override entry)
 // ---------------------------------------------------------------------------
+
+/// Map models.dev's provider `env` list to the conventional credential
+/// variable name (the first entry). Missing/empty lists yield `None`
+/// (providers not keyed by env var); a present but malformed name is a hard
+/// error — schema drift in a consumed field fails loudly at regen time.
+fn seed_credential_env_var(provider: &str, env: Option<&[String]>) -> Result<Option<String>> {
+    let Some(first) = env.and_then(|env| env.first()) else {
+        return Ok(None);
+    };
+    let name = first.trim();
+    if !is_valid_env_name(name) {
+        bail!(
+            "models.dev provider '{provider}': invalid credential env var name {first:?} \
+             (models.dev schema drift — extend the generator deliberately)"
+        );
+    }
+    Ok(Some(name.to_string()))
+}
+
+/// `[A-Za-z_][A-Za-z0-9_]*`; mirrors nac-core's `backend.rs` env-name rule.
+fn is_valid_env_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
 
 /// Map `reasoning_options` to thinking-level seeds. Wire values `xhigh` and
 /// `max` both address nac's xhigh slot; when a model lists both, `max` (the
@@ -381,7 +419,16 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
             }
             models.insert(id.clone(), entry);
         }
-        providers.insert(nac_id.to_string(), ProviderDoc { models });
+        providers.insert(
+            nac_id.to_string(),
+            ProviderDoc {
+                credential_env_var: seed_credential_env_var(
+                    models_dev_id,
+                    provider.env.as_deref(),
+                )?,
+                models,
+            },
+        );
     }
 
     // Review signal: curated entries that matched nothing this regen.

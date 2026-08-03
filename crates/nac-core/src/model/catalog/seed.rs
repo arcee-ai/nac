@@ -259,12 +259,21 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
 
 pub(super) fn seed_catalog() -> ModelCatalog {
     let mut providers: BTreeMap<BackendKind, ProviderCatalog> = BTreeMap::new();
-    let mut register = |default: ModelMetadata, known: &[ModelMetadata]| {
+    let mut register = |default: ModelMetadata,
+                        known: &[ModelMetadata],
+                        credential_env_var: Option<&str>| {
         let models = known
             .iter()
             .map(|metadata| (metadata.id.clone(), metadata.clone()))
             .collect();
-        providers.insert(default.provider, ProviderCatalog { default, models });
+        providers.insert(
+            default.provider,
+            ProviderCatalog {
+                default,
+                models,
+                credential_env_var: credential_env_var.map(str::to_string),
+            },
+        );
     };
 
     register(
@@ -281,6 +290,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             ),
         ),
         &[],
+        // Conventional credential var owned by the generated baseline.
+        None,
     );
     register(
         entry(
@@ -295,6 +306,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             ),
         ),
         &[],
+        None,
     );
     register(
         entry(
@@ -310,6 +322,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             ),
         ),
         &[],
+        None,
     );
     register(
         entry(
@@ -320,6 +333,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             Compat::default(),
         ),
         &[],
+        None,
     );
     register(
         entry(
@@ -330,6 +344,9 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             Compat::default(),
         ),
         &codex_seed_models(),
+        // Managed provider: no conventional env var; the auth hint is the
+        // login command.
+        None,
     );
     register(
         // Unknown Anthropic models stay conservative (none-only), matching
@@ -357,6 +374,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
                 Compat::default(),
             ),
         ],
+        None,
     );
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         register(
@@ -370,6 +388,9 @@ pub(super) fn seed_catalog() -> ModelCatalog {
                 completions_compat(None, "reasoning_content", Some(0.0)),
             ),
             &arcee_seed_models(backend),
+            // arcee-api's conventional variable (the README's provider-named
+            // list); arcee-auth is managed and carries no name.
+            (backend == BackendKind::ArceeApi).then_some("ARCEE_API_KEY"),
         );
     }
 

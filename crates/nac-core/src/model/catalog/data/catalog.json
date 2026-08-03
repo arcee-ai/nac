@@ -1,6 +1,7 @@
 {
   "providers": {
     "anthropic-messages": {
+      "credential_env_var": "ANTHROPIC_API_KEY",
       "models": {
         "claude-fable-5": {
           "display_name": "Claude Fable 5",
@@ -237,6 +238,7 @@
       }
     },
     "deepseek-chat": {
+      "credential_env_var": "DEEPSEEK_API_KEY",
       "models": {
         "deepseek-chat": {
           "display_name": "DeepSeek Chat",
@@ -309,6 +311,7 @@
       }
     },
     "fireworks-chat": {
+      "credential_env_var": "FIREWORKS_API_KEY",
       "models": {
         "accounts/fireworks/models/deepseek-v4-flash": {
           "display_name": "DeepSeek V4 Flash",
@@ -619,6 +622,7 @@
       }
     },
     "openai-responses": {
+      "credential_env_var": "OPENAI_API_KEY",
       "models": {
         "chatgpt-image-latest": {
           "display_name": "chatgpt-image-latest",
@@ -1563,6 +1567,7 @@
       }
     },
     "together-chat": {
+      "credential_env_var": "TOGETHER_API_KEY",
       "models": {
         "LiquidAI/LFM2-24B-A2B": {
           "display_name": "LFM2-24B-A2B",

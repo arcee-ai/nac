@@ -134,6 +134,14 @@ pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Whether a stored Codex credential exists and parses (the `/models`
+/// auth-status check; any read/parse/permission failure reads as absent,
+/// as does a foreign-provider credential file — the status read path's
+/// existing policy).
+pub(super) fn stored_credential_present() -> bool {
+    matches!(read_auth_file_optional_for_status(), Ok(Some(_)))
+}
+
 pub(super) fn preflight_stored_auth() -> Result<()> {
     let _lock = acquire_auth_lock()?;
     read_auth_file().map(|_| ())

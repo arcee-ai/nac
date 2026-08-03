@@ -168,7 +168,7 @@ pub(super) fn merge_overlay(
         providers.insert(provider, generated);
     }
     for (provider, generated) in providers {
-        super::data::merge_entries(catalog, provider, generated.models, ModelSource::Overlay);
+        super::data::merge_entries(catalog, provider, generated, ModelSource::Overlay);
     }
 }
 
@@ -448,6 +448,7 @@ pub(super) fn map_models_dev(
             ));
             continue;
         };
+        let credential_env_var = map_credential_env_var(models_dev_id, raw_provider, &mut warnings);
         let raw_models: BTreeMap<String, serde_json::Value> = match raw_provider
             .get("models")
             .cloned()
@@ -486,9 +487,55 @@ pub(super) fn map_models_dev(
                 Err(reason) => warnings.push(format!("{provider}/{id}: {reason}; skipped")),
             }
         }
-        providers.insert(provider, GeneratedProvider { models });
+        providers.insert(
+            provider,
+            GeneratedProvider {
+                credential_env_var,
+                models,
+            },
+        );
     }
     Ok((providers, warnings, model_count))
+}
+
+/// models.dev provider `env` → the conventional credential variable name
+/// (the first entry), mirroring the generator's `seed_credential_env_var`.
+/// Tolerant like the rest of the runtime mapper: a missing/empty list maps
+/// to `None` (the merge keeps the baseline's value); a malformed entry
+/// warns and maps to `None` rather than failing the provider.
+fn map_credential_env_var(
+    models_dev_id: &str,
+    raw_provider: &serde_json::Value,
+    warnings: &mut Vec<String>,
+) -> Option<String> {
+    let env = raw_provider.get("env")?;
+    // Null and empty lists are legitimate (no conventional name); anything
+    // that is not a list is drift — warn and keep the baseline's value.
+    if env.is_null() {
+        return None;
+    }
+    let Some(first) = env.as_array().and_then(|env| env.first()) else {
+        if env.as_array().is_some_and(|env| env.is_empty()) {
+            return None;
+        }
+        warnings.push(format!(
+            "models.dev provider '{models_dev_id}': malformed env list; credential hint skipped"
+        ));
+        return None;
+    };
+    let name = first.as_str().unwrap_or("").trim();
+    let valid = {
+        let mut bytes = name.bytes();
+        matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if !valid {
+        warnings.push(format!(
+            "models.dev provider '{models_dev_id}': invalid credential env var name; credential hint skipped"
+        ));
+        return None;
+    }
+    Some(name.to_string())
 }
 
 fn map_model(

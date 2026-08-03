@@ -212,6 +212,43 @@ fn missing_mapped_provider_fails_loudly() {
 }
 
 #[test]
+fn provider_env_maps_the_first_conventional_var_name() {
+    let payload = r#"{
+      "anthropic": {"env": ["ANTHROPIC_API_KEY", "ANTHROPIC_ALT_KEY"], "models": {}},
+      "deepseek": {"env": ["DEEPSEEK_API_KEY"], "models": {}},
+      "fireworks-ai": {"models": {}},
+      "togetherai": {"env": [], "models": {}},
+      "openai": {"env": ["OPENAI_API_KEY"], "models": {}}
+    }"#;
+    let generation = generate(payload, EMPTY_OVERRIDES);
+    let var = |provider: &str| generation.catalog.providers[provider].credential_env_var.as_deref();
+    // The first entry is the conventional name.
+    assert_eq!(var("anthropic-messages"), Some("ANTHROPIC_API_KEY"));
+    assert_eq!(var("deepseek-chat"), Some("DEEPSEEK_API_KEY"));
+    assert_eq!(var("openai-responses"), Some("OPENAI_API_KEY"));
+    // Missing and empty `env` lists map to None (no conventional name).
+    assert_eq!(var("fireworks-chat"), None);
+    assert_eq!(var("together-chat"), None);
+}
+
+#[test]
+fn invalid_credential_env_var_fails_loudly() {
+    for env in [r#"["not a valid name!!"]"#, r#"["  "]"#, r#"["1STARTS_WITH_DIGIT"]"#] {
+        let payload = format!(
+            r#"{{"anthropic": {{"models": {{}}}}, "deepseek": {{"env": {env}, "models": {{}}}},
+               "fireworks-ai": {{"models": {{}}}}, "togetherai": {{"models": {{}}}},
+               "openai": {{"models": {{}}}}}}"#
+        );
+        let result = gen::generate(&payload, EMPTY_OVERRIDES);
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(
+            error.contains("invalid credential env var name"),
+            "{env}: {error}"
+        );
+    }
+}
+
+#[test]
 fn provider_default_override_replaces_every_seed_map() {
     let overrides = r#"
         [providers."anthropic-messages"]

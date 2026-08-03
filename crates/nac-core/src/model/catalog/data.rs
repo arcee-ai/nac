@@ -11,11 +11,13 @@
 //!
 //! Record shape per model (the generator's `ModelDoc` contract):
 //! `display_name`, `context_window`, `max_tokens`, `cost` rates,
-//! `reasoning`, `thinking_level_map`. `provider`/`api` are hydrated from
-//! the provider key and `compat` is inherited from the provider's seed
-//! default, so known and unknown models of a provider stay identical at
-//! adapter-consolidation time (S6). `cache_write_1h` is not models.dev
-//! data; S3's cost computation applies the 2x-input default when `None`.
+//! `reasoning`, `thinking_level_map`; provider-level `credential_env_var`
+//! (status-only metadata for the `/models` auth hint). `provider`/`api`
+//! are hydrated from the provider key and `compat` is inherited from the
+//! provider's seed default, so known and unknown models of a provider stay
+//! identical at adapter-consolidation time (S6). `cache_write_1h` is not
+//! models.dev data; S3's cost computation applies the 2x-input default
+//! when `None`.
 //!
 //! The same record shape backs the S2 runtime overlay (`overlay.rs`), which
 //! reuses [`hydrate_entry`] with `ModelSource::Overlay`.
@@ -39,6 +41,12 @@ pub(super) struct GeneratedCatalog {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct GeneratedProvider {
+    /// The provider's conventional credential env var name (models.dev
+    /// `env`'s first entry; status-only metadata for the `/models` auth
+    /// hint). Absent in older overlays — an absent value never erases the
+    /// baseline's at merge time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) credential_env_var: Option<String>,
     pub(super) models: BTreeMap<String, GeneratedModel>,
 }
 
@@ -100,19 +108,24 @@ pub(super) fn hydrate_entry(
 
 /// Hydrate-and-insert one provider's generated records (baseline or
 /// overlay): `compat` comes from the provider's seed default so known and
-/// unknown models of a provider stay identical.
+/// unknown models of a provider stay identical. A present
+/// `credential_env_var` upgrades the provider's conventional-name metadata;
+/// an absent one never erases it.
 pub(super) fn merge_entries(
     catalog: &mut ModelCatalog,
     provider: BackendKind,
-    models: BTreeMap<String, GeneratedModel>,
+    generated: GeneratedProvider,
     source: ModelSource,
 ) {
     let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
         debug_assert!(false, "generated provider {provider} must have a seed default");
         return;
     };
+    if let Some(credential_env_var) = generated.credential_env_var {
+        provider_catalog.credential_env_var = Some(credential_env_var);
+    }
     let compat = provider_catalog.default.compat.clone();
-    for (id, entry) in models {
+    for (id, entry) in generated.models {
         let metadata = hydrate_entry(provider, id, entry, &compat, source);
         provider_catalog.models.insert(metadata.id.clone(), metadata);
     }
@@ -130,6 +143,6 @@ pub(super) fn merge_generated_baseline(catalog: &mut ModelCatalog) {
         }
     };
     for (provider, generated_provider) in generated.providers {
-        merge_entries(catalog, provider, generated_provider.models, ModelSource::Baseline);
+        merge_entries(catalog, provider, generated_provider, ModelSource::Baseline);
     }
 }

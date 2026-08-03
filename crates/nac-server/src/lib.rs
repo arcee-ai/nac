@@ -528,6 +528,16 @@ impl SessionManager {
         })
     }
 
+    /// The configured credential selector NAME (config.toml
+    /// `[model].api_key_env`, never the value) for the `/models`
+    /// auth-status hint. Root-config scope; a load failure degrades to
+    /// `None` (conventional-var-only status) so the listing never fails.
+    fn configured_model_api_key_env(&self) -> Option<String> {
+        NacConfig::load_from_cwd(&self.inner.root_cwd)
+            .ok()
+            .and_then(|config| config.model.api_key_env)
+    }
+
     pub fn launch_model_defaults(
         &self,
         request: LaunchModelDefaultsRequest,
@@ -1375,8 +1385,15 @@ async fn launch_model_defaults_handler(
 /// The model catalog listing for the frontend picker: every provider with
 /// auth requirements, managed base URL, `_default` limits and real entries.
 /// Reads the process-global catalog; synchronous, local-only, never fails.
-async fn models_handler() -> Json<ModelListing> {
-    Json(nac_core::model::api_listing())
+/// `auth_status`/`auth_hint` are computed per request from the process
+/// environment and the managed credential files; the configured selector
+/// NAME (never the value) comes from the root config — a config load
+/// failure degrades to conventional-var-only status rather than failing
+/// the listing.
+async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
+    Json(nac_core::model::api_listing(
+        manager.configured_model_api_key_env().as_deref(),
+    ))
 }
 
 async fn list_sessions(
@@ -2860,6 +2877,16 @@ mod tests {
             by_id("chatgpt-codex-responses")["managed_base_url"],
             nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
         );
+        // Managed providers without a stored credential hint their login
+        // command (a code constant, independent of machine catalog layers).
+        for (id, command) in [
+            ("arcee-auth", "nac-web arcee-auth login"),
+            ("chatgpt-codex-responses", "nac-web codex-auth login"),
+        ] {
+            if by_id(id)["auth_status"] == "no_credential" {
+                assert_eq!(by_id(id)["auth_hint"], command, "{id}");
+            }
+        }
 
         // Every provider carries `_default` limits and real entries only
         // (never the `_default` id or a synthesis-product source). Values
@@ -2867,6 +2894,23 @@ mod tests {
         // overlay/models.json, which may patch them — exact values are
         // pinned hermetically by the nac-core catalog tests.
         for provider in providers {
+            // Auth status is computed per request from the machine's env
+            // and credential files, so only the value domain and the
+            // hint/status invariants are machine-independent here.
+            let status = provider["auth_status"].as_str().unwrap();
+            assert!(
+                ["ready", "no_credential"].contains(&status),
+                "unexpected auth_status: {status}"
+            );
+            let hint = &provider["auth_hint"];
+            if status == "ready" {
+                assert!(hint.is_null(), "ready providers carry no hint: {provider}");
+            } else if provider["auth"] == "api_key_env" {
+                assert!(
+                    hint.as_str().is_some_and(|hint| !hint.is_empty()),
+                    "no_credential API-key providers hint the conventional var: {provider}"
+                );
+            }
             let limits = &provider["default_limits"];
             assert!(limits["context_window"].as_u64().unwrap() > 0);
             assert!(limits["max_tokens"].as_u64().unwrap() > 0);
@@ -2909,6 +2953,78 @@ mod tests {
                 "the seed's {model_id} entry must reach the {provider} listing"
             );
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_computes_auth_status_from_the_environment() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("models_endpoint_status");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        // Isolated: no credential files, no config, OPENAI_API_KEY cleared.
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let body = response_json(get_response(app.clone(), "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+
+        // Conventional var unset + no configured selector: no_credential
+        // with the conventional name as the hint.
+        assert_eq!(by_id("openai-responses")["auth_status"], "no_credential");
+        assert_eq!(by_id("openai-responses")["auth_hint"], "OPENAI_API_KEY");
+        // Managed providers without stored credentials hint the login
+        // commands.
+        assert_eq!(by_id("arcee-auth")["auth_status"], "no_credential");
+        assert_eq!(by_id("arcee-auth")["auth_hint"], "nac-web arcee-auth login");
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["auth_status"],
+            "no_credential"
+        );
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["auth_hint"],
+            "nac-web codex-auth login"
+        );
+
+        // A configured selector naming a set variable reads ready through
+        // the root config (the launch dialog's inherit semantics).
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\napi_key_env = \"SECOND_API_KEY\"\n",
+        )
+        .unwrap();
+        unsafe { std::env::set_var("SECOND_API_KEY", "server-test-key") };
+        let body = response_json(get_response(app.clone(), "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let openai = providers.iter().find(|p| p["id"] == "openai-responses").unwrap();
+        assert_eq!(openai["auth_status"], "ready");
+        assert!(openai["auth_hint"].is_null());
+
+        // A parseable stored credential flips its managed provider.
+        std::fs::write(
+            nac_home.join("auth.json"),
+            r#"{"type":"chatgpt-codex","access":"access-test","refresh":"refresh-test","expires_at_ms":18446744073709551615,"account_id":"account-test"}"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                nac_home.join("auth.json"),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
+        let body = response_json(get_response(app, "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let codex = providers
+            .iter()
+            .find(|p| p["id"] == "chatgpt-codex-responses")
+            .unwrap();
+        assert_eq!(codex["auth_status"], "ready");
+        assert!(codex["auth_hint"].is_null());
+
         let _ = std::fs::remove_dir_all(root);
     }
 

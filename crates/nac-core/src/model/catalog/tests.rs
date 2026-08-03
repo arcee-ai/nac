@@ -609,7 +609,7 @@ fn sparse_metadata_carries_the_documented_fallbacks() {
 fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
     // Provider set, auth requirements and managed base URLs derive from the
     // backend kind, not from catalog data — this test needs no env lock.
-    let listing = api_listing();
+    let listing = api_listing(None);
     let providers = listing
         .providers
         .iter()
@@ -649,7 +649,7 @@ fn api_listing_serializes_the_designed_field_names() {
     // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
     // refresh tests transiently reload the global with Overlay entries.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = serde_json::to_value(api_listing()).expect("listing serializes");
+    let listing = serde_json::to_value(api_listing(None)).expect("listing serializes");
     let keys = |value: &serde_json::Value| {
         value
             .as_object()
@@ -670,9 +670,30 @@ fn api_listing_serializes_the_designed_field_names() {
         .unwrap();
     assert_eq!(
         keys(anthropic),
-        ["auth", "default_limits", "id", "managed_base_url", "models"]
+        [
+            "auth",
+            "auth_hint",
+            "auth_status",
+            "default_limits",
+            "id",
+            "managed_base_url",
+            "models"
+        ]
     );
     assert_eq!(anthropic["auth"], "api_key_env");
+    // Status is machine-dependent (process env + credential files); the
+    // deterministic semantics are pinned by auth_status_tests. Here: the
+    // value domain only.
+    assert!(
+        ["ready", "no_credential"].contains(&anthropic["auth_status"].as_str().unwrap()),
+        "{}",
+        anthropic["auth_status"]
+    );
+    assert!(
+        anthropic["auth_hint"].is_string() || anthropic["auth_hint"].is_null(),
+        "{}",
+        anthropic["auth_hint"]
+    );
     assert!(anthropic["managed_base_url"].is_null());
     assert_eq!(
         keys(&anthropic["default_limits"]),
@@ -733,7 +754,7 @@ fn api_listing_supported_efforts_come_from_some_wired_map_keys() {
     // Wire values stay internal: claude-opus-4-6's xhigh maps to the wire
     // tier "max", but the listing reports the effort level.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = api_listing();
+    let listing = api_listing(None);
     let anthropic = listing
         .providers
         .iter()
@@ -761,7 +782,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
     // Holds TEST_ENV_LOCK for the same reason as the other global-catalog
     // assertions (transient Overlay entries from the refresh tests).
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = api_listing();
+    let listing = api_listing(None);
     assert_eq!(listing.providers.len(), 8);
     let mut total = 0;
     for provider in &listing.providers {
@@ -835,8 +856,8 @@ fn catalog_version_bumps_on_reload() {
     // Serializes with the S2 refresh tests: they reload the process-global
     // catalog (bumping the version) via EnvGuard::drop.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let before = api_listing().catalog_version;
+    let before = api_listing(None).catalog_version;
     reset_for_test();
-    let after = api_listing().catalog_version;
+    let after = api_listing(None).catalog_version;
     assert_eq!(after, before + 1);
 }

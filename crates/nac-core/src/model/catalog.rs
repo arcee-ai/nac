@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
+mod auth_status;
+#[cfg(test)]
+mod auth_status_tests;
 mod data;
 mod overlay;
 #[cfg(test)]
@@ -42,9 +45,9 @@ mod user_overrides;
 
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
-    ApiKind, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates, ModelEntry,
-    ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing, ThinkingLevelMap,
-    FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates,
+    ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing,
+    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -123,6 +126,12 @@ impl std::fmt::Display for CatalogWarning {
 struct ProviderCatalog {
     default: ModelMetadata,
     models: BTreeMap<String, ModelMetadata>,
+    /// The provider's conventional credential env var name (status-only
+    /// metadata for the `/models` auth hint): the generated baseline owns
+    /// the five models.dev providers' names, the seed hand-maintains
+    /// arcee-api's, and a present overlay value upgrades. Managed providers
+    /// carry `None` (their hint is the login command).
+    credential_env_var: Option<String>,
 }
 
 impl ProviderCatalog {
@@ -262,45 +271,61 @@ fn provider_auth(provider: BackendKind) -> ProviderAuth {
 /// and real entries. Synthesis products (ProviderDefault/Fallback) never
 /// enter the `models` map by construction; the source filter pins that
 /// contract at the boundary. Synchronous and local-only, like resolution.
-pub fn api_listing() -> ModelListing {
+///
+/// `auth_status`/`auth_hint` are computed per call from the process
+/// environment and the managed credential files (never baked into the
+/// catalog). `configured_api_key_env` is the configured credential selector
+/// NAME from the server's root config (never the value); an API-key
+/// provider reads as ready when either its conventional env var or that
+/// selector names a set variable.
+pub fn api_listing(configured_api_key_env: Option<&str>) -> ModelListing {
     let catalog = current();
     let providers = catalog
         .providers
         .iter()
-        .map(|(provider, provider_catalog)| ProviderListing {
-            id: *provider,
-            auth: provider_auth(*provider),
-            managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
-            default_limits: DefaultLimits {
-                context_window: provider_catalog.default.context_window,
-                max_tokens: provider_catalog.default.max_tokens,
-                supported_efforts: provider_catalog
-                    .default
-                    .thinking_level_map
-                    .supported_efforts(),
-            },
-            models: provider_catalog
-                .models
-                .values()
-                .filter(|metadata| {
-                    matches!(
-                        metadata.source,
-                        ModelSource::Baseline
-                            | ModelSource::Overlay
-                            | ModelSource::UserOverride
-                    )
-                })
-                .map(|metadata| ModelEntry {
-                    id: metadata.id.clone(),
-                    display_name: metadata.display_name.clone(),
-                    context_window: metadata.context_window,
-                    max_tokens: metadata.max_tokens,
-                    cost: metadata.cost,
-                    reasoning: metadata.reasoning,
-                    supported_efforts: metadata.thinking_level_map.supported_efforts(),
-                    source: metadata.source,
-                })
-                .collect(),
+        .map(|(provider, provider_catalog)| {
+            let (auth_status, auth_hint) = auth_status::provider_auth_status(
+                *provider,
+                provider_catalog.credential_env_var.as_deref(),
+                configured_api_key_env,
+            );
+            ProviderListing {
+                id: *provider,
+                auth: provider_auth(*provider),
+                auth_status,
+                auth_hint,
+                managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
+                default_limits: DefaultLimits {
+                    context_window: provider_catalog.default.context_window,
+                    max_tokens: provider_catalog.default.max_tokens,
+                    supported_efforts: provider_catalog
+                        .default
+                        .thinking_level_map
+                        .supported_efforts(),
+                },
+                models: provider_catalog
+                    .models
+                    .values()
+                    .filter(|metadata| {
+                        matches!(
+                            metadata.source,
+                            ModelSource::Baseline
+                                | ModelSource::Overlay
+                                | ModelSource::UserOverride
+                        )
+                    })
+                    .map(|metadata| ModelEntry {
+                        id: metadata.id.clone(),
+                        display_name: metadata.display_name.clone(),
+                        context_window: metadata.context_window,
+                        max_tokens: metadata.max_tokens,
+                        cost: metadata.cost,
+                        reasoning: metadata.reasoning,
+                        supported_efforts: metadata.thinking_level_map.supported_efforts(),
+                        source: metadata.source,
+                    })
+                    .collect(),
+            }
         })
         .collect();
     ModelListing {
