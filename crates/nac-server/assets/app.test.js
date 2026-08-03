@@ -79,7 +79,6 @@ function loadApp(overrides = {}) {
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
       loadLaunchDefaultsPreview,
       syncLaunchApiKeyMode, launchApiKeyInheritLabel, launchApiKeyInheritNoteText,
-      launchBaseUrlPlaceholder, launchBaseUrlInheritNoteText, syncLaunchBaseUrlField,
       buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
@@ -272,16 +271,13 @@ function settingsViewElements(uiInstance) {
 }
 
 // Mirrors the GET /models wire shape (Phase 1 DTOs): kebab-case provider ids,
-// snake_case auth/source, $/1M cost rates, server-derived supported_efforts,
-// and per-provider default_base_url (catalog endpoint defaults; null for the
-// managed providers, which keep their code-side canonical URLs).
+// snake_case auth/source, $/1M cost rates, server-derived supported_efforts.
 // The managed providers carry a representative subset of the hand-seeded
 // arcee/codex entries (catalog/seed.rs) so the picker tests cover real seeded
 // models: arcee effort-free (empty supported_efforts) and codex all-levels.
 function modelCatalogFixture() {
   return { catalog_version: 3, providers: [
     { id: "anthropic-messages", auth: "api_key_env", managed_base_url: null,
-      default_base_url: "https://api.anthropic.com",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "low", "medium", "high"] },
       models: [
@@ -299,7 +295,6 @@ function modelCatalogFixture() {
           source: "user_override" },
       ] },
     { id: "openai-responses", auth: "api_key_env", managed_base_url: null,
-      default_base_url: "https://api.openai.com/v1",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "low", "medium", "high"] },
       models: [
@@ -315,7 +310,7 @@ function modelCatalogFixture() {
           reasoning: false, supported_efforts: [], source: "baseline" },
       ] },
     { id: "arcee-auth", auth: "managed_arcee",
-      managed_base_url: "https://api.arcee.ai/api/v1", default_base_url: null,
+      managed_base_url: "https://api.arcee.ai/api/v1",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: [] },
       models: [
@@ -333,7 +328,7 @@ function modelCatalogFixture() {
           reasoning: false, supported_efforts: [], source: "baseline" },
       ] },
     { id: "chatgpt-codex-responses", auth: "codex_oauth",
-      managed_base_url: "https://chatgpt.com/backend-api", default_base_url: null,
+      managed_base_url: "https://chatgpt.com/backend-api",
       default_limits: { context_window: 128000, max_tokens: 16384,
         supported_efforts: ["none", "minimal", "low", "medium", "high", "xhigh"] },
       models: [
@@ -374,9 +369,8 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchEffort = { value: "inherit", innerHTML: "" };
   uiInstance.el.launchEffortField = { hidden: false };
   uiInstance.el.launchEffortHelp = { textContent: "" };
-  uiInstance.el.launchBaseUrl = { value: "", placeholder: "" };
+  uiInstance.el.launchBaseUrl = { value: "" };
   uiInstance.el.launchBaseUrlField = { hidden: false };
-  uiInstance.el.launchBaseUrlInheritNote = { textContent: "", hidden: true };
   uiInstance.el.launchApiKeyMode = { value: "inherit" };
   uiInstance.el.launchApiKeyModeField = { hidden: false };
   uiInstance.el.launchApiKeyEnv = { value: "", disabled: true, required: false };
@@ -3775,103 +3769,6 @@ test("launch API-key inherit note warns only on a named-selector provider mismat
   assert.equal(isolated.launchApiKeyInheritNoteText(), null);
 });
 
-test("launch base URL placeholder names the catalog provider default", () => {
-  const isolated = loadApp();
-  seedCatalog(isolated);
-  launchPickerElements(isolated);
-  // The launch "from config" selection keeps the generic placeholder.
-  isolated.syncLaunchBaseUrlField();
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "from config");
-  // A known pick names its provider's catalog default (root-URL shape).
-  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "default: https://api.anthropic.com");
-  // A /v1-shaped default renders verbatim, and updates on model change.
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "default: https://api.openai.com/v1");
-  // Managed providers have no catalog default — the field hides and the
-  // placeholder stays generic.
-  isolated.state.launchPicker = { open: true, query: "trinity", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrlField.hidden, true);
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "from config");
-  // The custom state follows the chosen provider's default...
-  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.state.launchPicker.custom, true);
-  const providerChange = (value) => ({ target: {
-    matches: (selector) => selector === "[data-model-picker-custom-provider]", value } });
-  isolated.handleModelPickerChange(providerChange("openai-responses"), "launch");
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "default: https://api.openai.com/v1");
-  // ...and an unresolvable custom provider falls back to generic.
-  isolated.handleModelPickerChange(providerChange(""), "launch");
-  assert.equal(isolated.el.launchBaseUrl.placeholder, "from config");
-  // Catalog unavailable → generic placeholder, never a fabricated default.
-  const degraded = loadApp();
-  launchPickerElements(degraded);
-  degraded.state.modelCatalog = { status: "error", data: null, error: "boom" };
-  degraded.el.launchModel.value = "gpt-5.1";
-  degraded.syncLaunchBaseUrlField();
-  assert.equal(degraded.el.launchBaseUrl.placeholder, "from config");
-});
-
-test("launch base URL inherit note warns only on a blank-field provider mismatch", () => {
-  const isolated = loadApp();
-  seedCatalog(isolated);
-  launchPickerElements(isolated);
-  const readyWith = (data) => {
-    isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data };
-  };
-  readyWith({ configured_model_backend: "anthropic-messages",
-    configured_model_base_url: "https://api.anthropic.com" });
-  // Same provider as the configured backend: no note.
-  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, true);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.textContent, "");
-  // A different provider names the configured backend AND its URL, and the
-  // note updates on model change.
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, false);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.textContent,
-    "configured for anthropic-messages (https://api.anthropic.com) — check it applies to openai-responses");
-  // A typed value means an explicit request URL — no inherit, no note.
-  // Clearing the field restores it.
-  isolated.el.launchBaseUrl.value = "https://proxy.example.test";
-  isolated.syncLaunchBaseUrlField();
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, true);
-  isolated.el.launchBaseUrl.value = "";
-  isolated.syncLaunchBaseUrlField();
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, false);
-  // Managed backends never show it (the base URL field itself is hidden).
-  isolated.state.launchPicker = { open: true, query: "trinity", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrlField.hidden, true);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, true);
-  // Custom/unknown models carry their own badge instead.
-  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.state.launchPicker.custom, true);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, true);
-  // The note requires a configured URL to mismatch against.
-  readyWith({ configured_model_backend: "anthropic-messages", configured_model_base_url: null });
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.el.launchBaseUrlInheritNote.hidden, true);
-  // A non-ready preview names nothing.
-  isolated.state.launchDefaultsPreview = { status: "loading", error: "", request: {}, data: null };
-  isolated.syncLaunchBaseUrlField();
-  assert.equal(isolated.launchBaseUrlInheritNoteText(), null);
-  // No configured backend at all → nothing to mismatch against.
-  readyWith({ configured_model_base_url: "https://api.anthropic.com" });
-  isolated.state.launchPicker = { open: true, query: "gpt-5.1", activeIndex: 0, custom: false };
-  isolated.selectModelPickerIndex("launch", 0);
-  assert.equal(isolated.launchBaseUrlInheritNoteText(), null);
-});
-
 test("model picker keyboard navigation wraps, selects, enters custom, and closes", () => {
   const isolated = loadApp();
   seedCatalog(isolated);
@@ -4111,9 +4008,7 @@ test("launch dialog wires the model picker, manual-entry fallback, and shared ef
   assert.match(indexSource, /id="launchBaseUrlField"/);
   assert.match(indexSource, /id="launchApiKeyModeField"/);
   assert.match(indexSource, /<option id="launchApiKeyInheritOption" value="inherit">inherit configured selector<\/option>/);
-  assert.match(indexSource, /<small id="launchApiKeyInheritNote" class="field-inherit-note" hidden><\/small>/);
-  assert.match(indexSource, /<small id="launchBaseUrlInheritNote" class="field-inherit-note" hidden><\/small>/);
-  assert.match(indexSource, /Blank inherits the configured, provider default, or managed base URL\./);
+  assert.match(indexSource, /<small id="launchApiKeyInheritNote" class="api-key-inherit-note" hidden><\/small>/);
   assert.match(indexSource, /<select id="launchBackend" name="backend">/);
   assert.match(indexSource, /<input id="launchModel" name="model"/);
   assert.match(indexSource, /id="launchCompactionThresholdHint" class="compaction-threshold-hint" hidden/);
@@ -4347,7 +4242,7 @@ test("model picker styles reuse the field, listbox, and badge tokens", () => {
   for (const rule of [".model-picker-toggle", ".model-picker-list",
     ".model-picker-option:hover, .model-picker-option.is-active",
     ".model-picker-badge.is-warning", ".model-picker-custom-row",
-    ".model-picker-group", ".model-catalog-notice", ".field-inherit-note"]) {
+    ".model-picker-group", ".model-catalog-notice", ".api-key-inherit-note"]) {
     assert.ok(redesignSource.includes(rule), rule);
   }
   assert.match(redesignSource, /\.field input, \.field select, \.field textarea, \.model-picker-filter/);

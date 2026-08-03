@@ -916,7 +916,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .model-picker-custom-note { color: var(--ink-soft); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
 .model-picker-back { padding: 0; border: 0; background: none; color: var(--attention); font: inherit; cursor: pointer; text-decoration: underline; }
 .model-catalog-notice { margin: 0; color: var(--danger); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
-.field-inherit-note { color: var(--danger); }
+.api-key-inherit-note { color: var(--danger); }
 
 .modal { font-family: var(--sans); }
 .modal-header .icon-button { width: 34px; height: 34px; border-color: var(--line-strong); border-radius: var(--r-md); background: var(--surface-hover); color: var(--ink-soft); }
