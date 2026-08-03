@@ -2820,7 +2820,10 @@ mod tests {
 
     #[tokio::test]
     async fn server_create_rejects_removed_backend_names_as_bad_requests() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("removed_backend_create");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
 
         for backend in ["arcee", "auto"] {
