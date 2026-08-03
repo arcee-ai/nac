@@ -322,7 +322,7 @@ impl ModelClient {
                 self.post_arcee_auth_with_refresh(url.as_str(), &request)
                     .await?
             }
-            _ => self.post_json_with_retry(url.as_str(), &request).await?,
+            _ => self.post_arcee_api_json(url.as_str(), &request).await?,
         };
         parse_chat_completions_response(&value, url.as_str())
     }
@@ -374,6 +374,22 @@ impl ModelClient {
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {}", api_key))
+        })
+        .await
+    }
+
+    /// Sends an `arcee-api` (bring-your-own key) inference request. Unlike
+    /// `arcee-auth`, the API key carries no client identity, so nac attributes
+    /// itself to ArceeFM with `User-Agent` and `X-Arcee-Client` for logging.
+    async fn post_arcee_api_json(&self, url: &str, body: &Value) -> Result<Value> {
+        let api_key = self.api_key.as_str();
+        let user_agent = format!("nac/{}", env!("CARGO_PKG_VERSION"));
+        let user_agent = user_agent.as_str();
+        self.post_json_with_retry_headers(url, body, |request| {
+            request
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("User-Agent", user_agent)
+                .header("X-Arcee-Client", "nac-cli")
         })
         .await
     }
@@ -741,9 +757,13 @@ mod tests {
             request.headers.get("authorization").map(String::as_str),
             Some("Bearer stored-login-credential")
         );
-        assert!(
-            request.headers.get("x-arcee-client").is_none(),
-            "x-arcee-client header must no longer be sent"
+        assert_eq!(
+            request.headers.get("x-arcee-client").map(String::as_str),
+            Some("nac-cli")
+        );
+        assert_eq!(
+            request.headers.get("user-agent").map(String::as_str),
+            Some(format!("nac/{}", env!("CARGO_PKG_VERSION")).as_str())
         );
         assert_eq!(
             request.headers.get("content-type").map(String::as_str),
