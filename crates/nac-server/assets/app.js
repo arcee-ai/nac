@@ -99,7 +99,6 @@ function bindElements() {
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchCompactionThresholdHint", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchApiKeyInheritOption", "launchApiKeyInheritNote", "launchExtraHeaders",
     "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
-    "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
   ]) el[id] = document.getElementById(id);
@@ -145,7 +144,6 @@ function bindEvents() {
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
-  el.refreshLaunchDefaults.addEventListener("click", () => loadLaunchDefaultsPreview());
   el.launchApiKeyMode.addEventListener("change", () => syncLaunchApiKeyMode({ user: true }));
   el.launchBackend.addEventListener("change", () => syncLaunchApiKeyMode());
   el.launchCompactionThreshold.addEventListener("input", () => clearCompactionThresholdHint("launch"));
@@ -4914,7 +4912,6 @@ function scheduleLaunchDefaultsPreview() {
   state.launchDefaultsPreview = request.ready
     ? { status: "loading", data: null, error: "", request: request.body }
     : { status: "waiting", data: null, error: "", message: request.message, request: null };
-  renderLaunchDefaultsPreview();
   if (!request.ready) return Promise.resolve(null);
   state.launchDefaultsTimer = window.setTimeout(() => {
     state.launchDefaultsTimer = null;
@@ -4933,17 +4930,14 @@ async function requestLaunchDefaultsPreview(context, generation) {
   if (generation !== state.launchDefaultsGeneration) return null;
   if (!request.ready) {
     state.launchDefaultsPreview = { status: "waiting", data: null, error: "", message: request.message, request: null };
-    renderLaunchDefaultsPreview();
     return null;
   }
   state.launchDefaultsPreview = { status: "loading", data: null, error: "", request: request.body };
-  renderLaunchDefaultsPreview();
   try {
     const data = await apiPost("/sessions/launch-defaults", request.body);
     if (generation !== state.launchDefaultsGeneration) return null;
     state.launchDefaultsPreview = { status: "ready", data: data || {}, error: "", request: request.body };
     syncLaunchApiKeyMode();
-    renderLaunchDefaultsPreview();
     // The resolved "from config" label and the inherited effort constraint
     // depend on the configured model — refresh them without disturbing an
     // open picker.
@@ -4953,7 +4947,6 @@ async function requestLaunchDefaultsPreview(context, generation) {
   } catch (error) {
     if (generation !== state.launchDefaultsGeneration) return null;
     state.launchDefaultsPreview = { status: "error", data: null, error: error.message, request: request.body };
-    renderLaunchDefaultsPreview();
     return null;
   }
 }
@@ -4968,66 +4961,6 @@ const MANAGED_LAUNCH_BACKENDS = {
     credentialLabel: "server-stored ChatGPT login",
   },
 };
-
-function managedLaunchDefaults(backend, baseUrl) {
-  const behavior = MANAGED_LAUNCH_BACKENDS[String(backend || "")];
-  if (!behavior) return null;
-  const configuredUrl = String(baseUrl || "");
-  return {
-    ...behavior,
-    usesCanonicalUrl: configuredUrl === behavior.canonicalUrl,
-  };
-}
-
-function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) {
-  const status = preview?.status || "idle";
-  if (status === "loading") return '<p class="launch-default-state">Loading configured backend and base URL…</p>';
-  if (status === "waiting") return `<p class="launch-default-state">${escapeHtml(preview.message || "Enter the launch location to load defaults.")}</p>`;
-  if (status === "error") {
-    return `<div class="launch-default-state is-error" role="alert"><strong>Configured defaults could not be loaded.</strong><span>${escapeHtml(preview.error || "Unknown error")}</span><small>Correct the launch location or refresh to try again.</small></div>`;
-  }
-  if (status !== "ready") return '<p class="launch-default-state">Open this dialog or refresh to inspect configured defaults.</p>';
-
-  const data = preview.data || {};
-  const backend = data.configured_model_backend == null ? "Not configured" : String(data.configured_model_backend);
-  const baseUrl = data.configured_model_base_url == null ? "Not configured" : String(data.configured_model_base_url);
-  const configuredModel = data.configured_model == null ? "" : String(data.configured_model);
-  const configuredEffort = data.configured_reasoning_effort == null ? "" : String(data.configured_reasoning_effort);
-  const configuredFound = configuredModel
-    ? findCatalogModel(String(data.configured_model_backend || ""), configuredModel) : null;
-  const configuredModelLabel = configuredFound
-    ? `${modelDisplayName(configuredFound.model)} (${configuredModel})` : configuredModel;
-  const configuredRows = configuredModel
-    ? `<div><dt>Configured model</dt><dd>${escapeHtml(configuredModelLabel)}</dd></div>
-    <div><dt>Configured effort</dt><dd>${escapeHtml(configuredEffort || "unset (backend default)")}</dd></div>` : "";
-  const managed = managedLaunchDefaults(data.configured_model_backend, data.configured_model_base_url);
-  // The selector NAME is not secret (the value is) — name it so "inherit"
-  // is concrete. The key is absent only on servers predating the field.
-  const apiKeyEnvRow = Object.hasOwn(data, "configured_api_key_env")
-    ? `<div><dt>Configured API key selector</dt><dd>${escapeHtml(data.configured_api_key_env == null ? "None configured" : String(data.configured_api_key_env))}</dd></div>` : "";
-  const managedHtml = managed ? `<div class="launch-managed-behavior">
-    <strong>Managed backend behavior</strong>
-    <p>${managed.usesCanonicalUrl
-      ? `Canonical URL: <code>${escapeHtml(managed.canonicalUrl)}</code>.`
-      : `Default canonical URL: <code>${escapeHtml(managed.canonicalUrl)}</code>. The configured base URL above remains authoritative until session creation validates it.`}</p>
-    <p>Credentials come from the ${escapeHtml(managed.credentialLabel)} when the session is created; secret values are never returned in this preview.</p>
-  </div>` : "";
-  return `<dl class="launch-default-values">
-    <div><dt>Configured backend</dt><dd>${escapeHtml(backend)}</dd></div>
-    <div><dt>Configured base URL</dt><dd>${escapeHtml(baseUrl)}</dd></div>
-    ${configuredRows}
-    ${apiKeyEnvRow}
-  </dl>${managedHtml}<p class="launch-default-scope">Preview only — session creation validates these settings.</p>`;
-}
-
-function renderLaunchDefaultsPreview() {
-  if (!el.launchDefaultsPreview || !el.launchDefaultsBody) return;
-  const status = state.launchDefaultsPreview?.status || "idle";
-  el.launchDefaultsPreview.dataset.state = status;
-  el.launchDefaultsPreview.setAttribute("aria-busy", status === "loading" ? "true" : "false");
-  el.launchDefaultsBody.innerHTML = renderLaunchDefaultsPreviewHtml(state.launchDefaultsPreview);
-  if (el.refreshLaunchDefaults) el.refreshLaunchDefaults.disabled = status === "loading";
-}
 
 // --- Model catalog + picker -------------------------------------------------
 // The catalog (GET /models) powers the model picker in the launch dialog and
@@ -5972,7 +5905,6 @@ async function createSession(event) {
     state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
     syncLaunchApiKeyMode();
     syncLaunchModelControls();
-    renderLaunchDefaultsPreview();
     openSession(sessionId, true, { fetchSnapshot: false });
     if (initialPrompt) {
       state.composerDrafts.set(sessionId, initialPrompt);

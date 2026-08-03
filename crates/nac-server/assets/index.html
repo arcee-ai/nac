@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>nac</title>
     <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/redesign.css?v=quality-40" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=quality-41" />
   </head>
   <body>
     <div id="app" class="app-frame">
@@ -118,10 +118,6 @@
         <div class="field-grid">
           <label class="field span-two"><span id="launchCwdLabel">working directory</span><input id="launchCwd" name="cwd" autocomplete="off" placeholder="/path/to/repository"></label>
           <label id="launchSshField" class="field span-two" hidden><span>ssh host</span><input id="launchSshHost" name="ssh_host" autocomplete="off" placeholder="user@host" disabled><small>SSH working directories are on the remote host.</small></label>
-          <section id="launchDefaultsPreview" class="launch-default-preview span-two" data-state="idle" aria-live="polite" aria-busy="false">
-            <header><div><h3>Launch defaults</h3><span>for this execution location</span></div><button id="refreshLaunchDefaults" class="button" type="button">refresh</button></header>
-            <div id="launchDefaultsBody"><p class="launch-default-state">Open this dialog or refresh to inspect configured defaults.</p></div>
-          </section>
           <div id="launchModelFallback" class="field-grid nested-grid span-two">
             <label class="field"><span>backend</span><select id="launchBackend" name="backend">
               <option value="">from config</option><option value="openai-responses">openai-responses</option><option value="chatgpt-codex-responses">chatgpt-codex-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="deepseek-chat">deepseek-chat</option><option value="fireworks-chat">fireworks-chat</option><option value="together-chat">together-chat</option><option value="arcee-auth">arcee-auth</option><option value="arcee-api">arcee-api</option>
@@ -152,6 +148,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=quality-42" defer></script>
+    <script src="/assets/app.js?v=quality-43" defer></script>
   </body>
 </html>

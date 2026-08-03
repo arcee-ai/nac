@@ -967,37 +967,11 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .execution-modes input:focus-visible + span { outline: 2px solid var(--paper); outline-offset: 2px; }
 /* Rows are always content-sized: under height pressure (small viewports, or
    the open model picker adding ~270px) the grid scrolls instead of
-   compressing tracks. With auto rows, scroll-container items like
-   .launch-default-preview (overflow: hidden) have a zero automatic minimum,
-   so track sizing starved them first — the preview collapsed to a sliver and
-   clipped its header/refresh button above the picker. */
+   compressing tracks. With auto rows, scroll-container grid items with
+   overflow: hidden have a zero automatic minimum, so track sizing starved
+   them first — fields collapsed to slivers and clipped their content. */
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 16px; padding: 18px 22px 22px; overflow: auto; }
 .nested-grid { padding: 0; }
-.launch-default-preview { overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
-.launch-default-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-bottom: 1px solid #252525; }
-.launch-default-preview > header > div { min-width: 0; display: grid; gap: 4px; }
-.launch-default-preview > header h3 { color: #a5a5a5; font: var(--fw-semibold) var(--fs-xs)/var(--lh-tight) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
-.launch-default-preview > header span { color: var(--ink-faint); font: var(--fs-xs)/var(--lh-tight) var(--mono); }
-.launch-default-preview > header .button { min-height: 30px; padding: 6px 10px; font-size: var(--fs-sm); }
-.launch-default-preview > header .button:disabled { opacity: .45; cursor: wait; }
-.launch-default-preview[data-state="error"] { border-color: var(--danger-border); }
-.launch-default-preview[data-state="loading"] { border-color: #454545; }
-#launchDefaultsBody { min-width: 0; }
-.launch-default-state { margin: 0; padding: 13px 14px; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
-.launch-default-state.is-error { display: grid; gap: 6px; color: var(--danger); }
-.launch-default-state.is-error strong { color: var(--danger); font-weight: var(--fw-semibold); }
-.launch-default-state.is-error span { overflow-wrap: anywhere; }
-.launch-default-state.is-error small { color: #765f5f; }
-.launch-default-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-bottom: 1px solid #242424; }
-.launch-default-values > div { min-width: 0; padding: 11px 13px; border-right: 1px solid #242424; }
-.launch-default-values > div:last-child { border-right: 0; }
-.launch-default-values dt { margin: 0 0 6px; color: var(--ink-soft); font: var(--fs-md)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
-.launch-default-values dd { margin: 0; overflow-wrap: anywhere; color: #b1b1b1; font: var(--fs-xs)/var(--lh-snug) var(--mono); }
-.launch-managed-behavior { display: grid; gap: 6px; padding: 11px 13px; border-bottom: 1px solid #242424; background: var(--surface-hover); }
-.launch-managed-behavior strong { color: #aaa; font: var(--fw-semibold) var(--fs-xs)/var(--lh-tight) var(--mono); text-transform: uppercase; }
-.launch-managed-behavior p { margin: 0; overflow-wrap: anywhere; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
-.launch-managed-behavior code { color: #aaa; font-family: inherit; }
-.launch-default-scope { margin: 0; padding: 9px 13px 11px; color: var(--ink-faint); font: var(--fs-xs)/var(--lh-normal) var(--mono); }
 .modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 22px 22px; }
 .modal-actions .button, .settings-actions .button { min-width: 132px; font-family: var(--sans); }
 .form-status { min-height: 18px; color: var(--ink-muted); font: var(--fs-sm)/var(--lh-tight) var(--mono); }
@@ -1162,9 +1136,6 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   .composer textarea { grid-column: 1; }
   .composer-send { grid-column: 2; }
   .field-grid, .settings-form { grid-template-columns: 1fr; }
-  .launch-default-values { grid-template-columns: 1fr; }
-  .launch-default-values > div { border-right: 0; border-bottom: 1px solid #242424; }
-  .launch-default-values > div:last-child { border-bottom: 0; }
   .span-two, .settings-actions { grid-column: 1; }
 }
 

@@ -77,7 +77,7 @@ function loadApp(overrides = {}) {
       firstWorkspaceDiffPath, invalidateWorkspaceDiffs, renderWorkspaceFocus,
       renderWorkspaceFocusDiff, renderDiffLine, loadFocusWorkspaceDiff, handleFocusClick,
       transitionLaunchCwdDrafts, syncLaunchExecutionFields, buildLaunchDefaultsRequest,
-      loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
+      loadLaunchDefaultsPreview,
       syncLaunchApiKeyMode, launchApiKeyInheritLabel, launchApiKeyInheritNoteText,
       buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
@@ -3678,17 +3678,15 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
 test("launch dialog grid rows are content-sized so height pressure scrolls instead of clipping fields", () => {
   // .field-grid is the launch dialog's scroll container (overflow: auto) with
   // a max-height-constrained flex parent. With auto rows, scroll-container
-  // grid items (.launch-default-preview has overflow: hidden) have a zero
-  // automatic minimum, so track sizing starved the preview first under height
-  // pressure — it collapsed to a sliver and clipped its header/refresh button
-  // above the model picker. max-content rows never compress; the grid scrolls.
+  // grid items with overflow: hidden have a zero automatic minimum, so track
+  // sizing starved them first under height pressure — fields collapsed to
+  // slivers and clipped their content. max-content rows never compress; the
+  // grid scrolls.
   const rule = redesignSource.match(/\.field-grid \{[^}]*\}/);
   assert.ok(rule, ".field-grid rule exists");
   assert.match(rule[0], /grid-auto-rows: max-content;/,
-    "field-grid rows must be max-content so the launch-defaults preview is never starved");
+    "field-grid rows must be max-content so dialog fields are never starved");
   assert.match(rule[0], /overflow: auto;/, "field-grid remains the dialog's scroll container");
-  assert.match(redesignSource, /\.launch-default-preview \{ overflow: hidden;/,
-    "preview keeps its border-radius clipping (the scroll-container property that starved auto rows)");
 });
 
 test("launch API-key inherit option names the configured selector, or its absence", () => {
@@ -3717,25 +3715,6 @@ test("launch API-key inherit option names the configured selector, or its absenc
     data: { configured_api_key_env: "  " } }), "inherit configured selector (none configured)");
   assert.equal(isolated.launchApiKeyInheritLabel({ status: "loading", data: null }),
     "inherit configured selector");
-});
-
-test("launch defaults preview names the configured API key selector", () => {
-  seedCatalog(ui);
-  const named = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "anthropic-messages",
-      configured_api_key_env: "MY_ANTHROPIC_KEY" } });
-  assert.match(named, /<dt>Configured API key selector<\/dt><dd>MY_ANTHROPIC_KEY<\/dd>/);
-  const unset = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "anthropic-messages", configured_api_key_env: null } });
-  assert.match(unset, /<dt>Configured API key selector<\/dt><dd>None configured<\/dd>/);
-  // Servers predating the field omit the row entirely.
-  const legacy = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "anthropic-messages" } });
-  assert.doesNotMatch(legacy, /Configured API key selector/);
-  // Defensive: a selector name still passes through escaping.
-  const escaped = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_api_key_env: "KEY<>" } });
-  assert.match(escaped, /KEY&lt;&gt;/);
 });
 
 test("launch API-key inherit note warns only on a named-selector provider mismatch", () => {
@@ -4013,26 +3992,6 @@ test("settings swaps from manual entry to the picker when the catalog arrives", 
   isolated.syncSettingsModelControls();
   assert.match(isolated.el.focusContent.innerHTML, /id="settingsModelPicker"/);
   assert.match(isolated.el.focusContent.innerHTML, /Claude Opus 4\.1 \(latest\)/);
-});
-
-test("launch defaults preview renders the configured model and effort", () => {
-  seedCatalog(ui);
-  const html = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "anthropic-messages",
-      configured_model_base_url: "https://api.anthropic.com",
-      configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } });
-  assert.match(html, /Configured model/);
-  assert.match(html, /Claude Opus 4\.1 \(latest\) \(claude-opus-4-1\)/);
-  assert.match(html, /Configured effort/);
-  assert.match(html, />high</);
-  const unknown = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "openai-responses", configured_model: "mystery-model" } });
-  assert.match(unknown, /mystery-model/);
-  assert.match(unknown, /unset \(backend default\)/);
-  const legacy = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "openai-responses",
-      configured_model_base_url: "https://api.example.test" } });
-  assert.doesNotMatch(legacy, /Configured model/);
 });
 
 test("launch request passes effort through without client-side validation", () => {
@@ -4531,9 +4490,6 @@ test("created snapshots initialize state without a duplicate GET while SSE, prom
   isolated.el.sandboxWorkdir = { value: "", disabled: false };
   isolated.el.sandboxShm = { value: "", disabled: false };
   isolated.el.sandboxMounts = { value: "", disabled: false };
-  isolated.el.launchDefaultsPreview = fakeElement();
-  isolated.el.launchDefaultsBody = { innerHTML: "" };
-  isolated.el.refreshLaunchDefaults = { disabled: false };
   isolated.el.initialPrompt = { value: "start immediately" };
   isolated.el.commandComposer = { requestSubmit() { timeline.push("initial-prompt"); } };
   isolated.state.workspaceDiffs.set("created-session:src/old.js", { status: "ready" });
@@ -4612,48 +4568,16 @@ scenario("Launch modes and defaults", "launch-default requests use local CWD or 
   assert.match(waiting.message, /Enter an SSH host/);
 });
 
-scenario("Launch modes and defaults", "launch-default preview limits claims and explains managed canonical URL and stored credentials", () => {
-  const ready = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
-    data: { configured_model_backend: "chatgpt-codex-responses",
-      configured_model_base_url: "https://chatgpt.com/backend-api",
-      model: "must-not-render", credential: "super-secret", }, });
-  assert.match(ready, /Configured backend/);
-  assert.match(ready, /chatgpt-codex-responses/);
-  assert.match(ready, /Configured base URL/);
-  assert.match(ready, /Canonical URL: <code>https:\/\/chatgpt\.com\/backend-api<\/code>/);
-  assert.match(ready, /server-stored ChatGPT login/);
-  assert.match(ready, /secret values are never returned/);
-  assert.match(ready, /Preview only/);
-  assert.doesNotMatch(ready, /must-not-render|super-secret/);
-  const arcee = ui.managedLaunchDefaults("arcee-auth", "https://custom.example.test");
-  assert.equal(arcee.usesCanonicalUrl, false);
-  assert.equal(arcee.canonicalUrl, "https://api.arcee.ai/api/v1");
-  const noncanonical = ui.renderLaunchDefaultsPreviewHtml({
-    status: "ready",
-    data: { configured_model_backend: "arcee-auth", configured_model_base_url: "https://custom.example.test" },
-  });
-  assert.match(noncanonical, /Default canonical URL/);
-  assert.match(noncanonical, /configured base URL above remains authoritative/);
-  assert.match(ui.renderLaunchDefaultsPreviewHtml({ status: "loading" }), /Loading configured backend/);
-  assert.match(ui.renderLaunchDefaultsPreviewHtml({ status: "error", error: "bad <cwd>" }), /role="alert"/);
-  assert.match(ui.renderLaunchDefaultsPreviewHtml({ status: "error", error: "bad <cwd>" }), /bad &lt;cwd&gt;/);
-});
-
 test("launch-default generation guards reject stale same-dialog responses", async () => {
   const requests = [];
   const isolated = loadApp({ fetch: (path, options) => {
       const pending = deferred();
       requests.push({ path, options, pending });
       return pending.promise; }, });
-  isolated.el.launchDefaultsPreview = fakeElement();
-  isolated.el.launchDefaultsBody = { innerHTML: "" };
-  isolated.el.refreshLaunchDefaults = { disabled: false };
   const first = isolated.loadLaunchDefaultsPreview({ mode: "local", cwd: "/old", sshHost: "" });
   const second = isolated.loadLaunchDefaultsPreview({ mode: "ssh", cwd: "~/new", sshHost: "build-box" });
   assert.equal(requests.length, 2);
   assert.equal(isolated.state.launchDefaultsPreview.status, "loading");
-  assert.equal(isolated.el.launchDefaultsPreview.dataset.state, "loading");
-  assert.equal(isolated.el.refreshLaunchDefaults.disabled, true);
   assert.equal(requests[0].path, "/sessions/launch-defaults");
   assert.equal(requests[0].options.method, "POST");
   assert.deepEqual(JSON.parse(requests[0].options.body), { cwd: "/old" });
@@ -4669,28 +4593,19 @@ test("launch-default generation guards reject stale same-dialog responses", asyn
   }));
   await first;
   assert.equal(isolated.state.launchDefaultsPreview.status, "ready");
-  assert.equal(isolated.el.launchDefaultsPreview.dataset.state, "ready");
-  assert.equal(isolated.el.refreshLaunchDefaults.disabled, false);
   assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_backend, "arcee-auth");
-  assert.match(isolated.el.launchDefaultsBody.innerHTML, /server-stored Arcee login/);
-  assert.doesNotMatch(isolated.el.launchDefaultsBody.innerHTML, /stale\.example/);
+  assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_base_url,
+    "https://api.arcee.ai/api/v1", "the stale first response must not overwrite the latest defaults");
 });
 
-test("launch-default errors remain refreshable and accessible", async () => {
+test("launch-default request failures land in the error state", async () => {
   const isolated = loadApp({ fetch: async () => ({ ok: false,
       status: 422, statusText: "Unprocessable Content",
       async text() { return JSON.stringify({ error: "invalid local <cwd>" }); },
     }), });
-  isolated.el.launchDefaultsPreview = fakeElement();
-  isolated.el.launchDefaultsBody = { innerHTML: "" };
-  isolated.el.refreshLaunchDefaults = { disabled: false };
   await isolated.loadLaunchDefaultsPreview({ mode: "local", cwd: "/missing", sshHost: "" });
   assert.equal(isolated.state.launchDefaultsPreview.status, "error");
-  assert.equal(isolated.el.launchDefaultsPreview.dataset.state, "error");
-  assert.equal(isolated.el.launchDefaultsPreview.getAttribute("aria-busy"), "false");
-  assert.equal(isolated.el.refreshLaunchDefaults.disabled, false);
-  assert.match(isolated.el.launchDefaultsBody.innerHTML, /role="alert"/);
-  assert.match(isolated.el.launchDefaultsBody.innerHTML, /invalid local &lt;cwd&gt;/);
+  assert.match(isolated.state.launchDefaultsPreview.error, /invalid local <cwd>/);
 });
 
 scenario("Launch modes and defaults", "managed defaults safely select no-env while explicit API-key mode remains user controlled", () => {
