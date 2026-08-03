@@ -98,6 +98,26 @@ pub(super) fn hydrate_entry(
     }
 }
 
+/// Hydrate-and-insert one provider's generated records (baseline or
+/// overlay): `compat` comes from the provider's seed default so known and
+/// unknown models of a provider stay identical.
+pub(super) fn merge_entries(
+    catalog: &mut ModelCatalog,
+    provider: BackendKind,
+    models: BTreeMap<String, GeneratedModel>,
+    source: ModelSource,
+) {
+    let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
+        debug_assert!(false, "generated provider {provider} must have a seed default");
+        return;
+    };
+    let compat = provider_catalog.default.compat.clone();
+    for (id, entry) in models {
+        let metadata = hydrate_entry(provider, id, entry, &compat, source);
+        provider_catalog.models.insert(metadata.id.clone(), metadata);
+    }
+}
+
 /// Merge the embedded generated baseline over the seed catalog. Never
 /// fails: a corrupt checked-in file degrades to seed-only resolution
 /// (caught loudly by the catalog tests, never at runtime).
@@ -110,14 +130,6 @@ pub(super) fn merge_generated_baseline(catalog: &mut ModelCatalog) {
         }
     };
     for (provider, generated_provider) in generated.providers {
-        let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
-            debug_assert!(false, "generated provider {provider} must have a seed default");
-            continue;
-        };
-        let compat = provider_catalog.default.compat.clone();
-        for (id, entry) in generated_provider.models {
-            let metadata = hydrate_entry(provider, id, entry, &compat, ModelSource::Baseline);
-            provider_catalog.models.insert(metadata.id.clone(), metadata);
-        }
+        merge_entries(catalog, provider, generated_provider.models, ModelSource::Baseline);
     }
 }

@@ -3,52 +3,13 @@
 //! tests drive `ModelCatalog::load_from_home` against temp homes, so they
 //! never touch the environment or the process-global catalog.
 
+use super::test_support::{write_overlay, TempHome};
 use super::*;
 use crate::model::ReasoningEffort;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-struct TempHome(PathBuf);
-
-impl TempHome {
-    fn new(label: &str) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let home = std::env::temp_dir().join(format!(
-            "nac-catalog-user-{label}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&home).unwrap();
-        Self(home)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempHome {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn write_models_json(home: &TempHome, doc: serde_json::Value) {
     std::fs::write(
         home.path().join("models.json"),
-        serde_json::to_string_pretty(&doc).unwrap(),
-    )
-    .unwrap();
-}
-
-fn write_overlay(home: &TempHome, generated_at: &str, providers: serde_json::Value) {
-    let dir = home.path().join("model-catalog");
-    std::fs::create_dir_all(&dir).unwrap();
-    let doc = serde_json::json!({ "generated_at": generated_at, "providers": providers });
-    std::fs::write(
-        dir.join("overlay.json"),
         serde_json::to_string_pretty(&doc).unwrap(),
     )
     .unwrap();
@@ -92,7 +53,7 @@ fn user_override_patches_an_exact_model() {
 fn precedence_user_beats_overlay_beats_baseline_beats_provider_default() {
     let home = TempHome::new("precedence");
     write_overlay(
-        &home,
+        home.path(),
         "2099-01-01T00:00:00Z",
         serde_json::json!({
             "deepseek-chat": {
@@ -279,38 +240,4 @@ fn invalid_override_entries_are_skipped_individually() {
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 12_345);
     assert_eq!(metadata.context_window, 1_000_000);
-}
-
-#[test]
-fn user_override_thinking_map_relaxes_effort_levels() {
-    // The S4 unlock path: relaxing a model's effort levels is a deliberate
-    // per-model data edit, no code change.
-    let home = TempHome::new("relax-levels");
-    write_models_json(
-        &home,
-        serde_json::json!({
-            "overrides": [
-                {
-                    "provider": "anthropic-messages",
-                    "model": "claude-haiku-4-5",
-                    "set": { "thinking_level_map": { "none": "none", "high": "high" } }
-                }
-            ]
-        }),
-    );
-
-    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
-
-    assert!(warnings.is_empty(), "{warnings:?}");
-    let metadata = catalog.resolve(BackendKind::AnthropicMessages, "claude-haiku-4-5");
-    assert_eq!(metadata.source, ModelSource::UserOverride);
-    // The baseline is none-only (the conservative matrix default); the
-    // override replaces the whole map.
-    assert!(metadata.thinking_level_map.is_supported(ReasoningEffort::High));
-    assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::High),
-        Some("high")
-    );
-    assert!(!metadata.thinking_level_map.is_supported(ReasoningEffort::Xhigh));
-    assert!(!metadata.thinking_level_map.is_supported(ReasoningEffort::Low));
 }

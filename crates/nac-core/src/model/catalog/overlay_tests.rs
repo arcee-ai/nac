@@ -5,99 +5,18 @@
 use super::data;
 use super::overlay::{
     format_unix_utc, is_utc_iso8601, map_models_dev, overlay_dir, read_sidecar,
-    refresh_overlay_once, reset_refresh_for_test, spawn_overlay_refresh, unix_now, write_sidecar,
+    refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar,
     OverlaySidecar, RefreshOutcome, REFRESH_CADENCE_SECS,
 };
+use super::test_support::{write_overlay, EnvGuard, TempHome};
 use super::*;
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 use crate::model::{validate_model_configuration, EffectiveModelSettings, ReasoningEffort};
 use crate::TEST_ENV_LOCK;
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 const NOVEL_MODEL: &str = "deepseek-v9-overlay-test";
-
-/// Serialize env-mutating refresh tests; restores env, disables the
-/// machine-state layers and reloads the baseline-only global catalog on
-/// drop, so concurrent tests never observe overlay data.
-struct RefreshEnvGuard {
-    original: Vec<(&'static str, Option<OsString>)>,
-    home: PathBuf,
-}
-
-impl RefreshEnvGuard {
-    fn new(label: &str) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let home = std::env::temp_dir().join(format!(
-            "nac-catalog-overlay-{label}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&home).unwrap();
-        let original = ["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"]
-            .into_iter()
-            .map(|name| (name, std::env::var_os(name)))
-            .collect::<Vec<_>>();
-        unsafe { std::env::set_var("NAC_HOME", &home) };
-        set_env_layers_for_test(true);
-        Self { original, home }
-    }
-
-    fn overlay_path(&self) -> PathBuf {
-        overlay_dir(&self.home).join("overlay.json")
-    }
-
-    fn sidecar_path(&self) -> PathBuf {
-        overlay_dir(&self.home).join("overlay.etag")
-    }
-}
-
-impl Drop for RefreshEnvGuard {
-    fn drop(&mut self) {
-        for (name, value) in self.original.drain(..) {
-            match value {
-                Some(value) => unsafe { std::env::set_var(name, value) },
-                None => unsafe { std::env::remove_var(name) },
-            }
-        }
-        set_env_layers_for_test(false);
-        let _ = std::fs::remove_dir_all(&self.home);
-        reset_for_test();
-        reset_refresh_for_test();
-    }
-}
-
-/// Temp home for layered-load tests that never touch the environment or
-/// the process-global catalog.
-struct TempHome(PathBuf);
-
-impl TempHome {
-    fn new(label: &str) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let home = std::env::temp_dir().join(format!(
-            "nac-catalog-local-{label}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&home).unwrap();
-        Self(home)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempHome {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn novel_model_payload() -> String {
     serde_json::json!({
@@ -126,17 +45,6 @@ fn overlay_model_doc(context_window: u64, max_tokens: u64) -> serde_json::Value 
     })
 }
 
-fn write_overlay(home: &Path, generated_at: &str, providers: serde_json::Value) {
-    let dir = overlay_dir(home);
-    std::fs::create_dir_all(&dir).unwrap();
-    let doc = serde_json::json!({ "generated_at": generated_at, "providers": providers });
-    std::fs::write(
-        dir.join("overlay.json"),
-        serde_json::to_string_pretty(&doc).unwrap(),
-    )
-    .unwrap();
-}
-
 fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64) {
     let dir = overlay_dir(home);
     std::fs::create_dir_all(&dir).unwrap();
@@ -157,7 +65,7 @@ fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64) {
 #[tokio::test]
 async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-200");
+    let env = EnvGuard::new("refresh-200", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     let started_at = unix_now();
     let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
         .with_header("ETag", "\"overlay-etag-1\"")]);
@@ -228,7 +136,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     );
 
     // Write-tmp + rename leaves no partial files behind.
-    let mut files = std::fs::read_dir(overlay_dir(&env.home))
+    let mut files = std::fs::read_dir(overlay_dir(env.path()))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect::<Vec<_>>();
@@ -239,8 +147,8 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
 #[tokio::test]
 async fn refresh_sends_sidecar_etag_for_revalidation() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-sidecar-etag");
-    write_sidecar_file(&env.home, Some("\"sidecar-etag\""), 0);
+    let env = EnvGuard::new("refresh-sidecar-etag", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    write_sidecar_file(env.path(), Some("\"sidecar-etag\""), 0);
     let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
         .with_header("ETag", "\"new-etag\"")]);
 
@@ -260,7 +168,7 @@ async fn refresh_sends_sidecar_etag_for_revalidation() {
 #[tokio::test]
 async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-304");
+    let env = EnvGuard::new("refresh-304", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     let started_at = unix_now();
     let server = ScriptedServer::start(vec![ScriptedResponse::json("304 Not Modified", "")]);
 
@@ -284,15 +192,15 @@ async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
 #[tokio::test]
 async fn refresh_304_preserves_an_existing_overlay() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-304-keep");
+    let env = EnvGuard::new("refresh-304-keep", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     write_overlay(
-        &env.home,
+        env.path(),
         "2099-01-01T00:00:00Z",
         serde_json::json!({
             "deepseek-chat": { "models": { "deepseek-v8-preexisting": overlay_model_doc(555_000, 8_000) } }
         }),
     );
-    write_sidecar_file(&env.home, Some("\"old-etag\""), 0);
+    write_sidecar_file(env.path(), Some("\"old-etag\""), 0);
     let overlay_bytes = std::fs::read_to_string(env.overlay_path()).unwrap();
     reset_for_test();
     assert_eq!(
@@ -317,15 +225,15 @@ async fn refresh_304_preserves_an_existing_overlay() {
 #[tokio::test]
 async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-500");
+    let env = EnvGuard::new("refresh-500", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     write_overlay(
-        &env.home,
+        env.path(),
         "2099-01-01T00:00:00Z",
         serde_json::json!({
             "deepseek-chat": { "models": { "deepseek-v8-preexisting": overlay_model_doc(555_000, 8_000) } }
         }),
     );
-    write_sidecar_file(&env.home, Some("\"old-etag\""), 0);
+    write_sidecar_file(env.path(), Some("\"old-etag\""), 0);
     let overlay_bytes = std::fs::read_to_string(env.overlay_path()).unwrap();
     reset_for_test();
     let server = ScriptedServer::start(vec![ScriptedResponse::json("500 Internal Server Error", "{}")]);
@@ -348,15 +256,38 @@ async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
 }
 
 #[tokio::test]
-async fn refresh_network_failure_is_contained() {
+async fn refresh_failures_are_contained_without_touching_state() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-offline");
-    // Nothing listens on 127.0.0.1:1; the connection is refused instantly.
-    let outcome = refresh_overlay_once("http://127.0.0.1:1/api.json", Duration::from_secs(2)).await;
+    let env = EnvGuard::new("refresh-failures", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    // A server that accepts and never responds (the timeout case).
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let hang_url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        if let Ok((stream, _)) = listener.accept() {
+            std::thread::sleep(Duration::from_secs(3));
+            drop(stream);
+        }
+    });
+    let garbage = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", "this is not json")]);
 
-    assert!(matches!(outcome, RefreshOutcome::Failed { .. }), "{outcome:?}");
-    assert!(!env.overlay_path().exists());
-    assert!(!env.sidecar_path().exists());
+    let cases: [(&str, String, Duration, &str); 3] = [
+        // Nothing listens on 127.0.0.1:1; the connection is refused instantly.
+        ("connection refused", "http://127.0.0.1:1/api.json".to_string(), Duration::from_secs(2), ""),
+        ("hanging server times out", hang_url, Duration::from_millis(200), ""),
+        ("unmappable payload", garbage.base_url.clone(), Duration::from_secs(5), "parsing models.dev payload"),
+    ];
+    for (label, url, timeout, expected_error) in cases {
+        let outcome = refresh_overlay_once(&url, timeout).await;
+        let RefreshOutcome::Failed { error } = outcome else {
+            panic!("{label}: expected Failed, got {outcome:?}");
+        };
+        assert!(error.contains(expected_error), "{label}: {error}");
+        // A failed refresh writes neither the overlay nor the sidecar.
+        assert!(!env.overlay_path().exists(), "{label}");
+        assert!(!env.sidecar_path().exists(), "{label}");
+    }
+    garbage.finish();
+
     // Offline behavior: the embedded baseline keeps resolving.
     let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(metadata.source, ModelSource::Baseline);
@@ -364,45 +295,9 @@ async fn refresh_network_failure_is_contained() {
 }
 
 #[tokio::test]
-async fn refresh_timeout_is_contained() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-timeout");
-    // A server that accepts and never responds.
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    std::thread::spawn(move || {
-        if let Ok((stream, _)) = listener.accept() {
-            std::thread::sleep(Duration::from_secs(3));
-            drop(stream);
-        }
-    });
-
-    let outcome = refresh_overlay_once(&url, Duration::from_millis(200)).await;
-
-    assert!(matches!(outcome, RefreshOutcome::Failed { .. }), "{outcome:?}");
-    assert!(!env.overlay_path().exists());
-}
-
-#[tokio::test]
-async fn refresh_unmappable_payload_preserves_state() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-garbage");
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", "this is not json")]);
-
-    let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
-
-    let RefreshOutcome::Failed { error } = outcome else {
-        panic!("expected Failed, got {outcome:?}");
-    };
-    assert!(error.contains("parsing models.dev payload"), "{error}");
-    assert!(!env.overlay_path().exists());
-    assert!(!env.sidecar_path().exists());
-}
-
-#[tokio::test]
 async fn refresh_skips_drifted_models_and_providers() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = RefreshEnvGuard::new("refresh-drift");
+    let _env = EnvGuard::new("refresh-drift", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     let payload = serde_json::json!({
         "deepseek": {
             "models": {
@@ -448,8 +343,8 @@ async fn refresh_skips_drifted_models_and_providers() {
 #[tokio::test]
 async fn cadence_skips_refresh_within_four_hours() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-cadence");
-    write_sidecar_file(&env.home, Some("\"fresh\""), unix_now());
+    let env = EnvGuard::new("refresh-cadence", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    write_sidecar_file(env.path(), Some("\"fresh\""), unix_now());
 
     // The closed port would fail instantly if a request were attempted;
     // SkippedCadence proves none was made.
@@ -461,9 +356,9 @@ async fn cadence_skips_refresh_within_four_hours() {
 #[tokio::test]
 async fn stale_cadence_refetches() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = RefreshEnvGuard::new("refresh-cadence-stale");
+    let env = EnvGuard::new("refresh-cadence-stale", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     let started_at = unix_now();
-    write_sidecar_file(&env.home, Some("\"stale\""), unix_now() - REFRESH_CADENCE_SECS - 60);
+    write_sidecar_file(env.path(), Some("\"stale\""), unix_now() - REFRESH_CADENCE_SECS - 60);
     let server = ScriptedServer::start(vec![ScriptedResponse::json("304 Not Modified", "")]);
 
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
@@ -477,7 +372,7 @@ async fn stale_cadence_refetches() {
 #[tokio::test]
 async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = RefreshEnvGuard::new("refresh-spawn");
+    let _env = EnvGuard::new("refresh-spawn", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     unsafe { std::env::set_var("MODELS_DEV_URL", "") }; // cleared: must fall back to the default
     let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
         .with_header("ETag", "\"spawn-etag\"")]);
@@ -505,7 +400,7 @@ async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
 #[test]
 fn resolution_and_validation_paths_never_touch_the_network() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = RefreshEnvGuard::new("no-network");
+    let _env = EnvGuard::new("no-network", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
     let server = ScriptedServer::start_unexpected_request_server(Duration::from_millis(300));
     unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
     unsafe { std::env::set_var("DEEPSEEK_API_KEY", "no-network-dummy-key") };

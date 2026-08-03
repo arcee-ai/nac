@@ -24,8 +24,8 @@
 //! invalid entries are skipped individually with warnings.
 
 use super::{
-    dated_snapshot_family, CatalogWarning, ModelCatalog, ModelMetadata, ModelSource,
-    ThinkingLevelMap, PROVIDER_DEFAULT_MODEL_ID,
+    CatalogWarning, ModelCatalog, ModelMetadata, ModelSource, ThinkingLevelMap,
+    PROVIDER_DEFAULT_MODEL_ID,
 };
 use crate::model::BackendKind;
 use serde::Deserialize;
@@ -113,27 +113,10 @@ fn apply_one(catalog: &mut ModelCatalog, value: serde_json::Value) -> Result<(),
     };
 
     // Base metadata: the exact entry, its dated-snapshot family, or the
-    // provider default (unknown models get fallback-derived metadata).
-    let mut metadata = if entry.model == PROVIDER_DEFAULT_MODEL_ID {
-        provider_catalog.default.clone()
-    } else if let Some(existing) = provider_catalog.models.get(&entry.model) {
-        existing.clone()
-    } else {
-        let family = dated_snapshot_family(&entry.model)
-            .and_then(|family| provider_catalog.models.get(family));
-        match family {
-            Some(family_entry) => {
-                let mut resolved = family_entry.clone();
-                resolved.id = entry.model.clone();
-                resolved
-            }
-            None => {
-                let mut resolved = provider_catalog.default.clone();
-                resolved.id = entry.model.clone();
-                resolved
-            }
-        }
-    };
+    // provider default (unknown models get fallback-derived metadata) — the
+    // shared resolution chain. `_default` resolves to the default entry
+    // itself; the intermediate `source` is overwritten below either way.
+    let mut metadata = provider_catalog.resolve_entry(&entry.model);
 
     let set = entry.set;
     if let Some(display_name) = set.display_name {

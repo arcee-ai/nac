@@ -1,11 +1,9 @@
+use super::test_support::EnvGuard;
 use super::*;
 use crate::model::{validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort};
 use crate::TEST_ENV_LOCK;
 use sha2::Digest;
 use std::collections::BTreeMap;
-use std::ffi::OsString;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const ALL_PROVIDERS: [BackendKind; 8] = [
     BackendKind::DeepSeekChat,
@@ -26,50 +24,6 @@ const ALL_EFFORTS: [ReasoningEffort; 6] = [
     ReasoningEffort::High,
     ReasoningEffort::Xhigh,
 ];
-
-/// Restore mutated environment variables and the reloaded catalog on drop.
-struct EnvGuard {
-    original: Vec<(&'static str, Option<OsString>)>,
-    home: PathBuf,
-}
-
-impl EnvGuard {
-    fn new(label: &str) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let home = std::env::temp_dir().join(format!(
-            "nac-catalog-{label}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&home).unwrap();
-        let original = ["NAC_HOME", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-            .into_iter()
-            .map(|name| (name, std::env::var_os(name)))
-            .collect::<Vec<_>>();
-        unsafe { std::env::set_var("NAC_HOME", &home) };
-        unsafe { std::env::remove_var("OPENAI_API_KEY") };
-        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
-        Self { original, home }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (name, value) in self.original.drain(..) {
-            match value {
-                Some(value) => unsafe { std::env::set_var(name, value) },
-                None => unsafe { std::env::remove_var(name) },
-            }
-        }
-        let _ = std::fs::remove_dir_all(&self.home);
-        // No-op for tests that never opted in; panic-safe reset for the
-        // ones that enabled the machine-state layers.
-        set_env_layers_for_test(false);
-        reset_for_test();
-    }
-}
 
 #[test]
 fn every_provider_ships_a_default_entry_with_its_wire_api() {
@@ -173,16 +127,11 @@ fn pre_s4_anthropic_family(model: &str, family: &str) -> bool {
 
 #[test]
 fn seed_maps_transcribe_the_validation_matrix_exactly() {
-    let models = [
-        "test-model",
-        "claude-opus-4-6",
-        "claude-opus-4-6-20260301",
-        "claude-sonnet-4-6",
-        "claude-sonnet-4-6-20251001",
-        "claude-opus-4-6-latest",
-        "claude-opus-4-5",
-        "claude-3-5-sonnet",
-    ];
+    // Unknown-model rows only (every provider resolves these through its
+    // `_default` entry): known models — and their dated snapshots, which
+    // resolve through the same guarded family entries — are covered
+    // exhaustively by `every_generated_entry_preserves_the_validation_matrix`.
+    let models = ["test-model", "claude-opus-4-6-latest", "claude-3-5-sonnet"];
     for provider in ALL_PROVIDERS {
         for model in models {
             let metadata = resolve(provider, model);
@@ -304,7 +253,11 @@ fn resolution_is_sync_local_and_credential_free() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     // The picker and resume paths resolve metadata without credentials or
     // network; pin that contract with an empty NAC_HOME and no provider keys.
-    let _env = EnvGuard::new("credential-free");
+    let _env = EnvGuard::new(
+        "credential-free",
+        &["NAC_HOME", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+        &["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+    );
     reset_for_test();
     for provider in ALL_PROVIDERS {
         let metadata = resolve(provider, "picker-model");
@@ -471,97 +424,20 @@ fn thinking_level_map_lookup_semantics() {
 }
 
 #[test]
-fn validation_resolves_dated_snapshot_families_from_catalog_data() {
-    // No code names this snapshot: it resolves through the family entry's
-    // data map (the generic `-YYYYMMDD` rule over catalog entries).
-    validate_model_reasoning_effort(
-        BackendKind::AnthropicMessages,
-        "claude-opus-4-6-20260301",
-        Some(ReasoningEffort::Xhigh),
-    )
-    .expect("dated snapshot inherits the family map from catalog data");
-    let metadata = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6-20260301");
-    assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
-        Some("max")
-    );
-
-    // The sonnet family caps at high, through the same data path.
-    validate_model_reasoning_effort(
-        BackendKind::AnthropicMessages,
-        "claude-sonnet-4-6-20260217",
-        Some(ReasoningEffort::High),
-    )
-    .expect("sonnet dated snapshot accepts high");
-    let error = validate_model_reasoning_effort(
-        BackendKind::AnthropicMessages,
-        "claude-sonnet-4-6-20260217",
-        Some(ReasoningEffort::Xhigh),
-    )
-    .expect_err("the sonnet family map has no xhigh tier");
-    assert!(
-        error.to_string().contains("claude-sonnet-4-6-20260217"),
-        "{error:#}"
-    );
-}
-
-#[test]
-fn unknown_models_keep_the_conservative_provider_default_rejection() {
-    // Unknown Anthropic models: only `none` (omission) is accepted.
-    validate_model_reasoning_effort(
-        BackendKind::AnthropicMessages,
-        "claude-never-seen-2099",
-        Some(ReasoningEffort::None),
-    )
-    .expect("none stays safe for unknown Anthropic models");
-    for effort in [
-        ReasoningEffort::Minimal,
-        ReasoningEffort::Low,
-        ReasoningEffort::Medium,
-        ReasoningEffort::High,
-        ReasoningEffort::Xhigh,
-    ] {
-        validate_model_reasoning_effort(
-            BackendKind::AnthropicMessages,
-            "claude-never-seen-2099",
-            Some(effort),
-        )
-        .expect_err("unknown Anthropic models stay conservative");
-    }
-
-    // Unknown deepseek models keep the provider default map.
-    validate_model_reasoning_effort(
-        BackendKind::DeepSeekChat,
-        "deepseek-never-seen",
-        Some(ReasoningEffort::Xhigh),
-    )
-    .expect("the provider default allows xhigh");
-    validate_model_reasoning_effort(
-        BackendKind::DeepSeekChat,
-        "deepseek-never-seen",
-        Some(ReasoningEffort::Low),
-    )
-    .expect_err("the provider default rejects low");
-
-    // Arcee rejects every explicit effort, including none.
-    validate_model_reasoning_effort(
-        BackendKind::ArceeApi,
-        "arcee-never-seen",
-        Some(ReasoningEffort::None),
-    )
-    .expect_err("arcee accepts no explicit effort levels");
-}
-
-#[test]
 fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
     // The S4 unlock, end to end: a `$NAC_HOME/models.json` override relaxes
     // a model's effort levels; validation and the adapter wire value both
     // follow the overridden data. Pre-S4, the hardcoded matrix rejected
     // every non-none effort for claude-haiku-4-5.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("s4-unlock");
+    let env = EnvGuard::new(
+        "s4-unlock",
+        &["NAC_HOME", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+        &["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+    )
+    .with_env_layers();
     std::fs::write(
-        env.home.join("models.json"),
+        env.path().join("models.json"),
         serde_json::to_string_pretty(&serde_json::json!({
             "overrides": [
                 {
@@ -574,7 +450,6 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
         .unwrap(),
     )
     .unwrap();
-    set_env_layers_for_test(true);
     reset_for_test();
 
     validate_model_reasoning_effort(

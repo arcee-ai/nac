@@ -71,7 +71,10 @@ impl ThinkingLevelMap {
     }
 
     /// Whether the map explicitly marks the effort unsupported (present +
-    /// `None`), as opposed to merely absent.
+    /// `None`), as opposed to merely absent. Currently consumed by tests;
+    /// it documents the user-override `null` wire-value case, which neither
+    /// the seed catalog nor the generator ever produces.
+    #[allow(dead_code)] // test-consumed until the planned /models endpoint
     pub fn is_explicitly_unsupported(&self, effort: ReasoningEffort) -> bool {
         matches!(self.0.get(&effort), Some(None))
     }
@@ -115,6 +118,8 @@ pub struct ModelMetadata {
     pub id: String,
     pub provider: BackendKind,
     pub api: ApiKind,
+    /// Human-facing name from models.dev. Currently consumed by tests; the
+    /// planned frontend `/models` endpoint is the production consumer.
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
@@ -122,9 +127,16 @@ pub struct ModelMetadata {
     /// Anthropic 1-hour-TTL cache-write rate; defaults to 2x input at cost
     /// computation time (S3).
     pub cache_write_1h: Option<f64>,
+    /// Whether the model reasons at all (models.dev `reasoning` flag).
+    /// Currently consumed by tests; the planned frontend `/models` endpoint
+    /// is the production consumer. Effort validation reads
+    /// `thinking_level_map` instead.
     pub reasoning: bool,
     pub thinking_level_map: ThinkingLevelMap,
     pub compat: Compat,
+    /// Which catalog layer produced this metadata. Currently consumed by
+    /// tests; the planned frontend `/models` endpoint is the production
+    /// consumer.
     pub source: ModelSource,
 }
 

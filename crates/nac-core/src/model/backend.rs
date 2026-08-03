@@ -73,7 +73,6 @@ pub fn validate_model_reasoning_effort(
 
 pub fn validate_backend_api_key_env(
     backend: BackendKind,
-    _base_url: Option<&str>,
     api_key_env: Option<&str>,
 ) -> Result<()> {
     if api_key_backend(backend) {
@@ -117,7 +116,7 @@ pub(super) fn api_key_for_backend(
     backend: BackendKind,
     configured_env: Option<&str>,
 ) -> Result<String> {
-    validate_backend_api_key_env(backend, None, configured_env)?;
+    validate_backend_api_key_env(backend, configured_env)?;
     if !api_key_backend(backend) {
         return Ok(String::new());
     }

@@ -31,6 +31,8 @@ mod overlay;
 mod overlay_tests;
 mod seed;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
 mod types;
 #[cfg(test)]
@@ -121,6 +123,32 @@ struct ProviderCatalog {
     models: BTreeMap<String, ModelMetadata>,
 }
 
+impl ProviderCatalog {
+    /// The single implementation of the resolution chain: exact entry, then
+    /// a dated-snapshot family match (`name-YYYYMMDD` → `name`, the pre-S4
+    /// `backend.rs` Anthropic family rule, now generic), then a clone of the
+    /// provider's `_default` entry with the id swapped in and `source`
+    /// re-marked `ProviderDefault` (pi's buildFallbackModel pattern).
+    /// `ModelCatalog::resolve`, user overrides and the overlay's seed-map
+    /// lookup all share it.
+    fn resolve_entry(&self, model: &str) -> ModelMetadata {
+        if let Some(metadata) = self.models.get(model) {
+            return metadata.clone();
+        }
+        if let Some(family) = dated_snapshot_family(model) {
+            if let Some(metadata) = self.models.get(family) {
+                let mut resolved = metadata.clone();
+                resolved.id = model.to_string();
+                return resolved;
+            }
+        }
+        let mut resolved = self.default.clone();
+        resolved.id = model.to_string();
+        resolved.source = ModelSource::ProviderDefault;
+        resolved
+    }
+}
+
 /// Local model metadata catalog. Resolution never fails for unknown models;
 /// see [`ModelCatalog::resolve`].
 #[derive(Debug)]
@@ -163,11 +191,8 @@ impl ModelCatalog {
         (catalog, warnings)
     }
 
-    /// Resolve metadata for `model` on `provider`: exact entry, then a
-    /// dated-snapshot family match (`name-YYYYMMDD` → `name`, the pre-S4
-    /// `backend.rs` Anthropic family rule, now generic), then a clone of the
-    /// provider's `_default` entry with the id swapped in (pi's
-    /// buildFallbackModel pattern).
+    /// Resolve metadata for `model` on `provider` through
+    /// [`ProviderCatalog::resolve_entry`]; never fails for unknown models.
     pub fn resolve(&self, provider: BackendKind, model: &str) -> ModelMetadata {
         let Some(catalog) = self.providers.get(&provider) else {
             // Unreachable while every provider ships a seed `_default` entry;
@@ -179,20 +204,7 @@ impl ModelCatalog {
                 ModelSource::Fallback,
             );
         };
-        if let Some(metadata) = catalog.models.get(model) {
-            return metadata.clone();
-        }
-        if let Some(family) = dated_snapshot_family(model) {
-            if let Some(metadata) = catalog.models.get(family) {
-                let mut resolved = metadata.clone();
-                resolved.id = model.to_string();
-                return resolved;
-            }
-        }
-        let mut resolved = catalog.default.clone();
-        resolved.id = model.to_string();
-        resolved.source = ModelSource::ProviderDefault;
-        resolved
+        catalog.resolve_entry(model)
     }
 }
 

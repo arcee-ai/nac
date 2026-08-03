@@ -24,9 +24,7 @@
 //! relaxing `overrides.toml` without updating the seed fails loudly.
 
 use super::data::{GeneratedModel, GeneratedProvider};
-use super::{
-    dated_snapshot_family, seed, CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap,
-};
+use super::{seed, CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap};
 use crate::model::BackendKind;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -170,16 +168,7 @@ pub(super) fn merge_overlay(
         providers.insert(provider, generated);
     }
     for (provider, generated) in providers {
-        let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
-            debug_assert!(false, "overlay provider {provider} must have a seed default");
-            continue;
-        };
-        let compat = provider_catalog.default.compat.clone();
-        for (id, entry) in generated.models {
-            let metadata =
-                super::data::hydrate_entry(provider, id, entry, &compat, ModelSource::Overlay);
-            provider_catalog.models.insert(metadata.id.clone(), metadata);
-        }
+        super::data::merge_entries(catalog, provider, generated.models, ModelSource::Overlay);
     }
 }
 
@@ -559,18 +548,10 @@ fn map_cost(cost: Option<&ModelsDevCost>) -> Result<super::ModelCostRates, Strin
 /// every models.dev-derived seed map; the two anthropic family entries keep
 /// theirs).
 fn seed_thinking_map(seed: &ModelCatalog, provider: BackendKind, id: &str) -> ThinkingLevelMap {
-    let Some(provider_catalog) = seed.providers.get(&provider) else {
-        return ThinkingLevelMap::default();
-    };
-    if let Some(entry) = provider_catalog.models.get(id) {
-        return entry.thinking_level_map.clone();
-    }
-    if let Some(family) = dated_snapshot_family(id) {
-        if let Some(entry) = provider_catalog.models.get(family) {
-            return entry.thinking_level_map.clone();
-        }
-    }
-    provider_catalog.default.thinking_level_map.clone()
+    seed.providers
+        .get(&provider)
+        .map(|catalog| catalog.resolve_entry(id).thinking_level_map)
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
