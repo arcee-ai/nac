@@ -81,6 +81,19 @@ function loadApp(overrides = {}) {
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
+      loadModelCatalog, catalogProviders, findCatalogProvider, findCatalogModel,
+      resolveModelSelection, launchConfiguredResolution, selectionEffortLevels,
+      modelDisplayName, formatModelContextWindow, formatModelCostHint, modelRowHint,
+      modelSourceBadgeHtml, modelPickerRows, modelPickerOptionCount, renderModelPickerHtml,
+      renderModelPickerListHtml, syncModelPicker, syncModelPickerList, openModelPicker,
+      closeModelPicker, selectModelPickerIndex, enterModelPickerCustom, exitModelPickerCustom,
+      handleModelPickerClick, handleModelPickerInput, handleModelPickerKeydown,
+      handleModelPickerChange, applyModelPickerSelection, modelPickerSelection,
+      syncLaunchModelControls, syncLaunchEffortControl, syncLaunchManagedFieldVisibility,
+      syncLaunchModelDependentControls, settingsEffortFieldHtml, syncSettingsEffortField,
+      syncSettingsModelControls, customProviderOptionsHtml, modelPickerCustomMetaHtml,
+      launchEffortOptionsHtml, handleFocusInput, handleFocusKeydown, handleFocusChange,
+      MODEL_CATALOG_NOTICE, EFFORT_LEVELS,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -250,6 +263,79 @@ function settingsViewElements(uiInstance) {
   uiInstance.el.focusContent = { innerHTML: "",
     querySelector() { return null; },
     querySelectorAll() { return []; }, };
+}
+
+// Mirrors the GET /models wire shape (Phase 1 DTOs): kebab-case provider ids,
+// snake_case auth/source, $/1M cost rates, server-derived supported_efforts.
+function modelCatalogFixture() {
+  return { catalog_version: 3, providers: [
+    { id: "anthropic-messages", auth: "api_key_env", managed_base_url: null,
+      default_limits: { context_window: 128000, max_tokens: 16384,
+        supported_efforts: ["none", "low", "medium", "high"] },
+      models: [
+        { id: "claude-opus-4-1", display_name: "Claude Opus 4.1 (latest)",
+          context_window: 200000, max_tokens: 32000,
+          cost: { input: 15, output: 75, cache_read: 1.5, cache_write: 18.75 },
+          reasoning: true,
+          supported_efforts: ["none", "low", "medium", "high", "xhigh"],
+          source: "baseline" },
+        { id: "claude-sonnet-4-5", display_name: null,
+          context_window: 1000000, max_tokens: 64000,
+          cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+          reasoning: true,
+          supported_efforts: ["none", "low", "medium", "high"],
+          source: "user_override" },
+      ] },
+    { id: "openai-responses", auth: "api_key_env", managed_base_url: null,
+      default_limits: { context_window: 128000, max_tokens: 16384,
+        supported_efforts: ["none", "low", "medium", "high"] },
+      models: [
+        { id: "gpt-5.1", display_name: "GPT-5.1",
+          context_window: 400000, max_tokens: 128000,
+          cost: { input: 1.25, output: 10, cache_read: 0.125, cache_write: 0 },
+          reasoning: true,
+          supported_efforts: ["none", "minimal", "low", "medium", "high"],
+          source: "overlay" },
+        { id: "gpt-5-mini", display_name: "GPT-5 mini",
+          context_window: 400000, max_tokens: 128000,
+          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+          reasoning: false, supported_efforts: [], source: "baseline" },
+      ] },
+    { id: "arcee-auth", auth: "managed_arcee",
+      managed_base_url: "https://api.arcee.ai/api/v1",
+      default_limits: { context_window: 128000, max_tokens: 16384,
+        supported_efforts: [] },
+      models: [
+        { id: "arcee-large", display_name: "Arcee Large",
+          context_window: 128000, max_tokens: 8192,
+          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+          reasoning: false, supported_efforts: [], source: "baseline" },
+      ] },
+  ] };
+}
+
+function seedCatalog(uiInstance, fixture = modelCatalogFixture()) {
+  uiInstance.state.modelCatalog = { status: "ready", data: fixture, error: "" };
+  return fixture;
+}
+
+function launchPickerElements(uiInstance) {
+  uiInstance.el.launchModelPicker = { hidden: true, innerHTML: "", dataset: {},
+    querySelector() { return null; } };
+  uiInstance.el.launchModelFallback = { hidden: false };
+  uiInstance.el.launchModelCatalogNotice = { hidden: true };
+  uiInstance.el.launchBackend = { value: "" };
+  uiInstance.el.launchModel = { value: "" };
+  uiInstance.el.launchEffort = { value: "inherit", innerHTML: "" };
+  uiInstance.el.launchEffortField = { hidden: false };
+  uiInstance.el.launchEffortHelp = { textContent: "" };
+  uiInstance.el.launchBaseUrl = { value: "" };
+  uiInstance.el.launchBaseUrlField = { hidden: false };
+  uiInstance.el.launchApiKeyMode = { value: "inherit" };
+  uiInstance.el.launchApiKeyModeField = { hidden: false };
+  uiInstance.el.launchApiKeyEnv = { value: "", disabled: true, required: false };
+  uiInstance.el.launchApiKeyEnvField = { hidden: true };
+  uiInstance.el.launchApiKeyHelp = { textContent: "" };
 }
 
 function fakeElement() {
@@ -3157,7 +3243,9 @@ test("empty PATCH responses reload config and reconcile snapshot and session sta
   assert.equal(isolated.state.settingsSubmission, null);
 });
 
-test("selector helpers include supported backends and reasoning levels", () => {
+test("fallback selector helpers cover the supported backends and reasoning levels for manual entry", () => {
+  // backendOptions/effortOptions are the offline/manual-entry fallback now
+  // that the catalog picker constrains selections per model.
   const backends = ui.backendOptions("arcee-auth");
   assert.match(backends, /value="arcee-auth" selected/);
   assert.match(backends, /value="arcee-api"/);
@@ -3167,6 +3255,439 @@ test("selector helpers include supported backends and reasoning levels", () => {
   assert.match(efforts, /value="__unset__">unset \(backend default\)<\/option>/);
   assert.match(efforts, /value="none">none<\/option>/);
   assert.match(efforts, /value="minimal">minimal<\/option>/);
+});
+
+test("model catalog loads once, keeps stale data on refresh failure, and only degrades on first-load failure", async () => {
+  let fail = false;
+  const calls = [];
+  const isolated = loadApp({ fetch: async (path) => {
+    calls.push(path);
+    if (fail) return errorResponse(500, { error: "boom" });
+    return jsonResponse(modelCatalogFixture());
+  } });
+  const data = await isolated.loadModelCatalog();
+  assert.deepEqual(calls, ["/models"]);
+  assert.equal(isolated.state.modelCatalog.status, "ready");
+  assert.equal(data.providers.length, 3);
+  // Concurrent calls share the in-flight request.
+  const first = isolated.loadModelCatalog();
+  const second = isolated.loadModelCatalog();
+  assert.strictEqual(first, second);
+  await first;
+  assert.equal(calls.length, 2);
+  // A failed refresh keeps the stale listing.
+  fail = true;
+  const stale = await isolated.loadModelCatalog({ force: true });
+  assert.equal(isolated.state.modelCatalog.status, "ready");
+  assert.equal(stale.providers.length, 3);
+  // A first-load failure degrades to manual entry.
+  const fresh = loadApp({ fetch: async () => errorResponse(500, { error: "boom" }) });
+  const none = await fresh.loadModelCatalog();
+  assert.equal(none, null);
+  assert.equal(fresh.state.modelCatalog.status, "error");
+  assert.equal(fresh.state.modelCatalog.error, "boom");
+});
+
+test("model picker rows filter across display name, id, and provider", () => {
+  seedCatalog(ui);
+  assert.equal(ui.modelPickerRows("").length, 5);
+  assert.equal(ui.modelPickerRows("claude").length, 2);
+  assert.equal(ui.modelPickerRows("GPT-5 mini").length, 1);
+  assert.equal(ui.modelPickerRows("arcee").length, 1);
+  assert.equal(ui.modelPickerRows("zzz").length, 0);
+  const [first] = ui.modelPickerRows("opus");
+  assert.equal(first.provider.id, "anthropic-messages");
+  assert.equal(first.model.id, "claude-opus-4-1");
+});
+
+test("model row hints format context and pricing with an unknown-pricing rule", () => {
+  const fixture = modelCatalogFixture();
+  const [opus, sonnet] = fixture.providers[0].models;
+  const [gpt, mini] = fixture.providers[1].models;
+  assert.equal(ui.modelRowHint(opus), "200k ctx · $15/$75 per 1M");
+  assert.equal(ui.modelRowHint(gpt), "400k ctx · $1.25/$10 per 1M");
+  assert.equal(ui.modelRowHint(mini), "400k ctx · pricing unknown");
+  assert.equal(ui.modelRowHint(sonnet), "1.0m ctx · $3/$15 per 1M");
+  assert.equal(ui.formatModelContextWindow(0), "");
+  assert.equal(ui.formatModelCostHint(null), "pricing unknown");
+  assert.equal(ui.modelDisplayName(sonnet), "claude-sonnet-4-5");
+});
+
+test("closed model picker renders display name, provider tag, and source badges", () => {
+  seedCatalog(ui);
+  let html = ui.renderModelPickerHtml("launch", { backend: "anthropic-messages", model: "claude-opus-4-1" });
+  assert.match(html, /model-picker-toggle-label">Claude Opus 4\.1 \(latest\)/);
+  assert.match(html, /model-picker-toggle-provider">anthropic-messages/);
+  assert.match(html, /role="combobox" aria-haspopup="listbox" aria-expanded="false"/);
+  assert.doesNotMatch(html, /model-picker-badge/);
+  html = ui.renderModelPickerHtml("launch", { backend: "anthropic-messages", model: "claude-sonnet-4-5" });
+  assert.match(html, /model-picker-toggle-label">claude-sonnet-4-5/);
+  assert.match(html, /model-picker-badge">customized/);
+  html = ui.renderModelPickerHtml("launch", { backend: "openai-responses", model: "gpt-5-typo" });
+  assert.match(html, /model-picker-toggle-label">gpt-5-typo/);
+  assert.match(html, /is-warning">unrecognized model — conservative defaults/);
+});
+
+test("closed launch picker resolves from config through the launch defaults", () => {
+  seedCatalog(ui);
+  ui.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "anthropic-messages",
+      configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } };
+  let html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(html, /from config: Claude Opus 4\.1 \(latest\)/);
+  assert.match(html, /anthropic-messages · high/);
+  ui.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "openai-responses", configured_model: "mystery" } };
+  html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(html, /from config: mystery/);
+  assert.match(html, /is-warning">unrecognized model/);
+  ui.state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
+  html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(html, /model-picker-toggle-label">from config</);
+});
+
+test("open model picker renders grouped options and the custom escape row", () => {
+  seedCatalog(ui);
+  ui.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  const open = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
+  assert.match(open, /role="listbox" aria-label="Models"/);
+  assert.match(open, /aria-activedescendant="launchModelPickerOption0"/);
+  assert.match(open, /model-picker-group" role="presentation">anthropic-messages/);
+  assert.match(open, /model-picker-option is-active/);
+  assert.match(open, /model-picker-option-hint">200k ctx · \$15\/\$75 per 1M/);
+  assert.doesNotMatch(open, /Use custom model/);
+  ui.state.launchPicker.query = "gpt";
+  let list = ui.renderModelPickerListHtml("launch");
+  assert.equal(occurrences(list, /model-picker-option-id/g), 2);
+  assert.match(list, /Use custom model &#34;gpt&#34; →/);
+  ui.state.launchPicker.query = "zzz";
+  list = ui.renderModelPickerListHtml("launch");
+  assert.doesNotMatch(list, /model-picker-option-id/);
+  assert.match(list, /Use custom model &#34;zzz&#34; →/);
+  assert.match(list, /aria-selected="true"/);
+});
+
+test("custom model state renders an editable id, provider select, and conservative-defaults hint", () => {
+  seedCatalog(ui);
+  ui.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
+  const html = ui.renderModelPickerHtml("launch", { backend: "openai-responses", model: "my-fine-tune" });
+  assert.match(html, /class="model-picker-custom-model"[^>]*value="my-fine-tune"/);
+  assert.match(html, /<option value="openai-responses" selected>openai-responses<\/option>/);
+  assert.match(html, /unrecognized model — conservative defaults/);
+  assert.match(html, /128k ctx est\. · pricing unknown/);
+  assert.match(html, /data-model-picker-back="launch">back to catalog/);
+  // Launch keeps "from config" as a provider choice; settings requires one.
+  assert.match(html, /<option value="">from config<\/option>/);
+  ui.state.settingsPicker = { open: false, query: "", activeIndex: 0, custom: true };
+  const settings = ui.renderModelPickerHtml("settings", { backend: "legacy-backend", model: "gpt-5" });
+  assert.match(settings, /<option value="legacy-backend" selected>legacy-backend \(unsupported — select a replacement\)<\/option>/);
+});
+
+test("model picker selection writes the launch fields and constrains effort per model", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchBackend.value, "anthropic-messages");
+  assert.equal(isolated.el.launchModel.value, "claude-opus-4-1");
+  assert.equal(isolated.state.launchPicker.open, false);
+  let efforts = isolated.el.launchEffort.innerHTML;
+  assert.match(efforts, /value="inherit">inherit \(from config\)/);
+  assert.match(efforts, /value="unset">unset \(backend default\)/);
+  assert.match(efforts, /value="xhigh">xhigh/);
+  assert.doesNotMatch(efforts, /value="minimal"/);
+  assert.equal(isolated.el.launchEffortField.hidden, false);
+  // A non-reasoning model hides the effort control and submits inherit.
+  isolated.state.launchPicker = { open: true, query: "mini", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchModel.value, "gpt-5-mini");
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+  assert.equal(isolated.el.launchEffort.value, "inherit");
+});
+
+test("launch effort control assumes provider defaults for custom models and resolves inherit", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Custom/unknown model → provider default_limits + assumed note.
+  isolated.el.launchBackend.value = "openai-responses";
+  isolated.el.launchModel.value = "my-fine-tune";
+  isolated.syncLaunchEffortControl();
+  assert.match(isolated.el.launchEffort.innerHTML, /value="medium">medium/);
+  assert.doesNotMatch(isolated.el.launchEffort.innerHTML, /value="xhigh"/);
+  assert.match(isolated.el.launchEffortHelp.textContent, /assumed for an unrecognized model/);
+  // "from config" constrains against the configured model.
+  isolated.el.launchBackend.value = "";
+  isolated.el.launchModel.value = "";
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "anthropic-messages", configured_model: "claude-opus-4-1" } };
+  isolated.syncLaunchEffortControl();
+  assert.match(isolated.el.launchEffort.innerHTML, /value="xhigh"/);
+  assert.doesNotMatch(isolated.el.launchEffort.innerHTML, /value="minimal"/);
+  assert.equal(isolated.el.launchEffortHelp.textContent.includes("assumed"), false);
+  // Unresolvable inherit stays unconstrained (backend validates verbatim).
+  isolated.state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
+  isolated.syncLaunchEffortControl();
+  assert.match(isolated.el.launchEffort.innerHTML, /value="minimal">minimal/);
+  // A configured non-reasoning model hides the control too.
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model_backend: "openai-responses", configured_model: "gpt-5-mini" } };
+  isolated.syncLaunchEffortControl();
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+  assert.equal(isolated.el.launchEffort.value, "inherit");
+});
+
+test("launch model controls toggle between picker, loading, and manual-entry fallback", () => {
+  const isolated = loadApp();
+  launchPickerElements(isolated);
+  isolated.state.modelCatalog = { status: "error", data: null, error: "boom" };
+  isolated.syncLaunchModelControls();
+  assert.equal(isolated.el.launchModelPicker.hidden, true);
+  assert.equal(isolated.el.launchModelFallback.hidden, false);
+  assert.equal(isolated.el.launchModelCatalogNotice.hidden, false);
+  isolated.state.modelCatalog = { status: "loading", data: null, error: "" };
+  isolated.syncLaunchModelControls();
+  assert.equal(isolated.el.launchModelPicker.hidden, false);
+  assert.equal(isolated.el.launchModelFallback.hidden, true);
+  assert.equal(isolated.el.launchModelCatalogNotice.hidden, true);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /Loading models…/);
+  seedCatalog(isolated);
+  isolated.syncLaunchModelControls();
+  assert.equal(isolated.el.launchModelPicker.hidden, false);
+  assert.equal(isolated.el.launchModelFallback.hidden, true);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /model-picker-toggle/);
+});
+
+test("managed backend selections hide base url and API key controls", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.el.launchBaseUrl.value = "https://stale.example.test";
+  isolated.state.launchPicker = { open: true, query: "arcee", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchBackend.value, "arcee-auth");
+  assert.equal(isolated.el.launchBaseUrlField.hidden, true);
+  assert.equal(isolated.el.launchApiKeyModeField.hidden, true);
+  assert.equal(isolated.el.launchBaseUrl.value, "");
+  assert.equal(isolated.el.launchApiKeyMode.value, "none");
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+  // Switching back to an api-key provider restores the controls.
+  isolated.state.launchPicker = { open: true, query: "opus", activeIndex: 0, custom: false };
+  isolated.selectModelPickerIndex("launch", 0);
+  assert.equal(isolated.el.launchBaseUrlField.hidden, false);
+  assert.equal(isolated.el.launchApiKeyModeField.hidden, false);
+  assert.equal(isolated.el.launchApiKeyMode.value, "inherit");
+  // A custom model on a managed provider hides them too.
+  isolated.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
+  isolated.handleModelPickerChange({ target: {
+    matches: (selector) => selector === "[data-model-picker-custom-provider]",
+    value: "arcee-auth" } }, "launch");
+  assert.equal(isolated.el.launchBackend.value, "arcee-auth");
+  assert.equal(isolated.el.launchBaseUrlField.hidden, true);
+});
+
+test("model picker keyboard navigation wraps, selects, enters custom, and closes", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  const key = (name) => ({ key: name, preventDefault() {}, stopPropagation() {} });
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  isolated.handleModelPickerKeydown(key("ArrowDown"), "launch");
+  assert.equal(isolated.state.launchPicker.activeIndex, 1);
+  isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
+  isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
+  assert.equal(isolated.state.launchPicker.activeIndex, 4);
+  isolated.handleModelPickerKeydown(key("Enter"), "launch");
+  assert.equal(isolated.el.launchModel.value, "arcee-large");
+  assert.equal(isolated.state.launchPicker.open, false);
+  // Enter on the custom escape row collapses into the custom state.
+  isolated.state.launchPicker = { open: true, query: "my-model", activeIndex: 0, custom: false };
+  isolated.handleModelPickerKeydown(key("Enter"), "launch");
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.el.launchModel.value, "my-model");
+  // Escape closes the list without changing the selection.
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 0, custom: false };
+  isolated.handleModelPickerKeydown(key("Escape"), "launch");
+  assert.equal(isolated.state.launchPicker.open, false);
+  assert.equal(isolated.el.launchModel.value, "my-model");
+});
+
+test("model picker click and input handlers route toggle, option, custom, back, and filter", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  const event = (match, extra = {}) => ({ target: {
+    closest: (selector) => (selector === match ? (extra.target || {}) : null),
+    ...extra, } });
+  isolated.handleModelPickerClick(event("[data-model-picker-toggle]"), "launch");
+  assert.equal(isolated.state.launchPicker.open, true);
+  isolated.handleModelPickerInput({ target: {
+    matches: (selector) => selector === "[data-model-picker-filter]", value: "gpt" } }, "launch");
+  assert.equal(isolated.state.launchPicker.query, "gpt");
+  isolated.handleModelPickerClick(event("[data-model-picker-option]",
+    { target: { dataset: { modelPickerOption: "1" } } }), "launch");
+  assert.equal(isolated.el.launchModel.value, "gpt-5-mini");
+  assert.equal(isolated.state.launchPicker.open, false);
+  isolated.state.launchPicker = { open: true, query: "abc", activeIndex: 0, custom: false };
+  isolated.handleModelPickerClick(event("[data-model-picker-custom]"), "launch");
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.el.launchModel.value, "abc");
+  isolated.handleModelPickerInput({ target: {
+    matches: (selector) => selector === "[data-model-picker-custom-model]", value: "abc-v2" } }, "launch");
+  assert.equal(isolated.el.launchModel.value, "abc-v2");
+  isolated.handleModelPickerClick(event("[data-model-picker-back]"), "launch");
+  assert.equal(isolated.state.launchPicker.open, true);
+  assert.equal(isolated.state.launchPicker.custom, false);
+});
+
+test("settings renders the picker prefilled from config with hidden form fields", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  const config = persistedConfig({ backend: "anthropic-messages",
+    model: "claude-opus-4-1", reasoning_effort: "high" });
+  isolated.state.currentId = "settings-session";
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 0, status: "ready", config, error: null, message: "" };
+  const html = isolated.renderFocusSettings();
+  assert.match(html, /id="settingsModelPicker"/);
+  assert.match(html, /<input type="hidden" name="backend" value="anthropic-messages">/);
+  assert.match(html, /<input type="hidden" name="model" value="claude-opus-4-1">/);
+  assert.match(html, /model-picker-toggle-label">Claude Opus 4\.1 \(latest\)/);
+  assert.doesNotMatch(html, /<select name="backend">/);
+  const effort = html.slice(html.indexOf('id="settingsEffortField"'));
+  assert.match(effort, /<option value="high" selected>high<\/option>/);
+  assert.match(effort, /<option value="xhigh">xhigh<\/option>/);
+  assert.doesNotMatch(effort, /value="minimal"/);
+  // Unchanged values produce an empty patch — prefill is not a repair.
+  const initial = isolated.settingsValuesFromConfig(config);
+  assert.deepEqual(plain(isolated.buildSettingsPatch(settingsFormElement({
+    backend: "anthropic-messages", model: "claude-opus-4-1", reasoning_effort: "high",
+  }).values, initial)), {});
+});
+
+test("settings renders unknown stored models in the custom state as informational, not an error", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  const config = persistedConfig({ model: "gpt-5-typo" });
+  isolated.state.currentId = "settings-session";
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 0, status: "ready", config, error: null, message: "" };
+  const html = isolated.renderFocusSettings();
+  assert.match(html, /model-picker-custom/);
+  assert.match(html, /class="model-picker-custom-model"[^>]*value="gpt-5-typo"/);
+  assert.match(html, /<input type="hidden" name="model" value="gpt-5-typo">/);
+  assert.match(html, /unrecognized model — conservative defaults/);
+  assert.match(html, /128k ctx est\. · pricing unknown/);
+  assert.match(html, /Effort levels assumed for an unrecognized model/);
+  // No forced repair: unchanged values still produce an empty patch.
+  const initial = isolated.settingsValuesFromConfig(config);
+  assert.deepEqual(plain(isolated.buildSettingsPatch(settingsFormElement({
+    model: "gpt-5-typo" }).values, initial)), {});
+});
+
+test("settings constrains effort and marks unsupported stored values for repair", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  const renderWith = (config) => {
+    isolated.state.currentId = "settings-session";
+    isolated.state.settingsFocus = { sessionId: "settings-session",
+      requestGeneration: 0, status: "ready", config, error: null, message: "" };
+    return isolated.renderFocusSettings();
+  };
+  const invalid = renderWith(persistedConfig({ backend: "anthropic-messages",
+    model: "claude-opus-4-1", reasoning_effort: "ultra" }));
+  assert.match(invalid, /<option value="ultra" selected>ultra \(unsupported — select a replacement\)<\/option>/);
+  assert.match(invalid, /<option value="__unset__">unset \(backend default\)<\/option>/);
+  assert.match(invalid, /<option value="xhigh">xhigh<\/option>/);
+  const nonReasoning = renderWith(persistedConfig({ backend: "openai-responses",
+    model: "gpt-5-mini", reasoning_effort: null }));
+  assert.match(nonReasoning, /<input type="hidden" id="settingsEffortField" name="reasoning_effort" value="__unset__">/);
+  assert.doesNotMatch(nonReasoning, /<select name="reasoning_effort">/);
+  const badBackend = renderWith(persistedConfig({ backend: "legacy-backend", model: "gpt-5" }));
+  assert.match(badBackend, /<option value="legacy-backend" selected>legacy-backend \(unsupported — select a replacement\)<\/option>/);
+  assert.match(badBackend, /<input type="hidden" name="backend" value="legacy-backend">/);
+});
+
+test("settings falls back to manual entry with a notice only on first-load failure", () => {
+  const isolated = loadApp();
+  isolated.state.currentId = "settings-session";
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 0, status: "ready", config: persistedConfig(), error: null, message: "" };
+  isolated.state.modelCatalog = { status: "error", data: null, error: "boom" };
+  const failed = isolated.renderFocusSettings();
+  assert.match(failed, /model-catalog-notice span-two">model catalog unavailable — manual entry/);
+  assert.match(failed, /<select name="backend">/);
+  assert.match(failed, /<select name="reasoning_effort">/);
+  assert.match(failed, /<input name="model" value="gpt-5">/);
+  isolated.state.modelCatalog = { status: "loading", data: null, error: "" };
+  const loading = isolated.renderFocusSettings();
+  assert.match(loading, /<select name="backend">/);
+  assert.doesNotMatch(loading, /model-catalog-notice/);
+});
+
+test("settings swaps from manual entry to the picker when the catalog arrives", () => {
+  const isolated = loadApp();
+  isolated.state.currentId = "settings-session";
+  isolated.state.focusView = { type: "settings" };
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 0, status: "ready",
+    config: persistedConfig({ backend: "anthropic-messages", model: "claude-opus-4-1" }),
+    error: null, message: "" };
+  const form = { querySelector() { return null; }, querySelectorAll() { return []; } };
+  isolated.el.focusContent = { innerHTML: "fallback",
+    querySelector: (selector) => (selector === "#settingsForm" ? form : null) };
+  seedCatalog(isolated);
+  isolated.syncSettingsModelControls();
+  assert.match(isolated.el.focusContent.innerHTML, /id="settingsModelPicker"/);
+  assert.match(isolated.el.focusContent.innerHTML, /Claude Opus 4\.1 \(latest\)/);
+});
+
+test("launch defaults preview renders the configured model and effort", () => {
+  seedCatalog(ui);
+  const html = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "anthropic-messages",
+      configured_model_base_url: "https://api.anthropic.com",
+      configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } });
+  assert.match(html, /Configured model/);
+  assert.match(html, /Claude Opus 4\.1 \(latest\) \(claude-opus-4-1\)/);
+  assert.match(html, /Configured effort/);
+  assert.match(html, />high</);
+  const unknown = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "openai-responses", configured_model: "mystery-model" } });
+  assert.match(unknown, /mystery-model/);
+  assert.match(unknown, /unset \(backend default\)/);
+  const legacy = ui.renderLaunchDefaultsPreviewHtml({ status: "ready",
+    data: { configured_model_backend: "openai-responses",
+      configured_model_base_url: "https://api.example.test" } });
+  assert.doesNotMatch(legacy, /Configured model/);
+});
+
+test("launch request passes effort through without client-side validation", () => {
+  // The picker constrains per model; the backend catalog validates verbatim.
+  assert.equal(ui.buildLaunchSessionRequest(launchValues({ reasoning_mode: "ultra" })).reasoning_effort, "ultra");
+  assert.equal(Object.hasOwn(ui.buildLaunchSessionRequest(launchValues()), "reasoning_effort"), false);
+});
+
+test("launch dialog wires the model picker, manual-entry fallback, and shared effort field", () => {
+  assert.match(indexSource, /id="launchModelFallback" class="field-grid nested-grid span-two"/);
+  assert.match(indexSource, /id="launchModelPicker" class="field model-picker span-two" hidden/);
+  assert.match(indexSource, /id="launchModelCatalogNotice"[^>]*hidden>model catalog unavailable — manual entry/);
+  assert.match(indexSource, /id="launchEffortField"/);
+  assert.match(indexSource, /id="launchBaseUrlField"/);
+  assert.match(indexSource, /id="launchApiKeyModeField"/);
+  assert.match(indexSource, /<select id="launchBackend" name="backend">/);
+  assert.match(indexSource, /<input id="launchModel" name="model"/);
+});
+
+test("model picker styles reuse the field, listbox, and badge tokens", () => {
+  for (const rule of [".model-picker-toggle", ".model-picker-list",
+    ".model-picker-option:hover, .model-picker-option.is-active",
+    ".model-picker-badge.is-warning", ".model-picker-custom-row",
+    ".model-picker-group", ".model-catalog-notice"]) {
+    assert.ok(redesignSource.includes(rule), rule);
+  }
+  assert.match(redesignSource, /\.field input, \.field select, \.field textarea, \.model-picker-filter/);
 });
 
 test("HTML escaping covers action names and user-provided labels", () => {

@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>nac</title>
     <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/redesign.css?v=quality-37" />
+    <link rel="stylesheet" href="/assets/redesign.css?v=quality-38" />
   </head>
   <body>
     <div id="app" class="app-frame">
@@ -122,14 +122,18 @@
             <header><div><h3>Launch defaults</h3><span>for this execution location</span></div><button id="refreshLaunchDefaults" class="button" type="button">refresh</button></header>
             <div id="launchDefaultsBody"><p class="launch-default-state">Open this dialog or refresh to inspect configured defaults.</p></div>
           </section>
-          <label class="field"><span>backend</span><select id="launchBackend" name="backend">
-            <option value="">from config</option><option value="openai-responses">openai-responses</option><option value="chatgpt-codex-responses">chatgpt-codex-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="deepseek-chat">deepseek-chat</option><option value="fireworks-chat">fireworks-chat</option><option value="together-chat">together-chat</option><option value="arcee-auth">arcee-auth</option><option value="arcee-api">arcee-api</option>
-          </select><small>Blank inherits the configured backend.</small></label>
-          <label class="field"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="inherit">inherit (from config)</option><option value="unset">unset (backend default)</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select><small>Inherit omits the field; unset explicitly clears configured effort.</small></label>
-          <label class="field"><span>model</span><input id="launchModel" name="model" autocomplete="off" placeholder="from config"><small>Blank inherits the configured model.</small></label>
-          <label class="field"><span>base url</span><input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="from config"><small>Blank inherits the configured or managed base URL.</small></label>
+          <div id="launchModelFallback" class="field-grid nested-grid span-two">
+            <label class="field"><span>backend</span><select id="launchBackend" name="backend">
+              <option value="">from config</option><option value="openai-responses">openai-responses</option><option value="chatgpt-codex-responses">chatgpt-codex-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="deepseek-chat">deepseek-chat</option><option value="fireworks-chat">fireworks-chat</option><option value="together-chat">together-chat</option><option value="arcee-auth">arcee-auth</option><option value="arcee-api">arcee-api</option>
+            </select><small>Blank inherits the configured backend.</small></label>
+            <label class="field"><span>model</span><input id="launchModel" name="model" autocomplete="off" placeholder="from config"><small>Blank inherits the configured model.</small></label>
+          </div>
+          <div id="launchModelPicker" class="field model-picker span-two" hidden></div>
+          <p id="launchModelCatalogNotice" class="model-catalog-notice span-two" hidden>model catalog unavailable — manual entry</p>
+          <label class="field" id="launchEffortField"><span>reasoning</span><select id="launchEffort" name="reasoning_effort"><option value="inherit">inherit (from config)</option><option value="unset">unset (backend default)</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select><small id="launchEffortHelp">Inherit omits the field; unset explicitly clears configured effort.</small></label>
+          <label class="field" id="launchBaseUrlField"><span>base url</span><input id="launchBaseUrl" name="base_url" autocomplete="off" placeholder="from config"><small>Blank inherits the configured or managed base URL.</small></label>
           <label class="field"><span>orchestrator compaction threshold</span><input id="launchCompactionThreshold" name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" placeholder="from config"><small>Absolute token count. Blank uses the server default; 0 disables compaction.</small></label>
-          <label class="field"><span>API key mode</span><select id="launchApiKeyMode" name="api_key_mode" aria-describedby="launchApiKeyHelp"><option value="inherit">inherit configured selector</option><option value="none">no environment selector</option><option value="named">named environment variable</option></select><small id="launchApiKeyHelp" aria-live="polite">Inherit omits this field; no environment selector explicitly clears it. Backends with stored login credentials don't need an API key environment variable.</small></label>
+          <label class="field" id="launchApiKeyModeField"><span>API key mode</span><select id="launchApiKeyMode" name="api_key_mode" aria-describedby="launchApiKeyHelp"><option value="inherit">inherit configured selector</option><option value="none">no environment selector</option><option value="named">named environment variable</option></select><small id="launchApiKeyHelp" aria-live="polite">Inherit omits this field; no environment selector explicitly clears it. Backends with stored login credentials don't need an API key environment variable.</small></label>
           <label id="launchApiKeyEnvField" class="field" hidden><span>API key environment variable</span><input id="launchApiKeyEnv" name="api_key_env" autocomplete="off" placeholder="OPENAI_API_KEY" disabled><small>Enter an environment-variable name only; never paste a credential value.</small></label>
           <label class="field span-two"><span>extra headers (JSON object)</span><textarea id="launchExtraHeaders" name="extra_headers" rows="3" spellcheck="false" placeholder='{"X-Header":"value"}'></textarea><small>Blank inherits configured headers. Enter <code>{}</code> to explicitly clear them for the new session; header values must be strings.</small></label>
           <div id="sandboxFields" class="field-grid nested-grid span-two" hidden>
@@ -148,6 +152,6 @@
 
     <script src="/assets/vendor/markdown-it.min.js" defer></script>
     <script src="/assets/vendor/purify.min.js" defer></script>
-    <script src="/assets/app.js?v=quality-38" defer></script>
+    <script src="/assets/app.js?v=quality-39" defer></script>
   </body>
 </html>

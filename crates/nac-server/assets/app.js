@@ -44,6 +44,10 @@ const state = {
   launchDefaultsPreview: { status: "idle", data: null, error: "", request: null },
   launchApiKeyModeManual: false,
   launchApiKeyAutoManaged: false,
+  modelCatalog: { status: "idle", data: null, error: "" },
+  modelCatalogRequest: null,
+  launchPicker: { open: false, query: "", activeIndex: 0, custom: false },
+  settingsPicker: { open: false, query: "", activeIndex: 0, custom: false },
   workspaceRenderFrame: null,
   workspaceRenderSessionId: null,
   workspaceRestoreId: 0,
@@ -94,6 +98,7 @@ function bindElements() {
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
     "launchExecutionModes", "launchCwd", "launchCwdLabel", "launchSshField", "launchSshHost", "launchBackend",
     "launchEffort", "launchModel", "launchBaseUrl", "launchCompactionThreshold", "launchApiKeyMode", "launchApiKeyEnv", "launchApiKeyEnvField", "launchApiKeyHelp", "launchExtraHeaders",
+    "launchModelFallback", "launchModelPicker", "launchModelCatalogNotice", "launchEffortField", "launchEffortHelp", "launchBaseUrlField", "launchApiKeyModeField",
     "launchDefaultsPreview", "launchDefaultsBody", "refreshLaunchDefaults",
     "sandboxFields", "sandboxImage", "sandboxGpu", "sandboxWorkdir", "sandboxShm",
     "sandboxMounts", "sandboxNoMount", "initialPrompt", "launchStatus",
@@ -124,6 +129,9 @@ function bindEvents() {
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
   el.focusContent.addEventListener("submit", handleFocusPanelSubmit);
+  el.focusContent.addEventListener("input", handleFocusInput);
+  el.focusContent.addEventListener("keydown", handleFocusKeydown);
+  el.focusContent.addEventListener("change", handleFocusChange);
   el.threadGrid.addEventListener("click", handleThreadClick);
   el.commandComposer.addEventListener("submit", submitComposer);
   el.promptInput.addEventListener("input", handleComposerInput);
@@ -138,6 +146,8 @@ function bindEvents() {
     if (command) runCommand(command.dataset.command);
     const closer = event.target.closest("[data-close-dialog]");
     if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
+    if (state.launchPicker.open && !event.target.closest?.("#launchModelPicker")) closeModelPicker("launch");
+    if (state.settingsPicker.open && !event.target.closest?.("#settingsModelPicker")) closeModelPicker("settings");
   });
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
@@ -145,6 +155,10 @@ function bindEvents() {
   el.refreshLaunchDefaults.addEventListener("click", () => loadLaunchDefaultsPreview());
   el.launchApiKeyMode.addEventListener("change", () => syncLaunchApiKeyMode({ user: true }));
   el.launchBackend.addEventListener("change", () => syncLaunchApiKeyMode());
+  el.launchModelPicker.addEventListener("click", (event) => handleModelPickerClick(event, "launch"));
+  el.launchModelPicker.addEventListener("input", (event) => handleModelPickerInput(event, "launch"));
+  el.launchModelPicker.addEventListener("keydown", (event) => handleModelPickerKeydown(event, "launch"));
+  el.launchModelPicker.addEventListener("change", (event) => handleModelPickerChange(event, "launch"));
   el.launchDialog.addEventListener("close", invalidateLaunchDefaultsPreview);
   el.launchForm.addEventListener("submit", createSession);
   window.addEventListener("hashchange", syncRouteFromHash);
@@ -2499,7 +2513,10 @@ function openFocusView(type, name = null) {
   renderThreads(currentSnapshot());
   renderFocusView(currentSnapshot());
   if (state.focusView?.type === type && state.focusView?.name === name) el.focusTitle?.focus?.({ preventScroll: true });
-  if (type === "settings") loadFocusSettings();
+  if (type === "settings") {
+    loadFocusSettings();
+    loadModelCatalog();
+  }
   if (type === "thread") loadThreadEventPage(name, { reset: true });
 }
 
@@ -2878,11 +2895,24 @@ function renderFocusSettings() {
   const saveStatus = savingThisSession
     ? "Saving…"
     : saveBlocked ? "Waiting for another settings save to finish…" : (settings.message || "");
+  // Model fields: the catalog picker when ready; the pre-picker manual-entry
+  // controls (plus a notice) as the offline/first-load-failure fallback.
+  let modelFieldsHtml;
+  if (state.modelCatalog.data) {
+    const selection = { backend: String(config.backend ?? ""), model: String(config.model ?? "") };
+    const resolution = resolveModelSelection(selection.backend, selection.model);
+    state.settingsPicker = { open: false, query: "", activeIndex: 0, custom: resolution.kind !== "known" };
+    modelFieldsHtml = `<div id="settingsModelPicker" class="field model-picker span-two">${renderModelPickerHtml("settings", selection)}</div><input type="hidden" name="backend" value="${escapeAttr(selection.backend)}"><input type="hidden" name="model" value="${escapeAttr(selection.model)}">${settingsEffortFieldHtml(config.reasoning_effort == null ? "__unset__" : String(config.reasoning_effort), resolution)}`;
+  } else {
+    const notice = state.modelCatalog.status === "error"
+      ? `<p class="model-catalog-notice span-two">${escapeHtml(MODEL_CATALOG_NOTICE)}</p>` : "";
+    modelFieldsHtml = `${notice}<label class="field"><span>backend</span><select name="backend">${backendOptions(config.backend)}</select></label>
+    <label class="field"><span>reasoning</span><select name="reasoning_effort">${effortOptions(config.reasoning_effort)}</select><small>Unset uses the backend default; none and minimal are explicit values.</small></label>
+    <label class="field"><span>model</span><input name="model" value="${escapeAttr(config.model ?? "")}"></label>`;
+  }
   return `<div class="focus-settings-layout"><form id="settingsForm" class="settings-form focus-settings-form"${saveBlocked ? ' inert aria-busy="true"' : ""}>
     ${diagnosticHtml}
-    <label class="field"><span>backend</span><select name="backend">${backendOptions(config.backend)}</select></label>
-    <label class="field"><span>reasoning</span><select name="reasoning_effort">${effortOptions(config.reasoning_effort)}</select><small>Unset uses the backend default; none and minimal are explicit values.</small></label>
-    <label class="field"><span>model</span><input name="model" value="${escapeAttr(config.model ?? "")}"></label>
+    ${modelFieldsHtml}
     <label class="field"><span>base url</span><input name="base_url" value="${escapeAttr(config.base_url ?? "")}"></label>
     <label class="field span-two"><span>api key environment variable</span><input name="api_key_env" value="${escapeAttr(config.api_key_env ?? "")}"><small>Enter the environment-variable name only, never a key value. Blank removes the session-specific selector.</small></label>
     <label class="field span-two"><span>orchestrator compaction threshold (tokens)</span><input name="orchestrator_compaction_threshold" type="number" min="0" max="9007199254740991" step="1" value="${escapeAttr(config.orchestrator_compaction_threshold ?? "")}" placeholder="disabled"><small>Blank or 0 disables the persisted session threshold; enter a positive whole-token count to enable it.</small></label>
@@ -3235,6 +3265,10 @@ function renderWorkspaceFocusDiff(path, cached) {
 }
 
 function handleFocusClick(event) {
+  if (event.target.closest?.("#settingsModelPicker")) {
+    handleModelPickerClick(event, "settings");
+    return;
+  }
   const retrySettings = event.target.closest("[data-retry-settings]");
   if (retrySettings && state.focusView?.type === "settings") {
     loadFocusSettings();
@@ -4753,6 +4787,9 @@ function openLaunchDialog() {
   el.launchCwd.value = transition.cwd;
   syncLaunchExecutionFields(mode);
   syncLaunchApiKeyMode();
+  state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
+  loadModelCatalog();
+  syncLaunchModelControls();
   el.launchDialog.showModal();
   loadLaunchDefaultsPreview();
   requestAnimationFrame(() => el.launchCwd.focus());
@@ -4864,6 +4901,11 @@ async function requestLaunchDefaultsPreview(context, generation) {
     state.launchDefaultsPreview = { status: "ready", data: data || {}, error: "", request: request.body };
     syncLaunchApiKeyMode();
     renderLaunchDefaultsPreview();
+    // The resolved "from config" label and the inherited effort constraint
+    // depend on the configured model — refresh them without disturbing an
+    // open picker.
+    if (!state.launchPicker.open && !state.launchPicker.custom) syncModelPicker("launch");
+    syncLaunchModelDependentControls();
     return data;
   } catch (error) {
     if (generation !== state.launchDefaultsGeneration) return null;
@@ -4906,6 +4948,15 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
   const data = preview.data || {};
   const backend = data.configured_model_backend == null ? "Not configured" : String(data.configured_model_backend);
   const baseUrl = data.configured_model_base_url == null ? "Not configured" : String(data.configured_model_base_url);
+  const configuredModel = data.configured_model == null ? "" : String(data.configured_model);
+  const configuredEffort = data.configured_reasoning_effort == null ? "" : String(data.configured_reasoning_effort);
+  const configuredFound = configuredModel
+    ? findCatalogModel(String(data.configured_model_backend || ""), configuredModel) : null;
+  const configuredModelLabel = configuredFound
+    ? `${modelDisplayName(configuredFound.model)} (${configuredModel})` : configuredModel;
+  const configuredRows = configuredModel
+    ? `<div><dt>Configured model</dt><dd>${escapeHtml(configuredModelLabel)}</dd></div>
+    <div><dt>Configured effort</dt><dd>${escapeHtml(configuredEffort || "unset (backend default)")}</dd></div>` : "";
   const managed = managedLaunchDefaults(data.configured_model_backend, data.configured_model_base_url);
   const managedHtml = managed ? `<div class="launch-managed-behavior">
     <strong>Managed backend behavior</strong>
@@ -4917,6 +4968,7 @@ function renderLaunchDefaultsPreviewHtml(preview = state.launchDefaultsPreview) 
   return `<dl class="launch-default-values">
     <div><dt>Configured backend</dt><dd>${escapeHtml(backend)}</dd></div>
     <div><dt>Configured base URL</dt><dd>${escapeHtml(baseUrl)}</dd></div>
+    ${configuredRows}
   </dl>${managedHtml}<p class="launch-default-scope">Preview only — session creation validates these settings.</p>`;
 }
 
@@ -4927,6 +4979,617 @@ function renderLaunchDefaultsPreview() {
   el.launchDefaultsPreview.setAttribute("aria-busy", status === "loading" ? "true" : "false");
   el.launchDefaultsBody.innerHTML = renderLaunchDefaultsPreviewHtml(state.launchDefaultsPreview);
   if (el.refreshLaunchDefaults) el.refreshLaunchDefaults.disabled = status === "loading";
+}
+
+// --- Model catalog + picker -------------------------------------------------
+// The catalog (GET /models) powers the model picker in the launch dialog and
+// the settings panel. It is cached in memory and refetched on every dialog /
+// panel open; a failed refresh keeps the stale data, and only a first-load
+// failure degrades the UI to manual entry (the pre-picker static fields).
+// Catalog freshness caveat: models.json edits apply on server restart or
+// overlay refresh, not live — the picker simply reflects what the server knows.
+
+const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
+const MODEL_CATALOG_NOTICE = "model catalog unavailable — manual entry";
+const MODEL_PICKER_UNRECOGNIZED_BADGE = '<span class="model-picker-badge is-warning">unrecognized model — conservative defaults</span>';
+
+function loadModelCatalog({ force = false } = {}) {
+  if (state.modelCatalogRequest && !force) return state.modelCatalogRequest;
+  const hadData = Boolean(state.modelCatalog.data);
+  if (!hadData) state.modelCatalog = { status: "loading", data: null, error: "" };
+  const request = (async () => {
+    try {
+      const data = await apiGet("/models");
+      state.modelCatalog = { status: "ready", data: data && typeof data === "object" ? data : null, error: "" };
+    } catch (error) {
+      state.modelCatalog = hadData
+        ? { status: "ready", data: state.modelCatalog.data, error: "" }
+        : { status: "error", data: null, error: error.message };
+    } finally {
+      if (state.modelCatalogRequest === request) state.modelCatalogRequest = null;
+    }
+    syncLaunchModelControls();
+    syncSettingsModelControls();
+    return state.modelCatalog.data;
+  })();
+  state.modelCatalogRequest = request;
+  return request;
+}
+
+function catalogProviders(catalog = state.modelCatalog.data) {
+  return Array.isArray(catalog?.providers) ? catalog.providers : [];
+}
+
+function findCatalogProvider(providerId, catalog = state.modelCatalog.data) {
+  return catalogProviders(catalog).find((provider) => provider?.id === providerId) || null;
+}
+
+function findCatalogModel(providerId, modelId, catalog = state.modelCatalog.data) {
+  const provider = findCatalogProvider(providerId, catalog);
+  const model = (Array.isArray(provider?.models) ? provider.models : [])
+    .find((entry) => entry?.id === modelId);
+  return provider && model ? { provider, model } : null;
+}
+
+// Resolves a (backend, model) pair against the catalog:
+//   { kind: "inherit" }                          blank model (launch "from config")
+//   { kind: "known", provider, model }           a real catalog entry
+//   { kind: "unknown", provider|null, ... }      free-text / typo'd / stale id
+function resolveModelSelection(backend, modelId, catalog = state.modelCatalog.data) {
+  const model = String(modelId || "").trim();
+  const backendId = String(backend || "").trim();
+  if (!model) return { kind: "inherit", backend: backendId };
+  const found = findCatalogModel(backendId, model, catalog);
+  if (found) return { kind: "known", ...found };
+  return { kind: "unknown", provider: findCatalogProvider(backendId, catalog), backend: backendId, modelId: model };
+}
+
+// The launch "from config" selection resolved through the launch-defaults
+// preview (configured_model_backend / configured_model), when available.
+function launchConfiguredResolution() {
+  const preview = state.launchDefaultsPreview;
+  if (preview?.status !== "ready") return null;
+  const backend = preview.data?.configured_model_backend;
+  const model = preview.data?.configured_model;
+  if (!backend || !model) return null;
+  return resolveModelSelection(backend, model);
+}
+
+// Effort levels a selection accepts. Unknown models fall back to the
+// provider's `_default` limits and are flagged as assumed; an unresolvable
+// inherit stays unconstrained (the backend validates verbatim on submit).
+function selectionEffortLevels(resolution) {
+  if (resolution?.kind === "known") {
+    return { levels: Array.isArray(resolution.model.supported_efforts) ? resolution.model.supported_efforts : [], assumed: false };
+  }
+  if (resolution?.kind === "unknown") {
+    const limits = resolution.provider?.default_limits;
+    return { levels: Array.isArray(limits?.supported_efforts) ? limits.supported_efforts : [], assumed: true };
+  }
+  return { levels: EFFORT_LEVELS, assumed: false };
+}
+
+function modelDisplayName(model) {
+  return String(model?.display_name || model?.id || "");
+}
+
+function formatModelContextWindow(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "";
+  return `${formatNumber(number)} ctx`;
+}
+
+function formatModelRate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return `$${Number(number.toFixed(2))}`;
+}
+
+// Cost rates are $/1M tokens; all-zero means unknown pricing, never $0.
+function formatModelCostHint(cost) {
+  const input = formatModelRate(cost?.input);
+  const output = formatModelRate(cost?.output);
+  if (!input || !output) return "pricing unknown";
+  return `${input}/${output} per 1M`;
+}
+
+function modelRowHint(model) {
+  const parts = [];
+  const context = formatModelContextWindow(model?.context_window);
+  if (context) parts.push(context);
+  parts.push(formatModelCostHint(model?.cost));
+  return parts.join(" · ");
+}
+
+function modelSourceBadgeHtml(source) {
+  if (source === "user_override") return '<span class="model-picker-badge">customized</span>';
+  return "";
+}
+
+function modelPickerRows(query, catalog = state.modelCatalog.data) {
+  const needle = String(query || "").trim().toLowerCase();
+  const rows = [];
+  for (const provider of catalogProviders(catalog)) {
+    for (const model of Array.isArray(provider?.models) ? provider.models : []) {
+      if (needle) {
+        const haystack = `${model?.id || ""} ${model?.display_name || ""} ${provider?.id || ""}`.toLowerCase();
+        if (!haystack.includes(needle)) continue;
+      }
+      rows.push({ provider, model });
+    }
+  }
+  return rows;
+}
+
+function modelPickerState(scope) {
+  return scope === "settings" ? state.settingsPicker : state.launchPicker;
+}
+
+function modelPickerIds(scope) {
+  const prefix = scope === "settings" ? "settingsModelPicker" : "launchModelPicker";
+  return {
+    toggle: `${prefix}Toggle`,
+    filter: `${prefix}Filter`,
+    list: `${prefix}List`,
+    customModel: `${prefix}CustomModel`,
+    customMeta: `${prefix}CustomMeta`,
+    option: (index) => `${prefix}Option${index}`,
+  };
+}
+
+function modelPickerRoot(scope) {
+  if (scope === "settings") return el.focusContent?.querySelector?.("#settingsModelPicker") || null;
+  return el.launchModelPicker || null;
+}
+
+// The picker's value lives in real form fields so the submit paths stay
+// unchanged: the (hidden) fallback backend/model controls in the launch
+// dialog, hidden inputs in the settings form.
+function modelPickerSelectionElements(scope) {
+  if (scope === "settings") {
+    const form = el.focusContent?.querySelector?.("#settingsForm");
+    return {
+      backend: form?.querySelector?.('[name="backend"]') || null,
+      model: form?.querySelector?.('[name="model"]') || null,
+    };
+  }
+  return { backend: el.launchBackend, model: el.launchModel };
+}
+
+function modelPickerSelection(scope) {
+  const fields = modelPickerSelectionElements(scope);
+  return { backend: String(fields.backend?.value || ""), model: String(fields.model?.value || "") };
+}
+
+function applyModelPickerSelection(scope, { backend, model }) {
+  const fields = modelPickerSelectionElements(scope);
+  if (fields.backend) fields.backend.value = String(backend || "");
+  if (fields.model) fields.model.value = String(model || "");
+  if (scope === "launch") syncLaunchModelDependentControls();
+  else syncSettingsEffortField();
+}
+
+// Visible option count: filtered rows plus the custom-model escape row that
+// appears whenever a query is typed (it is the zero-results escape hatch).
+function modelPickerOptionCount(scope) {
+  const picker = modelPickerState(scope);
+  return modelPickerRows(picker.query).length + (String(picker.query || "").trim() ? 1 : 0);
+}
+
+function renderModelPickerHtml(scope, selection = modelPickerSelection(scope)) {
+  const picker = modelPickerState(scope);
+  const label = "<span>model</span>";
+  if (!state.modelCatalog.data) {
+    const text = state.modelCatalog.status === "loading" ? "Loading models…" : "Model catalog unavailable";
+    return `${label}<button type="button" class="model-picker-toggle" disabled><span class="model-picker-toggle-label">${text}</span></button>`;
+  }
+  if (picker.custom) return label + renderModelPickerCustomHtml(scope, selection);
+  if (picker.open) return label + renderModelPickerOpenHtml(scope);
+  return label + renderModelPickerClosedHtml(scope, selection);
+}
+
+function renderModelPickerClosedHtml(scope, selection) {
+  const ids = modelPickerIds(scope);
+  const resolution = resolveModelSelection(selection.backend, selection.model);
+  let primary = "from config";
+  let secondary = "";
+  let badge = "";
+  if (resolution.kind === "known") {
+    primary = modelDisplayName(resolution.model);
+    secondary = resolution.provider.id;
+    badge = modelSourceBadgeHtml(resolution.model.source);
+  } else if (resolution.kind === "unknown") {
+    primary = resolution.modelId || "custom model";
+    secondary = resolution.backend || "";
+    badge = MODEL_PICKER_UNRECOGNIZED_BADGE;
+  } else if (scope === "launch") {
+    const configured = launchConfiguredResolution();
+    if (configured?.kind === "known") {
+      const effort = state.launchDefaultsPreview?.data?.configured_reasoning_effort;
+      primary = `from config: ${modelDisplayName(configured.model)}`;
+      secondary = configured.provider.id + (effort ? ` · ${effort}` : "");
+    } else if (configured?.kind === "unknown") {
+      primary = `from config: ${configured.modelId}`;
+      secondary = configured.backend || "";
+      badge = MODEL_PICKER_UNRECOGNIZED_BADGE;
+    }
+  }
+  return `<button type="button" id="${ids.toggle}" class="model-picker-toggle" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="${ids.list}" aria-label="Model picker" data-model-picker-toggle="${scope}"><span class="model-picker-toggle-label">${escapeHtml(primary)}</span>${secondary ? `<span class="model-picker-toggle-provider">${escapeHtml(secondary)}</span>` : ""}${badge}<span class="model-picker-caret" aria-hidden="true">▾</span></button>`;
+}
+
+function renderModelPickerOpenHtml(scope) {
+  const ids = modelPickerIds(scope);
+  const picker = modelPickerState(scope);
+  const count = modelPickerOptionCount(scope);
+  const active = count ? ` aria-activedescendant="${ids.option(picker.activeIndex)}"` : "";
+  return `<div class="model-picker-open"><input id="${ids.filter}" class="model-picker-filter" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="${ids.list}"${active} aria-label="Search models" placeholder="Search models…" value="${escapeAttr(picker.query)}" data-model-picker-filter="${scope}"><div id="${ids.list}" class="model-picker-list" role="listbox" aria-label="Models">${renderModelPickerListHtml(scope)}</div></div>`;
+}
+
+function renderModelPickerListHtml(scope) {
+  const picker = modelPickerState(scope);
+  const ids = modelPickerIds(scope);
+  const rows = modelPickerRows(picker.query);
+  const parts = [];
+  let lastProvider = null;
+  rows.forEach((row, index) => {
+    if (row.provider.id !== lastProvider) {
+      lastProvider = row.provider.id;
+      parts.push(`<div class="model-picker-group" role="presentation">${escapeHtml(row.provider.id)}</div>`);
+    }
+    const active = index === picker.activeIndex;
+    parts.push(`<button type="button" id="${ids.option(index)}" class="model-picker-option${active ? " is-active" : ""}" role="option" aria-selected="${active}" tabindex="-1" data-model-picker-option="${index}"><span class="model-picker-option-name">${escapeHtml(modelDisplayName(row.model))}${modelSourceBadgeHtml(row.model.source)}</span><span class="model-picker-option-id">${escapeHtml(row.model.id)}</span><span class="model-picker-option-hint">${escapeHtml(modelRowHint(row.model))}</span></button>`);
+  });
+  const query = String(picker.query || "").trim();
+  if (query) {
+    const index = rows.length;
+    const active = picker.activeIndex === index;
+    parts.push(`<button type="button" id="${ids.option(index)}" class="model-picker-option model-picker-custom-row${active ? " is-active" : ""}" role="option" aria-selected="${active}" tabindex="-1" data-model-picker-custom="${scope}"><span class="model-picker-option-name">Use custom model &#34;${escapeHtml(query)}&#34; →</span></button>`);
+  } else if (!rows.length) {
+    parts.push('<div class="model-picker-empty">Type to filter the catalog, or enter a custom model id.</div>');
+  }
+  return parts.join("");
+}
+
+function customProviderOptionsHtml(scope, selected) {
+  const providers = catalogProviders();
+  const options = [];
+  if (scope === "launch") options.push(`<option value=""${selected ? "" : " selected"}>from config</option>`);
+  const known = providers.some((provider) => provider.id === selected);
+  if (selected && !known) {
+    options.push(`<option value="${escapeAttr(selected)}" selected>${escapeHtml(selected)} (unsupported — select a replacement)</option>`);
+  } else if (!selected && scope === "settings") {
+    options.push('<option value="" selected disabled>select a provider</option>');
+  }
+  options.push(...providers.map((provider) => `<option value="${escapeAttr(provider.id)}"${provider.id === selected ? " selected" : ""}>${escapeHtml(provider.id)}</option>`));
+  return options.join("");
+}
+
+function modelPickerCustomMetaHtml(backend) {
+  const provider = findCatalogProvider(backend);
+  const context = formatModelContextWindow(provider?.default_limits?.context_window);
+  const hint = context ? `${context} est. · pricing unknown` : "";
+  return `${MODEL_PICKER_UNRECOGNIZED_BADGE}${hint ? `<span class="model-picker-custom-hint">${escapeHtml(hint)}</span>` : ""}`;
+}
+
+function renderModelPickerCustomHtml(scope, selection) {
+  const ids = modelPickerIds(scope);
+  return `<div class="model-picker-custom"><div class="model-picker-custom-fields"><input id="${ids.customModel}" class="model-picker-custom-model" type="text" autocomplete="off" spellcheck="false" value="${escapeAttr(selection.model)}" placeholder="custom model id" aria-label="Custom model id" data-model-picker-custom-model="${scope}"><select class="model-picker-custom-provider" aria-label="Custom model provider" data-model-picker-custom-provider="${scope}">${customProviderOptionsHtml(scope, selection.backend)}</select></div><div id="${ids.customMeta}" class="model-picker-custom-meta">${modelPickerCustomMetaHtml(selection.backend)}</div><small class="model-picker-custom-note">Custom model — the provider's conservative defaults apply until the catalog recognizes it. <button type="button" class="model-picker-back" data-model-picker-back="${scope}">back to catalog</button></small></div>`;
+}
+
+// Full picker re-render (state transitions). While open, typing/navigation
+// only re-renders the list so the filter input keeps focus — the commandMenu
+// pattern.
+function syncModelPicker(scope, { focus = null } = {}) {
+  const root = modelPickerRoot(scope);
+  if (!root) return;
+  root.innerHTML = renderModelPickerHtml(scope);
+  const picker = modelPickerState(scope);
+  root.dataset.state = picker.custom ? "custom" : picker.open ? "open" : "closed";
+  const ids = modelPickerIds(scope);
+  const target = focus === "filter" ? root.querySelector?.(`#${ids.filter}`)
+    : focus === "custom" ? root.querySelector?.(`#${ids.customModel}`)
+      : focus === "toggle" ? root.querySelector?.(`#${ids.toggle}`) : null;
+  target?.focus?.();
+}
+
+function syncModelPickerList(scope) {
+  const root = modelPickerRoot(scope);
+  const picker = modelPickerState(scope);
+  const ids = modelPickerIds(scope);
+  const list = root?.querySelector?.(`#${ids.list}`);
+  if (!list) return;
+  const count = modelPickerOptionCount(scope);
+  picker.activeIndex = count ? Math.min(Math.max(picker.activeIndex, 0), count - 1) : 0;
+  list.innerHTML = renderModelPickerListHtml(scope);
+  const filter = root.querySelector?.(`#${ids.filter}`);
+  if (count) filter?.setAttribute?.("aria-activedescendant", ids.option(picker.activeIndex));
+  else filter?.removeAttribute?.("aria-activedescendant");
+}
+
+function syncModelPickerCustomMeta(scope) {
+  const root = modelPickerRoot(scope);
+  const meta = root?.querySelector?.(`#${modelPickerIds(scope).customMeta}`);
+  if (meta) meta.innerHTML = modelPickerCustomMetaHtml(modelPickerSelection(scope).backend);
+}
+
+function openModelPicker(scope) {
+  const picker = modelPickerState(scope);
+  picker.open = true;
+  picker.custom = false;
+  picker.query = "";
+  picker.activeIndex = 0;
+  syncModelPicker(scope, { focus: "filter" });
+}
+
+function closeModelPicker(scope, { focus = null } = {}) {
+  const picker = modelPickerState(scope);
+  if (!picker.open) return;
+  picker.open = false;
+  picker.query = "";
+  picker.activeIndex = 0;
+  syncModelPicker(scope, { focus });
+}
+
+function selectModelPickerIndex(scope, index) {
+  const picker = modelPickerState(scope);
+  const rows = modelPickerRows(picker.query);
+  if (index >= rows.length) {
+    enterModelPickerCustom(scope);
+    return;
+  }
+  const row = rows[index];
+  if (!row) return;
+  picker.open = false;
+  picker.custom = false;
+  picker.query = "";
+  picker.activeIndex = 0;
+  applyModelPickerSelection(scope, { backend: row.provider.id, model: row.model.id });
+  syncModelPicker(scope, { focus: "toggle" });
+}
+
+// The zero-results escape hatch: the typed query becomes the custom model id.
+// Custom state is sticky (it is also the settings repair surface) until a
+// catalog model is picked.
+function enterModelPickerCustom(scope) {
+  const picker = modelPickerState(scope);
+  const query = String(picker.query || "").trim();
+  picker.custom = true;
+  picker.open = false;
+  picker.query = "";
+  picker.activeIndex = 0;
+  const selection = modelPickerSelection(scope);
+  let backend = selection.backend;
+  if (scope === "launch" && !backend && state.launchDefaultsPreview?.status === "ready") {
+    backend = String(state.launchDefaultsPreview.data?.configured_model_backend || "");
+  }
+  applyModelPickerSelection(scope, { backend, model: query || selection.model });
+  syncModelPicker(scope, { focus: "custom" });
+}
+
+function exitModelPickerCustom(scope) {
+  const picker = modelPickerState(scope);
+  picker.custom = false;
+  picker.open = true;
+  picker.query = "";
+  picker.activeIndex = 0;
+  syncModelPicker(scope, { focus: "filter" });
+}
+
+function handleModelPickerClick(event, scope) {
+  if (event.target.closest?.("[data-model-picker-toggle]")) {
+    openModelPicker(scope);
+    return;
+  }
+  const option = event.target.closest?.("[data-model-picker-option]");
+  if (option) {
+    selectModelPickerIndex(scope, Number(option.dataset.modelPickerOption));
+    return;
+  }
+  if (event.target.closest?.("[data-model-picker-custom]")) {
+    enterModelPickerCustom(scope);
+    return;
+  }
+  if (event.target.closest?.("[data-model-picker-back]")) exitModelPickerCustom(scope);
+}
+
+function handleModelPickerInput(event, scope) {
+  const picker = modelPickerState(scope);
+  if (event.target.matches?.("[data-model-picker-filter]")) {
+    picker.query = event.target.value;
+    picker.activeIndex = 0;
+    syncModelPickerList(scope);
+    return;
+  }
+  if (event.target.matches?.("[data-model-picker-custom-model]")) {
+    const fields = modelPickerSelectionElements(scope);
+    if (fields.model) fields.model.value = event.target.value;
+  }
+}
+
+function handleModelPickerKeydown(event, scope) {
+  const picker = modelPickerState(scope);
+  if (!picker.open) return;
+  const count = modelPickerOptionCount(scope);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (count) picker.activeIndex = (picker.activeIndex + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+    syncModelPickerList(scope);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    selectModelPickerIndex(scope, picker.activeIndex);
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeModelPicker(scope, { focus: "toggle" });
+  }
+}
+
+function handleModelPickerChange(event, scope) {
+  if (!event.target.matches?.("[data-model-picker-custom-provider]")) return;
+  const fields = modelPickerSelectionElements(scope);
+  if (fields.backend) fields.backend.value = event.target.value;
+  if (scope === "launch") syncLaunchModelDependentControls();
+  else syncSettingsEffortField();
+  syncModelPickerCustomMeta(scope);
+}
+
+// --- Effort constraint + managed-field visibility ----------------------------
+
+function launchEffortOptionsHtml(levels) {
+  const options = ['<option value="inherit">inherit (from config)</option>', '<option value="unset">unset (backend default)</option>'];
+  for (const level of levels) options.push(`<option value="${escapeAttr(level)}">${escapeHtml(level)}</option>`);
+  return options.join("");
+}
+
+// Rebuilds the launch effort select from the current selection: constrained
+// to the model's supported efforts, assumed from provider defaults for custom
+// models, constrained to the configured model for "from config", and hidden
+// entirely when the effective model takes no explicit effort (an explicit
+// effort would be rejected by the backend).
+function syncLaunchEffortControl() {
+  if (!el.launchEffort) return;
+  const previous = el.launchEffort.value || "inherit";
+  let levels = EFFORT_LEVELS;
+  let assumed = false;
+  let hide = false;
+  if (state.modelCatalog.data) {
+    const selection = resolveModelSelection(el.launchBackend?.value, el.launchModel?.value);
+    const effective = selection.kind === "inherit" ? (launchConfiguredResolution() || selection) : selection;
+    const derived = selectionEffortLevels(effective);
+    levels = derived.levels;
+    assumed = derived.assumed;
+    hide = effective.kind !== "inherit" && levels.length === 0;
+  }
+  if (el.launchEffortField) el.launchEffortField.hidden = hide;
+  if (hide) {
+    el.launchEffort.value = "inherit";
+    return;
+  }
+  el.launchEffort.innerHTML = launchEffortOptionsHtml(levels);
+  el.launchEffort.value = ["inherit", "unset", ...levels].includes(previous) ? previous : "inherit";
+  if (el.launchEffortHelp) {
+    el.launchEffortHelp.textContent = assumed
+      ? "Effort levels assumed for an unrecognized model — the backend validates on launch."
+      : "Inherit omits the field; unset explicitly clears configured effort.";
+  }
+}
+
+// Known models on managed backends (managed_base_url from the catalog) need
+// neither a base URL nor an API key selector — hide both. The API key mode
+// value itself stays with syncLaunchApiKeyMode's auto-managed state machine.
+function syncLaunchManagedFieldVisibility() {
+  if (!el.launchBaseUrlField || !el.launchApiKeyModeField) return;
+  const provider = state.modelCatalog.data ? findCatalogProvider(String(el.launchBackend?.value || "")) : null;
+  const managed = Boolean(provider?.managed_base_url);
+  el.launchBaseUrlField.hidden = managed;
+  el.launchApiKeyModeField.hidden = managed;
+  if (managed) {
+    if (el.launchBaseUrl) el.launchBaseUrl.value = "";
+    if (el.launchApiKeyEnvField) el.launchApiKeyEnvField.hidden = true;
+    if (el.launchApiKeyEnv) {
+      el.launchApiKeyEnv.disabled = true;
+      el.launchApiKeyEnv.required = false;
+    }
+  }
+  syncLaunchApiKeyMode();
+}
+
+function syncLaunchModelDependentControls() {
+  syncLaunchEffortControl();
+  syncLaunchManagedFieldVisibility();
+}
+
+// Toggles the launch dialog between the picker (catalog ready / loading) and
+// manual entry (idle / first-load failure), then re-derives the controls that
+// depend on the selected model.
+function syncLaunchModelControls() {
+  if (!el.launchModelPicker || !el.launchModelFallback) return;
+  const ready = Boolean(state.modelCatalog.data);
+  const loading = !ready && state.modelCatalog.status === "loading";
+  el.launchModelPicker.hidden = !(ready || loading);
+  el.launchModelFallback.hidden = ready || loading;
+  if (el.launchModelCatalogNotice) {
+    el.launchModelCatalogNotice.hidden = state.modelCatalog.status !== "error";
+  }
+  if ((ready || loading) && !state.launchPicker.open && !state.launchPicker.custom) syncModelPicker("launch");
+  syncLaunchModelDependentControls();
+}
+
+// The settings effort control, rendered from the CURRENT form value so
+// targeted re-renders never clobber an unsaved choice. A stored value outside
+// the constrained list renders as a marked repair option (replacing the old
+// __unsupported__ pattern); a non-reasoning model with nothing invalid stored
+// collapses to a hidden unset input (no patch on save).
+function settingsEffortFieldHtml(current, resolution) {
+  const { levels, assumed } = selectionEffortLevels(resolution);
+  const value = String(current ?? "__unset__") || "__unset__";
+  const valid = value === "__unset__" || levels.includes(value);
+  if (!levels.length && valid) {
+    return '<input type="hidden" id="settingsEffortField" name="reasoning_effort" value="__unset__">';
+  }
+  const options = [];
+  if (!valid) {
+    options.push(`<option value="${escapeAttr(value)}" selected>${escapeHtml(value || "empty value")} (unsupported — select a replacement)</option>`);
+  }
+  options.push(`<option value="__unset__"${value === "__unset__" ? " selected" : ""}>unset (backend default)</option>`);
+  for (const level of levels) {
+    options.push(`<option value="${escapeAttr(level)}"${level === value ? " selected" : ""}>${escapeHtml(level)}</option>`);
+  }
+  const note = assumed
+    ? "<small>Effort levels assumed for an unrecognized model — the backend validates on save.</small>"
+    : "<small>Unset uses the backend default; none and minimal are explicit values.</small>";
+  return `<label class="field" id="settingsEffortField"><span>reasoning</span><select name="reasoning_effort">${options.join("")}</select>${note}</label>`;
+}
+
+function syncSettingsEffortField() {
+  const form = el.focusContent?.querySelector?.("#settingsForm");
+  const field = form?.querySelector?.("#settingsEffortField");
+  if (!field) return;
+  const current = form.querySelector?.('[name="reasoning_effort"]')?.value ?? "__unset__";
+  const selection = modelPickerSelection("settings");
+  field.outerHTML = settingsEffortFieldHtml(current, resolveModelSelection(selection.backend, selection.model));
+}
+
+// When the catalog arrives (or fails) while the settings form is open in the
+// other mode, re-render the form and restore in-progress edits by field name
+// (the picker hidden inputs share names with the fallback controls), then
+// re-derive the picker from the restored values.
+function syncSettingsModelControls() {
+  if (state.focusView?.type !== "settings" || state.settingsFocus?.status !== "ready") return;
+  const form = el.focusContent?.querySelector?.("#settingsForm");
+  if (!form) return;
+  const wantsPicker = Boolean(state.modelCatalog.data);
+  const hasPicker = Boolean(form.querySelector?.("#settingsModelPicker"));
+  const wantsNotice = state.modelCatalog.status === "error";
+  const hasNotice = Boolean(form.querySelector?.(".model-catalog-notice"));
+  if (wantsPicker === hasPicker && wantsNotice === hasNotice) return;
+  const controls = captureFormControlStates(form);
+  const active = captureFocusTarget(document.activeElement);
+  el.focusContent.innerHTML = renderFocusSettings();
+  restoreFormControlStates(controls);
+  if (active) restoreFocusTarget(active);
+  if (wantsPicker) {
+    const selection = modelPickerSelection("settings");
+    state.settingsPicker.custom = resolveModelSelection(selection.backend, selection.model).kind !== "known";
+    syncModelPicker("settings");
+    syncSettingsEffortField();
+  }
+}
+
+function handleFocusInput(event) {
+  if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerInput(event, "settings");
+}
+
+function handleFocusKeydown(event) {
+  if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerKeydown(event, "settings");
+}
+
+function handleFocusChange(event) {
+  if (event.target?.closest?.("#settingsModelPicker")) handleModelPickerChange(event, "settings");
 }
 
 const LAUNCH_API_KEY_HELP = "Inherit omits this field; no environment selector explicitly clears it. Managed stored-login backends default to no environment selector.";
@@ -4986,14 +5649,12 @@ function buildLaunchSessionRequest(values) {
     body.orchestrator_compaction_threshold = parseCompactionThreshold(rawCompactionThreshold);
   }
 
+  // The picker constrains effort choices per model; anything that still slips
+  // through is validated verbatim by the backend catalog (the error surfaces
+  // in launchStatus), so there is no client-side effort validation here.
   const reasoningMode = String(values?.reasoning_mode || "inherit");
   if (reasoningMode === "unset") body.reasoning_effort = null;
-  else if (reasoningMode !== "inherit") {
-    if (!["none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoningMode)) {
-      throw new Error(`Unsupported reasoning mode: ${reasoningMode}`);
-    }
-    body.reasoning_effort = reasoningMode;
-  }
+  else if (reasoningMode !== "inherit") body.reasoning_effort = reasoningMode;
 
   const apiKeyMode = String(values?.api_key_mode || "inherit");
   if (apiKeyMode === "none") body.api_key_env = null;
@@ -5097,7 +5758,9 @@ async function createSession(event) {
     resetLaunchDraftState();
     syncLaunchExecutionFields("local");
     state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
+    state.launchPicker = { open: false, query: "", activeIndex: 0, custom: false };
     syncLaunchApiKeyMode();
+    syncLaunchModelControls();
     renderLaunchDefaultsPreview();
     openSession(sessionId, true, { fetchSnapshot: false });
     if (initialPrompt) {
@@ -5198,6 +5861,9 @@ function formatDuration(value) {
   return formatRuntime(value);
 }
 
+// Fallback-only: the static backend/effort lists render when the model
+// catalog endpoint is unreachable (manual entry). The picker constrains
+// per-model when the catalog is available.
 function backendOptions(selected) {
   const values = ["openai-responses", "chatgpt-codex-responses", "anthropic-messages", "deepseek-chat", "fireworks-chat", "together-chat", "arcee-auth", "arcee-api"];
   const missing = selected === null || selected === undefined;
