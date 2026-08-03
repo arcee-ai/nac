@@ -312,6 +312,8 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             )
             .unwrap();

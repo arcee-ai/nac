@@ -2437,6 +2437,8 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::User {
                     content: "hello".to_string(),
@@ -2446,6 +2448,8 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_text: Some("hidden thinking".to_string()),
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
             Some("OPENAI_API_KEY".to_string()),

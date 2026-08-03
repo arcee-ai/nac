@@ -333,6 +333,7 @@ pub(super) fn parse_anthropic_messages_response(
         assistant: AssistantTurn {
             content,
             reasoning_text: None,
+            reasoning_field: None,
             reasoning_details,
             tool_calls: if tool_calls.is_empty() {
                 None

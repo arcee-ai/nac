@@ -227,6 +227,12 @@ pub struct AssistantTurn {
     pub reasoning_text: Option<String>,
     pub reasoning_details: Option<Value>,
     pub tool_calls: Option<Vec<ToolCall>>,
+    /// The wire field that carried `reasoning_text` on completions endpoints
+    /// ("reasoning_content" for deepseek/fireworks/arcee, "reasoning" for
+    /// together). Stamped onto the transcript message (S5) so replay uses
+    /// the provider's own field name. `None` for details-based reasoning
+    /// (Anthropic thinking blocks, OpenAI reasoning items).
+    pub reasoning_field: Option<String>,
 }
 
 /// Per-response cost in micro-USD (1e-6 USD), stored as u64 so `TokenUsage`

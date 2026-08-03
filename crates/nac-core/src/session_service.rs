@@ -2389,6 +2389,8 @@ pub(super) mod tests {
                 reasoning_text: Some("reasoning without visible content".to_string()),
                 reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "older-tool".to_string(),
@@ -2412,6 +2414,8 @@ pub(super) mod tests {
                     thread_call("thread-malformed", r#"{"name":"broken"#),
                     thread_call("thread-empty", r#"{"name":"   "}"#),
                 ]),
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "thread-zeta".to_string(),
@@ -2422,6 +2426,8 @@ pub(super) mod tests {
                 reasoning_text: Some("new reasoning".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::System {
                 content: "system-three".to_string(),
@@ -2434,6 +2440,8 @@ pub(super) mod tests {
                     "thread-alpha",
                     r#"{"name":"alpha","action":"inside the cycle"}"#,
                 )]),
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "thread-alpha".to_string(),
@@ -2444,6 +2452,8 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ]
     }
@@ -2686,6 +2696,8 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::User {
                 content: "recent request".to_string(),
@@ -3092,6 +3104,8 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
         )
@@ -3105,6 +3119,8 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let expected_live = page_messages(&expected_live, request);
         let live = parts.service.messages_page(request).await.unwrap();
@@ -3561,6 +3577,8 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         };
         let cases: Vec<(Vec<crate::store::ThreadSteeringRecord>, Vec<Message>)> = vec![
             (vec![], vec![]),
@@ -3922,6 +3940,8 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -4036,6 +4056,8 @@ pub(super) mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     })
                     .await
                     .unwrap();
@@ -4121,6 +4143,8 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
@@ -4266,6 +4290,8 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -4379,6 +4405,8 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -4668,6 +4696,8 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             });
         }
 
@@ -5037,6 +5067,8 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),

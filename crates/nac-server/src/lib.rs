@@ -3008,6 +3008,8 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::User {
                 content: "current cycle".to_string(),
@@ -3017,6 +3019,8 @@ mod tests {
                 reasoning_text: Some("thinking".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Assistant {
                 content: None,
@@ -3030,6 +3034,8 @@ mod tests {
                         arguments: r#"{"name":"current/research"}"#.to_string(),
                     },
                 }]),
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::System {
                 content: "hidden tail".to_string(),
@@ -3039,6 +3045,8 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ]
     }

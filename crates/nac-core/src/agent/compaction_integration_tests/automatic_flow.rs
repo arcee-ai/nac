@@ -143,6 +143,8 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent".to_string(),
@@ -265,6 +267,8 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent".to_string(),

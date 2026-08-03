@@ -145,6 +145,8 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: Some(vec![unsafe_tool_call]),
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::User {
                     content: "recent".to_string(),

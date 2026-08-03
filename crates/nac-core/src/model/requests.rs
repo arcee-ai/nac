@@ -28,6 +28,7 @@ pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
         Message::Assistant {
             content,
             reasoning_text,
+            reasoning_field,
             tool_calls,
             ..
         } => {
@@ -36,7 +37,12 @@ pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
                 "content": content,
             });
             if let Some(reasoning_text) = reasoning_text {
-                value["reasoning_content"] = Value::String(reasoning_text.clone());
+                // Replay under the field the provider originally used (S5
+                // field-name discipline: together sends "reasoning", the
+                // other completions providers "reasoning_content"). Legacy
+                // messages without a stamp keep the historical default.
+                let field = reasoning_field.as_deref().unwrap_or("reasoning_content");
+                value[field] = Value::String(reasoning_text.clone());
             }
             if let Some(tool_calls) = tool_calls {
                 value["tool_calls"] =

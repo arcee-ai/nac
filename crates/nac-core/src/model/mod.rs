@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use url::Url;
 
-use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
+use crate::types::{FunctionCall, Message, ModelOrigin, ToolCall, ToolDefinition};
 
 fn backoff_duration(attempt: usize) -> Duration {
     let base_ms = 200u64;
@@ -24,6 +24,7 @@ pub mod catalog;
 mod chat;
 mod chatgpt_codex;
 mod client;
+mod history;
 mod requests;
 mod responses;
 #[cfg(test)]
@@ -141,6 +142,7 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
 use anthropic::*;
 use backend::*;
 use chat::*;
+use history::*;
 use requests::*;
 use responses::*;
 
@@ -1706,6 +1708,8 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: parsed.assistant.reasoning_details.clone(),
                     tool_calls: parsed.assistant.tool_calls.clone(),
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::Tool {
                     tool_call_id: "toolu_1".to_string(),
@@ -1740,6 +1744,8 @@ mod tests {
             reasoning_text: Some("need current context".to_string()),
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         }];
         let levels = test_thinking_levels(BackendKind::DeepSeekChat, "deepseek-v4-pro");
         let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[], &levels);
@@ -1894,6 +1900,8 @@ mod tests {
                         arguments: "{\"path\":\"src/main.rs\"}".to_string(),
                     },
                 }]),
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "call_1".to_string(),

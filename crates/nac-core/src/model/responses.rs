@@ -113,6 +113,7 @@ pub(super) fn parse_openai_responses_response(
         assistant: AssistantTurn {
             content,
             reasoning_text,
+            reasoning_field: None,
             reasoning_details,
             tool_calls: if tool_calls.is_empty() {
                 None

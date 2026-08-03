@@ -56,6 +56,8 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent".to_string(),
@@ -195,6 +197,8 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "aged".to_string(),
@@ -204,6 +208,8 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent".to_string(),
@@ -346,6 +352,8 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent".to_string(),

@@ -70,6 +70,8 @@ fn compactable_messages() -> Vec<Message> {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent user".to_string(),

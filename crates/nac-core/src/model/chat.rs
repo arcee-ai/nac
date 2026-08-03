@@ -49,16 +49,20 @@ pub(super) fn parse_chat_completions_response(
         }
     });
 
+    let reasoning_text = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
     Ok(ModelTurnResponse {
         assistant: AssistantTurn {
             content: message
                 .get("content")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            reasoning_text: message
-                .get("reasoning_content")
-                .and_then(Value::as_str)
-                .map(ToString::to_string),
+            reasoning_field: reasoning_text
+                .as_ref()
+                .map(|_| "reasoning_content".to_string()),
+            reasoning_text,
             reasoning_details: None,
             tool_calls,
         },
@@ -132,16 +136,18 @@ pub(super) fn parse_together_chat_response(
         }
     });
 
+    let reasoning_text = message
+        .get("reasoning")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
     Ok(ModelTurnResponse {
         assistant: AssistantTurn {
             content: message
                 .get("content")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            reasoning_text: message
-                .get("reasoning")
-                .and_then(Value::as_str)
-                .map(ToString::to_string),
+            reasoning_field: reasoning_text.as_ref().map(|_| "reasoning".to_string()),
+            reasoning_text,
             reasoning_details: None,
             tool_calls,
         },
