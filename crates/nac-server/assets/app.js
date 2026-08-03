@@ -141,14 +141,7 @@ function bindEvents() {
     if (option) runCommand(option.dataset.commandOption);
   });
   el.clearTarget.addEventListener("click", clearThreadTarget);
-  document.addEventListener("click", (event) => {
-    const command = event.target.closest("[data-command]");
-    if (command) runCommand(command.dataset.command);
-    const closer = event.target.closest("[data-close-dialog]");
-    if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
-    if (state.launchPicker.open && !event.target.closest?.("#launchModelPicker")) closeModelPicker("launch");
-    if (state.settingsPicker.open && !event.target.closest?.("#settingsModelPicker")) closeModelPicker("settings");
-  });
+  document.addEventListener("click", handleDocumentClick);
   el.launchExecutionModes.addEventListener("change", syncLaunchExecutionMode);
   el.launchCwd.addEventListener("input", handleLaunchLocationInput);
   el.launchSshHost.addEventListener("input", scheduleLaunchDefaultsPreview);
@@ -5400,6 +5393,20 @@ function syncModelPickerCustomMeta(scope) {
   if (meta) meta.innerHTML = modelPickerCustomMetaHtml(modelPickerSelection(scope).backend);
 }
 
+// Document click: command routing, dialog close, and the pickers'
+// outside-click close. Picker-internal clicks never reach this handler —
+// handleModelPickerClick stops propagation because opening re-renders the
+// picker root (detaching the click target), after which the target's
+// closest() can no longer find the root and the close would misfire.
+function handleDocumentClick(event) {
+  const command = event.target.closest("[data-command]");
+  if (command) runCommand(command.dataset.command);
+  const closer = event.target.closest("[data-close-dialog]");
+  if (closer) document.getElementById(closer.dataset.closeDialog)?.close();
+  if (state.launchPicker.open && !event.target.closest?.("#launchModelPicker")) closeModelPicker("launch");
+  if (state.settingsPicker.open && !event.target.closest?.("#settingsModelPicker")) closeModelPicker("settings");
+}
+
 function openModelPicker(scope) {
   const picker = modelPickerState(scope);
   picker.open = true;
@@ -5464,6 +5471,14 @@ function exitModelPickerCustom(scope) {
 }
 
 function handleModelPickerClick(event, scope) {
+  // Every click routed here is picker-internal by construction (launch binds
+  // the listener on the picker root; settings delegates only clicks inside
+  // #settingsModelPicker), so it must never reach the document outside-click
+  // closer. Opening re-renders root.innerHTML, which detaches the click
+  // target — the same click would otherwise bubble to handleDocumentClick
+  // with a target whose closest() can no longer find the picker root,
+  // instantly closing the picker it just opened.
+  event.stopPropagation?.();
   if (event.target.closest?.("[data-model-picker-toggle]")) {
     openModelPicker(scope);
     return;

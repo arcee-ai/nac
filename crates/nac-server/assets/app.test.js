@@ -89,6 +89,7 @@ function loadApp(overrides = {}) {
       closeModelPicker, selectModelPickerIndex, enterModelPickerCustom, exitModelPickerCustom,
       handleModelPickerClick, handleModelPickerInput, handleModelPickerKeydown,
       handleModelPickerChange, applyModelPickerSelection, modelPickerSelection,
+      handleDocumentClick,
       syncLaunchModelControls, syncLaunchEffortControl, syncLaunchManagedFieldVisibility,
       syncLaunchModelDependentControls, settingsEffortFieldHtml, syncSettingsEffortField,
       syncSettingsModelControls, customProviderOptionsHtml, modelPickerCustomMetaHtml,
@@ -341,6 +342,51 @@ function launchPickerElements(uiInstance) {
   uiInstance.el.launchApiKeyHelp = { textContent: "" };
   uiInstance.el.launchCompactionThreshold = { value: "" };
   uiInstance.el.launchCompactionThresholdHint = { textContent: "", hidden: true };
+}
+
+// --- Picker click bubbling shim --------------------------------------------
+// The vm harness never runs bindEvents, so these helpers replay the exact
+// listener sequence a real click produces: the picker root listener (launch)
+// or the focusContent delegation (settings), then the document listener —
+// unless stopPropagation was called. Opening the picker re-renders the
+// root's innerHTML, which detaches the click target; the targets below
+// mirror that: attribute self-matches survive detachment, ancestor matches
+// (#launchModelPicker / #settingsModelPicker) do not.
+function pickerClickEvent(target) {
+  return { target, propagationStopped: false,
+    preventDefault() {},
+    stopPropagation() { this.propagationStopped = true; } };
+}
+
+// The launch toggle, as the document handler sees it after the open
+// re-render: detached, so closest("#launchModelPicker") finds nothing.
+function detachedLaunchToggleTarget() {
+  const target = { closest(selector) {
+    return selector === "[data-model-picker-toggle]" ? target : null;
+  } };
+  return target;
+}
+
+// The settings toggle, still attached while handleFocusClick routes it (the
+// re-render happens inside that call), detached afterwards.
+function settingsToggleTarget() {
+  const target = { attached: true, closest(selector) {
+    if (selector === "[data-model-picker-toggle]") return target;
+    if (selector === "#settingsModelPicker") return target.attached ? target : null;
+    return null;
+  } };
+  return target;
+}
+
+function dispatchLaunchPickerClick(uiInstance, event) {
+  uiInstance.handleModelPickerClick(event, "launch");
+  if (!event.propagationStopped) uiInstance.handleDocumentClick(event);
+}
+
+function dispatchSettingsPickerClick(uiInstance, event) {
+  uiInstance.handleFocusClick(event);
+  if (event.target.attached !== undefined) event.target.attached = false;
+  if (!event.propagationStopped) uiInstance.handleDocumentClick(event);
 }
 
 function fakeElement() {
@@ -3544,6 +3590,75 @@ test("model picker click and input handlers route toggle, option, custom, back, 
   isolated.handleModelPickerClick(event("[data-model-picker-back]"), "launch");
   assert.equal(isolated.state.launchPicker.open, true);
   assert.equal(isolated.state.launchPicker.custom, false);
+});
+
+test("model picker toggle click opens the listbox and the same click cannot reclose it", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // Replays the real bubble sequence: the root listener opens the picker
+  // (re-rendering root.innerHTML, which detaches the toggle), then the
+  // document listener runs only if propagation continued. Before the fix,
+  // the same click reached the document outside-click closer with a
+  // detached target whose closest() no longer found #launchModelPicker,
+  // and the picker closed within the very click that opened it.
+  const event = pickerClickEvent(detachedLaunchToggleTarget());
+  dispatchLaunchPickerClick(isolated, event);
+  assert.equal(isolated.state.launchPicker.open, true);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /role="listbox"/);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /data-model-picker-option="0"/);
+  assert.match(isolated.el.launchModelPicker.innerHTML, /Claude Opus 4\.1 \(latest\)/);
+  // The pinned mechanism: a picker-internal click stops propagation, so the
+  // document outside-click closer never ran (the dispatcher above would
+  // have invoked it, and it would have closed the picker).
+  assert.equal(event.propagationStopped, true);
+});
+
+test("model picker closes on outside click and Escape, but not on an attached inside click", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  dispatchLaunchPickerClick(isolated, pickerClickEvent(detachedLaunchToggleTarget()));
+  assert.equal(isolated.state.launchPicker.open, true);
+  // A click inside the picker that did not re-render (e.g. focusing the
+  // filter input): the target is still attached, closest() finds the root,
+  // and the document handler leaves the picker open.
+  const inside = pickerClickEvent({ closest: (selector) =>
+    selector === "#launchModelPicker" ? {} : null });
+  isolated.handleDocumentClick(inside);
+  assert.equal(isolated.state.launchPicker.open, true);
+  // A true outside click closes it.
+  isolated.handleDocumentClick(pickerClickEvent({ closest: () => null }));
+  assert.equal(isolated.state.launchPicker.open, false);
+  // Reopen, then Escape closes (and stops propagation so a surrounding
+  // dialog or focus view does not close with it).
+  dispatchLaunchPickerClick(isolated, pickerClickEvent(detachedLaunchToggleTarget()));
+  assert.equal(isolated.state.launchPicker.open, true);
+  let escaped = false;
+  isolated.handleModelPickerKeydown({ key: "Escape", preventDefault() {},
+    stopPropagation() { escaped = true; } }, "launch");
+  assert.equal(isolated.state.launchPicker.open, false);
+  assert.equal(escaped, true);
+});
+
+test("settings model picker toggle opens through delegation and survives the document click bubble", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  const root = { innerHTML: "", dataset: {}, querySelector() { return null; } };
+  isolated.el.focusContent = { querySelector: (selector) =>
+    selector === "#settingsModelPicker" ? root : null };
+  // Same race through the settings delegation path: handleFocusClick routes
+  // the attached toggle click to the picker handler, the open re-render
+  // detaches the target, and the document closer must never see it.
+  const event = pickerClickEvent(settingsToggleTarget());
+  dispatchSettingsPickerClick(isolated, event);
+  assert.equal(isolated.state.settingsPicker.open, true);
+  assert.match(root.innerHTML, /role="listbox"/);
+  assert.match(root.innerHTML, /data-model-picker-option="0"/);
+  assert.equal(event.propagationStopped, true);
+  // A true outside click still closes the settings picker.
+  isolated.handleDocumentClick(pickerClickEvent({ closest: () => null }));
+  assert.equal(isolated.state.settingsPicker.open, false);
 });
 
 test("settings renders the picker prefilled from config with hidden form fields", () => {
