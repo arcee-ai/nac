@@ -1270,6 +1270,70 @@ test("transcript refreshes coalesce bursts and preserve structural snapshot stat
   assert.deepEqual(requests, Array(2).fill(`/sessions/${sessionId}/messages?limit=24`));
 });
 
+test("authoritative snapshots invalidate in-flight transcript refreshes so stale /messages cannot overwrite newer commits", async () => {
+  const transcriptPage = deferred();
+  const snapshot = deferred();
+  const requests = [];
+  const cleared = [];
+  let nextTimer = 100;
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      if (path.includes("/messages?")) return transcriptPage.promise;
+      return snapshot.promise;
+    },
+    window: {
+      setTimeout() { nextTimer += 1; return nextTimer; },
+      clearTimeout(timer) { cleared.push(timer); },
+    },
+  });
+  const sessionId = "snapshot-supersedes-transcript";
+  isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, sessionSnapshot(sessionId, {
+    messages: [{ role: "user", content: "prompt" }],
+  }));
+  // A pending debounced transcript refresh must not fire after a direct snapshot.
+  isolated.state.transcriptTimers.set(sessionId, 42);
+
+  const transcriptLoad = isolated.loadTranscriptMessages(sessionId);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0], /\/messages\?/);
+
+  const snapshotLoad = isolated.loadSnapshot(sessionId, false);
+  assert.deepEqual(cleared, [42], "loadSnapshot cancels a pending transcript timer");
+  assert.equal(isolated.state.transcriptTimers.has(sessionId), false);
+  assert.equal(requests.length, 2, "the authoritative snapshot starts without waiting on /messages");
+  assert.match(requests[1], new RegExp(`/sessions/${sessionId}\\?`));
+
+  // Newer commits arrive on the snapshot while the older transcript page is still buffered.
+  snapshot.resolve(jsonResponse(sessionSnapshot(sessionId, {
+    messages: [
+      { role: "user", content: "prompt" },
+      { role: "assistant", content: "latest commit" },
+      { role: "user", content: "follow-up" },
+    ],
+    message_page: { start: 0, end: 3, total: 3, has_older: false },
+  })));
+  assert.equal((await snapshotLoad).messages.length, 3);
+  assert.deepEqual(
+    plain(isolated.state.snapshots.get(sessionId).messages.map((message) => message.content)),
+    ["prompt", "latest commit", "follow-up"]);
+
+  transcriptPage.resolve(jsonResponse({
+    messages: [
+      { role: "user", content: "prompt" },
+      { role: "assistant", content: "stale mid-run page" },
+    ],
+    page: { start: 0, end: 2, total: 2, has_older: false },
+  }));
+  assert.equal(await transcriptLoad, null, "the superseded transcript coordinator yields null");
+  assert.deepEqual(
+    plain(isolated.state.snapshots.get(sessionId).messages.map((message) => message.content)),
+    ["prompt", "latest commit", "follow-up"],
+    "a slower /messages response must not clobber the authoritative snapshot transcript");
+  assert.equal(isolated.state.transcriptRefreshCoordinators.has(sessionId), false);
+});
+
 test("a failed invalidated snapshot GET yields to its successful trailing refresh while terminal errors remain visible", async () => {
   const failed = deferred();
   const recovered = deferred();
