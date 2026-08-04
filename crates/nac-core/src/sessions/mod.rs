@@ -659,6 +659,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 },
             ],
             None,
@@ -878,6 +879,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 },
             ];
             completed_run.last_response_duration_ms = Some(250);
@@ -1711,6 +1713,7 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
         ];
         create_session(&store_path, &with_log).unwrap();
@@ -1736,12 +1739,14 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
                     },
                     Message::Assistant {
                         content: None,
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call]),
+                        duration_ms: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),

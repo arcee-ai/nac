@@ -1,14 +1,15 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
-use crate::events::{AgentEvent, EventSink};
+use crate::events::{AgentEvent, AssistantStreamDelta, EventSink};
 use crate::mcp::McpRegistry;
-use crate::model::{ModelClient, TokenUsage};
+use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
 use crate::sandbox::SandboxSession;
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
@@ -34,11 +35,15 @@ pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
 use compaction::{CompactionState, PreparedProviderView};
-use preview::*;
 pub(crate) use preview::key_arg_preview;
+use preview::*;
 use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
@@ -471,17 +476,41 @@ impl Agent {
                 iteration,
             });
 
-            let response = match self
+            let call_started = Instant::now();
+            let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
+                self.event_sink.emit_assistant_delta(AssistantStreamDelta {
+                    thread_name: self.thread_name.clone(),
+                    text: (!delta.text.is_empty()).then_some(delta.text),
+                    reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
+                });
+            });
+            let push_delta = |delta| deltas.push(delta);
+            // Only the orchestrator's output is read as it arrives: a thread is
+            // summarized on its card, and nobody watching at all means the
+            // cheaper buffered request shape.
+            let delta_sink: DeltaSink<'_> = (self.thread_name.is_none()
+                && self.event_sink.wants_assistant_deltas())
+            .then_some(&push_delta);
+            let turn = self
                 .client
-                .send_turn(provider_view.messages, self.tool_defs.clone())
-                .await
-            {
+                .send_turn_streaming(
+                    provider_view.messages,
+                    self.tool_defs.clone(),
+                    delta_sink,
+                )
+                .await;
+            // Whatever arrived in the last partial window still belongs on screen.
+            deltas.flush();
+            let response = match turn {
                 Ok(response) => response,
                 Err(error) => {
                     // Preserve accumulated usage (including summary and worker
                     // costs from prior rounds) so it survives the error return.
                     self.last_usage = Some(accumulated_usage.clone());
-                    self.emit(AgentEvent::Error {
+                    // The provider's own words about the call it refused: the
+                    // one error class worth showing rather than reducing to
+                    // "operation failed".
+                    self.emit(AgentEvent::ModelError {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
@@ -542,6 +571,7 @@ impl Agent {
                     reasoning_text: response.assistant.reasoning_text.clone(),
                     reasoning_details: response.assistant.reasoning_details.clone(),
                     tool_calls: response.assistant.tool_calls.clone(),
+                    duration_ms: Some(duration_millis(call_started.elapsed())),
                 })
                 .await
             {
@@ -669,9 +699,7 @@ impl Agent {
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends serialize on one connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
-        self.transcript_log
-            .as_ref()
-            .map(|sink| sink.writer.clone())
+        self.transcript_log.as_ref().map(|sink| sink.writer.clone())
     }
 
     #[cfg(test)]
@@ -780,6 +808,7 @@ impl Agent {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         })
         .await
     }
@@ -803,7 +832,8 @@ impl Agent {
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
         // Live trigger (step 3): emitted after the log commit, before the
         // vec push — the store-backed read path sees the rows immediately.
-        self.event_sink.emit_transcript_appended(start_idx + batch_len);
+        self.event_sink
+            .emit_transcript_appended(start_idx + batch_len);
         Ok(())
     }
 

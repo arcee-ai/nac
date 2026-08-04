@@ -1,7 +1,7 @@
 import { ModelPill } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
-import { formatDurationShort } from "@/app/lib/format";
+import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import type { ModelTurn } from "@/app/lib/transcript";
 
@@ -10,6 +10,8 @@ interface ModelMessageProps {
   model: string;
   /** Draws the spinner ring while this turn is the one still producing output. */
   active: boolean;
+  /** What the run is doing right now, named only while this turn is active. */
+  activity?: string;
   selectedThread: string | null;
   onSelectThread: (name: string) => void;
   onSelectWorkset: (id: string) => void;
@@ -23,6 +25,7 @@ export function ModelMessage({
   turn,
   model,
   active,
+  activity,
   selectedThread,
   onSelectThread,
   onSelectWorkset,
@@ -32,7 +35,13 @@ export function ModelMessage({
       <div className="flex items-center gap-3">
         <ModelPill active={active} />
         <span className="label-small text-basic-secondary truncate">{model}</span>
-        {turn.durationMs != null ? (
+        {/* The header carries whichever of the two is available: what the run is
+            doing now, or how long it took once it is over. */}
+        {active && activity ? (
+          <span className="label-micro text-shimmer-basic min-w-0 truncate">
+            {activity}
+          </span>
+        ) : turn.durationMs != null ? (
           <span className="label-micro text-basic-tertiary shrink-0">
             {formatDurationShort(turn.durationMs)}
           </span>
@@ -43,7 +52,17 @@ export function ModelMessage({
         {turn.blocks.map((block) => {
           switch (block.kind) {
             case "thoughts":
-              return <ChatBadge key={block.key} label="Thoughts" body={block.text} />;
+              return (
+                <ChatBadge
+                  key={block.key}
+                  label={
+                    block.durationMs == null
+                      ? "Thoughts"
+                      : `Thoughts, ${formatSeconds(block.durationMs)}`
+                  }
+                  body={block.text}
+                />
+              );
             case "text":
               return (
                 <div

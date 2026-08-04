@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/app/services/queries";
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
 import {
+  applyAssistantDelta,
   applyEnvelope,
   resetRuntime,
   setStreamStatus,
@@ -50,6 +51,9 @@ export function useSessionStream(sessionId: string | null): void {
           });
         }
       },
+      // Deltas never invalidate the snapshot: they are the same text the
+      // assistant message will bring, only sooner.
+      onAssistantDelta: applyAssistantDelta,
       onStatus: setStreamStatus,
       // A gap or a lagged subscriber means events were dropped, so the
       // snapshot is the only reliable way back to a consistent view.

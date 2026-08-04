@@ -6,7 +6,10 @@
 // in parallel, so each such assistant message becomes one wave.
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
-import type { RuntimeThread } from "@/app/store/runtimeStore";
+import {
+  THREAD_COMMAND_TAIL,
+  type RuntimeThread,
+} from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   SessionSnapshotResponse,
@@ -23,13 +26,17 @@ export interface TranscriptThread {
   name: string;
   /** What the orchestrator asked the thread to do. */
   action: string;
-  /** Reported result, or the command in flight while it still runs. */
-  detail: string;
+  /**
+   * Reported result once the thread is done, or the tail of the commands it has
+   * issued while it still runs — oldest first, so the newest reads at the
+   * bottom of the card.
+   */
+  details: string[];
   state: ThreadState;
 }
 
 export type TranscriptBlock =
-  | { kind: "thoughts"; key: string; text: string }
+  | { kind: "thoughts"; key: string; text: string; durationMs: number | null }
   | { kind: "text"; key: string; text: string }
   | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
@@ -51,6 +58,12 @@ export interface ModelTurn {
 
 export type TranscriptTurn = UserTurn | ModelTurn;
 
+/** Model output that has arrived over the stream, prose and reasoning apart. */
+export interface StreamedOutput {
+  text: string;
+  reasoning: string;
+}
+
 function parseArguments(call: ToolCall): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(call.function?.arguments || "{}");
@@ -66,15 +79,20 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Newest command the thread reported, used as the subtitle while it runs. */
-function lastCommand(events: AgentEvent[] | undefined): string {
-  for (let i = (events?.length ?? 0) - 1; i >= 0; i -= 1) {
+/**
+ * Newest commands the thread reported, oldest first. Read from the persisted
+ * events, which is what a reload has to fall back on; while the stream is
+ * connected the store keeps a fresher copy of the same thing.
+ */
+function commandTail(events: AgentEvent[] | undefined, limit: number): string[] {
+  const tail: string[] = [];
+  for (let i = (events?.length ?? 0) - 1; i >= 0 && tail.length < limit; i -= 1) {
     const event = events?.[i];
     if (event?.type === "tool_call_started") {
-      return `${event.name}: ${event.args_preview}`;
+      tail.push(`${event.name}: ${event.args_preview}`);
     }
   }
-  return "";
+  return tail.reverse();
 }
 
 interface BuildContext {
@@ -95,10 +113,70 @@ function describeThread(call: ToolCall, ctx: BuildContext): TranscriptThread {
     : result != null
       ? "done"
       : "running";
-  const detail =
-    state === "running" ? lastCommand(ctx.threadEvents[name]) || action : result || action;
 
-  return { callId: call.id, name, action, detail, state };
+  let details: string[];
+  if (state === "running") {
+    const tail = live?.commands.length
+      ? live.commands
+      : commandTail(ctx.threadEvents[name], THREAD_COMMAND_TAIL);
+    // Before the first command there is nothing to tail, so the card keeps
+    // showing what the thread was asked to do.
+    details = tail.length ? tail : [action];
+  } else {
+    details = [result || action];
+  }
+
+  return { callId: call.id, name, action, details, state };
+}
+
+/**
+ * Newest block of a kind, which is the only one streamed output could belong to.
+ */
+function lastBlockText(
+  blocks: TranscriptBlock[],
+  kind: "text" | "thoughts",
+): string | null {
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    if (block.kind === kind) return block.text;
+  }
+  return null;
+}
+
+/**
+ * Show model output that has reached the browser ahead of the snapshot.
+ *
+ * The buffers outlive the message being committed, so the text does not blink
+ * out while the snapshot is refetched; what keeps it from being shown twice is
+ * the check against what the snapshot already carries.
+ */
+function appendStreamedOutput(
+  turns: TranscriptTurn[],
+  stream: StreamedOutput,
+): void {
+  const reasoning = stream.reasoning.trim();
+  const text = stream.text.trim();
+  if (!reasoning && !text) return;
+
+  let turn = turns[turns.length - 1];
+  if (turn?.kind !== "model") {
+    // The run answers with output before its first message is persisted, so the
+    // turn it belongs to may not exist yet.
+    turn = { kind: "model", key: "model-stream", blocks: [], durationMs: null };
+    turns.push(turn);
+  }
+
+  if (reasoning && !lastBlockText(turn.blocks, "thoughts")?.includes(reasoning)) {
+    turn.blocks.push({
+      kind: "thoughts",
+      key: "thoughts-stream",
+      text: reasoning,
+      durationMs: null,
+    });
+  }
+  if (text && !lastBlockText(turn.blocks, "text")?.includes(text)) {
+    turn.blocks.push({ kind: "text", key: "text-stream", text });
+  }
 }
 
 /**
@@ -108,6 +186,7 @@ function describeThread(call: ToolCall, ctx: BuildContext): TranscriptThread {
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
+  stream?: StreamedOutput,
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
@@ -155,7 +234,14 @@ export function buildTranscript(
 
     const reasoning = message.reasoning_text?.trim();
     if (reasoning) {
-      blocks.push({ kind: "thoughts", key: `thoughts-${index}`, text: reasoning });
+      blocks.push({
+        kind: "thoughts",
+        key: `thoughts-${index}`,
+        text: reasoning,
+        // The model call this message came out of, which for a reasoning model
+        // is very nearly the time it spent thinking.
+        durationMs: message.duration_ms ?? null,
+      });
     }
 
     const content = (message.content ?? "").trim();
@@ -180,6 +266,8 @@ export function buildTranscript(
     });
     if (wave.length) blocks.push({ kind: "wave", key: `wave-${index}`, threads: wave });
   });
+
+  if (stream) appendStreamedOutput(turns, stream);
 
   return turns.length > MAX_TURNS ? turns.slice(-MAX_TURNS) : turns;
 }

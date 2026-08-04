@@ -1,4 +1,6 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
+use super::responses_stream::ResponsesStreamFold;
+use super::sse::{read_sse_response, StreamFold};
 use super::*;
 use anyhow::Context;
 use fs2::FileExt;
@@ -258,16 +260,17 @@ pub async fn send_responses(
     reasoning_effort: Option<ReasoningEffort>,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
     let request = codex_responses_request(model, reasoning_effort, &messages, &tools);
     let auth = fresh_auth(client).await?;
 
-    match post_codex_json_with_retry(client, &url, &request, &auth).await {
+    match post_codex_json_with_retry(client, &url, &request, &auth, on_delta).await {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
             let refreshed = force_refresh_auth(client).await?;
-            let value = post_codex_json_with_retry(client, &url, &request, &refreshed)
+            let value = post_codex_json_with_retry(client, &url, &request, &refreshed, on_delta)
                 .await
                 .map_err(anyhow::Error::new)?;
             parse_openai_responses_response(&value, &url)
@@ -513,12 +516,14 @@ fn codex_responses_request(
         );
     }
 
+    // As on plain Responses: the summary is the readable reasoning, so it is
+    // asked for whether or not an effort is configured.
+    let mut reasoning = json!({"summary": "auto"});
     if let Some(effort) = reasoning_effort {
-        request["reasoning"] = json!({
-            "effort": effort.as_str(),
-        });
-        request["include"] = json!(["reasoning.encrypted_content"]);
+        reasoning["effort"] = json!(effort.as_str());
     }
+    request["reasoning"] = reasoning;
+    request["include"] = json!(["reasoning.encrypted_content"]);
 
     request
 }
@@ -551,6 +556,7 @@ async fn post_codex_json_with_retry(
     url: &str,
     body: &Value,
     auth: &StoredCodexAuth,
+    on_delta: DeltaSink<'_>,
 ) -> std::result::Result<Value, CodexRequestError> {
     let mut last_error = CodexRequestError {
         status: None,
@@ -595,14 +601,18 @@ async fn post_codex_json_with_retry(
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        let response_body = response.text().await.map_err(|error| CodexRequestError {
-            status: Some(status),
-            message: format!("Failed to read response body from {url}: {error}"),
-        })?;
 
         if status.is_success() {
+            // Reading the body incrementally forfeits the retry: by the time a
+            // read fails the caller has already seen part of the answer.
+            if let Some(on_delta) = on_delta.filter(|_| is_event_stream(content_type.as_deref())) {
+                return stream_codex_responses(response, url, status, on_delta).await;
+            }
+            let response_body = read_codex_body(response, url, status).await?;
             return parse_codex_success_body(url, status, content_type.as_deref(), &response_body);
         }
+
+        let response_body = read_codex_body(response, url, status).await?;
 
         let error = CodexRequestError {
             status: Some(status),
@@ -635,6 +645,39 @@ async fn post_codex_json_with_retry(
     Err(last_error)
 }
 
+async fn read_codex_body(
+    response: reqwest::Response,
+    url: &str,
+    status: StatusCode,
+) -> std::result::Result<String, CodexRequestError> {
+    response.text().await.map_err(|error| CodexRequestError {
+        status: Some(status),
+        message: format!("Failed to read response body from {url}: {error}"),
+    })
+}
+
+fn is_event_stream(content_type: Option<&str>) -> bool {
+    content_type
+        .map(|value| value.contains("text/event-stream"))
+        .unwrap_or(false)
+}
+
+/// Consume the Codex event stream as it arrives, forwarding output to the sink
+/// and returning the same final response object the buffered path produces.
+async fn stream_codex_responses(
+    response: reqwest::Response,
+    url: &str,
+    status: StatusCode,
+    on_delta: &(dyn Fn(ModelStreamDelta) + Send + Sync),
+) -> std::result::Result<Value, CodexRequestError> {
+    read_sse_response(url, response, ResponsesStreamFold::new(Some(on_delta)))
+        .await
+        .map_err(|error| CodexRequestError {
+            status: Some(status),
+            message: format!("{error:#}"),
+        })
+}
+
 fn parse_codex_success_body(
     url: &str,
     status: StatusCode,
@@ -665,8 +708,7 @@ fn parse_codex_success_body(
 }
 
 fn parse_codex_sse_response(response_body: &str) -> std::result::Result<Value, String> {
-    let mut final_response = None;
-    let mut output_items: Vec<(usize, Value)> = Vec::new();
+    let mut fold = ResponsesStreamFold::new(None);
 
     for data in sse_data_payloads(response_body) {
         if data == "[DONE]" {
@@ -675,54 +717,10 @@ fn parse_codex_sse_response(response_body: &str) -> std::result::Result<Value, S
 
         let event: Value = serde_json::from_str(&data)
             .map_err(|error| format!("invalid SSE JSON event: {error}"))?;
-        match event.get("type").and_then(Value::as_str) {
-            Some("error") | Some("response.failed") => {
-                return Err(codex_event_error_message(&event)
-                    .unwrap_or_else(|| format!("Codex error event: {event}")));
-            }
-            Some("response.output_item.done") => {
-                if let Some(item) = event.get("item").cloned() {
-                    let output_index = event
-                        .get("output_index")
-                        .and_then(Value::as_u64)
-                        .and_then(|index| usize::try_from(index).ok())
-                        .unwrap_or(output_items.len());
-                    output_items.retain(|(index, _)| *index != output_index);
-                    output_items.push((output_index, item));
-                }
-            }
-            Some("response.completed") | Some("response.done") | Some("response.incomplete") => {
-                if let Some(response) = event.get("response").and_then(Value::as_object) {
-                    if response.get("status").and_then(Value::as_str) == Some("failed") {
-                        return Err(codex_event_error_message(&event)
-                            .unwrap_or_else(|| format!("Codex response failed: {event}")));
-                    }
-                    let mut response_value = Value::Object(response.clone());
-                    if response_output_is_empty(&response_value) && !output_items.is_empty() {
-                        output_items.sort_by_key(|(index, _)| *index);
-                        response_value["output"] = Value::Array(
-                            output_items
-                                .iter()
-                                .map(|(_, item)| item.clone())
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    final_response = Some(response_value);
-                }
-            }
-            _ => {}
-        }
+        fold.push(&event)?;
     }
 
-    final_response.ok_or_else(|| "SSE stream did not include a final response event".to_string())
-}
-
-fn response_output_is_empty(response: &Value) -> bool {
-    response
-        .get("output")
-        .and_then(Value::as_array)
-        .map(Vec::is_empty)
-        .unwrap_or(true)
+    fold.finish()
 }
 
 fn sse_data_payloads(response_body: &str) -> Vec<String> {
@@ -745,23 +743,6 @@ fn sse_data_payloads(response_body: &str) -> Vec<String> {
     }
 
     payloads
-}
-
-fn codex_event_error_message(event: &Value) -> Option<String> {
-    event
-        .get("response")
-        .and_then(|response| response.get("error"))
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            event
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| event.get("message").and_then(Value::as_str))
-        .filter(|message| !message.is_empty())
-        .map(str::to_string)
 }
 
 fn codex_responses_url(base_url: &str) -> Result<String> {
@@ -1660,8 +1641,9 @@ mod tests {
         assert_eq!(absent["store"], false);
         assert_eq!(absent["stream"], true);
         assert_eq!(absent["text"]["verbosity"], "low");
-        assert!(absent.get("reasoning").is_none());
-        assert!(absent.get("include").is_none());
+        // The summary is requested unconditionally; only the effort is opt-in.
+        assert_eq!(absent["reasoning"], json!({"summary": "auto"}));
+        assert_eq!(absent["include"], json!(["reasoning.encrypted_content"]));
         assert!(absent.get("tools").is_none());
         assert!(absent.get("tool_choice").is_none());
         assert!(absent.get("parallel_tool_calls").is_none());

@@ -173,10 +173,16 @@ pub(super) fn openai_responses_request(
         request["tool_choice"] = json!("auto");
         request["parallel_tool_calls"] = json!(true);
     }
+    // A summary is the only readable form of reasoning this API returns — the
+    // encrypted content exists to hand state back on the next turn, not to be
+    // shown — and it is requested even without an effort so the UI has thinking
+    // to display while the model works.
+    let mut reasoning = json!({"summary": "auto"});
     if let Some(effort) = reasoning_effort {
-        request["reasoning"] = json!({"effort": effort.as_str()});
-        request["include"] = json!(["reasoning.encrypted_content"]);
+        reasoning["effort"] = json!(effort.as_str());
     }
+    request["reasoning"] = reasoning;
+    request["include"] = json!(["reasoning.encrypted_content"]);
     request
 }
 

@@ -549,6 +549,7 @@ mod tests {
                         arguments: "{\"path\":\"x\"}".to_string(),
                     },
                 }]),
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
@@ -580,6 +581,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 },
                 TranscriptMessageKind::Assistant,
                 "assistant",
@@ -903,6 +905,7 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
                     },
                     // Assistant with tool calls: not visible even with content.
                     Message::Assistant {
@@ -910,6 +913,7 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call.clone()]),
+                        duration_ms: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),
@@ -921,6 +925,7 @@ mod tests {
                         reasoning_text: Some("reasoning only".to_string()),
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
                     },
                     // Assistant with an empty tool-call list: visible.
                     Message::Assistant {
@@ -928,6 +933,7 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(Vec::new()),
+                        duration_ms: None,
                     },
                     Message::User {
                         content: "latest prompt".to_string(),

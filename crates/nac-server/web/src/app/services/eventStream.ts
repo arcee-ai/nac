@@ -7,6 +7,7 @@
 
 import { api } from "@/app/services/api";
 import type {
+  AssistantStreamDelta,
   LaggedEvent,
   ReplayBoundaryEvent,
   ReplayGapEvent,
@@ -22,6 +23,8 @@ export type StreamStatus =
 
 export interface SessionStreamHandlers {
   onEnvelope: (envelope: SessionEventEnvelope) => void;
+  /** Model output as it is produced. Carries no sequence id: see the backend. */
+  onAssistantDelta?: (delta: AssistantStreamDelta) => void;
   onStatus?: (status: StreamStatus) => void;
   onReplayBoundary?: (event: ReplayBoundaryEvent) => void;
   onReplayGap?: (event: ReplayGapEvent) => void;
@@ -88,6 +91,13 @@ export function subscribeToSessionEvents(
       if (!envelope) return;
       lastSequenceId = envelope.sequence_id;
       handlers.onEnvelope(envelope);
+    });
+
+    source.addEventListener("assistant_delta", (event) => {
+      const parsed = parseEvent<AssistantStreamDelta>(
+        event as MessageEvent<string>,
+      );
+      if (parsed) handlers.onAssistantDelta?.(parsed);
     });
 
     source.addEventListener("replay_boundary", (event) => {

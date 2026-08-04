@@ -1165,8 +1165,10 @@ name = "nac-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "diffy",
  "fs2",
+ "futures-util",
  "libc",
  "portable-pty",
  "rand",

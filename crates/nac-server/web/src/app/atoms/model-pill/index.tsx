@@ -32,7 +32,7 @@ const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
     style={{ width: size, height: size }}
     {...props}
   >
-    <Icon iconName={IconName.Brain} size={size - 8} />
+    <Icon iconName={IconName.Brain} size={size - 16} />
     {active ? (
       <div className="absolute inset-0 flex animate-spin items-center justify-center">
         <Icon iconName={IconName.Loader} size={size} />

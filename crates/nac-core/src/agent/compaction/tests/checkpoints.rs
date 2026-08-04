@@ -281,6 +281,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
                     arguments: "{}".to_string(),
                 },
             }]),
+            duration_ms: None,
         },
         Message::Tool {
             tool_call_id: "call".to_string(),

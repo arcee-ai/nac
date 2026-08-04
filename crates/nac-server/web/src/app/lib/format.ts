@@ -46,6 +46,12 @@ export function formatDurationShort(ms: number | null | undefined): string {
   return `${m}m ${Math.round(s % 60)}s`;
 }
 
+/** Model-call time as the transcript spells it out, e.g. 12324 -> "12.32s". */
+export function formatSeconds(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "";
+  return `${(Math.round(ms / 10) / 100).toFixed(2)}s`;
+}
+
 export function displaySessionTitle(
   summary: SessionSummarySnapshot | null | undefined,
 ): string {

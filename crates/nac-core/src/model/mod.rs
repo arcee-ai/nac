@@ -17,16 +17,21 @@ fn backoff_duration(attempt: usize) -> Duration {
 }
 
 mod anthropic;
+mod anthropic_stream;
 mod api_key_store;
 mod arcee;
 mod auth_store;
 mod backend;
 mod catalog;
 mod chat;
+mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod requests;
 mod responses;
+mod responses_stream;
+mod sse;
+mod stream;
 #[cfg(test)]
 pub(crate) mod test_http;
 mod types;
@@ -52,6 +57,7 @@ pub fn resolve_backend_api_key(backend: BackendKind, api_key_env: Option<&str>) 
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
+pub(crate) use stream::{CoalescedDeltas, DeltaSink, ModelStreamDelta};
 pub use types::{
     managed_backend_base_url, resolve_model_base_url, EffectiveModelSettings,
     ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
@@ -287,8 +293,7 @@ mod tests {
             for _ in 0..200 {
                 let delay = backoff_duration(attempt);
                 assert!(
-                    delay >= Duration::from_millis(lower)
-                        && delay <= Duration::from_millis(upper),
+                    delay >= Duration::from_millis(lower) && delay <= Duration::from_millis(upper),
                     "attempt {attempt} produced {delay:?} outside [{lower}ms, {upper}ms]"
                 );
             }
@@ -1367,6 +1372,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: parsed.assistant.reasoning_details.clone(),
                     tool_calls: parsed.assistant.tool_calls.clone(),
+                    duration_ms: None,
                 },
                 Message::Tool {
                     tool_call_id: "toolu_1".to_string(),
@@ -1400,6 +1406,7 @@ mod tests {
             reasoning_text: Some("need current context".to_string()),
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         }];
         let absent = deepseek_chat_request("deepseek-v4-pro", None, &messages, &[]);
         assert!(absent.get("thinking").is_none());
@@ -1476,7 +1483,8 @@ mod tests {
         }
 
         let openai_absent = openai_responses_request("model", None, &messages, &[]);
-        assert!(openai_absent.get("reasoning").is_none());
+        // Readable reasoning is asked for regardless; only the effort is opt-in.
+        assert_eq!(openai_absent["reasoning"], json!({"summary": "auto"}));
         assert!(openai_absent.get("tools").is_none());
 
         let tools = [ToolDefinition {
@@ -1531,6 +1539,7 @@ mod tests {
                         arguments: "{\"path\":\"src/main.rs\"}".to_string(),
                     },
                 }]),
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "call_1".to_string(),

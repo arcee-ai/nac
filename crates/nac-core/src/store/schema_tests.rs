@@ -493,6 +493,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         },
     )
     .unwrap();

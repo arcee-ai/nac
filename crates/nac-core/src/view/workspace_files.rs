@@ -109,10 +109,7 @@ pub fn read_file(host_root: &Path, path: &str) -> Result<WorkspaceFileContent> {
     }
 
     let bytes = fs::read(&full).with_context(|| format!("cannot read '{}'", relpath))?;
-    let binary = bytes
-        .iter()
-        .take(BINARY_SNIFF_BYTES)
-        .any(|byte| *byte == 0);
+    let binary = bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0);
     let content = if binary {
         None
     } else {

@@ -29,7 +29,9 @@ use axum::{
 use include_dir::{include_dir, Dir};
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
-    events::{SessionEventEnvelope, SessionReplayGap},
+    events::{
+        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
+    },
     model::{
         list_provider_models, list_stored_api_keys, managed_backend_base_url,
         provider_default_base_url, provider_uses_api_key, remove_api_key, resolve_backend_api_key,
@@ -45,8 +47,8 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -389,6 +391,11 @@ pub struct SwitchBranchRequest {
     /// Make the branch first, off the current HEAD.
     #[serde(default)]
     pub create: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommitWorkspaceRequest {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1032,7 +1039,7 @@ impl SessionManager {
             .find(|entry| entry.summary.session_id == session_id)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
         let root = summary.summary.workspace_host_path.clone().ok_or_else(|| {
-            anyhow!("branch operations are not supported for remote/sandbox-only sessions")
+            anyhow!("writing to the checkout is not supported for remote/sandbox-only sessions")
         })?;
 
         if let Some(busy) = sessions.iter().find(|entry| {
@@ -1165,6 +1172,21 @@ impl SessionManager {
         .context("branch switch task failed")?
     }
 
+    /// Commit the whole checkout on the user's behalf. Guarded like a branch
+    /// switch: an agent writing files underneath a `git add` would commit a
+    /// half-finished tree.
+    pub async fn commit_workspace(
+        &self,
+        session_id: &str,
+        request: CommitWorkspaceRequest,
+    ) -> Result<workspace::CommitOutcome> {
+        let root = self.idle_workspace_root(session_id).await?;
+
+        tokio::task::spawn_blocking(move || workspace::commit_all(&root, &request.message))
+            .await
+            .context("commit task failed")?
+    }
+
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -1254,6 +1276,7 @@ impl SessionManager {
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
         SessionEventReceiver,
+        AssistantStreamDeltaReceiver,
     )> {
         let service = self.attach_session(session_id).await?;
         let subscription = service
@@ -1265,6 +1288,7 @@ impl SessionManager {
             subscription.replay_gap,
             subscription.replayed_events,
             subscription.receiver,
+            subscription.assistant_deltas,
         ))
     }
 
@@ -1637,6 +1661,10 @@ fn api_router(manager: SessionManager) -> Router {
         .route(
             "/sessions/{session_id}/workspace/branches",
             get(workspace_branches).post(switch_workspace_branch),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/commit",
+            post(commit_workspace),
         )
         .route(
             "/sessions/{session_id}/workspace/revisions",
@@ -2219,7 +2247,6 @@ async fn thread_events(
     ))
 }
 
-
 async fn workspace_diff(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -2286,6 +2313,15 @@ async fn switch_workspace_branch(
             .switch_workspace_branch(&session_id, request)
             .await?,
     ))
+}
+
+async fn commit_workspace(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<CommitWorkspaceRequest>, JsonRejection>,
+) -> std::result::Result<Json<workspace::CommitOutcome>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.commit_workspace(&session_id, request).await?))
 }
 
 async fn submit_prompt(
@@ -2356,7 +2392,14 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (epoch_id, replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
+    let (
+        epoch_id,
+        replay_boundary_sequence_id,
+        replay_gap,
+        replayed_events,
+        receiver,
+        assistant_deltas,
+    ) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
@@ -2369,6 +2412,7 @@ async fn stream_events(
         replay_gap,
         replayed_events,
         receiver,
+        assistant_deltas,
     );
 
     Ok(Sse::new(event_stream).keep_alive(
@@ -2747,6 +2791,7 @@ fn session_event_stream(
     replay_gap: Option<SessionReplayGap>,
     replayed_events: Vec<SessionEventEnvelope>,
     mut receiver: SessionEventReceiver,
+    mut assistant_deltas: AssistantStreamDeltaReceiver,
 ) -> impl futures_core::Stream<Item = std::result::Result<Event, Infallible>> {
     let mut replayed_events = VecDeque::from(replayed_events);
     stream! {
@@ -2767,17 +2812,39 @@ fn session_event_stream(
             yield Ok(sse_envelope_event(&envelope));
         }
 
+        // Deltas share the connection but not the sequence: they carry no SSE
+        // id, so a reconnect still resumes from the last session event.
+        let mut deltas_open = true;
         loop {
-            match receiver.recv().await {
-                Ok(envelope) => yield Ok(sse_envelope_event(&envelope)),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+            let next = tokio::select! {
+                envelope = receiver.recv() => StreamItem::Session(envelope),
+                delta = assistant_deltas.recv(), if deltas_open => StreamItem::Delta(delta),
+            };
+            match next {
+                StreamItem::Session(Ok(envelope)) => yield Ok(sse_envelope_event(&envelope)),
+                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
                     let payload = serde_json::json!({ "missed": count });
                     yield Ok(sse_json_event("lagged", None, &payload));
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                StreamItem::Delta(Ok(delta)) => {
+                    yield Ok(sse_json_event("assistant_delta", None, &delta));
+                }
+                // Falling behind on deltas costs the client nothing it will not
+                // get again from the assistant message.
+                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    deltas_open = false;
+                }
             }
         }
     }
+}
+
+/// Whichever of the two channels behind the event stream woke up first.
+enum StreamItem {
+    Session(std::result::Result<SessionEventEnvelope, tokio::sync::broadcast::error::RecvError>),
+    Delta(std::result::Result<AssistantStreamDelta, tokio::sync::broadcast::error::RecvError>),
 }
 
 fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
@@ -4014,6 +4081,7 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
             Message::User {
                 content: "current cycle".to_string(),
@@ -4023,6 +4091,7 @@ mod tests {
                 reasoning_text: Some("thinking".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
             Message::Assistant {
                 content: None,
@@ -4036,6 +4105,7 @@ mod tests {
                         arguments: r#"{"name":"current/research"}"#.to_string(),
                     },
                 }]),
+                duration_ms: None,
             },
             Message::System {
                 content: "hidden tail".to_string(),
@@ -4045,6 +4115,7 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
         ]
     }
@@ -6634,6 +6705,8 @@ api_key_env = "OPENAI_API_KEY"
             let (sender, receiver) = tokio::sync::broadcast::channel(4);
             sender.send(live).unwrap();
             drop(sender);
+            let (delta_sender, assistant_deltas) = tokio::sync::broadcast::channel(4);
+            drop(delta_sender);
 
             Sse::new(session_event_stream(
                 "test-epoch".to_string(),
@@ -6644,6 +6717,7 @@ api_key_env = "OPENAI_API_KEY"
                 }),
                 replayed,
                 receiver,
+                assistant_deltas,
             ))
         }
 

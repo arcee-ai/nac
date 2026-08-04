@@ -13,8 +13,8 @@ mod thread_events;
 mod threads;
 mod time;
 mod transcript;
-mod workspace_revisions;
 mod worksets;
+mod workspace_revisions;
 
 pub use model_configurations::*;
 pub use render::*;
@@ -23,8 +23,8 @@ pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
 pub use transcript::*;
-pub use workspace_revisions::*;
 pub use worksets::*;
+pub use workspace_revisions::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};
 use time::now_utc;
@@ -310,6 +310,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 },
             )
             .unwrap();

@@ -1,12 +1,12 @@
 //! Everything nac writes to the user's repository on its own initiative.
 //!
 //! Two kinds of write live here and they carry very different weight. The
-//! branch operations below change what the user's checkout is, so each one is
-//! deliberately narrow, and whether it is allowed at all — no run in flight,
-//! nothing uncommitted — is decided by the caller, because only it can see the
-//! other sessions sharing this checkout. The revision captures in the submodule
-//! change nothing the user can observe: they only add objects and one ref under
-//! `refs/nac/`.
+//! branch and commit operations below change what the user's checkout is, so
+//! each one is deliberately narrow, and whether it is allowed at all — no run
+//! in flight, nothing uncommitted — is decided by the caller, because only it
+//! can see the other sessions sharing this checkout. The revision captures in
+//! the submodule change nothing the user can observe: they only add objects and
+//! one ref under `refs/nac/`.
 
 use std::path::Path;
 use std::process::Command as StdCommand;
@@ -80,6 +80,71 @@ pub fn switch_branch(root: &Path, name: &str) -> Result<BranchList> {
     list_branches(root)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommitOutcome {
+    pub sha: String,
+    /// None on a detached HEAD.
+    pub branch: Option<String>,
+    pub files_changed: usize,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+/// Stage the whole checkout and commit it.
+///
+/// This is the user's own commit, so it runs against the ordinary index and
+/// leaves their identity, hooks and signing configuration to decide the rest;
+/// whatever git refuses is passed back verbatim. Everything is staged because
+/// the panel that calls this offers no way to pick a subset.
+pub fn commit_all(root: &Path, message: &str) -> Result<CommitOutcome> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err(anyhow!("commit message is empty"));
+    }
+
+    run_git(root, &["add", "--all"])?;
+    // Committing an empty index either fails or, with a hook in play, succeeds
+    // confusingly, so the caller is told plainly instead.
+    if run_git(root, &["diff", "--cached", "--name-only"])?.is_empty() {
+        return Err(anyhow!("nothing to commit: the checkout matches HEAD"));
+    }
+    run_git(root, &["commit", "--message", message])?;
+
+    let branch = run_git(root, &["branch", "--show-current"])?;
+    let (files_changed, additions, deletions) =
+        sum_numstat(&run_git(root, &["show", "--numstat", "--format=", "HEAD"])?);
+    Ok(CommitOutcome {
+        sha: run_git(root, &["rev-parse", "HEAD"])?,
+        branch: (!branch.is_empty()).then_some(branch),
+        files_changed,
+        additions,
+        deletions,
+    })
+}
+
+/// Totals over `git show --numstat` output, whose lines are additions, then
+/// deletions, then the path, tab separated. A binary file reports `-` for both
+/// counts, so it is counted as a file that changed by nothing.
+fn sum_numstat(raw: &str) -> (usize, u64, u64) {
+    let mut files = 0;
+    let mut additions = 0;
+    let mut deletions = 0;
+
+    for line in raw.lines() {
+        let mut fields = line.split('\t');
+        let (Some(added), Some(removed), Some(_path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        files += 1;
+        additions += added.parse::<u64>().unwrap_or(0);
+        deletions += removed.parse::<u64>().unwrap_or(0);
+    }
+
+    (files, additions, deletions)
+}
+
 fn is_dirty(root: &Path) -> Result<bool> {
     // Untracked files travel across a switch untouched, so they do not count;
     // git refuses on its own in the rare case one would be overwritten.
@@ -123,5 +188,7 @@ fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
         return Err(anyhow!("git {} failed: {}", args[0], message));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }

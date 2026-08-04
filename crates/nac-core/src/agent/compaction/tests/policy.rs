@@ -123,7 +123,9 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     )
     .unwrap();
     let mut end_state = state(end_path.clone(), Some(1));
-    end_state.restore_newest_valid_checkpoint(&end_messages).unwrap();
+    end_state
+        .restore_newest_valid_checkpoint(&end_messages)
+        .unwrap();
     let end_candidate = candidate(end_state.plan(&end_messages, &[], CompactionReason::Auto));
     assert_eq!(end_candidate.previous_checkpoint_id, Some(end_parent.id));
     assert_eq!(end_candidate.boundary, 2);

@@ -44,7 +44,10 @@ pub(super) fn parse_chat_completions_response(
             cache_read_tokens: cached,
             cache_write_tokens: 0,
             reasoning_tokens: 0,
-            orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            orchestrator_context_tokens: u
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
         }
     });
 
@@ -69,10 +72,7 @@ pub(super) fn parse_chat_completions_response(
     })
 }
 
-pub(super) fn parse_together_chat_response(
-    value: &Value,
-    url: &str,
-) -> Result<ModelTurnResponse> {
+pub(super) fn parse_together_chat_response(value: &Value, url: &str) -> Result<ModelTurnResponse> {
     let choices = value
         .get("choices")
         .and_then(Value::as_array)
@@ -126,7 +126,10 @@ pub(super) fn parse_together_chat_response(
             cache_read_tokens: cached,
             cache_write_tokens: 0,
             reasoning_tokens,
-            orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            orchestrator_context_tokens: u
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
         }
     });
 

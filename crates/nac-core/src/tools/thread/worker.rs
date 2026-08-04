@@ -87,6 +87,7 @@ impl WorkerTimeoutTrace {
                 self.active_tool_calls.clear();
             }
             AgentEvent::Error { .. }
+            | AgentEvent::ModelError { .. }
             | AgentEvent::TokenUsageUpdated { .. }
             | AgentEvent::ThreadLog { .. }
             | AgentEvent::ThreadSteeringQueued { .. }

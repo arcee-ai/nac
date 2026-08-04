@@ -9,6 +9,7 @@ import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
   AgentEvent,
+  AssistantStreamDelta,
   SessionEventEnvelope,
 } from "@/app/types/api";
 
@@ -36,16 +37,38 @@ export interface RuntimeThread {
   action: string;
   exitCode: number | null;
   isError: boolean;
+  /** Newest commands the thread issued, oldest first, for the card's log tail. */
+  commands: string[];
 }
+
+/** How many commands a thread card shows at once. */
+export const THREAD_COMMAND_TAIL = 3;
 
 interface RuntimeState {
   sessionId: string | null;
   running: boolean;
   activity: string;
   error: string | null;
+  /**
+   * The provider's own reason for refusing the current run's model call. The
+   * terminal `run_failed` says only "run failed", so this is what turns the red
+   * box into something the user can act on.
+   */
+  modelError: string | null;
   streamStatus: StreamStatus;
   events: RuntimeEvent[];
   threads: Record<string, RuntimeThread>;
+  /** Prose the current model call has produced so far. */
+  streamText: string;
+  /** Reasoning the current model call has produced so far. */
+  streamReasoning: string;
+  /**
+   * The buffers hold output that is already committed, so the next delta starts
+   * a new call rather than appending to it. They are kept rather than cleared so
+   * the transcript does not blink between the commit and the refetched snapshot;
+   * the renderer drops whichever part the snapshot already covers.
+   */
+  streamSettled: boolean;
 }
 
 export const runtimeStore = createStore<RuntimeState>({
@@ -53,9 +76,13 @@ export const runtimeStore = createStore<RuntimeState>({
   running: false,
   activity: "",
   error: null,
+  modelError: null,
   streamStatus: "idle",
   events: [],
   threads: {},
+  streamText: "",
+  streamReasoning: "",
+  streamSettled: false,
 });
 
 const { setState, getState, useStore } = runtimeStore;
@@ -68,9 +95,31 @@ export function resetRuntime(sessionId: string | null): void {
     running: false,
     activity: "",
     error: null,
+    modelError: null,
     streamStatus: sessionId ? "connecting" : "idle",
     events: [],
     threads: {},
+    streamText: "",
+    streamReasoning: "",
+    streamSettled: false,
+  });
+}
+
+/**
+ * Fold one slice of live model output into the buffers. Only the orchestrator's
+ * own output belongs in the chat — a thread's output is summarized on its card.
+ */
+export function applyAssistantDelta(delta: AssistantStreamDelta): void {
+  if (delta.thread_name) return;
+  setState((state) => {
+    const base = state.streamSettled
+      ? { streamText: "", streamReasoning: "" }
+      : { streamText: state.streamText, streamReasoning: state.streamReasoning };
+    return {
+      streamSettled: false,
+      streamText: base.streamText + (delta.text ?? ""),
+      streamReasoning: base.streamReasoning + (delta.reasoning ?? ""),
+    };
   });
 }
 
@@ -118,6 +167,7 @@ const emptyThread = (name: string): RuntimeThread => ({
   action: "",
   exitCode: null,
   isError: false,
+  commands: [],
 });
 
 function updateThread(name: string, patch: Partial<RuntimeThread>) {
@@ -130,6 +180,16 @@ function updateThread(name: string, patch: Partial<RuntimeThread>) {
   }));
 }
 
+/** Append to a thread's log tail, dropping whatever no longer fits the card. */
+function pushThreadCommand(name: string, command: string) {
+  if (!name || !command) return;
+  setState((state) => {
+    const thread = state.threads[name] ?? emptyThread(name);
+    const commands = [...thread.commands, command].slice(-THREAD_COMMAND_TAIL);
+    return { threads: { ...state.threads, [name]: { ...thread, commands } } };
+  });
+}
+
 /**
  * Classify one envelope. Returns true when the canonical snapshot should be
  * re-fetched, because the stream carries whole-message granularity and the
@@ -140,7 +200,15 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
   const event = envelope.event;
   switch (event.type) {
     case "run_started":
-      setState({ running: true, activity: "Run started…", error: null });
+      setState({
+        running: true,
+        activity: "Run started…",
+        error: null,
+        modelError: null,
+        streamText: "",
+        streamReasoning: "",
+        streamSettled: false,
+      });
       pushEvent({
         seq,
         kind: "run",
@@ -149,14 +217,35 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       });
       return true;
     case "run_completed":
-      setState({ running: false, activity: "" });
+      // The run's own answer is the authoritative version of whatever the
+      // stream last held, so it takes over until the snapshot lands.
+      setState({
+        running: false,
+        activity: "",
+        streamText: event.response,
+        streamReasoning: "",
+        streamSettled: true,
+      });
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
       return true;
-    case "run_failed":
-      setState({ running: false, activity: "", error: event.message });
-      pushEvent({ seq, kind: "error", text: event.message, isError: true });
+    case "run_failed": {
+      // The terminal message is a constant; a provider refusal seen earlier in
+      // this run explains the same failure and says something useful.
+      const message = getState().modelError ?? event.message;
+      setState({
+        running: false,
+        activity: "",
+        error: message,
+        streamSettled: true,
+      });
+      pushEvent({ seq, kind: "error", text: message, isError: true });
       return true;
+    }
     case "snapshot_saved":
+      return true;
+    case "transcript_appended":
+      // A message was committed, so the buffers now describe the past.
+      setState({ streamSettled: true });
       return true;
     case "agent":
       return applyAgent(seq, event.event);
@@ -169,6 +258,14 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
   switch (event.type) {
     case "tool_call_started":
       setState({ activity: `Tool: ${event.name}` });
+      // A thread's own calls also feed the log tail on its card in the chat,
+      // which is why they are kept per thread rather than only in the log below.
+      if (event.thread_name) {
+        pushThreadCommand(
+          event.thread_name,
+          `${event.name}: ${event.args_preview}`,
+        );
+      }
       pushEvent({
         seq,
         kind: "tool",
@@ -197,6 +294,9 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         action: event.action,
         exitCode: null,
         isError: false,
+        // A name can be dispatched again, and the previous run's commands are
+        // not this one's.
+        commands: [],
       });
       return false;
     case "thread_finished":
@@ -281,6 +381,10 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
       setState({ error: event.message });
       pushEvent({ seq, kind: "error", text: event.message, isError: true });
       return false;
+    case "model_error":
+      setState({ error: event.message, modelError: event.message });
+      pushEvent({ seq, kind: "error", text: event.message, isError: true });
+      return false;
     default:
       return false;
   }
@@ -298,4 +402,6 @@ export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
+export const useStreamText = () => useStore((s) => s.streamText);
+export const useStreamReasoning = () => useStore((s) => s.streamReasoning);
 export { getState as getRuntimeState };

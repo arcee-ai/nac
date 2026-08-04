@@ -4,21 +4,27 @@ import {
   Icon,
   IconName,
   Input,
-  InputLeading,
   InputSize,
   Loader,
   LoaderSize,
   LoaderVariant,
+  MessageBox,
+  MessageBoxVariant,
   Popover,
   PopoverPlacement,
+  TabButton,
+  TabButtonSize,
 } from "@/app/atoms";
-import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBranches, useSwitchBranch } from "@/app/services/queries";
 import { useRunning } from "@/app/store/runtimeStore";
 
 /** Why the picker will not act right now, or null when it is free to. */
-function blockedReason(running: boolean, dirty: boolean, create: boolean): string | null {
+function blockedReason(
+  running: boolean,
+  dirty: boolean,
+  create: boolean,
+): string | null {
   if (running) return "A run is in flight; wait for it to finish.";
   // A new branch carries uncommitted work along, so only leaving is a problem.
   if (dirty && !create) {
@@ -27,35 +33,56 @@ function blockedReason(running: boolean, dirty: boolean, create: boolean): strin
   return null;
 }
 
+/**
+ * One row of the panel. The label carries no type or colour of its own: at this
+ * size the button already supplies both, and leaving them to it is what dims
+ * the row properly once it is disabled.
+ */
 function Row({
   label,
   icon,
+  active,
   disabled,
   title,
   onClick,
 }: {
   label: React.ReactNode;
   icon: IconName;
+  active?: boolean;
   disabled?: boolean;
   title?: string;
   onClick: () => void;
 }) {
   return (
-    <button
+    <TabButton
       type="button"
-      className={cn(
-        "flex items-center gap-2 w-full p-1 rounded-[4px] text-left btn-ghost",
-        disabled && "opacity-40 cursor-not-allowed",
-      )}
+      size={TabButtonSize.Small}
+      active={active}
       disabled={disabled}
       title={title}
       onClick={onClick}
     >
-      <Icon iconName={icon} size={16} className="shrink-0" />
-      <span className="flex-1 min-w-0 truncate label-micro text-btn-secondary">
-        {label}
-      </span>
-    </button>
+      <Icon iconName={icon} className="shrink-0" />
+      <span className="flex-1 min-w-0 truncate text-left">{label}</span>
+    </TabButton>
+  );
+}
+
+/** A line of panel status, with a spinner while something is in flight. */
+function Status({
+  busy,
+  children,
+}: {
+  busy?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
+      {busy ? (
+        <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
+      ) : null}
+      {children}
+    </div>
   );
 }
 
@@ -92,6 +119,11 @@ export function BranchPicker({
   const exists = (data?.branches ?? []).some((item) => item.name === needle);
   const dirty = data?.dirty ?? false;
 
+  // Neither refusal depends on which branch was clicked, only on what is being
+  // asked of the checkout, so both are settled once for the whole panel.
+  const createReason = blockedReason(running, dirty, true);
+  const switchReason = blockedReason(running, dirty, false);
+
   const act = (name: string, create: boolean) => {
     switchBranch.mutate({ name, create }, { onSuccess: close });
   };
@@ -108,52 +140,19 @@ export function BranchPicker({
       onClose={close}
       // The chip sits in the footer, so the panel has to grow upwards.
       placement={PopoverPlacement.TopRight}
-      size="w-[300px]"
       className="min-w-0"
       content={
         <>
           <Input
             autoFocus
-            inputSize={InputSize.Small}
-            leading={InputLeading.Icon}
-            leadingIconName={IconName.Search}
+            inputSize={InputSize.Medium}
             placeholder="Find or create a branch"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
 
-          {isLoading ? (
-            <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
-              <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
-              Reading branches…
-            </div>
-          ) : null}
-
-          {!isLoading && !error ? (
-            <div className="flex flex-col gap-1 max-h-[240px] overflow-auto [&>*]:shrink-0">
-              {branches.map((item) => {
-                const reason = item.is_current
-                  ? null
-                  : blockedReason(running, dirty, false);
-                return (
-                  <Row
-                    key={item.name}
-                    label={item.name}
-                    icon={item.is_current ? IconName.Check : IconName.Scheme}
-                    disabled={item.is_current || Boolean(reason)}
-                    title={reason ?? undefined}
-                    onClick={() => act(item.name, false)}
-                  />
-                );
-              })}
-              {branches.length === 0 && !needle ? (
-                <div className="p-1 label-micro text-basic-muted">
-                  No local branches.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
+          {/* Directly under the field, because it acts on what was typed there
+              rather than on anything in the list below. */}
           {needle && !exists && !error ? (
             <Row
               label={
@@ -162,27 +161,49 @@ export function BranchPicker({
                 </>
               }
               icon={IconName.Add}
-              disabled={Boolean(blockedReason(running, dirty, true))}
-              title={blockedReason(running, dirty, true) ?? undefined}
+              disabled={Boolean(createReason)}
+              title={createReason ?? undefined}
               onClick={() => act(needle, true)}
             />
           ) : null}
 
-          {switchBranch.isPending ? (
-            <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
-              <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
-              Working…
+          {isLoading ? <Status busy>Reading branches…</Status> : null}
+
+          {!isLoading && !error ? (
+            <div className="flex flex-col gap-1 max-h-[240px] overflow-auto [&>*]:shrink-0">
+              {branches.map((item) => {
+                const reason = item.is_current ? null : switchReason;
+                return (
+                  <Row
+                    key={item.name}
+                    label={item.name}
+                    icon={item.is_current ? IconName.Check : IconName.Scheme}
+                    // The branch you are on is marked by the highlight and
+                    // refused as a destination at the same time.
+                    active={item.is_current}
+                    disabled={item.is_current || Boolean(reason)}
+                    title={reason ?? undefined}
+                    onClick={() => act(item.name, false)}
+                  />
+                );
+              })}
+              {branches.length === 0 && !needle ? (
+                <Status>No local branches.</Status>
+              ) : null}
             </div>
           ) : null}
 
+          {switchBranch.isPending ? <Status busy>Working…</Status> : null}
+
           {failure ? (
-            <div className="p-1 label-micro text-error-primary">{failure}</div>
+            <MessageBox variant={MessageBoxVariant.Error} title={failure} />
           ) : null}
 
           {!failure && dirty && !running ? (
-            <div className="p-1 label-micro text-basic-muted">
-              Uncommitted changes: you can branch off them, but not switch away.
-            </div>
+            <MessageBox
+              variant={MessageBoxVariant.Info}
+              title="Uncommitted changes: you can branch off them, but not switch away."
+            />
           ) : null}
         </>
       }
@@ -195,7 +216,9 @@ export function BranchPicker({
         onClick={() => (open ? close() : setOpen(true))}
       >
         <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate">{branch}</span>
+        <span className="label-micro text-btn-secondary truncate">
+          {branch}
+        </span>
       </button>
     </Popover>
   );

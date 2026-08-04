@@ -372,11 +372,7 @@ impl Drop for SmolVmSession {
 
 fn volume_arg(mount: &MountSpec) -> String {
     if mount.read_only {
-        format!(
-            "{}:{}:ro",
-            mount.host.display(),
-            mount.guest.display()
-        )
+        format!("{}:{}:ro", mount.host.display(), mount.guest.display())
     } else {
         format!("{}:{}", mount.host.display(), mount.guest.display())
     }

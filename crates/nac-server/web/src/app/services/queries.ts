@@ -13,6 +13,7 @@ import type {
   BackendKind,
   BranchList,
   BrowseListing,
+  CommitWorkspaceRequest,
   CreateModelConfigurationRequest,
   CreateSessionRequest,
   ManagedSessionSummary,
@@ -332,6 +333,21 @@ export function useSwitchBranch(id: string) {
       // The checkout moved, so the branch label, the changed files and every
       // cached diff under this session are all stale.
       void client.invalidateQueries({ queryKey: queryKeys.branches(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
+    },
+  });
+}
+
+export function useCommitWorkspace(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CommitWorkspaceRequest) =>
+      api.commitWorkspace(id, payload),
+    onSuccess: () => {
+      // HEAD moved and the tree is clean again, so the changed-file list, every
+      // cached diff and the branch's dirty flag are all stale. They hang off
+      // the session key, which invalidates them as its prefix.
       void client.invalidateQueries({ queryKey: queryKeys.session(id) });
       void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
     },

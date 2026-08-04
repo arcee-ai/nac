@@ -19,7 +19,14 @@ interface SessionLayoutState {
   selectedFile: string | null;
   /** Folders flipped away from their default open state, by path. */
   toggledFolders: ReadonlySet<string>;
+  /**
+   * Whether the Changes panel lists the whole project as a tree or only what
+   * git reports as changed.
+   */
+  fileListing: FileListing;
 }
+
+export type FileListing = "tree" | "changed";
 
 export const sessionLayoutStore = createStore<SessionLayoutState>({
   collapsed: false,
@@ -29,6 +36,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedRevision: null,
   selectedFile: null,
   toggledFolders: new Set(),
+  fileListing: "tree",
 });
 
 const { getState, setState, useStore } = sessionLayoutStore;
@@ -74,6 +82,10 @@ export function toggleFolder(path: string): void {
   });
 }
 
+export function selectFileListing(fileListing: FileListing): void {
+  setState({ fileListing });
+}
+
 /**
  * Revisions, files and folders belong to one session, so carrying them into
  * another would point the panels at something that is not theirs.
@@ -93,3 +105,4 @@ export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);
 export const useToggledFolders = () => useStore((s) => s.toggledFolders);
+export const useFileListing = () => useStore((s) => s.fileListing);

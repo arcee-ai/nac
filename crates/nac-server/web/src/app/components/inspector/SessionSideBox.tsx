@@ -33,8 +33,10 @@ import type {
   WorkspaceSnapshot,
 } from "@/app/types/api";
 
+// The `files` panel is called Changes in the design; its route keeps the older
+// name so links that are already out there still land on it.
 const PANEL_LABEL: Record<SessionPanel, string> = {
-  files: "Files",
+  files: "Changes",
   worksets: "Worksets",
   threads: "Threads",
 };
@@ -138,7 +140,7 @@ export function SessionSideBox({
         <div className="flex items-center gap-2 pb-[2px] shrink-0">
           <Tooltip
             title={expanded ? "Restore split" : "Expand panel"}
-            position={TooltipPosition.BottomRight}
+            position={TooltipPosition.BottomLeft}
           >
             <Button
               size={ButtonSize.Medium}
@@ -156,7 +158,7 @@ export function SessionSideBox({
           </Tooltip>
           {/* Hiding has no meaning once the box covers the screen. */}
           {expanded ? null : (
-            <Tooltip title="Hide panel" position={TooltipPosition.BottomRight}>
+            <Tooltip title="Hide panel" position={TooltipPosition.BottomLeft}>
               <Button
                 size={ButtonSize.Medium}
                 variant={ButtonVariant.Ghost}

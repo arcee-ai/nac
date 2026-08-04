@@ -34,6 +34,11 @@ pub enum Message {
         reasoning_details: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>,
+        /// Wall-clock time the model call behind this message took. Only ever
+        /// read by the UI: every provider mapper drops it, so it never travels
+        /// back out on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
     #[serde(rename = "tool")]
     Tool {
@@ -88,6 +93,7 @@ mod tests {
                     arguments: r#"{"path": "src/main.rs"}"#.to_string(),
                 },
             }]),
+            duration_ms: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(
@@ -127,6 +133,7 @@ mod tests {
                 reasoning_text,
                 reasoning_details,
                 tool_calls,
+                ..
             } => {
                 assert_eq!(content.as_deref(), Some("hello"));
                 assert_eq!(reasoning_text.as_deref(), Some("thinking"));

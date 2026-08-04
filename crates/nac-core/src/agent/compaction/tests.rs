@@ -15,6 +15,7 @@ fn assistant(content: &str) -> Message {
         reasoning_text: None,
         reasoning_details: None,
         tool_calls: None,
+        duration_ms: None,
     }
 }
 

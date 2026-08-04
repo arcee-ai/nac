@@ -6,6 +6,8 @@
 import type {
   BranchList,
   BrowseListing,
+  CommitOutcome,
+  CommitWorkspaceRequest,
   CompactSessionResponse,
   CreateModelConfigurationRequest,
   CreateSessionRequest,
@@ -332,6 +334,11 @@ export const api = {
 
   switchBranch: (id: string, body: SwitchBranchRequest) =>
     request<BranchList>("POST", `${sessionPath(id)}/workspace/branches`, {
+      body,
+    }),
+
+  commitWorkspace: (id: string, body: CommitWorkspaceRequest) =>
+    request<CommitOutcome>("POST", `${sessionPath(id)}/workspace/commit`, {
       body,
     }),
 

@@ -116,6 +116,7 @@ fn plain_assistant(content: &str) -> Message {
         reasoning_text: None,
         reasoning_details: None,
         tool_calls: None,
+        duration_ms: None,
     }
 }
 
@@ -137,6 +138,7 @@ fn tool_call_assistant(call_ids: &[&str]) -> Message {
                 })
                 .collect(),
         ),
+        duration_ms: None,
     }
 }
 

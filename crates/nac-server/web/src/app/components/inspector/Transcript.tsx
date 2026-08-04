@@ -16,7 +16,7 @@ import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { displayPromptFromMessageText } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
-import { buildTranscript } from "@/app/lib/transcript";
+import { buildTranscript, type TranscriptTurn } from "@/app/lib/transcript";
 import {
   selectThread,
   selectWorkset,
@@ -27,6 +27,8 @@ import {
   useLiveThreads,
   useRunError,
   useRunning,
+  useStreamReasoning,
+  useStreamText,
 } from "@/app/store/runtimeStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
@@ -34,6 +36,15 @@ interface TranscriptProps {
   snapshot: SessionSnapshotResponse | null;
   /** Brings the matching side panel forward when the chat points at a row. */
   onFocusPanel: (panel: SessionPanel) => void;
+}
+
+/** Text of the newest user bubble, or null when the chat opens with the model. */
+function lastUserText(turns: TranscriptTurn[]): string | null {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn.kind === "user") return turn.text;
+  }
+  return null;
 }
 
 /**
@@ -45,13 +56,15 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   const activity = useActivity();
   const error = useRunError();
   const liveThreads = useLiveThreads();
+  const streamText = useStreamText();
+  const streamReasoning = useStreamReasoning();
   const selectedThread = useSelectedThread();
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
     useStickToBottom();
 
   const turns = useMemo(
-    () => buildTranscript(snapshot, liveThreads),
-    [snapshot, liveThreads],
+    () => buildTranscript(snapshot, liveThreads, { text: streamText, reasoning: streamReasoning }),
+    [snapshot, liveThreads, streamText, streamReasoning],
   );
 
   const model = snapshot?.metadata.model ?? "";
@@ -65,10 +78,16 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
     : "";
-  const last = turns[turns.length - 1];
-  const showPending = Boolean(
-    pendingText && !(last?.kind === "user" && last.text === pendingText),
-  );
+  // Compared against the last *user* turn rather than the last turn of any
+  // kind: everything the run produces lands after the prompt it answers, so
+  // once that prompt is in the snapshot the copy is a duplicate no matter how
+  // many model turns have piled up on top of it.
+  const showPending = Boolean(pendingText && lastUserText(turns) !== pendingText);
+
+  // Once the run has a model message of its own, that message carries the
+  // liveness — its pill spins and its header names the activity. A standalone
+  // row below would be a second pill for the same run.
+  const liveTurn = running && turns[turns.length - 1]?.kind === "model";
 
   const focusThread = (name: string) => {
     selectThread(name);
@@ -107,6 +126,7 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
                 turn={turn}
                 model={model}
                 active={running && index === turns.length - 1}
+                activity={activity}
                 selectedThread={selectedThread}
                 onSelectThread={focusThread}
                 onSelectWorkset={focusWorkset}
@@ -116,7 +136,7 @@ export function Transcript({ snapshot, onFocusPanel }: TranscriptProps) {
 
           {showPending ? <UserMessage text={pendingText} pending /> : null}
 
-          {running ? (
+          {running && !liveTurn ? (
             <div className="flex items-center gap-3">
               <ModelPill active />
               {activity ? (

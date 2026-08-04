@@ -10,6 +10,12 @@ interface ThreadBoxProps {
 
 const STATE_ORDER: Record<ThreadState, number> = { error: 0, running: 1, done: 2 };
 
+/** Older commands recede rather than compete with the newest one. */
+function tailOpacity(distanceFromNewest: number): string {
+  if (distanceFromNewest === 0) return "";
+  return distanceFromNewest === 1 ? "opacity-30" : "opacity-10";
+}
+
 function StateIcon({ state }: { state: ThreadState }) {
   if (state === "running") {
     return <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />;
@@ -44,7 +50,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
         aria-pressed={selected}
         onClick={() => onSelect(thread.name)}
       >
-        <div className="flex items-center gap-[10px] p-2 w-full">
+        <div className="flex items-center gap-[10px] shrink-0 p-2 w-full">
           <StateIcon state={thread.state} />
           <span
             className={cn(
@@ -59,18 +65,31 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
             {thread.name}
           </span>
         </div>
-        {/* Chrome blockifies `-webkit-box` flex items, so the clamped text
-            needs a plain wrapper to stay clamped. */}
-        <div className="w-full px-2 pb-2">
-          <p
-            className={cn(
-              "line-clamp-2 text-[12px] leading-[16px]",
-              running ? "code text-basic-muted" : "text-basic-tertiary",
-            )}
-          >
-            {thread.detail}
-          </p>
-        </div>
+        {running ? (
+          // The tail is bottom-aligned and clipped at the top, so the newest
+          // command sits still while older ones fade out of the card.
+          <div className="flex flex-col justify-end flex-1 min-h-0 w-full px-2 pb-2 overflow-hidden">
+            {thread.details.map((line, index) => (
+              <p
+                key={`${index}-${line}`}
+                className={cn(
+                  "w-full truncate code text-basic-muted text-[12px] leading-[16px]",
+                  tailOpacity(thread.details.length - 1 - index),
+                )}
+              >
+                {line}
+              </p>
+            ))}
+          </div>
+        ) : (
+          // Chrome blockifies `-webkit-box` flex items, so the clamped text
+          // needs a plain wrapper to stay clamped.
+          <div className="w-full px-2 pb-2">
+            <p className="line-clamp-2 text-[12px] leading-[16px] text-basic-tertiary">
+              {thread.details[0]}
+            </p>
+          </div>
+        )}
       </button>
     </div>
   );

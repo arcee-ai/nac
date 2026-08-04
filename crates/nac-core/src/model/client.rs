@@ -1,3 +1,7 @@
+use super::anthropic_stream::AnthropicStreamFold;
+use super::chat_stream::ChatStreamFold;
+use super::responses_stream::ResponsesStreamFold;
+use super::sse::{read_sse_response, StreamFold};
 use super::*;
 use anyhow::Context;
 
@@ -136,6 +140,30 @@ pub(super) fn no_redirect_model_client() -> Result<Client> {
         .context("failed to build no-redirect model HTTP client")
 }
 
+fn anthropic_headers(
+    request: reqwest::RequestBuilder,
+    api_key: &str,
+    cache_ttl: Option<&'static str>,
+) -> reqwest::RequestBuilder {
+    let request = request
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_VERSION);
+    if cache_ttl == Some("1h") {
+        return request.header("anthropic-beta", "extended-cache-ttl-2025-04-11");
+    }
+    request
+}
+
+async fn read_response_body(
+    response: reqwest::Response,
+) -> std::result::Result<String, ModelHttpError> {
+    let status = response.status();
+    response.text().await.map_err(|error| ModelHttpError {
+        status: Some(status.as_u16()),
+        message: format!("Failed to read response body: {}", error),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     client: Client,
@@ -224,15 +252,32 @@ impl ModelClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ModelTurnResponse> {
+        self.send_turn_streaming(messages, tools, None).await
+    }
+
+    /// Run a turn, handing output to `on_delta` as the provider produces it.
+    ///
+    /// With no sink every backend keeps its plain buffered request: streaming is
+    /// only worth its extra per-chunk parsing when somebody is watching.
+    pub async fn send_turn_streaming(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<ModelTurnResponse> {
         match self.backend {
-            BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools).await,
-            BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools).await,
-            BackendKind::TogetherChat => self.send_together_chat(messages, tools).await,
+            BackendKind::DeepSeekChat => self.send_deepseek_chat(messages, tools, on_delta).await,
+            BackendKind::FireworksChat => self.send_fireworks_chat(messages, tools, on_delta).await,
+            BackendKind::TogetherChat => self.send_together_chat(messages, tools, on_delta).await,
             BackendKind::ArceeAuth | BackendKind::ArceeApi => {
-                self.send_arcee_chat(messages, tools).await
+                self.send_arcee_chat(messages, tools, on_delta).await
             }
-            BackendKind::OpenAiResponses => self.send_openai_responses(messages, tools).await,
-            BackendKind::AnthropicMessages => self.send_anthropic_messages(messages, tools).await,
+            BackendKind::OpenAiResponses => {
+                self.send_openai_responses(messages, tools, on_delta).await
+            }
+            BackendKind::AnthropicMessages => {
+                self.send_anthropic_messages(messages, tools, on_delta).await
+            }
             BackendKind::ChatGptCodexResponses => {
                 chatgpt_codex::send_responses(
                     &self.client,
@@ -241,6 +286,7 @@ impl ModelClient {
                     self.reasoning_effort,
                     messages,
                     tools,
+                    on_delta,
                 )
                 .await
             }
@@ -271,11 +317,12 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
         let request = fireworks_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
-        let value = self.post_json_with_retry(&url, &request).await?;
+        let value = self.post_chat_completions(&url, request, on_delta).await?;
         parse_chat_completions_response(&value, &url)
     }
 
@@ -283,12 +330,37 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
         let request = together_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
-        let value = self.post_json_with_retry(&url, &request).await?;
+        let value = self.post_chat_completions(&url, request, on_delta).await?;
         parse_together_chat_response(&value, &url)
+    }
+
+    /// Send a chat-completions request, streaming it when somebody is watching.
+    /// `include_usage` is what keeps the usage numbers on the streamed path,
+    /// which otherwise omits them entirely.
+    async fn post_chat_completions(
+        &self,
+        url: &str,
+        mut request: Value,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<Value> {
+        if on_delta.is_none() {
+            return self.post_json_with_retry(url, &request).await;
+        }
+        request["stream"] = Value::Bool(true);
+        request["stream_options"] = json!({"include_usage": true});
+        let api_key = self.api_key.as_str();
+        self.post_sse_with_retry_headers(
+            url,
+            &request,
+            |request| request.header("Authorization", format!("Bearer {}", api_key)),
+            ChatStreamFold::new(on_delta),
+        )
+        .await
     }
 
     fn arcee_chat_request(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
@@ -312,17 +384,23 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = arcee::chat_completions_url(&self.base_url)
             .map_err(classify_model_configuration_error)?;
         let request = self.arcee_chat_request(&messages, &tools);
 
         let value = match self.backend {
+            // The stored-login flow needs a token refresh around the request, so
+            // it keeps the buffered path regardless of who is watching.
             BackendKind::ArceeAuth => {
                 self.post_arcee_auth_with_refresh(url.as_str(), &request)
                     .await?
             }
-            _ => self.post_json_with_retry(url.as_str(), &request).await?,
+            _ => {
+                self.post_chat_completions(url.as_str(), request, on_delta)
+                    .await?
+            }
         };
         parse_chat_completions_response(&value, url.as_str())
     }
@@ -331,11 +409,12 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/chat/completions", self.base_url);
         let request = deepseek_chat_request(&self.model, self.reasoning_effort, &messages, &tools);
 
-        let value = self.post_json_with_retry(&url, &request).await?;
+        let value = self.post_chat_completions(&url, request, on_delta).await?;
         parse_chat_completions_response(&value, &url)
     }
 
@@ -343,12 +422,26 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/responses", self.base_url);
-        let request =
+        let mut request =
             openai_responses_request(&self.model, self.reasoning_effort, &messages, &tools);
 
-        let value = self.post_json_with_retry(&url, &request).await?;
+        let value = match on_delta {
+            Some(_) => {
+                request["stream"] = Value::Bool(true);
+                let api_key = self.api_key.as_str();
+                self.post_sse_with_retry_headers(
+                    &url,
+                    &request,
+                    |request| request.header("Authorization", format!("Bearer {}", api_key)),
+                    ResponsesStreamFold::new(on_delta),
+                )
+                .await?
+            }
+            None => self.post_json_with_retry(&url, &request).await?,
+        };
         parse_openai_responses_response(&value, &url)
     }
 
@@ -356,9 +449,10 @@ impl ModelClient {
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-        let request = anthropic_messages_request(
+        let mut request = anthropic_messages_request(
             &self.model,
             self.reasoning_effort,
             &messages,
@@ -366,7 +460,21 @@ impl ModelClient {
             self.cache_ttl,
         )?;
 
-        let value = self.post_anthropic_json_with_retry(&url, &request).await?;
+        let value = match on_delta {
+            Some(_) => {
+                request["stream"] = Value::Bool(true);
+                let api_key = self.api_key.as_str();
+                let cache_ttl = self.cache_ttl;
+                self.post_sse_with_retry_headers(
+                    &url,
+                    &request,
+                    |request| anthropic_headers(request, api_key, cache_ttl),
+                    AnthropicStreamFold::new(on_delta),
+                )
+                .await?
+            }
+            None => self.post_anthropic_json_with_retry(&url, &request).await?,
+        };
         parse_anthropic_messages_response(&value, &url)
     }
 
@@ -415,13 +523,7 @@ impl ModelClient {
         let api_key = self.api_key.as_str();
         let cache_ttl = self.cache_ttl;
         self.post_json_with_retry_headers(url, body, |request| {
-            let mut request = request
-                .header("x-api-key", api_key)
-                .header("anthropic-version", ANTHROPIC_VERSION);
-            if cache_ttl == Some("1h") {
-                request = request.header("anthropic-beta", "extended-cache-ttl-2025-04-11");
-            }
-            request
+            anthropic_headers(request, api_key, cache_ttl)
         })
         .await
     }
@@ -446,6 +548,32 @@ impl ModelClient {
         body: &Value,
         apply_headers: F,
     ) -> std::result::Result<Value, ModelHttpError>
+    where
+        F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+    {
+        let response = self.send_with_retry_headers(url, body, apply_headers).await?;
+        let status = response.status();
+        let body_text = read_response_body(response).await?;
+        serde_json::from_str::<Value>(&body_text).map_err(|e| ModelHttpError {
+            status: Some(status.as_u16()),
+            message: format!(
+                "Failed to parse response from {}: {}\nBody: {}",
+                url,
+                e,
+                truncate_utf8(&body_text, 500)
+            ),
+        })
+    }
+
+    /// Issue the request under the retry policy and hand back the response with
+    /// its body still unread, so a caller can either buffer it or stream it.
+    /// Every non-success outcome is resolved here, including its bounded body.
+    async fn send_with_retry_headers<F>(
+        &self,
+        url: &str,
+        body: &Value,
+        apply_headers: F,
+    ) -> std::result::Result<reqwest::Response, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
@@ -493,10 +621,11 @@ impl ModelClient {
                 .get(reqwest::header::LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let body = response.text().await.map_err(|e| ModelHttpError {
-                status: Some(status.as_u16()),
-                message: format!("Failed to read response body: {}", e),
-            })?;
+            if status.is_success() {
+                return Ok(response);
+            }
+
+            let body = read_response_body(response).await?;
 
             if status.is_redirection() {
                 let location = redirect_location
@@ -511,18 +640,6 @@ impl ModelClient {
                         status.as_u16(),
                         url,
                         location,
-                        truncate_utf8(&body, 500)
-                    ),
-                });
-            }
-
-            if status.is_success() {
-                return serde_json::from_str::<Value>(&body).map_err(|e| ModelHttpError {
-                    status: Some(status.as_u16()),
-                    message: format!(
-                        "Failed to parse response from {}: {}\nBody: {}",
-                        url,
-                        e,
                         truncate_utf8(&body, 500)
                     ),
                 });
@@ -557,6 +674,26 @@ impl ModelClient {
         }
 
         Err(last_error)
+    }
+
+    /// Send a streaming request, folding the event stream back into the response
+    /// value the buffered parsers expect.
+    async fn post_sse_with_retry_headers<F, Fold>(
+        &self,
+        url: &str,
+        body: &Value,
+        apply_headers: F,
+        fold: Fold,
+    ) -> Result<Value>
+    where
+        F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+        Fold: StreamFold,
+    {
+        let response = self
+            .send_with_retry_headers(url, body, apply_headers)
+            .await
+            .map_err(|error| anyhow!(error.message))?;
+        read_sse_response(url, response, fold).await
     }
 
     fn extra_headers_override_content_type(&self) -> bool {
@@ -806,7 +943,7 @@ mod tests {
             };
 
             client
-                .send_arcee_chat(Vec::new(), Vec::new())
+                .send_arcee_chat(Vec::new(), Vec::new(), None)
                 .await
                 .unwrap_or_else(|error| panic!("{configured_path}: {error:#}"));
             let requests = server.finish();
@@ -856,6 +993,7 @@ mod tests {
                         content: "sensitive prompt".to_string(),
                     }],
                     Vec::new(),
+                    None,
                 )
                 .await
                 .expect_err("Arcee inference redirects must not be followed")
@@ -1129,7 +1267,7 @@ mod tests {
         };
 
         let error = client
-            .send_arcee_chat(Vec::new(), Vec::new())
+            .send_arcee_chat(Vec::new(), Vec::new(), None)
             .await
             .expect_err("Host override must fail before the HTTP client runs");
 
@@ -1226,7 +1364,7 @@ mod tests {
         };
 
         let error = client
-            .send_arcee_chat(Vec::new(), Vec::new())
+            .send_arcee_chat(Vec::new(), Vec::new(), None)
             .await
             .expect_err("HTTP 400 should return an error")
             .to_string();

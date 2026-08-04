@@ -1503,6 +1503,10 @@ impl SessionService {
                         .await;
                 }
                 Err(message) => {
+                    // The published event is deliberately reduced to "run
+                    // failed", so the operator's log is the only place the real
+                    // reason can be read.
+                    eprintln!("nac: run failed: {message}");
                     service
                         .finish_run_once(&task_run_id, RunOutcome::Failed(message, usage))
                         .await;
@@ -2319,6 +2323,7 @@ pub(super) mod tests {
                 reasoning_text: Some("reasoning without visible content".to_string()),
                 reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
                 tool_calls: None,
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "older-tool".to_string(),
@@ -2342,6 +2347,7 @@ pub(super) mod tests {
                     thread_call("thread-malformed", r#"{"name":"broken"#),
                     thread_call("thread-empty", r#"{"name":"   "}"#),
                 ]),
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "thread-zeta".to_string(),
@@ -2352,6 +2358,7 @@ pub(super) mod tests {
                 reasoning_text: Some("new reasoning".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
             Message::System {
                 content: "system-three".to_string(),
@@ -2364,6 +2371,7 @@ pub(super) mod tests {
                     "thread-alpha",
                     r#"{"name":"alpha","action":"inside the cycle"}"#,
                 )]),
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "thread-alpha".to_string(),
@@ -2374,6 +2382,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
         ]
     }
@@ -2616,6 +2625,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             },
             Message::User {
                 content: "recent request".to_string(),
@@ -2811,6 +2821,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 },
             ],
         )
@@ -2824,6 +2835,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         });
         let expected_live = page_messages(&expected_live, request);
         let live = parts.service.messages_page(request).await.unwrap();
@@ -3280,6 +3292,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         };
         let cases: Vec<(Vec<crate::store::ThreadSteeringRecord>, Vec<Message>)> = vec![
             (vec![], vec![]),
@@ -3566,6 +3579,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 })
                 .await
                 .unwrap();
@@ -3680,6 +3694,7 @@ pub(super) mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
                     })
                     .await
                     .unwrap();
@@ -3765,6 +3780,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
@@ -3840,10 +3856,7 @@ pub(super) mod tests {
         assert_eq!(loaded.previous_response_duration_ms, Some(999));
         assert_eq!(loaded.token_usages.len(), 2);
         assert!(loaded.token_usages[0].is_none());
-        assert_eq!(
-            loaded.token_usages[1].as_ref().unwrap().input_tokens,
-            10
-        );
+        assert_eq!(loaded.token_usages[1].as_ref().unwrap().input_tokens, 10);
         let blob_json_after: String = crate::store::open_connection(&store_path)
             .unwrap()
             .query_row(
@@ -3910,6 +3923,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 })
                 .await
                 .unwrap();
@@ -4022,6 +4036,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                 })
                 .await
                 .unwrap();
@@ -4310,6 +4325,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
             });
         }
 
@@ -4679,6 +4695,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),

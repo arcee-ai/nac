@@ -126,11 +126,13 @@ export function ChatInputBox({
             el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
           }}
           onKeyDown={(e) => {
-            // Cmd/Ctrl+Enter sends; plain Enter inserts a newline, as in the old UI.
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void submit();
-            }
+            if (e.key !== "Enter") return;
+            // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
+            if (e.shiftKey) return;
+            // Enter also commits an in-flight IME composition, so it must not send.
+            if (e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            void submit();
           }}
         />
         {running ? (
@@ -225,7 +227,9 @@ export function ChatInputBox({
             ) : (
               <Icon iconName={IconName.History} size={16} />
             )}
-            <span>{formatClock(elapsedMs)}</span>
+            <span className="block w-[36px] text-center">
+              {formatClock(elapsedMs)}
+            </span>
           </div>
         </Tooltip>
       </div>

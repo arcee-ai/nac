@@ -87,7 +87,12 @@ pub fn capture(root: &Path, session_id: &str, previous: Option<&str>) -> Result<
 pub fn forget(root: &Path, session_id: &str) -> Result<()> {
     let repo_root = repo_root(root)?;
     let reference = ref_name(session_id);
-    if run_git(&repo_root, &["rev-parse", "--verify", "--quiet", &reference]).is_err() {
+    if run_git(
+        &repo_root,
+        &["rev-parse", "--verify", "--quiet", &reference],
+    )
+    .is_err()
+    {
         return Ok(());
     }
     run_git(&repo_root, &["update-ref", "-d", &reference])
@@ -197,5 +202,7 @@ fn git(repo_root: &Path, args: &[&str], index: Option<&Path>, identity: bool) ->
             .unwrap_or("git reported no details");
         return Err(anyhow!("git {} failed: {}", args[0], message));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }

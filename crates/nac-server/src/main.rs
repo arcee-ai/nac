@@ -75,7 +75,10 @@ enum ArceeAuthCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web upgrade", about = "reinstall the latest nac-web release")]
+#[command(
+    name = "nac-web upgrade",
+    about = "reinstall the latest nac-web release"
+)]
 struct UpgradeCli {
     /// Install directory to replace (default: current nac-web executable directory)
     #[arg(long)]
@@ -485,9 +488,9 @@ fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
     run_upgrade(UpgradeRequest {
         install_dir: cli.install_dir,
-        executable_path: Some(std::env::current_exe().context(
-            "failed to determine nac-web executable path",
-        )?),
+        executable_path: Some(
+            std::env::current_exe().context("failed to determine nac-web executable path")?,
+        ),
         package_version: env!("CARGO_PKG_VERSION").to_string(),
     })
     .await

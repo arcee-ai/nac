@@ -56,6 +56,8 @@ export type Message =
       reasoning_text?: string;
       reasoning_details?: unknown;
       tool_calls?: ToolCall[];
+      /** How long the model call behind this message took. */
+      duration_ms?: number;
     }
   | { role: "tool"; tool_call_id: string; content: string };
 
@@ -85,7 +87,6 @@ export interface SubmittedUserMessageSnapshot {
   run_id: string;
   client_id?: string;
   content: string;
-  baseline_user_message_count?: number;
   submitted_at_epoch_ms: number;
 }
 
@@ -222,6 +223,20 @@ export interface BranchList {
 export interface SwitchBranchRequest {
   name: string;
   create?: boolean;
+}
+
+export interface CommitWorkspaceRequest {
+  message: string;
+}
+
+/** What the commit the user just made turned out to contain. */
+export interface CommitOutcome {
+  sha: string;
+  /** Null on a detached HEAD. */
+  branch: string | null;
+  files_changed: number;
+  additions: number;
+  deletions: number;
 }
 
 /** The checkout as it stood when one run finished. */
@@ -446,6 +461,8 @@ export type AgentEvent =
       usage?: TokenUsage;
     }
   | { type: "error"; thread_name?: string; message: string }
+  /** A refusal from the provider, reported verbatim rather than reduced. */
+  | { type: "model_error"; thread_name?: string; message: string }
   | { type: "run_finished"; thread_name?: string };
 
 export type AgentEventType = AgentEvent["type"];
@@ -461,7 +478,9 @@ export type SessionEvent =
     }
   | { type: "run_completed"; response: string; duration_ms?: number }
   | { type: "run_failed"; message: string }
-  | { type: "snapshot_saved"; session_id: string };
+  | { type: "snapshot_saved"; session_id: string }
+  /** The orchestrator transcript grew: a message was committed to the log. */
+  | { type: "transcript_appended"; transcript_len: number };
 
 export interface SessionEventEnvelope {
   session_id: string | null;
@@ -486,6 +505,17 @@ export interface ReplayGapEvent {
 
 export interface LaggedEvent {
   missed: number;
+}
+
+/**
+ * `nac_core::events::AssistantStreamDelta`, delivered on the `assistant_delta`
+ * SSE event. Unsequenced and never replayed: the assistant message that follows
+ * is the authoritative copy of the same text.
+ */
+export interface AssistantStreamDelta {
+  thread_name: string | null;
+  text?: string;
+  reasoning?: string;
 }
 
 export interface ThreadEventRecord {

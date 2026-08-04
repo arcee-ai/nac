@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { FileIcon, Icon, IconName, Loader, LoaderSize } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  FileIcon,
+  Icon,
+  IconName,
+  Loader,
+  LoaderSize,
+} from "@/app/atoms";
+import { CommitPopover } from "@/app/components/inspector/CommitPopover";
 import {
   PanelEmpty,
   PanelRow,
@@ -30,9 +41,12 @@ import {
 } from "@/app/services/queries";
 import {
   selectFile,
+  selectFileListing,
   toggleFolder,
+  useFileListing,
   useSelectedFile,
   useToggledFolders,
+  type FileListing,
 } from "@/app/store/sessionLayoutStore";
 import type {
   ChangedFileStat,
@@ -132,6 +146,102 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           onClick={() => onSelect(file.path)}
         />
       ))}
+    </div>
+  );
+}
+
+/** Flat list of what git reports as changed, with the folders left out. */
+function ChangedList({
+  files,
+  selected,
+  onSelect,
+}: {
+  files: FileNode[];
+  selected: string | null;
+  onSelect: (path: string) => void;
+}) {
+  if (files.length === 0) {
+    return (
+      <div className="p-1 label-micro text-basic-muted">
+        Nothing has changed here yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-[2px]">
+      {files.map((file) => (
+        <PanelRow
+          key={file.path}
+          label={fileLabel(file.path)}
+          active={selected === file.path}
+          title={file.path}
+          labelClassName={statusLabelClass(file.status)}
+          icon={<FileIcon path={file.path} />}
+          onClick={() => onSelect(file.path)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ListingButton({
+  iconName,
+  label,
+  active,
+  onClick,
+}: {
+  iconName: IconName;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      size={ButtonSize.Small}
+      variant={active ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
+      content={ButtonContent.Icon}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Icon iconName={iconName} />
+    </Button>
+  );
+}
+
+/** The bar above the list: how the files are listed, and the commit action. */
+function ListToolbar({
+  sessionId,
+  listing,
+  changed,
+  revision,
+}: {
+  sessionId: string;
+  listing: FileListing;
+  changed: ChangedFileStat[];
+  revision: number | null;
+}) {
+  return (
+    <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
+      <ListingButton
+        iconName={IconName.Folders}
+        label="Show every file"
+        active={listing === "tree"}
+        onClick={() => selectFileListing("tree")}
+      />
+      <ListingButton
+        iconName={IconName.Scheme}
+        label="Show changed files only"
+        active={listing === "changed"}
+        onClick={() => selectFileListing("changed")}
+      />
+      <CommitPopover
+        sessionId={sessionId}
+        changed={changed}
+        revision={revision}
+      />
     </div>
   );
 }
@@ -464,10 +574,11 @@ function FilePane({
 }
 
 /**
- * Every project file as a folder tree, with the selected one shown beside it:
- * its diff when it has changed, its contents when it has not.
+ * The files of the checkout — either all of them as a folder tree or only what
+ * git reports as changed — with the selected one shown beside the list: its
+ * diff when it has changed, its contents when it has not.
  *
- * With a revision selected the same tree describes the checkout as it stood at
+ * With a revision selected the same lists describe the checkout as it stood at
  * the end of that run, and "changed" means what that run changed.
  */
 export function FilesView({
@@ -484,6 +595,7 @@ export function FilesView({
   // full-screen dialog, and it has to open on the file you were reading.
   const selected = useSelectedFile();
   const toggled = useToggledFolders();
+  const fileListing = useFileListing();
 
   const {
     data: listing,
@@ -514,6 +626,13 @@ export function FilesView({
     [listing, changed],
   );
   const tree = useMemo(() => buildFileTree(nodes), [nodes]);
+  // Taken from the merged nodes rather than from `changed` directly, because an
+  // untracked directory arrives from git as one entry and has to be spread back
+  // over the files inside it.
+  const changedNodes = useMemo(
+    () => nodes.filter((node) => node.status !== null),
+    [nodes],
+  );
 
   // Folders start closed — a whole repository is too much to show at once —
   // except along the paths that lead to a change, which is what the panel is
@@ -558,22 +677,38 @@ export function FilesView({
 
   return (
     <PanelSplit
+      listHeader={
+        <ListToolbar
+          sessionId={sessionId}
+          listing={fileListing}
+          changed={changed}
+          revision={revision}
+        />
+      }
       list={
-        <>
-          <Tree
-            dir={tree}
-            depth={0}
-            open={open}
+        fileListing === "changed" ? (
+          <ChangedList
+            files={changedNodes}
             selected={current}
-            onToggle={toggleFolder}
             onSelect={selectFile}
           />
-          {listing.truncated ? (
-            <div className="p-1 label-micro text-basic-muted">
-              Listing truncated.
-            </div>
-          ) : null}
-        </>
+        ) : (
+          <>
+            <Tree
+              dir={tree}
+              depth={0}
+              open={open}
+              selected={current}
+              onToggle={toggleFolder}
+              onSelect={selectFile}
+            />
+            {listing.truncated ? (
+              <div className="p-1 label-micro text-basic-muted">
+                Listing truncated.
+              </div>
+            ) : null}
+          </>
+        )
       }
     >
       {!current ? (
