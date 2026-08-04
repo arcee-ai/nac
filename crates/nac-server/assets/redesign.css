@@ -493,9 +493,41 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .thread-board {
   min-height: 0;
   flex: 1;
-  padding: 12px;
   overflow: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
 }
+
+.thread-history { display: grid; gap: 12px; padding: 12px 12px 32px; }
+.thread-history > .focus-history-loader { margin: 0; }
+.thread-history-group { min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: #101010; overflow: clip; }
+.thread-history-group[data-state="active"] { border-color: #3e3e3e; }
+.thread-history-group[data-state="attention"] { border-color: var(--danger-border); }
+.thread-history-summary {
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: var(--surface);
+  cursor: pointer;
+  list-style: none;
+}
+.thread-history-summary::-webkit-details-marker { display: none; }
+.thread-history-summary:hover { background: var(--surface-hover); }
+.thread-history-chevron { width: 7px; height: 7px; border-right: 1px solid var(--ink-muted); border-bottom: 1px solid var(--ink-muted); transform: rotate(-45deg); transition: transform 120ms ease; }
+.thread-history-group[open] .thread-history-chevron { transform: rotate(45deg) translate(-1px, -1px); }
+.thread-history-purpose { min-width: 0; display: grid; gap: 4px; }
+.thread-history-purpose strong { overflow: hidden; color: var(--ink); font: var(--fw-semibold) var(--fs-md)/var(--lh-tight) var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.thread-history-purpose small { color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
+.thread-history-progress { color: var(--ink-muted); font: var(--fs-sm)/var(--lh-none) var(--mono); white-space: nowrap; }
+.thread-history-group[data-state="active"] .thread-history-progress { color: var(--paper); }
+.thread-history-group[data-state="attention"] .thread-history-progress { color: var(--danger); }
+.thread-history-body { padding: 10px; border-top: 1px solid var(--line); }
 
 .thread-current-grid {
   display: grid;
@@ -511,13 +543,9 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   grid-auto-rows: 38px;
   align-content: start;
   gap: 6px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #1c1c1c;
 }
 
-.thread-earlier-grid.is-only { margin-top: 0; padding-top: 0; border-top: 0; }
-.thread-board-empty { margin: 18px 2px; color: var(--ink-muted); font: var(--fs-md)/var(--lh-snug) var(--mono); }
+.thread-board-empty { margin: 18px 12px; color: var(--ink-muted); font: var(--fs-md)/var(--lh-snug) var(--mono); }
 
 .thread-tile {
   min-width: 0;
@@ -1130,7 +1158,9 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   .session-layout { height: calc(100dvh - 148px); }
   .overview-rail { display: flex; flex-direction: column; }
   .rail-section { border-right: 0; }
-  .thread-board { padding: 9px; }
+  .thread-history { padding: 9px 9px 24px; }
+  .thread-history-summary { grid-template-columns: 14px minmax(0, 1fr); }
+  .thread-history-progress { grid-column: 2; }
   .thread-current-grid, .thread-earlier-grid { grid-template-columns: 1fr; }
   .focus-workspace-layout { grid-template-columns: 1fr; grid-template-rows: minmax(180px, .35fr) minmax(0, 1fr); }
   .focus-settings-layout { padding: 16px; }

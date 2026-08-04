@@ -44,13 +44,15 @@ function loadApp(overrides = {}) {
       reconcileSessionCompactionSnapshot, noteSessionCompactionEvent,
       clearSessionAttention, buildThreadModels, projectThreadActions, mergeThreadEvidence,
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
-      renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
+      renderThreadEpisodes, renderThreadTile, renderThreads, renderFocusMessage, renderOrchestratorChatRail,
       renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch,
       orchestratorNowEntries, latestThreadActivityEntries, projectNowActivity,
       orchestratorNowPresentation, threadNowPresentation, renderOrchestratorNow, renderThreadNow,
       recordNowPanelViewport, restoreNowPanelViewport,
       renderFocusActions, toolDisplayName, actionIcon, formatActionArgs, isToolAction, isTileVisibleAction,
       formatToolCall, threadDispatchContext, threadDispatchStatus,
+      threadDispatchesFromMessage, threadHistoryGroups, threadGroupProgress, renderThreadGroup,
+      captureThreadGroupExpansion, handleThreadOverviewScroll,
       guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
@@ -2663,6 +2665,86 @@ test("orchestrator chat thread dispatches wait for lifecycle evidence before sho
   assert.match(redesignSource, /\.tool-block-status \{[^}]*display: inline-flex;[^}]*margin-left: auto;/s);
   assert.match(redesignSource, /\.tool-block-status\[data-state="running"\]::before \{[^}]*animation: pending-badge-pulse/s);
   assert.match(redesignSource, /\.tool-block-status\[data-state="failed"\], \.tool-block-status\[data-state="timed-out"\] \{ color: var\(--danger\); \}/);
+});
+
+test("thread overview groups task history by the user request that dispatched it", () => {
+  const sessionId = "thread-history-groups";
+  const dispatch = (id, name) => ({ id, function: { name: "thread",
+    arguments: JSON.stringify({ name, action: `work on ${name}` }) } });
+  const finished = (name) => [
+    { type: "thread_started", name, action: "thread dispatched", source_threads: [] },
+    { type: "thread_finished", name, exit_code: 0, timed_out: false },
+  ];
+  const snapshot = sessionSnapshot(sessionId, {
+    active_threads: ["impl/renderer"],
+    threads: ["legacy/task", "research/katex", "research/mathjax", "impl/renderer"].map((name) => ({ name })),
+    thread_events: {
+      "legacy/task": finished("legacy/task"),
+      "research/katex": finished("research/katex"),
+      "research/mathjax": finished("research/mathjax"),
+      "impl/renderer": [{ type: "thread_started", name: "impl/renderer", action: "thread dispatched", source_threads: [] }],
+    },
+    message_cycle: { marker: "history:2:4", thread_names: ["impl/renderer"] },
+    messages: [
+      { role: "user", content: "Research <safe> math rendering approaches" },
+      { role: "assistant", content: null, tool_calls: [
+        dispatch("call-katex", "research/katex"), dispatch("call-mathjax", "research/mathjax"),
+      ] },
+      { role: "assistant", content: "Research is underway." },
+      { role: "user", content: "Implement the renderer from those findings" },
+      { role: "assistant", content: null, tool_calls: [dispatch("call-renderer", "impl/renderer")] },
+    ],
+  });
+
+  ui.state.currentId = sessionId;
+  ui.state.snapshots.set(sessionId, snapshot);
+  const models = ui.buildThreadModels(snapshot);
+  const groups = ui.threadHistoryGroups(snapshot, models);
+  assert.deepEqual(plain(groups.map((group) => ({
+    purpose: group.purpose, current: group.current, names: group.models.map((model) => model.name),
+  }))), [
+    { purpose: "Earlier task history", current: false, names: ["legacy/task"] },
+    { purpose: "Research <safe> math rendering approaches", current: false,
+      names: ["research/katex", "research/mathjax"] },
+    { purpose: "Implement the renderer from those findings", current: true, names: ["impl/renderer"] },
+  ]);
+  assert.deepEqual(plain(ui.threadGroupProgress(groups[1])), {
+    total: 2, active: 0, attention: 0, finished: 2, label: "2/2 finished", state: "done",
+  });
+  assert.equal(ui.threadGroupProgress(groups[2]).label, "0/1 finished · 1 active");
+
+  installWorkspaceElements(ui);
+  ui.state.currentId = sessionId;
+  ui.state.snapshots.set(sessionId, snapshot);
+  ui.state.messageWindows.set(sessionId, { start: 12, end: 36, total: 60, hasOlder: true, loading: false,
+    messages: snapshot.messages });
+  Object.assign(ui.el.threadGrid, { scrollTop: 0, scrollHeight: 900, clientHeight: 300 });
+  ui.renderThreads(snapshot);
+  const html = ui.el.threadGrid.innerHTML;
+  assert.equal((html.match(/class="thread-history-group"/g) || []).length, 3);
+  assert.match(html, /scroll up for earlier requests/);
+  assert.match(html, /Research &lt;safe&gt; math rendering approaches/);
+  assert.doesNotMatch(html, /Research <safe>/);
+  assert.ok(html.indexOf("Earlier task history") < html.indexOf("Research &lt;safe&gt;"));
+  assert.ok(html.indexOf("Research &lt;safe&gt;") < html.indexOf("Implement the renderer"));
+  assert.match(html, /data-thread-group="dispatch:call-renderer"[^>]* open/);
+  assert.doesNotMatch(html, /data-thread-group="dispatch:call-katex"[^>]* open/);
+  assert.equal(ui.el.threadGrid.scrollTop, 900, "a fresh history opens at the newest request");
+
+  ui.el.threadGrid.querySelectorAll = () => [{ dataset: { threadGroup: "dispatch:call-renderer" }, open: false }];
+  ui.renderThreads(snapshot);
+  assert.doesNotMatch(ui.el.threadGrid.innerHTML, /data-thread-group="dispatch:call-renderer"[^>]* open/,
+    "a manually collapsed current request stays collapsed across live rerenders");
+
+  Object.assign(ui.el.threadGrid, { scrollTop: 240, scrollHeight: 900, clientHeight: 300 });
+  ui.handleThreadOverviewScroll({ target: ui.el.threadGrid, isTrusted: true });
+  assert.deepEqual(plain(ui.state.threadOverviewViewport), {
+    sessionId, pinnedToBottom: false, scrollTop: 240,
+  });
+
+  assert.match(redesignSource, /\.thread-history \{[^}]*display: grid;[^}]*padding: 12px 12px 32px;/s);
+  assert.match(redesignSource, /\.thread-history-summary \{[^}]*grid-template-columns: 14px minmax\(0, 1fr\) auto;/s);
+  assert.match(redesignSource, /\.thread-history-group\[data-state="active"\] \.thread-history-progress \{ color: var\(--paper\); \}/);
 });
 
 test("thread tile ledgers are always exactly ten lines tall", () => {

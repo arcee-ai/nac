@@ -31,6 +31,8 @@ const state = {
   threadEventWindows: new Map(),
   focusRenderId: 0,
   threadCycles: new Map(),
+  threadGroupExpansion: new Map(),
+  threadOverviewViewport: null,
   attentionSessions: new Set(),
   sessionRunActivity: new Map(),
   pendingEchoes: new Map(),
@@ -132,6 +134,7 @@ function bindEvents() {
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
   el.focusContent.addEventListener("submit", handleFocusPanelSubmit);
   el.threadGrid.addEventListener("click", handleThreadClick);
+  el.threadGrid.addEventListener("scroll", handleThreadOverviewScroll, true);
   el.commandComposer.addEventListener("submit", submitComposer);
   el.promptInput.addEventListener("input", handleComposerInput);
   el.promptInput.addEventListener("keydown", handleComposerKeydown);
@@ -1326,7 +1329,9 @@ async function loadOlderOrchestratorMessages(scroller) {
     }
     state.orchestratorPrependAnchor = anchor;
     renderOrchestratorChatRail(snapshot);
-    if (el.orchestratorChatContent && anchor) {
+    if (scroller === el.threadGrid) {
+      renderThreads(snapshot, { prependAnchor: anchor });
+    } else if (el.orchestratorChatContent && anchor) {
       el.orchestratorChatContent.scrollTop = Math.max(0, el.orchestratorChatContent.scrollHeight - anchor.scrollHeight + anchor.scrollTop);
     }
   } catch (error) {
@@ -1335,7 +1340,9 @@ async function loadOlderOrchestratorMessages(scroller) {
     if (loader) {
       loader.classList.remove("is-loading");
       const label = loader.querySelector("span");
-      if (label) label.textContent = "scroll up for earlier messages";
+      if (label) label.textContent = scroller === el.threadGrid
+        ? "scroll up for earlier requests"
+        : "scroll up for earlier messages";
     }
   }
 }
@@ -1419,6 +1426,7 @@ function resetSessionSequenceEpoch(sessionId, boundary = 0, epochId = null) {
   if (epochId) state.eventEpochs.set(sessionId, epochId);
   else state.eventEpochs.delete(sessionId);
   state.threadCycles.delete(sessionId);
+  if (state.threadOverviewViewport?.sessionId === sessionId) state.threadOverviewViewport = null;
   state.attentionSessions.delete(sessionId);
   state.sessionRunActivity.delete(sessionId);
   state.pendingEchoes.delete(sessionId);
@@ -2424,8 +2432,11 @@ function restoreWorkspaceViewScroll(view) {
       } else {
         scroller.scrollTop = saved;
       }
-    } else if (Number.isFinite(saved)) {
-      scroller.scrollTop = saved;
+    } else {
+      const viewport = state.threadOverviewViewport;
+      if (Number.isFinite(saved)) scroller.scrollTop = saved;
+      else if (viewport?.sessionId === state.currentId && !viewport.pinnedToBottom) scroller.scrollTop = viewport.scrollTop;
+      else scroller.scrollTop = scroller.scrollHeight;
     }
   });
 }
@@ -3156,6 +3167,19 @@ function handleOrchestratorChatScroll(event) {
   if (scroller !== el.orchestratorChatContent) return;
   if (event.isTrusted) {
     state.orchestratorViewport = {
+      sessionId: state.currentId,
+      pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
+      scrollTop: scroller.scrollTop,
+    };
+  }
+  if (scroller.scrollTop <= 36) loadOlderOrchestratorMessages(scroller);
+}
+
+function handleThreadOverviewScroll(event) {
+  const scroller = event.target;
+  if (scroller !== el.threadGrid) return;
+  if (event.isTrusted) {
+    state.threadOverviewViewport = {
       sessionId: state.currentId,
       pinnedToBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80,
       scrollTop: scroller.scrollTop,
@@ -4288,16 +4312,158 @@ function steeringRecordAction(record) {
   };
 }
 
-function renderThreads(snapshot) {
+function threadDispatchesFromMessage(message) {
+  if (message?.role !== "assistant" || !Array.isArray(message.tool_calls)) return [];
+  return message.tool_calls.flatMap((call) => {
+    if (call?.function?.name !== "thread") return [];
+    const name = focusToolTarget(focusToolArguments(call), "name");
+    if (!name) return [];
+    const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
+    return [{ name, callId }];
+  });
+}
+
+function threadHistoryGroups(snapshot, models = buildThreadModels(snapshot)) {
+  const modelsByName = new Map(models.map((model) => [model.name, model]));
+  const groups = [];
+  let cycle = null;
+  for (const [messageIndex, message] of (snapshot?.messages || []).entries()) {
+    if (message?.role === "user") {
+      const purpose = compactActionDetail(String(message.content || "Request without text"), 220);
+      cycle = { purpose, messageIndex, dispatches: [] };
+      continue;
+    }
+    const dispatches = threadDispatchesFromMessage(message);
+    if (!dispatches.length) continue;
+    if (!cycle) {
+      cycle = { purpose: "Earlier orchestration activity", messageIndex: -1, dispatches: [] };
+    }
+    if (!groups.includes(cycle)) groups.push(cycle);
+    cycle.dispatches.push(...dispatches);
+  }
+
+  const currentNames = new Set(snapshot?.message_cycle?.thread_names || []);
+  let currentIndex = -1;
+  const assigned = new Set();
+  const projected = groups.map((group, index) => {
+    const names = [];
+    for (const dispatch of group.dispatches) {
+      if (!modelsByName.has(dispatch.name) || names.includes(dispatch.name)) continue;
+      names.push(dispatch.name);
+      assigned.add(dispatch.name);
+    }
+    if (names.some((name) => currentNames.has(name))) currentIndex = index;
+    const firstCallId = group.dispatches.find((dispatch) => dispatch.callId)?.callId;
+    return {
+      key: firstCallId ? `dispatch:${firstCallId}` : `request:${group.messageIndex}:${names[0] || group.purpose}`,
+      purpose: group.purpose,
+      models: names.map((name) => modelsByName.get(name)),
+      current: false,
+      fallback: group.messageIndex < 0,
+    };
+  }).filter((group) => group.models.length);
+
+  if (currentIndex >= 0) {
+    // Empty groups may have been removed above, so locate the matching
+    // projected group by one of the server-provided current thread names.
+    currentIndex = projected.findLastIndex((group) => group.models.some((model) => currentNames.has(model.name)));
+  } else if (!snapshot?.message_cycle && projected.length) {
+    currentIndex = projected.length - 1;
+  }
+  if (currentIndex >= 0) projected[currentIndex].current = true;
+
+  const ungrouped = models.filter((model) => !assigned.has(model.name));
+  if (ungrouped.length) {
+    projected.unshift({
+      key: "earlier-task-history",
+      purpose: "Earlier task history",
+      models: ungrouped,
+      current: false,
+      fallback: true,
+    });
+  }
+  return projected;
+}
+
+function threadGroupProgress(group) {
+  const total = group?.models?.length || 0;
+  let active = 0;
+  let attention = 0;
+  for (const model of group?.models || []) {
+    if (["running", "queued"].includes(model.state)) active += 1;
+    else if (model.latestError || model.finish?.timed_out
+      || /^(failed|timed out)/i.test(String(model.outcome || ""))) attention += 1;
+  }
+  const finished = total - active;
+  const label = active
+    ? `${finished}/${total} finished · ${active} active`
+    : attention
+      ? `${finished}/${total} finished · ${attention} need attention`
+      : `${finished}/${total} finished`;
+  return { total, active, attention, finished, label, state: active ? "active" : attention ? "attention" : "done" };
+}
+
+function threadGroupExpansionState(sessionId = state.currentId) {
+  let expansion = state.threadGroupExpansion.get(sessionId);
+  if (!expansion) {
+    expansion = new Map();
+    state.threadGroupExpansion.set(sessionId, expansion);
+  }
+  return expansion;
+}
+
+function captureThreadGroupExpansion(sessionId = el.threadGrid?.dataset?.threadHistorySession || state.currentId) {
+  if (!sessionId) return;
+  const expansion = threadGroupExpansionState(sessionId);
+  for (const group of el.threadGrid?.querySelectorAll?.("[data-thread-group]") || []) {
+    const key = String(group.dataset?.threadGroup || "");
+    if (key) expansion.set(key, Boolean(group.open));
+  }
+}
+
+function renderThreadGroup(group, expansion) {
+  const progress = threadGroupProgress(group);
+  const explicitlyOpen = expansion.has(group.key) ? expansion.get(group.key) : null;
+  const open = explicitlyOpen === null ? group.current : explicitlyOpen;
+  const context = group.current ? "Current request" : group.fallback ? "Earlier history" : "Earlier request";
+  const tiles = group.models.map((model) => renderThreadTile({
+    ...model,
+    compact: !group.current || !["running", "queued"].includes(model.state),
+  })).join("");
+  const gridClass = group.current ? "thread-current-grid" : "thread-earlier-grid";
+  return `<details class="thread-history-group" data-thread-group="${escapeAttr(group.key)}" data-state="${escapeAttr(progress.state)}"${open ? " open" : ""}><summary class="thread-history-summary"><span class="thread-history-chevron" aria-hidden="true"></span><span class="thread-history-purpose"><strong title="${escapeAttr(group.purpose)}">${escapeHtml(group.purpose)}</strong><small>${escapeHtml(context)} · ${progress.total} task${progress.total === 1 ? "" : "s"}</small></span><span class="thread-history-progress">${escapeHtml(progress.label)}</span></summary><div class="thread-history-body"><div class="${gridClass}">${tiles}</div></div></details>`;
+}
+
+function renderThreads(snapshot, { prependAnchor = null } = {}) {
   const activeControl = captureFocusTarget(document.activeElement);
+  captureThreadGroupExpansion();
   const models = buildThreadModels(snapshot);
   if (state.targetedThread && !models.some((thread) => thread.name === state.targetedThread && ["running", "queued"].includes(thread.state))) state.targetedThread = null;
-  const current = models.filter((thread) => !thread.compact);
-  const earlier = models.filter((thread) => thread.compact);
-  const currentGrid = current.length ? `<div class="thread-current-grid">${current.map(renderThreadTile).join("")}</div>` : "";
-  const earlierGrid = earlier.length ? `<div class="thread-earlier-grid ${current.length ? "" : "is-only"}">${earlier.map(renderThreadTile).join("")}</div>` : "";
+  const groups = threadHistoryGroups(snapshot, models);
+  const expansion = threadGroupExpansionState();
+  const messageWindow = state.messageWindows.get(state.currentId);
+  const historyLoader = messageWindow?.hasOlder
+    ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier requests…" : "scroll up for earlier requests"}</span></div>`
+    : "";
   const empty = models.length ? "" : `<p class="thread-board-empty">No threads yet.</p>`;
-  el.threadGrid.innerHTML = currentGrid + earlierGrid + empty;
+  el.threadGrid.innerHTML = `<div class="thread-history">${historyLoader}${groups.map((group) => renderThreadGroup(group, expansion)).join("")}${empty}</div>`;
+  const sessionId = state.currentId;
+  if (el.threadGrid.dataset) el.threadGrid.dataset.threadHistorySession = sessionId || "";
+  const viewport = state.threadOverviewViewport;
+  requestAnimationFrame(() => {
+    if (state.currentId !== sessionId || !el.threadGrid) return;
+    if (prependAnchor?.sessionId === sessionId) {
+      el.threadGrid.scrollTop = Math.max(0, el.threadGrid.scrollHeight - prependAnchor.scrollHeight + prependAnchor.scrollTop);
+    } else if (!viewport || viewport.sessionId !== sessionId || viewport.pinnedToBottom) {
+      el.threadGrid.scrollTop = el.threadGrid.scrollHeight;
+    } else {
+      el.threadGrid.scrollTop = viewport.scrollTop;
+    }
+    if (Number(el.threadGrid.clientHeight || 0) > 0
+      && orchestratorHistoryNeedsFill(el.threadGrid, messageWindow)) {
+      loadOlderOrchestratorMessages(el.threadGrid);
+    }
+  });
   renderComposerTarget();
   scheduleActiveControlRestoration(activeControl);
 }
