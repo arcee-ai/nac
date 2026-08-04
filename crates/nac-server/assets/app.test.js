@@ -53,7 +53,9 @@ function loadApp(overrides = {}) {
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
-      renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
+      renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot,
+      loadTranscriptMessages, acceptTranscriptPage, scheduleTranscriptRefresh,
+      loadOlderOrchestratorMessages,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
       notePendingEcho, displayPromptFromMessage, pendingEchoCoveredByCanonical,
       reconcilePendingEcho, effectivePendingMessages,
@@ -488,20 +490,23 @@ scenario("SSE", "replay-gap compaction reconciliation retries a snapshot invalid
   assert.equal(isolated.state.snapshots.get(sessionId).active_compaction, null);
 });
 
-scenario("SSE", "transcript_appended schedules a debounced refetch that renders mid-run messages", async () => {
+scenario("SSE", "transcript_appended refreshes only the paged transcript", async () => {
   const { FakeEventSource, instances } = eventSourceHarness();
   const requests = [];
   const timers = [];
   const isolated = loadApp({ EventSource: FakeEventSource,
     fetch: async (path) => { requests.push(path);
-      return jsonResponse(sessionSnapshot("live-session", {
+      return jsonResponse({
         messages: [{ role: "user", content: "prompt" }, { role: "assistant", content: "mid-run answer" }],
-        active_run: { run_id: "run-live", started_at_epoch_ms: 1 },
-      })); },
+        page: { start: 0, end: 2, total: 2, has_older: false },
+      }); },
     window: { setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
       clearTimeout() {}, }, });
   const sessionId = "live-session";
   isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, sessionSnapshot(sessionId, {
+    active_run: { run_id: "run-live", started_at_epoch_ms: 1 },
+  }));
   isolated.connectEventStream(sessionId);
   const source = instances[0];
   source.emit("replay_boundary", { replay_boundary_sequence_id: 1 });
@@ -509,21 +514,49 @@ scenario("SSE", "transcript_appended schedules a debounced refetch that renders 
   source.emit("session_event", { session_id: sessionId, sequence_id: 1,
     event: { type: "transcript_appended", transcript_len: 2 } });
   assert.equal(timers.filter(({ delay }) => delay === 120).length, 0);
-  // The live signal schedules the debounced snapshot refetch.
+  // The live signal schedules the debounced transcript refetch.
   source.emit("session_event", { session_id: sessionId, sequence_id: 2,
     event: { type: "transcript_appended", transcript_len: 3 } });
-  const snapshotTimers = timers.filter(({ delay }) => delay === 120);
-  assert.equal(snapshotTimers.length, 1, "transcript_appended reuses the 120ms snapshot debounce");
-  snapshotTimers[0].callback();
-  const refreshDrain = isolated.state.snapshotRefreshCoordinators.get(sessionId)?.promise;
+  const transcriptTimers = timers.filter(({ delay }) => delay === 120);
+  assert.equal(transcriptTimers.length, 1, "transcript_appended uses the 120ms transcript debounce");
+  transcriptTimers[0].callback();
+  const refreshDrain = isolated.state.transcriptRefreshCoordinators.get(sessionId)?.promise;
   assert.ok(refreshDrain);
   await refreshDrain;
-  assert.ok(requests.some((path) => path.startsWith(`/sessions/${sessionId}?`)),
-    "the live signal refetches the store-backed snapshot");
+  assert.deepEqual(requests, [`/sessions/${sessionId}/messages?limit=24`]);
   assert.deepEqual(
     plain(isolated.state.snapshots.get(sessionId).messages.map((message) => message.role)),
     ["user", "assistant"],
-    "mid-run messages from the refetched snapshot are the live transcript");
+    "mid-run messages from the lightweight page are the live transcript");
+  assert.equal(isolated.state.snapshots.get(sessionId).active_run.run_id, "run-live",
+    "transcript refresh preserves structural snapshot state");
+});
+
+scenario("SSE", "structural events supersede a pending transcript-only refresh", () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const cleared = [];
+  let nextTimer = 0;
+  const isolated = loadApp({ EventSource: FakeEventSource,
+    window: {
+      setTimeout() { nextTimer += 1; return nextTimer; },
+      clearTimeout(timer) { cleared.push(timer); },
+    }, });
+  const sessionId = "structural-session";
+  isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, sessionSnapshot(sessionId));
+  isolated.connectEventStream(sessionId);
+  const source = instances[0];
+  source.emit("replay_boundary", { replay_boundary_sequence_id: 1 });
+  source.emit("session_event", { session_id: sessionId, sequence_id: 2,
+    event: { type: "transcript_appended", transcript_len: 2 } });
+  const transcriptTimer = isolated.state.transcriptTimers.get(sessionId);
+  assert.ok(transcriptTimer);
+  source.emit("session_event", { session_id: sessionId, sequence_id: 3,
+    event: { type: "snapshot_saved" } });
+  assert.equal(isolated.state.transcriptTimers.has(sessionId), false);
+  assert.equal(isolated.state.snapshotTimers.has(sessionId), true);
+  assert.deepEqual(cleared, [transcriptTimer],
+    "the authoritative snapshot cancels the weaker pending transcript request");
 });
 
 scenario("SSE", "initial replay hydrates chronology without replaying stale run-attention side effects", () => {
@@ -1189,6 +1222,52 @@ test("snapshot refreshes coalesce bursts, carry dirty state through trailing req
   assert.equal(isolated.el.sessionNavStatus.textContent, "Session refreshed", "queued announce intent reaches the final accepted request");
   assert.equal(isolated.state.snapshotRefreshCoordinators.has("snapshot-session"), false);
   assert.deepEqual(requests, Array(3).fill("/sessions/snapshot-session?message_limit=24&thread_event_limit=50&include_sessions=false"));
+});
+
+test("transcript refreshes coalesce bursts and preserve structural snapshot state", async () => {
+  const first = deferred();
+  const trailing = deferred();
+  const pending = [first, trailing];
+  const requests = [];
+  const isolated = loadApp({
+    fetch(path) {
+      requests.push(path);
+      return pending.shift().promise;
+    },
+  });
+  const sessionId = "transcript-coordinator";
+  isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, sessionSnapshot(sessionId, {
+    active_run: { run_id: "run-1", started_at_epoch_ms: 1 },
+    messages: [{ role: "user", content: "old" }],
+  }));
+
+  const initialLoad = isolated.loadTranscriptMessages(sessionId);
+  const queuedLoad = isolated.loadTranscriptMessages(sessionId);
+  assert.equal(initialLoad, queuedLoad);
+  assert.equal(requests.length, 1, "a burst during the active page GET queues one trailing GET");
+
+  first.resolve(jsonResponse({
+    messages: [{ role: "assistant", content: "stale" }],
+    page: { start: 0, end: 1, total: 1, has_older: false },
+  }));
+  await flushPromises();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(requests.length, 2);
+  assert.equal(isolated.state.snapshots.get(sessionId).messages[0].content, "old",
+    "the invalidated transcript response is not accepted");
+
+  trailing.resolve(jsonResponse({
+    messages: [{ role: "user", content: "old" }, { role: "assistant", content: "fresh" }],
+    page: { start: 0, end: 2, total: 2, has_older: false },
+  }));
+  const [initialResult, queuedResult] = await Promise.all([initialLoad, queuedLoad]);
+  assert.equal(initialResult.messages[1].content, "fresh");
+  assert.equal(queuedResult.messages[1].content, "fresh");
+  assert.equal(initialResult.active_run.run_id, "run-1");
+  assert.equal(isolated.state.transcriptRefreshCoordinators.has(sessionId), false);
+  assert.deepEqual(requests, Array(2).fill(`/sessions/${sessionId}/messages?limit=24`));
 });
 
 test("a failed invalidated snapshot GET yields to its successful trailing refresh while terminal errors remain visible", async () => {

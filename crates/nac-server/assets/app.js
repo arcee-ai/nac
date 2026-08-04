@@ -16,6 +16,8 @@ const state = {
   sessionReorder: null,
   snapshotTimers: new Map(),
   snapshotRefreshCoordinators: new Map(),
+  transcriptTimers: new Map(),
+  transcriptRefreshCoordinators: new Map(),
   sessionListRefreshCoordinator: null,
   statsLoadedAt: 0,
   statusTimer: null,
@@ -1123,6 +1125,66 @@ function acceptSnapshot(sessionId, snapshot, { announce = false, compactionFence
   return snapshot;
 }
 
+function loadTranscriptMessages(sessionId) {
+  if (!sessionId) return Promise.resolve(null);
+  if (!state.snapshots.has(sessionId)) return loadSnapshot(sessionId, false);
+  const existing = state.transcriptRefreshCoordinators.get(sessionId);
+  if (existing) {
+    existing.invalidation += 1;
+    existing.dirty = true;
+    return existing.promise;
+  }
+
+  const coordinator = {
+    invalidation: 1,
+    dirty: true,
+    promise: null,
+  };
+  state.transcriptRefreshCoordinators.set(sessionId, coordinator);
+  coordinator.promise = drainTranscriptRefreshes(sessionId, coordinator);
+  return coordinator.promise;
+}
+
+async function drainTranscriptRefreshes(sessionId, coordinator) {
+  let accepted = null;
+  try {
+    while (coordinator.dirty) {
+      coordinator.dirty = false;
+      const requestInvalidation = coordinator.invalidation;
+      const currentIdAtRequest = state.currentId;
+      try {
+        const response = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/messages?limit=${ORCHESTRATOR_MESSAGE_PAGE_LIMIT}`);
+        if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
+        accepted = acceptTranscriptPage(sessionId, response);
+      } catch (error) {
+        if (coordinator.invalidation !== requestInvalidation || state.currentId !== currentIdAtRequest) continue;
+        if (state.currentId === sessionId) showToast(error.message, true);
+        accepted = null;
+      }
+    }
+    return accepted;
+  } finally {
+    if (state.transcriptRefreshCoordinators.get(sessionId) === coordinator) {
+      state.transcriptRefreshCoordinators.delete(sessionId);
+    }
+  }
+}
+
+function acceptTranscriptPage(sessionId, response) {
+  const current = state.snapshots.get(sessionId);
+  if (!current) return null;
+  const snapshot = {
+    ...current,
+    messages: response?.messages || [],
+    message_page: response?.page || null,
+  };
+  mergeSnapshotMessageWindow(sessionId, snapshot);
+  reconcilePendingEcho(sessionId, snapshot);
+  state.snapshots.set(sessionId, snapshot);
+  if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
+  return snapshot;
+}
+
 function mergeSnapshotMessageWindow(sessionId, snapshot) {
   const page = snapshot?.message_page;
   const incoming = snapshot?.messages || [];
@@ -1534,7 +1596,11 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
     const historical = observationFloor === null || envelope.sequence_id <= observationFloor;
     if (!recordSessionEnvelope(sessionId, envelope, { historical })) return;
     if (state.currentId === sessionId) scheduleWorkspaceRender(sessionId);
-    if (!historical && eventNeedsSnapshot(envelope)) scheduleSnapshot(sessionId);
+    if (!historical && envelope.event?.type === "transcript_appended") {
+      scheduleTranscriptRefresh(sessionId);
+    } else if (!historical && eventNeedsSnapshot(envelope)) {
+      scheduleSnapshot(sessionId);
+    }
     if (!historical && ["run_started", "run_completed", "run_failed"].includes(envelope.event?.type)) {
       renderPicker();
       loadSessions({ workspaceStats: false });
@@ -1563,9 +1629,7 @@ function connectEventStream(sessionId, { replayFromBeginning = false } = {}) {
 
 function eventNeedsSnapshot(envelope) {
   const type = envelope.event?.type;
-  // transcript_appended is the live mid-run signal: a commit point just made
-  // new orchestrator messages visible in the store-backed transcript.
-  if (["run_started", "run_completed", "run_failed", "snapshot_saved", "transcript_appended"].includes(type)) return true;
+  if (["run_started", "run_completed", "run_failed", "snapshot_saved"].includes(type)) return true;
   const agent = agentEvent(envelope);
   if (agent?.reason === "manual"
       && (agent.type === COMPACTION_STARTED_EVENT_TYPE || COMPACTION_TERMINAL_EVENT_TYPES.has(agent.type))) return true;
@@ -1574,13 +1638,38 @@ function eventNeedsSnapshot(envelope) {
 }
 
 function scheduleSnapshot(sessionId) {
+  const transcriptTimer = state.transcriptTimers.get(sessionId);
+  if (transcriptTimer != null) {
+    window.clearTimeout(transcriptTimer);
+    state.transcriptTimers.delete(sessionId);
+  }
   const existing = state.snapshotTimers.get(sessionId);
   if (existing != null) window.clearTimeout(existing);
   const timer = window.setTimeout(() => {
     state.snapshotTimers.delete(sessionId);
-    loadSnapshot(sessionId, false);
+    const transcriptRefresh = state.transcriptRefreshCoordinators.get(sessionId);
+    if (transcriptRefresh) {
+      transcriptRefresh.promise.finally(() => loadSnapshot(sessionId, false));
+    } else {
+      loadSnapshot(sessionId, false);
+    }
   }, 120);
   state.snapshotTimers.set(sessionId, timer);
+}
+
+function scheduleTranscriptRefresh(sessionId) {
+  if (state.snapshotTimers.has(sessionId)) return;
+  const existing = state.transcriptTimers.get(sessionId);
+  if (existing != null) window.clearTimeout(existing);
+  const timer = window.setTimeout(() => {
+    state.transcriptTimers.delete(sessionId);
+    if (state.snapshotRefreshCoordinators.has(sessionId)) {
+      loadSnapshot(sessionId, false);
+    } else {
+      loadTranscriptMessages(sessionId);
+    }
+  }, 120);
+  state.transcriptTimers.set(sessionId, timer);
 }
 
 function agentEvent(envelope) { return envelope?.event?.type === "agent" ? envelope.event.event : null; }
