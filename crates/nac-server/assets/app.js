@@ -1059,8 +1059,26 @@ function showPicker(updateHash = true) {
   });
 }
 
+function cancelTranscriptRefresh(sessionId) {
+  const timer = state.transcriptTimers.get(sessionId);
+  if (timer != null) {
+    window.clearTimeout(timer);
+    state.transcriptTimers.delete(sessionId);
+  }
+  const coordinator = state.transcriptRefreshCoordinators.get(sessionId);
+  if (!coordinator) return;
+  // Authoritative snapshots supersede transcript pages: discard the in-flight
+  // request and do not schedule a trailing /messages retry.
+  coordinator.invalidation += 1;
+  coordinator.dirty = false;
+}
+
 function loadSnapshot(sessionId, announce = false) {
   if (!sessionId) return Promise.resolve(null);
+  // Full snapshots and transcript pages are mutually exclusive. Invalidate any
+  // in-flight /messages refresh so a slower response cannot overwrite newer
+  // messages after this authoritative snapshot is accepted.
+  cancelTranscriptRefresh(sessionId);
   const existing = state.snapshotRefreshCoordinators.get(sessionId);
   if (existing) {
     existing.invalidation += 1;
@@ -1638,6 +1656,8 @@ function eventNeedsSnapshot(envelope) {
 }
 
 function scheduleSnapshot(sessionId) {
+  // Pending transcript timers are cancelled inside loadSnapshot; clear early so
+  // scheduleTranscriptRefresh cannot race the debounce window.
   const transcriptTimer = state.transcriptTimers.get(sessionId);
   if (transcriptTimer != null) {
     window.clearTimeout(transcriptTimer);
@@ -1647,12 +1667,7 @@ function scheduleSnapshot(sessionId) {
   if (existing != null) window.clearTimeout(existing);
   const timer = window.setTimeout(() => {
     state.snapshotTimers.delete(sessionId);
-    const transcriptRefresh = state.transcriptRefreshCoordinators.get(sessionId);
-    if (transcriptRefresh) {
-      transcriptRefresh.promise.finally(() => loadSnapshot(sessionId, false));
-    } else {
-      loadSnapshot(sessionId, false);
-    }
+    loadSnapshot(sessionId, false);
   }, 120);
   state.snapshotTimers.set(sessionId, timer);
 }
