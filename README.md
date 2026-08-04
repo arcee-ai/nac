@@ -45,7 +45,7 @@ Run the web dashboard from the project you want to work in:
 nac-web
 ```
 
-It confirms the current working directory as the project folder (`Y` to accept, `n` to type another path), then listens on `http://127.0.0.1:3210` and opens that URL in your browser. Pass `-C /path/to/project` to skip the prompt, or `-y` to accept cwd non-interactively. The dashboard is a React app whose build output is committed under `crates/nac-server/assets/dist` and embedded in the binary, so a release never needs Node. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once.
+It confirms the current working directory as the project folder (`Y` to accept, `n` to type another path), then listens on `http://127.0.0.1:3210` and opens that URL in your browser. Pass `-C /path/to/project` to skip the prompt, or `-y` to accept cwd non-interactively. Pass `-p 4321` or `--port 4321` to choose a custom loopback port in the range `1..=65535`; use `--bind` instead to specify a full IPv4 or IPv6 loopback address. `--port` and `--bind` cannot be combined. The dashboard is a React app whose build output is committed under `crates/nac-server/assets/dist` and embedded in the binary, so a release never needs Node. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once.
 
 Server and session lifecycle:
 
