@@ -742,6 +742,7 @@ test("orchestrator Now exposes a nearby live-response checkbox", () => {
   const panel = indexSource.slice(start, indexSource.indexOf("</section>", start));
   assert.match(panel, /<input id="liveThreadUpdates" type="checkbox" checked>/);
   assert.match(panel, /Respond live/);
+  assert.match(panel, /In either mode, you can steer the orchestrator while threads are working\./);
   assert.ok(panel.indexOf('id="liveThreadUpdates"') < panel.indexOf('id="orchestratorNowState"'),
     "the control sits beside the Now state rather than in distant settings");
   assert.match(redesignSource, /\.thread-update-control \{[^}]*display: inline-flex;/s);
