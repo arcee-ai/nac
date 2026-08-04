@@ -46,6 +46,7 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `GET /sessions/{session_id}/threads/{thread_name}/events`
 - `GET /sessions/{session_id}/config`
 - `PATCH /sessions/{session_id}/config`
+- `POST /sessions/{session_id}/fork`
 - `POST /sessions/{session_id}/compact`
 - `POST /sessions/{session_id}/runs`
 - `PUT /sessions/{session_id}/thread-updates`
@@ -59,7 +60,77 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 
 Snapshot messages can be bounded with `message_limit`; only then does snapshot `include_system=true` affect the selected page and add `message_page`/`message_cycle`. `GET .../messages` pages backward with `before` and `limit` (and accepts `include_system`), while thread events page with `before_id` and `limit` and return `next_before_id`. Persisted snapshot and initial thread-event-page baselines carry `thread_event_boundary: {epoch_id, sequence_id}`; merge only later envelopes from the same epoch. SSE first reports `{epoch_id, replay_boundary_sequence_id}` and supports sequence replay within that epoch. Finite responses may be gzip-compressed; SSE is never compressed.
 
-The store schema is version 3 and upgrades forward. Back up each store before upgrading; v3 stores must not be opened with older binaries or downgraded. Do not use mixed-version writers against one store. Parent binaries and custom worker executables must use matching releases; mixed versions are unsupported because the required `--dispatch-id` worker protocol is version-coupled. Operational tool telemetry is intentionally lossy: full tool arguments, tool results, and log/error text are omitted or sanitized before persistence and streaming. The deliberate exception is `key_arg_preview`: each tool call persists and streams a short (roughly 120-character) human-readable snippet of its key argument — the path for file tools, the command for `exec_command`, the input for `write_stdin` — so the dashboard can show what a call is doing. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view. `/assets/app.css` is a compatibility alias for `/assets/redesign.css`.
+### Store schema, pinned snapshot, and rollback
+
+The store schema is version 4. This release can migrate schema versions 0 through 3 forward, but schema compatibility is one-way: a v4 store must not be opened with an older binary or downgraded, and mixed-version writers against one store are unsupported. Parent binaries and custom worker executables must use matching releases because the required `--dispatch-id` worker protocol is also version-coupled.
+
+Before mutating the schema of an existing store whose version differs from the current version, NAC uses SQLite's online backup API to capture committed database and WAL contents at:
+
+```text
+<store-parent>/backups/pinned/pre-branching.db
+<store-parent>/backups/pinned/pre-branching.sha256
+```
+
+This pair is create-once: NAC validates an existing snapshot with `PRAGMA integrity_check` and verifies its SHA-256 sidecar, but never overwrites it. A missing, incomplete, corrupt, or hash-mismatched pair blocks migration. Both files contain sensitive store data and are owner-only on Unix. `scripts/backup-nac-store.sh` creates separate rotating `backups/store-*.db` copies; its retention cleanup does not remove `backups/pinned/`.
+
+To validate or restore the pinned database, first stop `nac-web` and every other writer. Set `store` to the actual active store path (for example `.nac/store.db` or `~/.config/nac/store.db`), then run:
+
+```sh
+store=/path/to/store.db
+snapshot="$(dirname "$store")/backups/pinned/pre-branching.db"
+sidecar="$(dirname "$store")/backups/pinned/pre-branching.sha256"
+
+sqlite3 "$snapshot" 'PRAGMA integrity_check;'
+expected=$(tr -d '[:space:]' < "$sidecar")
+if command -v shasum >/dev/null 2>&1; then
+  actual=$(shasum -a 256 "$snapshot" | awk '{print $1}')
+else
+  actual=$(sha256sum "$snapshot" | awk '{print $1}')
+fi
+[ "$actual" = "$expected" ] || { echo "snapshot SHA-256 mismatch" >&2; exit 1; }
+
+mv "$store" "$store.before-restore"
+rm -f "$store-wal" "$store-shm"
+cp "$snapshot" "$store"
+chmod 600 "$store"
+```
+
+`integrity_check` must print `ok`, and the hash comparison must succeed before restoring. The snapshot retains its pre-migration schema version: after rollback, use a binary compatible with that version if the goal is to remain rolled back. Starting the current binary will validate the pinned pair and migrate the restored store forward again.
+
+### Forking sessions
+
+The dashboard shows a subtle interstitial **fork** control exactly between an eligible persisted, completed assistant output and the immediately following persisted user message. There is no public CLI fork command. The HTTP equivalent is:
+
+```http
+POST /sessions/{session_id}/fork
+Content-Type: application/json
+
+{"title":"Alternative approach","through_message_index":12}
+```
+
+The JSON body is required. `title` is optional and follows the normal title validation rules. `through_message_index` is required and must be the **zero-based raw canonical index of the preceding assistant message**; use `message_page.canonical_indices` rather than a filtered display position. The message at the next canonical index must be a user message, and the selected assistant prefix must be protocol-complete (for example, it cannot leave tool calls awaiting results). The child copies the canonical transcript through the selected assistant and excludes the following user message. Missing or empty bodies, missing indices, out-of-range indices, other selected roles, trailing assistants, non-user successors, and incomplete tool-call boundaries are rejected.
+
+A successful request returns `201 Created`. Its top level is the immediately usable child session snapshot (the same projection used by the dashboard), with additive lineage metadata. An abridged response is:
+
+```json
+{
+  "metadata": { "session_id": "fork-…" },
+  "fork": {
+    "source_session_id": "source-session-id",
+    "copied_message_count": 13,
+    "source_message_count": 20,
+    "created_at": "2026-08-04T18:00:00Z"
+  }
+}
+```
+
+The source must be idle: an active run or compaction, or a conflicting cross-process operation lease, returns `409 Conflict`. Invalid titles or boundaries return `400 Bad Request`, and a missing source returns `404 Not Found`. Rejected requests do not create a child.
+
+A fork copies the selected canonical conversation prefix plus the source working directory and durable execution configuration (model/backend, endpoint, reasoning, sandbox and mounts, credential environment-variable selector, extra headers, and compaction threshold). It does **not** copy worker/thread state, events, steering, checkpoints, worksets, metrics, response timing/token history, presentation pin/order, or active operations; those begin empty or reset, and a title is set only when requested. Subsequent source and child conversation state is independent.
+
+Forking is not a filesystem or Git branch. The child uses the same working directory and copied sandbox/mount configuration, so source and child can observe and modify the same files, Git working tree, and repository state. Coordinate concurrent work or create a separate worktree yourself. Forking also duplicates sensitive conversation content and may duplicate sensitive persisted configuration such as extra headers and credential selectors; protect, export, and delete the child as carefully as the source.
+
+Operational tool telemetry is intentionally lossy: full tool arguments, tool results, and log/error text are omitted or sanitized before persistence and streaming. The deliberate exception is `key_arg_preview`: each tool call persists and streams a short (roughly 120-character) human-readable snippet of its key argument — the path for file tools, the command for `exec_command`, the input for `write_stdin` — so the dashboard can show what a call is doing. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view. `/assets/app.css` is a compatibility alias for `/assets/redesign.css`.
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): open the web dashboard to list and select existing sessions, or use the `GET /sessions` and `GET /sessions/{session_id}` API endpoints to inspect a specific session. Worker thread history does not auto-compact.
 
