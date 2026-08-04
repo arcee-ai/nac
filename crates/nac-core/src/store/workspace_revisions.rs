@@ -20,6 +20,12 @@ pub struct WorkspaceRevisionRecord {
     pub deletions: u64,
     pub changed_files: u64,
     pub created_at: String,
+    /// How many transcript messages the session had when this revision was
+    /// taken — the link that lets a revert ask "what did the checkout look
+    /// like at this point in the conversation". `None` on rows written before
+    /// the column existed.
+    #[serde(default)]
+    pub transcript_len: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +38,7 @@ pub struct NewWorkspaceRevision {
     pub additions: u64,
     pub deletions: u64,
     pub changed_files: u64,
+    pub transcript_len: Option<u64>,
 }
 
 pub fn append_workspace_revision(
@@ -48,8 +55,8 @@ pub fn append_workspace_revision(
     conn.execute(
         "INSERT INTO workspace_revisions
          (session_id, run_id, commit_sha, base_sha, branch, label,
-          additions, deletions, changed_files, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          additions, deletions, changed_files, created_at, transcript_len)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             session_id,
             revision.run_id,
@@ -61,6 +68,7 @@ pub fn append_workspace_revision(
             revision.deletions,
             revision.changed_files,
             created_at,
+            revision.transcript_len,
         ],
     )?;
 
@@ -76,6 +84,7 @@ pub fn append_workspace_revision(
         deletions: revision.deletions,
         changed_files: revision.changed_files,
         created_at,
+        transcript_len: revision.transcript_len,
     })
 }
 
@@ -87,7 +96,7 @@ pub fn list_workspace_revisions(
     let conn = open_runtime_connection(path)?;
     let mut statement = conn.prepare(
         "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
-                additions, deletions, changed_files, created_at
+                additions, deletions, changed_files, created_at, transcript_len
          FROM workspace_revisions
          WHERE session_id = ?1
          ORDER BY id DESC",
@@ -105,7 +114,7 @@ pub fn read_workspace_revision(
     Ok(conn
         .query_row(
             "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
-                    additions, deletions, changed_files, created_at
+                    additions, deletions, changed_files, created_at, transcript_len
              FROM workspace_revisions
              WHERE session_id = ?1 AND id = ?2",
             params![session_id, id],
@@ -122,7 +131,7 @@ pub fn latest_workspace_revision(
     Ok(conn
         .query_row(
             "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
-                    additions, deletions, changed_files, created_at
+                    additions, deletions, changed_files, created_at, transcript_len
              FROM workspace_revisions
              WHERE session_id = ?1
              ORDER BY id DESC
@@ -131,6 +140,49 @@ pub fn latest_workspace_revision(
             decode_row,
         )
         .optional()?)
+}
+
+/// The newest revision that describes a transcript no longer than
+/// `transcript_len` — the checkout as it stood at that point in the
+/// conversation. Rows without a recorded length predate the link and are
+/// skipped rather than guessed at.
+pub fn workspace_revision_at_transcript_len(
+    path: &Path,
+    session_id: &str,
+    transcript_len: u64,
+) -> Result<Option<WorkspaceRevisionRecord>> {
+    let conn = open_runtime_connection(path)?;
+    Ok(conn
+        .query_row(
+            "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
+                    additions, deletions, changed_files, created_at, transcript_len
+             FROM workspace_revisions
+             WHERE session_id = ?1
+               AND transcript_len IS NOT NULL
+               AND transcript_len <= ?2
+             ORDER BY id DESC
+             LIMIT 1",
+            params![session_id, transcript_len],
+            decode_row,
+        )
+        .optional()?)
+}
+
+/// Forget every revision newer than `keep_through_id`, or all of them when it
+/// is `None`. A revert rewinds the checkout, so the revisions taken after that
+/// point no longer describe anything the session can reach.
+pub fn delete_workspace_revisions_after(
+    path: &Path,
+    session_id: &str,
+    keep_through_id: Option<i64>,
+) -> Result<usize> {
+    let conn = open_runtime_connection(path)?;
+    let deleted = conn.execute(
+        "DELETE FROM workspace_revisions
+         WHERE session_id = ?1 AND id > ?2",
+        params![session_id, keep_through_id.unwrap_or(0)],
+    )?;
+    Ok(deleted)
 }
 
 fn decode_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRevisionRecord> {
@@ -146,5 +198,6 @@ fn decode_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRevisionReco
         deletions: row.get(8)?,
         changed_files: row.get(9)?,
         created_at: row.get(10)?,
+        transcript_len: row.get(11)?,
     })
 }

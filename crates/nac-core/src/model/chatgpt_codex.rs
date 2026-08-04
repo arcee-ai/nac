@@ -7,11 +7,16 @@ use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use url::form_urlencoded;
 use uuid::Uuid;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -19,6 +24,7 @@ const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/devicea
 const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const DEVICE_VERIFICATION_URL: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
+const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const ORIGINATOR: &str = "nac";
@@ -26,6 +32,12 @@ const AUTH_TYPE: &str = "chatgpt-codex";
 const DEFAULT_EXPIRES_IN_SECS: u64 = 3600;
 const REFRESH_SKEW_MS: u64 = 60_000;
 const DEVICE_TIMEOUT_SECS: u64 = 15 * 60;
+
+/// The only loopback address OpenAI will redirect this client back to, so the
+/// port cannot be chosen freely and a second login cannot run alongside a first.
+const LOOPBACK_ADDR: &str = "127.0.0.1:1455";
+const LOOPBACK_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+const LOOPBACK_TIMEOUT_SECS: u64 = 10 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredCodexAuth {
@@ -141,38 +153,180 @@ pub(super) fn preflight_stored_auth() -> Result<()> {
     read_auth_file().map(|_| ())
 }
 
-pub async fn codex_auth_login() -> Result<()> {
+/// A Codex device login that has been issued a code and is waiting for the
+/// user to approve it.
+pub(super) struct CodexDeviceLogin {
+    client: Client,
+    device: DeviceCode,
+}
+
+impl CodexDeviceLogin {
+    pub(super) fn prompt(&self) -> DeviceLoginPrompt {
+        DeviceLoginPrompt {
+            // Codex serves one verification page for everyone and expects the
+            // code to be typed into it, so the URL carries no code of its own.
+            verification_uri: DEVICE_VERIFICATION_URL.to_string(),
+            user_code: Some(self.device.user_code.clone()),
+            expires_in_secs: DEVICE_TIMEOUT_SECS,
+        }
+    }
+
+    pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
+        let code = poll_device_code(&self.client, &self.device).await?;
+        let tokens = exchange_authorization_code(&self.client, &code, DEVICE_REDIRECT_URI).await?;
+        store_tokens(tokens)
+    }
+}
+
+pub(super) async fn begin_codex_device_login() -> Result<CodexDeviceLogin> {
     let client = Client::new();
     let device = request_device_code(&client).await?;
+    Ok(CodexDeviceLogin { client, device })
+}
+
+/// A Codex login waiting for the browser to be sent back to this machine.
+///
+/// Nothing has to be read off the screen or typed: the authorization arrives on
+/// the loopback port as a redirect. The cost is that the browser has to be able
+/// to reach that port, which only holds when it runs on the same machine.
+pub(super) struct CodexLoopbackLogin {
+    client: Client,
+    listener: TcpListener,
+    /// Proves this process started the authorization it is redeeming.
+    verifier: String,
+    /// Ties the redirect that arrives back to the one that was requested.
+    state: String,
+}
+
+impl CodexLoopbackLogin {
+    pub(super) fn prompt(&self) -> DeviceLoginPrompt {
+        let challenge = pkce_challenge(&self.verifier);
+        let query = form_urlencoded::Serializer::new(String::new())
+            .append_pair("response_type", "code")
+            .append_pair("client_id", CLIENT_ID)
+            .append_pair("redirect_uri", LOOPBACK_REDIRECT_URI)
+            .append_pair("scope", "openid profile email offline_access")
+            .append_pair("code_challenge", &challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("id_token_add_organizations", "true")
+            .append_pair("codex_cli_simplified_flow", "true")
+            .append_pair("state", &self.state)
+            .finish();
+
+        DeviceLoginPrompt {
+            verification_uri: format!("{AUTHORIZE_URL}?{query}"),
+            // The whole point of this flow is that there is no code to confirm.
+            user_code: None,
+            expires_in_secs: LOOPBACK_TIMEOUT_SECS,
+        }
+    }
+
+    pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
+        let (code, mut stream) = wait_for_loopback_redirect(&self.listener, &self.state).await?;
+        // The browser is held until the tokens are actually in hand, so the tab
+        // never claims success for a sign-in that then failed.
+        let exchanged = exchange_authorization_code(
+            &self.client,
+            &AuthorizationCode {
+                code,
+                verifier: self.verifier,
+            },
+            LOOPBACK_REDIRECT_URI,
+        )
+        .await;
+        let page = match &exchanged {
+            Ok(_) => LOOPBACK_DONE_PAGE,
+            Err(_) => LOOPBACK_FAILED_PAGE,
+        };
+        write_loopback_response(&mut stream, StatusCode::OK, page).await;
+        store_tokens(exchanged?)
+    }
+}
+
+/// Claims the loopback port before the browser is sent anywhere, so a port that
+/// is already taken fails now rather than after the user has approved.
+pub(super) async fn begin_codex_loopback_login() -> Result<CodexLoopbackLogin> {
+    let listener = TcpListener::bind(LOOPBACK_ADDR).await.map_err(|error| {
+        anyhow!("could not listen on {LOOPBACK_ADDR} for the Codex sign-in redirect: {error}")
+    })?;
+    Ok(CodexLoopbackLogin {
+        client: Client::new(),
+        listener,
+        verifier: random_url_safe_token(),
+        state: random_url_safe_token(),
+    })
+}
+
+fn store_tokens(tokens: TokenResponse) -> Result<ManagedAuthSnapshot> {
+    let auth = auth_from_token_response(tokens, None)?;
+    with_auth_lock(|| write_auth_file(&auth))?;
+    Ok(snapshot_from_stored(Some(auth), auth_file_path()?))
+}
+
+pub(super) fn codex_auth_snapshot() -> Result<ManagedAuthSnapshot> {
+    let path = auth_file_path()?;
+    Ok(snapshot_from_stored(
+        read_auth_file_optional_for_status()?,
+        path,
+    ))
+}
+
+fn snapshot_from_stored(auth: Option<StoredCodexAuth>, path: PathBuf) -> ManagedAuthSnapshot {
+    ManagedAuthSnapshot {
+        provider: ManagedAuthProvider::Codex,
+        signed_in: auth.is_some(),
+        account: auth.as_ref().map(|auth| auth.account_id.clone()),
+        organization: None,
+        // Codex only ever talks to its own origin, so there is nothing per-login
+        // to report here the way there is for Arcee.
+        base_url: None,
+        expires_at_ms: auth.as_ref().map(|auth| auth.expires_at_ms),
+        path: path.display().to_string(),
+    }
+}
+
+pub(super) fn codex_auth_remove() -> Result<bool> {
+    let path = auth_file_path()?;
+    with_auth_lock(|| {
+        if auth_path_is_symlink(&path)? {
+            return remove_auth_path(&path);
+        }
+        remove_codex_auth_file_for_logout(&path)
+    })
+}
+
+/// Signs in from the terminal, which always uses the device flow.
+///
+/// The redirect flow would need the browser to reach a port on this machine,
+/// and a terminal cannot tell whether it has one: over SSH the port binds
+/// perfectly well and the redirect still lands on the wrong computer. The
+/// served UI has a way to know, and uses it there.
+pub async fn codex_auth_login() -> Result<()> {
+    let login = begin_codex_device_login().await?;
+    let prompt = login.prompt();
 
     println!("Open this URL in a browser:");
-    println!("{DEVICE_VERIFICATION_URL}");
-    println!();
-    println!("Enter this code:");
-    println!("{}", device.user_code);
+    println!("{}", prompt.verification_uri);
+    if let Some(code) = &prompt.user_code {
+        println!();
+        println!("Enter this code:");
+        println!("{code}");
+    }
     println!();
     println!("Waiting for authorization...");
 
-    let code = poll_device_code(&client, &device).await?;
-    let tokens = exchange_authorization_code(&client, &code).await?;
-    let auth = auth_from_token_response(tokens, None)?;
-    with_auth_lock(|| write_auth_file(&auth))?;
+    let snapshot = login.complete().await?;
 
     println!("Codex auth saved.");
-    println!("account: {}", auth.account_id);
-    println!("path: {}", auth_file_path()?.display());
+    println!("account: {}", snapshot.account.unwrap_or_default());
+    println!("path: {}", snapshot.path);
 
     Ok(())
 }
 
 pub fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
-    let removed = with_auth_lock(|| {
-        if auth_path_is_symlink(&path)? {
-            return remove_auth_path(&path);
-        }
-        remove_codex_auth_file_for_logout(&path)
-    })?;
+    let removed = codex_auth_remove()?;
 
     if removed {
         println!("Codex auth removed.");
@@ -236,20 +390,18 @@ fn remove_auth_path(path: &Path) -> Result<bool> {
 }
 
 pub fn codex_auth_status() -> Result<()> {
-    let path = auth_file_path()?;
-    let auth = read_auth_file_optional_for_status()?;
-    match auth {
-        Some(auth) => {
-            println!("Codex auth: signed in");
-            println!("account: {}", auth.account_id);
-            println!("expires: {}", expiry_status(auth.expires_at_ms));
-            println!("path: {}", path.display());
-        }
-        None => {
-            println!("Codex auth: not signed in");
-            println!("path: {}", path.display());
-        }
+    let snapshot = codex_auth_snapshot()?;
+    if snapshot.signed_in {
+        println!("Codex auth: signed in");
+        println!("account: {}", snapshot.account.unwrap_or_default());
+        println!(
+            "expires: {}",
+            expiry_status(snapshot.expires_at_ms.unwrap_or_default())
+        );
+    } else {
+        println!("Codex auth: not signed in");
     }
+    println!("path: {}", snapshot.path);
     Ok(())
 }
 
@@ -324,6 +476,143 @@ async fn request_device_code(client: &Client) -> Result<DeviceCode> {
     })
 }
 
+/// What the browser is left looking at once the sign-in has been settled.
+const LOOPBACK_DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signed in</title></head><body style=\"font-family:system-ui;padding:3rem;text-align:center\"><h1>Signed in to Codex</h1><p>You can close this tab and return to nac.</p></body></html>";
+const LOOPBACK_FAILED_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign-in failed</title></head><body style=\"font-family:system-ui;padding:3rem;text-align:center\"><h1>Codex sign-in failed</h1><p>Return to nac for the reason.</p></body></html>";
+
+/// Waits for the browser to come back to the loopback port with an
+/// authorization, handing back the connection it arrived on so the caller can
+/// answer once it knows whether the sign-in actually worked.
+///
+/// Anything else that connects — a port probe, a favicon request, a stale tab —
+/// is turned away and then ignored, because the redirect that matters may still
+/// be on its way.
+async fn wait_for_loopback_redirect(
+    listener: &TcpListener,
+    state: &str,
+) -> Result<(String, TcpStream)> {
+    let wait = async {
+        loop {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .context("failed to accept the Codex sign-in redirect")?;
+            let Some(target) = read_request_target(&mut stream).await else {
+                continue;
+            };
+            match authorization_from_target(&target, state) {
+                Some(Ok(code)) => return Ok((code, stream)),
+                Some(Err(error)) => {
+                    write_loopback_response(&mut stream, StatusCode::OK, LOOPBACK_FAILED_PAGE)
+                        .await;
+                    return Err(error);
+                }
+                None => {
+                    write_loopback_response(&mut stream, StatusCode::NOT_FOUND, "").await;
+                }
+            }
+        }
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(LOOPBACK_TIMEOUT_SECS), wait)
+        .await
+        .unwrap_or_else(|_| Err(anyhow!("timed out waiting for the Codex sign-in to finish")))
+}
+
+/// The authorization carried by a redirect, or `None` when this request was not
+/// the redirect at all.
+fn authorization_from_target(target: &str, state: &str) -> Option<Result<String>> {
+    // The request line carries only a path, which `Url` will not parse alone.
+    let url = Url::parse(&format!("http://localhost{target}")).ok()?;
+    if url.path() != "/auth/callback" {
+        return None;
+    }
+
+    let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    if let Some(error) = query.get("error") {
+        let description = query
+            .get("error_description")
+            .map(String::as_str)
+            .unwrap_or("no description given");
+        return Some(Err(anyhow!(
+            "Codex refused the sign-in: {error} ({description})"
+        )));
+    }
+    if query.get("state").map(String::as_str) != Some(state) {
+        // Someone else's redirect, or a replay of an older one.
+        return Some(Err(anyhow!(
+            "the Codex sign-in came back with a state that does not match the request"
+        )));
+    }
+    match query.get("code") {
+        Some(code) => Some(Ok(code.clone())),
+        None => Some(Err(anyhow!(
+            "the Codex sign-in came back without an authorization code"
+        ))),
+    }
+}
+
+/// Reads the target out of the request line, which is all that is needed; the
+/// headers and body that follow are left unread and discarded with the socket.
+async fn read_request_target(stream: &mut TcpStream) -> Option<String> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while line.len() < 8192 {
+        match stream.read(&mut byte).await {
+            Ok(0) | Err(_) => return None,
+            Ok(_) => {}
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        if byte[0] != b'\r' {
+            line.push(byte[0]);
+        }
+    }
+    let line = String::from_utf8(line).ok()?;
+    line.split(' ').nth(1).map(str::to_string)
+}
+
+async fn write_loopback_response(stream: &mut TcpStream, status: StatusCode, body: &str) {
+    let reason = status.canonical_reason().unwrap_or("");
+    let response = format!(
+        "HTTP/1.1 {} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        status.as_u16(),
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.flush().await;
+}
+
+/// A PKCE verifier, also used for the `state` value, which has the same job of
+/// being unguessable and is subject to the same URL-safety constraint.
+fn random_url_safe_token() -> String {
+    base64_url_encode(&rand::random::<[u8; 32]>())
+}
+
+fn pkce_challenge(verifier: &str) -> String {
+    base64_url_encode(&Sha256::digest(verifier.as_bytes()))
+}
+
+/// Unpadded base64url, the only encoding PKCE accepts. The decoding half lives
+/// further down, next to the id-token reader that needs it.
+fn base64_url_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let mut bits = 0u32;
+        for (index, byte) in chunk.iter().enumerate() {
+            bits |= u32::from(*byte) << (16 - 8 * index);
+        }
+        // Three bytes make four characters; a short chunk drops the characters
+        // that would carry no bits rather than padding them out.
+        for index in 0..chunk.len() + 1 {
+            out.push(ALPHABET[((bits >> (18 - 6 * index)) & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
 async fn poll_device_code(client: &Client, device: &DeviceCode) -> Result<AuthorizationCode> {
     let started = now_ms();
     loop {
@@ -385,9 +674,13 @@ async fn poll_device_code(client: &Client, device: &DeviceCode) -> Result<Author
     }
 }
 
+/// The redirect URI has to match the one the authorization was issued for, and
+/// the two flows do not share it: the device flow lands on OpenAI's own
+/// callback, the loopback flow on this machine.
 async fn exchange_authorization_code(
     client: &Client,
     code: &AuthorizationCode,
+    redirect_uri: &str,
 ) -> Result<TokenResponse> {
     let response = client
         .post(TOKEN_URL)
@@ -395,7 +688,7 @@ async fn exchange_authorization_code(
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code.code.as_str()),
-            ("redirect_uri", DEVICE_REDIRECT_URI),
+            ("redirect_uri", redirect_uri),
             ("client_id", CLIENT_ID),
             ("code_verifier", code.verifier.as_str()),
         ])
@@ -445,6 +738,13 @@ async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
         return Ok(auth);
     }
     refresh_and_store_auth(client, auth).await
+}
+
+/// Bearer token and account id for a read-only call to the Codex API, renewed
+/// first when the stored one is close to expiring.
+pub(super) async fn stored_auth_for_request(client: &Client) -> Result<(String, String)> {
+    let auth = fresh_auth(client).await?;
+    Ok((auth.access, auth.account_id))
 }
 
 async fn force_refresh_auth(client: &Client) -> Result<StoredCodexAuth> {

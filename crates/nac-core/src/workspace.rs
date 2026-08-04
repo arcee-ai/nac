@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 mod revisions;
 
-pub use revisions::{capture, forget, RevisionCapture};
+pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Branch {

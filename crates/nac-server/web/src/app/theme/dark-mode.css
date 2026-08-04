@@ -76,15 +76,15 @@
   --color-bg-divider-muted: var(--white-trans-25);
 
   /* Background / Elevation */
-  --color-bg-elevation-ground: var(--gray-950);
+  --color-bg-elevation-ground: var(--gray-975);
   --color-bg-elevation-ground-transparent: var(--transparent-dark-mode);
 
   --color-bg-elevation-ground-inverse: var(--white);
 
-  --color-bg-elevation-level-0-5: var(--gray-900);
-  --color-bg-elevation-level-1: var(--gray-850);
-  --color-bg-elevation-level-2: var(--gray-800);
-  --color-bg-elevation-level-3: var(--gray-750);
+  --color-bg-elevation-level-0-5: var(--gray-950);
+  --color-bg-elevation-level-1: var(--gray-900);
+  --color-bg-elevation-level-2: var(--gray-850);
+  --color-bg-elevation-level-3: var(--gray-800);
 
   --color-bg-elevation-sublevel-variant-A: var(--white-trans-25);
   --color-bg-elevation-sublevel-variant-B: var(--white-trans-50);
@@ -205,6 +205,16 @@
   --color-fill-btn-ghost-pressed: var(--white);
   --color-fill-btn-ghost-disabled: var(--white-trans-300);
 
+  --color-fill-btn-secondary-highlighted: var(--white);
+  --color-fill-btn-secondary-highlighted-hovered: var(--white);
+  --color-fill-btn-secondary-highlighted-pressed: var(--white);
+  --color-fill-btn-secondary-highlighted-disabled: var(--white-trans-300);
+
+  --color-fill-btn-ghost-highlighted: var(--white);
+  --color-fill-btn-ghost-highlighted-hovered: var(--white);
+  --color-fill-btn-ghost-highlighted-pressed: var(--white);
+  --color-fill-btn-ghost-highlighted-disabled: var(--white-trans-300);
+
   --color-fill-btn-destructive: var(--red-300);
   --color-fill-btn-destructive-hovered: var(--red-200);
   --color-fill-btn-destructive-pressed: var(--red-100);
@@ -233,6 +243,9 @@
   --color-fill-secondary-inversed: var(--white-trans-600);
   --color-fill-tertiary-inversed: var(--white-trans-500);
   --color-fill-muted-inversed: var(--white-trans-300);
+
+  /* fill / Notification */
+  --color-fill-notification: var(--white);
 
   /* fill / Success */
   --color-fill-success-primary: var(--green-300);
@@ -275,6 +288,16 @@
   --color-text-btn-ghost-pressed: var(--white);
   --color-text-btn-ghost-disabled: var(--white-trans-300);
 
+  --color-text-btn-secondary-highlighted: var(--white);
+  --color-text-btn-secondary-highlighted-hovered: var(--white);
+  --color-text-btn-secondary-highlighted-pressed: var(--white);
+  --color-text-btn-secondary-highlighted-disabled: var(--white-trans-300);
+
+  --color-text-btn-ghost-highlighted: var(--white);
+  --color-text-btn-ghost-highlighted-hovered: var(--white);
+  --color-text-btn-ghost-highlighted-pressed: var(--white);
+  --color-text-btn-ghost-highlighted-disabled: var(--white-trans-300);
+
   --color-text-btn-destructive: var(--red-300);
   --color-text-btn-destructive-hovered: var(--red-200);
   --color-text-btn-destructive-pressed: var(--red-100);
@@ -309,6 +332,10 @@
   --color-text-secondary-inverse: var(--dark-trans-700);
   --color-text-tertiary-inverse: var(--dark-trans-600);
   --color-text-muted-inverse: var(--dark-trans-400);
+
+  /* Text / Notification. A toast sits on a saturated surface in both themes,
+     so its label does not follow the mode the way the rest of the text does. */
+  --color-text-notification: var(--white);
 
   /* Text / Success */
   --color-text-success-primary: var(--green-300);

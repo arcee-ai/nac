@@ -7,9 +7,11 @@
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
 import {
-  THREAD_COMMAND_TAIL,
-  type RuntimeThread,
-} from "@/app/store/runtimeStore";
+  mergeThreadLog,
+  persistedThreadLog,
+  type ThreadLogLine,
+} from "@/app/lib/threadLog";
+import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   SessionSnapshotResponse,
@@ -26,17 +28,22 @@ export interface TranscriptThread {
   name: string;
   /** What the orchestrator asked the thread to do. */
   action: string;
-  /**
-   * Reported result once the thread is done, or the tail of the commands it has
-   * issued while it still runs — oldest first, so the newest reads at the
-   * bottom of the card.
-   */
-  details: string[];
+  /** What the thread reported once it was done, or its action before then. */
+  summary: string;
+  /** Commands the thread has issued, oldest first, for the tail on its card. */
+  log: ThreadLogLine[];
   state: ThreadState;
 }
 
 export type TranscriptBlock =
-  | { kind: "thoughts"; key: string; text: string; durationMs: number | null }
+  | {
+      kind: "thoughts";
+      key: string;
+      text: string;
+      durationMs: number | null;
+      /** The model is producing this reasoning right now. */
+      streaming: boolean;
+    }
   | { kind: "text"; key: string; text: string }
   | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
@@ -46,6 +53,10 @@ export interface UserTurn {
   kind: "user";
   key: string;
   text: string;
+  /** Raw snapshot index, which is what a revert addresses the turn by. */
+  messageIndex: number;
+  /** When the message entered the transcript log, if the backend knows. */
+  createdAt: string | null;
 }
 
 export interface ModelTurn {
@@ -79,22 +90,6 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/**
- * Newest commands the thread reported, oldest first. Read from the persisted
- * events, which is what a reload has to fall back on; while the stream is
- * connected the store keeps a fresher copy of the same thing.
- */
-function commandTail(events: AgentEvent[] | undefined, limit: number): string[] {
-  const tail: string[] = [];
-  for (let i = (events?.length ?? 0) - 1; i >= 0 && tail.length < limit; i -= 1) {
-    const event = events?.[i];
-    if (event?.type === "tool_call_started") {
-      tail.push(`${event.name}: ${event.args_preview}`);
-    }
-  }
-  return tail.reverse();
-}
-
 interface BuildContext {
   results: Map<string, string>;
   liveThreads: Record<string, RuntimeThread>;
@@ -114,19 +109,19 @@ function describeThread(call: ToolCall, ctx: BuildContext): TranscriptThread {
       ? "done"
       : "running";
 
-  let details: string[];
-  if (state === "running") {
-    const tail = live?.commands.length
-      ? live.commands
-      : commandTail(ctx.threadEvents[name], THREAD_COMMAND_TAIL);
-    // Before the first command there is nothing to tail, so the card keeps
-    // showing what the thread was asked to do.
-    details = tail.length ? tail : [action];
-  } else {
-    details = [result || action];
-  }
-
-  return { callId: call.id, name, action, details, state };
+  return {
+    callId: call.id,
+    name,
+    action,
+    summary: result || action,
+    // The persisted events are what a reload falls back on, and the stream is
+    // what carries the commands issued since the last snapshot.
+    log: mergeThreadLog(
+      persistedThreadLog(ctx.threadEvents[name]),
+      live?.log ?? [],
+    ),
+    state,
+  };
 }
 
 /**
@@ -141,6 +136,25 @@ function lastBlockText(
     if (block.kind === kind) return block.text;
   }
   return null;
+}
+
+/**
+ * Position of the next block of a kind within its turn.
+ *
+ * Blocks are keyed by this rather than by the message they came out of, so the
+ * block a run is streaming and the block the snapshot commits for it end up
+ * with the same key. React then updates that block in place instead of
+ * replacing it, which is what lets an expanded reasoning badge stay open
+ * across the commit.
+ */
+function nextOrdinal(
+  blocks: TranscriptBlock[],
+  kind: TranscriptBlock["kind"],
+): number {
+  return blocks.reduce(
+    (total, block) => (block.kind === kind ? total + 1 : total),
+    0,
+  );
 }
 
 /**
@@ -161,21 +175,35 @@ function appendStreamedOutput(
   let turn = turns[turns.length - 1];
   if (turn?.kind !== "model") {
     // The run answers with output before its first message is persisted, so the
-    // turn it belongs to may not exist yet.
-    turn = { kind: "model", key: "model-stream", blocks: [], durationMs: null };
+    // turn it belongs to may not exist yet. It is keyed as the model turn it is
+    // about to become, so committing the message does not remount it.
+    const ordinal = turns.filter((entry) => entry.kind === "model").length;
+    turn = {
+      kind: "model",
+      key: `model-${ordinal}`,
+      blocks: [],
+      durationMs: null,
+    };
     turns.push(turn);
   }
 
   if (reasoning && !lastBlockText(turn.blocks, "thoughts")?.includes(reasoning)) {
     turn.blocks.push({
       kind: "thoughts",
-      key: "thoughts-stream",
+      key: `thoughts-${nextOrdinal(turn.blocks, "thoughts")}`,
       text: reasoning,
       durationMs: null,
+      // Prose arriving means the model has stopped thinking and started
+      // answering, even though this reasoning is not committed yet.
+      streaming: !text,
     });
   }
   if (text && !lastBlockText(turn.blocks, "text")?.includes(text)) {
-    turn.blocks.push({ kind: "text", key: "text-stream", text });
+    turn.blocks.push({
+      kind: "text",
+      key: `text-${nextOrdinal(turn.blocks, "text")}`,
+      text,
+    });
   }
 }
 
@@ -190,6 +218,7 @@ export function buildTranscript(
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
+  const createdAt = snapshot?.message_created_at ?? [];
 
   const results = new Map<string, string>();
   for (const message of messages) {
@@ -216,6 +245,8 @@ export function buildTranscript(
         kind: "user",
         key: `user-${index}`,
         text: displayPromptFromMessageText(message.content),
+        messageIndex: index,
+        createdAt: createdAt[index] ?? null,
       });
       return;
     }
@@ -224,7 +255,7 @@ export function buildTranscript(
       modelTurnIndex += 1;
       current = {
         kind: "model",
-        key: `model-${index}`,
+        key: `model-${modelTurnIndex}`,
         blocks: [],
         durationMs: durations[modelTurnIndex] ?? null,
       };
@@ -236,16 +267,23 @@ export function buildTranscript(
     if (reasoning) {
       blocks.push({
         kind: "thoughts",
-        key: `thoughts-${index}`,
+        key: `thoughts-${nextOrdinal(blocks, "thoughts")}`,
         text: reasoning,
         // The model call this message came out of, which for a reasoning model
         // is very nearly the time it spent thinking.
         durationMs: message.duration_ms ?? null,
+        streaming: false,
       });
     }
 
     const content = (message.content ?? "").trim();
-    if (content) blocks.push({ kind: "text", key: `text-${index}`, text: content });
+    if (content) {
+      blocks.push({
+        kind: "text",
+        key: `text-${nextOrdinal(blocks, "text")}`,
+        text: content,
+      });
+    }
 
     const wave: TranscriptThread[] = [];
     (message.tool_calls ?? []).forEach((call, callIndex) => {

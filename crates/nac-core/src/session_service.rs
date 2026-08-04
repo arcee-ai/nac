@@ -136,6 +136,11 @@ pub struct SessionServiceInit {
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
     pub messages: Vec<Message>,
+    /// When each message was written to the transcript log, aligned with
+    /// `messages`. `None` for messages carried by the snapshot blob, which
+    /// predates the log and stores no per-message time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub message_created_at: Vec<Option<String>>,
     pub response_timing: ResponseTimingSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
@@ -214,6 +219,10 @@ pub struct MessageCycleMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
     pub messages: Vec<Message>,
+    /// Transcript-log row times, one per message. `None` where the message
+    /// predates the log (the snapshot blob carries no per-message time).
+    #[serde(default)]
+    pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -990,16 +999,22 @@ impl SessionService {
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
         };
         let loaded_messages = match options.messages {
-            FrontendSnapshotMessages::All => LoadedFrontendMessages {
-                messages: self.store_backed_transcript().await?,
-                page: None,
-                cycle: None,
-            },
+            FrontendSnapshotMessages::All => {
+                let messages = self.store_backed_transcript().await?;
+                let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                LoadedFrontendMessages {
+                    messages,
+                    created_at,
+                    page: None,
+                    cycle: None,
+                }
+            }
             FrontendSnapshotMessages::Page(request) => {
                 let page = self.page_store_transcript(request).await?;
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
                     messages: page.messages,
+                    created_at: page.created_at,
                     page: Some(page.page),
                     cycle: Some(cycle),
                 }
@@ -1015,6 +1030,7 @@ impl SessionService {
         let snapshot = SessionFrontendSnapshot {
             metadata,
             messages: loaded_messages.messages,
+            message_created_at: loaded_messages.created_at,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -1069,6 +1085,27 @@ impl SessionService {
         .await
         .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
         .map(|(tail_len, rows)| (tail_len as usize, rows))
+    }
+
+    /// Row creation times for the window [`Self::read_log_tail_window`]
+    /// returns. Empty for services without a transcript log (pickers).
+    async fn read_log_tail_window_times(
+        &self,
+        blob_len: usize,
+        tail_start: usize,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(Vec::new());
+        };
+        tokio::task::spawn_blocking(move || {
+            writer.read_tail_window_times(&session_id, blob_len as u64, tail_start as u64, limit)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail time read task failed: {error}"))?
     }
 
     /// Read the full transcript log tail relative to a snapshot blob of
@@ -1148,19 +1185,30 @@ impl SessionService {
         } else {
             Vec::new()
         };
-        let log_part: Vec<Message> = if end > blob_visible {
+        let (log_part, log_times): (Vec<Message>, Vec<String>) = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
+            let count = end - blob_visible - tail_start;
             let (_, rows) = self
-                .read_log_tail_window(blob_len, tail_start, end - blob_visible - tail_start)
+                .read_log_tail_window(blob_len, tail_start, count)
                 .await?;
-            rows.into_iter().map(|(_, message)| message).collect()
+            let times = self
+                .read_log_tail_window_times(blob_len, tail_start, count)
+                .await?;
+            (
+                rows.into_iter().map(|(_, message)| message).collect(),
+                times,
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
+        let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
+        created_at.extend(log_times.into_iter().map(Some));
         let mut messages = blob_part;
         messages.extend(log_part);
+        created_at.resize(messages.len(), None);
         Ok(MessagesPageSnapshot {
             messages,
+            created_at,
             page: MessagePageMetadata {
                 start,
                 end,
@@ -1168,6 +1216,256 @@ impl SessionService {
                 has_older: start > 0,
             },
         })
+    }
+
+    /// Length of the merged store transcript without decoding any of it.
+    async fn transcript_len(&self) -> Result<u64> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        let (tail_len, _) = self.read_log_tail_window(blob_len, 0, 0).await?;
+        Ok((blob_len + tail_len) as u64)
+    }
+
+    /// What the user typed to produce the message at `message_idx`, rather
+    /// than the expanded prompt the agent was handed: sending it again has to
+    /// go back through the same expansion, or a `/plan` would reach the model
+    /// as its own instruction sheet.
+    pub async fn user_input_at(&self, message_idx: usize) -> Result<String> {
+        let messages = self.store_backed_transcript().await?;
+        match messages.get(message_idx) {
+            Some(Message::User { content }) => Ok(commands::display_prompt_from_message(content)),
+            Some(_) => Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message can be sent again"
+            )),
+            None => Err(anyhow::anyhow!(
+                "message {message_idx} is not in this session's transcript"
+            )),
+        }
+    }
+
+    /// Take the session back to just before the user message at `message_idx`:
+    /// that message and everything after it leave the transcript, and the
+    /// checkout returns to the revision that was current when it was sent.
+    ///
+    /// Order matters. The checkout is restored first, because a git failure
+    /// there is recoverable — nothing has been forgotten yet — whereas a
+    /// transcript truncated against a checkout that then refuses to move would
+    /// leave the two describing different moments with no way back. Everything
+    /// after the truncation is bookkeeping that follows from it.
+    ///
+    /// This is destructive by design and has no undo: the callers above it are
+    /// responsible for holding the session's operation lease, so that no run is
+    /// writing to the transcript or the checkout while it happens.
+    pub async fn revert_to_message(&self, message_idx: usize) -> Result<RevertOutcome> {
+        let session_id =
+            self.metadata.session_id.clone().ok_or_else(|| {
+                anyhow::anyhow!("this session is not persisted, so it cannot revert")
+            })?;
+        let writer = self
+            .transcript_log
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| anyhow::anyhow!("this session has no transcript log to revert"))?;
+
+        let messages = self.store_backed_transcript().await?;
+        let target = messages.get(message_idx).ok_or_else(|| {
+            anyhow::anyhow!("message {message_idx} is not in this session's transcript")
+        })?;
+        if !matches!(target, Message::User { .. }) {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message marks a point to revert to"
+            ));
+        }
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        if message_idx < blob_len {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} predates this session's transcript log and cannot be reverted to"
+            ));
+        }
+
+        let store_path = self.metadata.store_path.clone();
+        let workspace_root = self.metadata.workspace_host_path.clone();
+        let revision = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::store::workspace_revision_at_transcript_len(
+                    &store_path,
+                    &session_id,
+                    message_idx as u64,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision lookup task failed: {error}"))??
+        };
+
+        let workspace_restored = match (&workspace_root, &revision) {
+            (Some(root), Some(revision)) => {
+                let root = root.clone();
+                let session_id = session_id.clone();
+                let commit = revision.commit_sha.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::workspace::restore(&root, &session_id, &commit)?;
+                    crate::workspace::rewind_ref(&root, &session_id, &commit)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("workspace restore task failed: {error}"))??;
+                true
+            }
+            _ => false,
+        };
+
+        {
+            let writer = Arc::clone(&writer);
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                writer.delete_from(&session_id, message_idx as u64)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+        }
+
+        let kept = &messages[..message_idx];
+        {
+            let mut agent = self.agent.lock().await;
+            agent.messages.truncate(message_idx);
+        }
+        {
+            let mut scan = self
+                .transcript_scan
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *scan = TranscriptScanCache::from_transcript(kept);
+        }
+
+        // The timing history is indexed by visible response, so it has to lose
+        // exactly the responses the transcript just lost, or every later run
+        // would attribute its duration to the wrong message.
+        let kept_responses = kept
+            .iter()
+            .filter(|message| is_visible_response(message))
+            .count();
+        let run_state_update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            snapshot.as_mut().map(|snapshot| {
+                let mut durations =
+                    response_duration_history_from_snapshot(snapshot, kept_responses);
+                durations.truncate(kept_responses);
+                let mut token_usages = snapshot.token_usages.clone();
+                token_usages.truncate(kept_responses);
+                let last = durations.last().copied().flatten();
+                let previous = durations
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|idx| durations.get(idx).copied().flatten());
+                snapshot.apply_run_state(sessions::SessionRunState {
+                    last_response_duration_ms: last,
+                    previous_response_duration_ms: previous,
+                    response_durations_ms: Some(durations),
+                    token_usages,
+                })
+            })
+        };
+        if let Some(update) = run_state_update {
+            let store_path = store_path.clone();
+            tokio::task::spawn_blocking(move || {
+                sessions::save_session_run_state(&store_path, &update)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("session run state task failed: {error}"))??;
+        }
+
+        let revisions_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            let keep_through_id = revision.as_ref().map(|revision| revision.id);
+            tokio::task::spawn_blocking(move || {
+                crate::store::delete_workspace_revisions_after(
+                    &store_path,
+                    &session_id,
+                    keep_through_id,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision prune task failed: {error}"))??
+        };
+
+        // Threads the discarded messages dispatched are work nothing can reach
+        // any more: the tool calls that named them are gone. A name the kept
+        // messages also dispatched stays whole, because the same rows carry the
+        // episodes of those earlier dispatches, which the transcript still
+        // refers to.
+        let orphaned_threads: Vec<String> = {
+            let kept_names = thread_tool_call_names(kept);
+            thread_tool_call_names(&messages[message_idx..])
+                .into_iter()
+                .filter(|name| {
+                    name != crate::store::ORCHESTRATOR_STEERING_TARGET && !kept_names.contains(name)
+                })
+                .collect()
+        };
+        let threads_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut removed = 0usize;
+                for name in orphaned_threads {
+                    if crate::store::delete_thread(&store_path, &session_id, &name)? {
+                        removed += 1;
+                    }
+                }
+                anyhow::Ok(removed)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
+        };
+
+        self.event_bus.emit(SessionEvent::TranscriptReverted {
+            transcript_len: message_idx as u64,
+        });
+
+        Ok(RevertOutcome {
+            transcript_len: message_idx,
+            messages_removed: messages.len() - message_idx,
+            workspace_restored,
+            revisions_removed,
+            threads_removed,
+        })
+    }
+
+    /// Per-message creation times aligned with [`Self::store_backed_transcript`],
+    /// which is why the caller passes the transcript length it already read:
+    /// an append landing between the two reads must not shift the alignment.
+    /// Blob messages predate the log and report `None`.
+    async fn store_backed_transcript_times(&self, total: usize) -> Result<Vec<Option<String>>> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        }
+        .min(total);
+        let mut times: Vec<Option<String>> = vec![None; blob_len];
+        if total > blob_len {
+            let tail = self
+                .read_log_tail_window_times(blob_len, 0, total - blob_len)
+                .await?;
+            times.extend(tail.into_iter().map(Some));
+        }
+        times.resize(total, None);
+        Ok(times)
     }
 
     /// Advance the incremental transcript scan over newly appended rows.
@@ -1725,6 +2023,10 @@ impl SessionService {
         let store_path = self.metadata.store_path.clone();
         let run_id = run.run_id.to_string();
         let label = run.prompt_preview.clone();
+        // Recorded now rather than derived later: this is the only moment we
+        // can say for certain which transcript prefix the captured files go
+        // with, and a revert has nothing else to key off.
+        let transcript_len = self.transcript_len().await.ok();
 
         let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
             let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
@@ -1742,6 +2044,7 @@ impl SessionService {
                     additions: captured.additions,
                     deletions: captured.deletions,
                     changed_files: captured.changed_files,
+                    transcript_len,
                 },
             )?;
             Ok(())
@@ -2001,8 +2304,20 @@ impl SessionService {
     }
 }
 
+/// What a revert left behind, so the caller can report it without re-reading
+/// everything the revert just changed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevertOutcome {
+    pub transcript_len: usize,
+    pub messages_removed: usize,
+    pub workspace_restored: bool,
+    pub revisions_removed: usize,
+    pub threads_removed: usize,
+}
+
 struct LoadedFrontendMessages {
     messages: Vec<Message>,
+    created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
 }
@@ -2098,6 +2413,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
         .collect();
     MessagesPageSnapshot {
         messages,
+        created_at: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,
@@ -2401,6 +2717,7 @@ pub(super) mod tests {
         let start = end.saturating_sub(request.limit.max(1));
         MessagesPageSnapshot {
             messages: visible[start..end].to_vec(),
+            created_at: Vec::new(),
             page: MessagePageMetadata {
                 start,
                 end,

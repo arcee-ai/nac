@@ -38,22 +38,28 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Item({ item }: { item: WorksetItemSnapshot }) {
   return (
-    <div className="flex flex-col gap-2 p-3 rounded-[8px] border border-muted bg-elevation-level-0-5">
+    <div className="flex flex-col gap-4 p-4 rounded-[8px] border border-muted bg-elevation-level-1">
       {item.role ? (
-        <Badge text={item.role} color={BadgeColor.Blue} className="self-start" />
+        <Badge
+          text={item.role}
+          color={BadgeColor.Blue}
+          className="self-start"
+        />
       ) : null}
-      <span className="label-small text-basic-primary">{item.title}</span>
-      {item.scope ? (
-        <span className="code code-small text-danger-primary break-words">
-          {item.scope}
-        </span>
-      ) : null}
-      {item.description ? (
-        <p className="paragraph-small text-basic-secondary">{item.description}</p>
-      ) : null}
+      <div className="flex flex-col gap-1">
+        <span className="header-small text-basic-primary">{item.title}</span>
+        {item.scope ? (
+          <span className="code code-small text-danger-primary break-words">
+            {item.scope}
+          </span>
+        ) : null}
+        {item.description ? (
+          <p className="text-small text-basic-secondary">{item.description}</p>
+        ) : null}
+      </div>
       {item.acceptance ? (
         <Field label="Acceptance">
-          <p className="paragraph-small text-basic-secondary">{item.acceptance}</p>
+          <p className="text-small text-basic-secondary">{item.acceptance}</p>
         </Field>
       ) : null}
       {item.depends_on.length > 0 ? (
@@ -64,7 +70,7 @@ function Item({ item }: { item: WorksetItemSnapshot }) {
         </Field>
       ) : null}
       {item.notes ? (
-        <p className="paragraph-small text-basic-muted italic">{item.notes}</p>
+        <p className="text-small text-basic-muted italic">{item.notes}</p>
       ) : null}
     </div>
   );
@@ -72,13 +78,15 @@ function Item({ item }: { item: WorksetItemSnapshot }) {
 
 function Detail({ workset }: { workset: WorksetSnapshot }) {
   return (
-    <div className="flex flex-col gap-5 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
+    <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
       <Field label="ID">
-        <span className="label-big text-basic-primary break-words">{workset.id}</span>
+        <span className="header-medium text-basic-primary break-words">
+          {workset.id}
+        </span>
       </Field>
       {workset.goal ? (
         <Field label="Goal">
-          <p className="paragraph-medium text-basic-secondary">{workset.goal}</p>
+          <p className="paragraph-small text-basic-primary">{workset.goal}</p>
         </Field>
       ) : null}
       {workset.status ? (
@@ -90,12 +98,14 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
       ) : null}
       {workset.summary ? (
         <Field label="Summary">
-          <p className="paragraph-medium text-basic-secondary">{workset.summary}</p>
+          <p className="paragraph-small text-basic-primary">
+            {workset.summary}
+          </p>
         </Field>
       ) : null}
       {workset.verification_recipe ? (
         <Field label="Verification recipe">
-          <p className="paragraph-medium text-basic-secondary whitespace-pre-wrap">
+          <p className="paragraph-small text-basic-primary whitespace-pre-wrap">
             {workset.verification_recipe}
           </p>
         </Field>
@@ -128,7 +138,9 @@ export function WorksetsView({
 
   const worksets = snapshot.worksets;
   if (worksets.error) {
-    return <div className="p-6 label-small text-error-primary">{worksets.error}</div>;
+    return (
+      <div className="p-6 label-small text-error-primary">{worksets.error}</div>
+    );
   }
   if (worksets.items.length === 0) {
     return <PanelEmpty>No worksets defined for this session.</PanelEmpty>;

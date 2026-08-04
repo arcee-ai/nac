@@ -2,7 +2,7 @@
 // protocol a session speaks. The Rust enum is authoritative, so every variant of
 // `types/api.ts#BackendKind` must appear here.
 
-import type { BackendKind } from "@/app/types/api";
+import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 
 const PROVIDER_LABELS: Record<BackendKind, string> = {
   "openai-responses": "OpenAI Responses",
@@ -44,6 +44,22 @@ const API_KEY_PROVIDERS: ReadonlySet<BackendKind> = new Set<BackendKind>([
 
 export function providerUsesApiKey(backend: BackendKind): boolean {
   return API_KEY_PROVIDERS.has(backend);
+}
+
+/**
+ * The browser login a backend authenticates through. Mirrors
+ * `ManagedAuthProvider::for_backend` in `crates/nac-core/src/model/mod.rs`.
+ */
+const MANAGED_AUTH_PROVIDERS: Partial<Record<BackendKind, ManagedAuthProvider>> =
+  {
+    "arcee-auth": "arcee",
+    "chatgpt-codex-responses": "codex",
+  };
+
+export function managedAuthProvider(
+  backend: BackendKind,
+): ManagedAuthProvider | null {
+  return MANAGED_AUTH_PROVIDERS[backend] ?? null;
 }
 
 function isBackendKind(backend: string): backend is BackendKind {

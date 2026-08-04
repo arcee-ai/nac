@@ -28,7 +28,7 @@ const variantClasses: Record<MessageBoxVariant, string> = {
 
 const variantIcons: Record<MessageBoxVariant, IconName> = {
   [MessageBoxVariant.Info]: IconName.Info,
-  [MessageBoxVariant.Error]: IconName.Important,
+  [MessageBoxVariant.Error]: IconName.Danger,
   [MessageBoxVariant.Danger]: IconName.Danger,
   [MessageBoxVariant.Success]: IconName.CheckCircle,
 };
@@ -64,8 +64,10 @@ const iconSizes: Record<MessageBoxSize, number> = {
   [MessageBoxSize.Large]: 24,
 };
 
-interface MessageBoxProps
-  extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
+interface MessageBoxProps extends Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  "title"
+> {
   title?: React.ReactNode;
   variant?: MessageBoxVariant;
   size?: MessageBoxSize;

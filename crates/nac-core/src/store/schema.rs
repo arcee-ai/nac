@@ -121,6 +121,15 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     }
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
     create_workspace_revisions_table(&transaction)?;
+    // Revisions recorded before revert existed cannot say which transcript
+    // prefix they describe; NULL is that "unknown", and a revert simply does
+    // not consider them.
+    ensure_column(
+        &transaction,
+        "workspace_revisions",
+        "transcript_len",
+        "INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0)",
+    )?;
     create_model_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
@@ -490,6 +499,7 @@ fn create_workspace_revisions_table(conn: &Connection) -> Result<()> {
              deletions INTEGER NOT NULL DEFAULT 0 CHECK (deletions >= 0),
              changed_files INTEGER NOT NULL DEFAULT 0 CHECK (changed_files >= 0),
              created_at TEXT NOT NULL,
+             transcript_len INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0),
              UNIQUE (session_id, run_id)
          );
          CREATE INDEX IF NOT EXISTS idx_workspace_revisions_session

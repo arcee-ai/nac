@@ -22,8 +22,17 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
+import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
+import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import {
+  KEY_DEBOUNCE_MS,
+  MASKED_KEY,
+  modelItems,
+  type Validation,
+} from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import {
   PROVIDER_KINDS,
@@ -33,6 +42,8 @@ import {
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
+  useManagedLogout,
+  useManagedProviderModels,
   useModelConfigs,
   useProviderModels,
   useResolvedModelConfig,
@@ -40,7 +51,6 @@ import {
 import type {
   BackendKind,
   CreateModelConfigurationRequest,
-  ProviderModel,
   ResolvedModelConfiguration,
 } from "@/app/types/api";
 
@@ -76,47 +86,99 @@ const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
   label: providerLabel(kind),
 }));
 
-const CONTROL_WIDTH = "w-[220px]";
+const CONTROL_WIDTH = "w-[280px]";
 
-/** Long enough to stop firing on every keystroke of a pasted key. */
-const KEY_DEBOUNCE_MS = 600;
 const PATH_DEBOUNCE_MS = 400;
 
-/** Stored keys never leave the server, so a saved setup only shows a stand-in. */
-const MASKED_KEY = "*".repeat(32);
+/**
+ * The Authentication row a managed provider shows in place of the API key: the
+ * credential is a browser login, so there is nothing to paste.
+ *
+ * The login belongs to the provider rather than to this configuration — one
+ * file in NAC home backs every session using that backend — which is why the
+ * row reports being signed in even when the sign-in happened elsewhere.
+ */
+function AuthenticationRow({ backend }: { backend: BackendKind }) {
+  const { provider, signedIn } = useManagedSignIn(backend);
+  const { state, start, cancel } = useDeviceLogin();
+  const logout = useManagedLogout();
 
-type Validation =
-  | { status: "idle" }
-  | { status: "validating" }
-  | { status: "ready"; models: ProviderModel[]; baseUrl: string }
-  | { status: "error"; message: string };
+  if (!provider) return null;
 
-function modelItems(models: ProviderModel[]): SelectItem[] {
-  return models.map((model) => ({
-    id: model.id,
-    label: model.display_name ?? model.id,
-  }));
-}
+  const failed = state.status === "failed";
 
-/** Green tick, spinner or key, depending on how the key checked out. */
-function KeyStatus({ status }: { status: Validation["status"] }) {
-  if (status === "validating") return <Loader size={LoaderSize.Micro} />;
-  if (status === "ready") {
-    return (
-      <Icon
-        iconName={IconName.CheckCircle}
-        size={16}
-        className="text-success-primary"
-      />
+  const control =
+    state.status === "waiting" ? (
+      <div className="flex items-center gap-2">
+        <Loader size={LoaderSize.Micro} />
+        {state.prompt.user_code ? (
+          <>
+            <span className="text-micro text-basic-muted">Code</span>
+            <span className="label-small text-basic-primary tabular-nums">
+              {state.prompt.user_code}
+            </span>
+          </>
+        ) : (
+          <span className="text-micro text-basic-muted">
+            Waiting for the browser
+          </span>
+        )}
+        <Button
+          variant={ButtonVariant.Ghost}
+          size={ButtonSize.Medium}
+          content={ButtonContent.Text}
+          onClick={() => void cancel()}
+        >
+          Cancel
+        </Button>
+      </div>
+    ) : signedIn ? (
+      <div className="flex items-center gap-2">
+        <Button
+          variant={ButtonVariant.Ghost}
+          size={ButtonSize.Medium}
+          content={ButtonContent.Text}
+          loading={logout.isPending}
+          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
+        >
+          Logout
+        </Button>
+        <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+          <Icon
+            iconName={IconName.CheckCircle}
+            className="text-success-primary"
+          />
+          <span className="label-small text-success-primary">Success</span>
+        </div>
+      </div>
+    ) : (
+      <Button
+        variant={ButtonVariant.Primary}
+        size={ButtonSize.Medium}
+        content={ButtonContent.IconRight}
+        loading={state.status === "starting"}
+        onClick={() => void start(provider)}
+      >
+        <span>Login</span>
+        <Icon iconName={IconName.External} />
+      </Button>
     );
-  }
+
   return (
-    <Icon
-      iconName={IconName.Key}
-      size={16}
-      className={cn(
-        status === "error" ? "text-error-primary" : "text-basic-muted",
-      )}
+    <ConfigRow
+      label="Authentication"
+      invalid={failed}
+      hint="Signs in through the browser; every session on this provider shares the login."
+      control={
+        <div className="flex flex-col items-end gap-1">
+          {control}
+          {failed ? (
+            <p className="label-micro text-error-primary max-w-[280px] text-right">
+              {state.message}
+            </p>
+          ) : null}
+        </div>
+      }
     />
   );
 }
@@ -205,6 +267,13 @@ export function ConfigurationsPanel({
     null,
     source.kind === "new" && discovers,
   );
+  const { signedIn } = useManagedSignIn(backend);
+  // A login reaches a model index the same way a key does; it just cannot be
+  // read before the sign-in exists.
+  const loginQuery = useManagedProviderModels(
+    backend,
+    source.kind === "new" && provider !== CUSTOM && !needsKey && signedIn,
+  );
   const configQuery = useResolvedModelConfig(configId, configFile);
 
   const validation: Validation = !(
@@ -243,7 +312,7 @@ export function ConfigurationsPanel({
   // Derived rather than stored, so a stale pick never survives a source change.
   const models =
     source.kind === "new"
-      ? (keyQuery.data?.models ?? [])
+      ? ((needsKey ? keyQuery.data?.models : loginQuery.data?.models) ?? [])
       : (resolved?.models ?? []);
   const configuredModel = source.kind === "new" ? "" : (resolved?.model ?? "");
   const chosenModel = models.some((model) => model.id === defaultModel)
@@ -291,9 +360,13 @@ export function ConfigurationsPanel({
         };
       }
       if (!needsKey) {
-        const model = modelDraft.trim();
-        if (!model) return null;
-        return { kind: "save", request: { name: trimmedName, backend, model } };
+        // The login is the credential, so there is nothing worth saving until
+        // it exists — and the model list only loads once it does.
+        if (!signedIn || !chosenModel) return null;
+        return {
+          kind: "save",
+          request: { name: trimmedName, backend, model: chosenModel },
+        };
       }
       if (!keyValidated || !chosenModel || !validatedBaseUrl) return null;
       return {
@@ -330,6 +403,7 @@ export function ConfigurationsPanel({
     backend,
     baseUrlDraft,
     modelDraft,
+    signedIn,
     keyValidated,
     validatedBaseUrl,
     chosenModel,
@@ -354,6 +428,23 @@ export function ConfigurationsPanel({
       toast.error(`Failed to remove the configuration: ${errorMessage(error)}`);
     }
   };
+
+  /**
+   * Whether the credential this setup rests on is settled. What follows it —
+   * which model, and the advanced knobs — cannot be answered before then, so
+   * the rows stay out of the way rather than sitting there unanswerable.
+   *
+   * A hand-written setup has no credential to settle: its URL and model are the
+   * fields being filled in, so having them is the equivalent milestone.
+   */
+  const credentialReady =
+    source.kind === "new"
+      ? provider === CUSTOM
+        ? Boolean(baseUrlDraft.trim() && modelDraft.trim())
+        : needsKey
+          ? keyValidated
+          : signedIn
+      : Boolean(resolved);
 
   const keyInvalid = validation.status === "error";
   const boxInvalid = invalid || keyInvalid || Boolean(resolveError);
@@ -471,6 +562,12 @@ export function ConfigurationsPanel({
                   />
                 }
               />
+              {!needsKey && provider !== CUSTOM ? (
+                <>
+                  <Separator />
+                  <AuthenticationRow backend={backend} />
+                </>
+              ) : null}
               {needsKey ? (
                 <>
                   <Separator />
@@ -531,23 +628,27 @@ export function ConfigurationsPanel({
                   />
                 </>
               ) : !needsKey ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    label="Model"
-                    required
-                    hint="This provider signs in with a stored login, so it lists no models."
-                    control={
-                      <Input
-                        inputSize={InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        placeholder="gpt-5.5"
-                        value={modelDraft}
-                        onChange={(event) => setModelDraft(event.target.value)}
-                      />
-                    }
-                  />
-                </>
+                signedIn ? (
+                  <>
+                    <Separator />
+                    <ConfigRow
+                      label="Default Model"
+                      hint="Model the session starts with; the login reaches all of these."
+                      control={
+                        <SmallSelect
+                          items={modelItems(models)}
+                          value={chosenModel}
+                          onValueChange={setDefaultModel}
+                          placeholder={
+                            loginQuery.isFetching
+                              ? "Reading the model list…"
+                              : "No models offered"
+                          }
+                        />
+                      }
+                    />
+                  </>
+                ) : null
               ) : validation.status === "ready" ? (
                 <>
                   <Separator />
@@ -586,7 +687,7 @@ export function ConfigurationsPanel({
             />
           ) : null}
 
-          {children ? (
+          {children && credentialReady ? (
             <>
               <Separator />
               {children}
@@ -711,7 +812,12 @@ function ResolvedRows({
             }
           />
         </>
-      ) : null}
+      ) : (
+        <>
+          <Separator />
+          <AuthenticationRow backend={backend} />
+        </>
+      )}
       <Separator />
       {listed ? (
         <ConfigRow
@@ -781,9 +887,8 @@ function SmallSelect({
       placeholder={placeholder}
       size={ButtonSize.Medium}
       variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.BottomLeft}
-      className="max-w-[220px]"
-      panelClassName="max-h-64 overflow-auto min-w-[220px]"
+      placement={PopoverPlacement.CenterLeft}
+      panelClassName="max-h-[200px] overflow-auto min-w-[220px]"
     />
   );
 }

@@ -3,43 +3,74 @@ import { useState } from "react";
 import {
   Button,
   ButtonContent,
+  ButtonSize,
   ButtonVariant,
+  Icon,
+  IconName,
   Input,
+  InputSize,
+  InputWrapper,
+  Loader,
+  LoaderSize,
   Modal,
   ModalSize,
   Select,
+  type SelectItem,
+  Separator,
+  TextArea,
+  Tooltip,
+  TooltipPosition,
 } from "@/app/atoms";
+import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
   BACKEND_OPTIONS,
   REASONING_OPTIONS,
-  SETTINGS_CREDENTIAL_OPTIONS,
 } from "@/app/components/modals/options";
-import { StoredApiKey } from "@/app/components/modals/StoredApiKey";
+import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
+import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import {
+  isGeneratedCredentialName,
+  KEY_DEBOUNCE_MS,
+  MASKED_KEY,
+  modelItems,
+  type Validation,
+} from "@/app/lib/apiKey";
 import {
   buildSettingsPatch,
   managedLaunchBaseUrl,
   type CredentialMode,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
+import { displaySessionTitle } from "@/app/lib/format";
+import { providerUsesApiKey } from "@/app/lib/providers";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { ApiError } from "@/app/services/api";
 import {
+  useManagedLogout,
+  useManagedProviderModels,
+  useProviderModels,
   useSessionConfig,
   useSessionSnapshot,
+  useStoreGeneratedCredential,
+  useStoredKeyProviderModels,
   useUpdateConfig,
+  useUpdatePresentation,
 } from "@/app/services/queries";
-import type { RawSessionConfig, SessionMetadata } from "@/app/types/api";
+import type {
+  BackendKind,
+  RawSessionConfig,
+  SessionMetadata,
+  SessionSummarySnapshot,
+} from "@/app/types/api";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="label-small text-basic-secondary">{label}</label>
-      {children}
-    </div>
-  );
-}
+/** Stands in for the name a key gets while the form is only being checked. */
+const PENDING_KEY_NAME = "NAC_CONFIG_pending";
 
 function headersToText(headers: Record<string, string>): string {
-  return Object.keys(headers).length === 0 ? "" : JSON.stringify(headers, null, 2);
+  return Object.keys(headers).length === 0
+    ? ""
+    : JSON.stringify(headers, null, 2);
 }
 
 /** The persisted column is a JSON string; unparsable content means "repair me". */
@@ -77,6 +108,31 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
   };
 }
 
+/** Shared chrome, so the loading state does not resize into the loaded form. */
+function SettingsShell({
+  onClose,
+  footer,
+  children,
+}: {
+  onClose: () => void;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Session settings"
+      size={ModalSize.Wide}
+      flush
+      className="h-[700px]"
+      footer={footer}
+    >
+      {children}
+    </Modal>
+  );
+}
+
 export function SettingsModal({
   open,
   id,
@@ -102,13 +158,13 @@ export function SettingsModal({
 
   if (!initial) {
     return (
-      <Modal open onClose={onClose} title="Session settings" size={ModalSize.Medium}>
+      <SettingsShell onClose={onClose}>
         <p className="text-basic-muted text-micro">
           {isLoading
             ? "Loading session configuration…"
             : "Session configuration unavailable."}
         </p>
-      </Modal>
+      </SettingsShell>
     );
   }
 
@@ -116,6 +172,9 @@ export function SettingsModal({
     <SettingsForm
       id={id}
       initial={initial}
+      summary={
+        snapshot?.sessions.find((entry) => entry.session_id === id) ?? null
+      }
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
     />
@@ -126,49 +185,138 @@ export function SettingsModal({
 function SettingsForm({
   id,
   initial,
+  summary,
   diagnostics,
   onClose,
 }: {
   id: string;
   initial: SettingsInitialValues;
+  /** Carries the presentation version the title save has to match. */
+  summary: SessionSummarySnapshot | null;
   diagnostics: string[];
   onClose: () => void;
 }) {
   const toast = useToast();
   const updateConfig = useUpdateConfig();
+  const updatePresentation = useUpdatePresentation();
+  const storeKey = useStoreGeneratedCredential();
 
+  const initialTitle = summary?.title ?? "";
+  const [title, setTitle] = useState(initialTitle);
   const [model, setModel] = useState(initial.model);
   const [backend, setBackend] = useState(initial.backend);
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
-  const [credentialMode, setCredentialMode] = useState<CredentialMode>(
-    initial.api_key_env ? "variable" : "none",
-  );
-  const [apiKeyEnv, setApiKeyEnv] = useState(initial.api_key_env ?? "");
   const [baseUrl, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
+  // Null while the session keeps the key it already has. A string is a
+  // replacement being typed, and an empty one means the key was taken away.
+  const [keyDraft, setKeyDraft] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  const kind = backend as BackendKind;
   const managedUrl = managedLaunchBaseUrl(backend);
   const locked = Boolean(managedUrl);
-  const effectiveCredMode: CredentialMode = locked ? "none" : credentialMode;
   const displayBaseUrl = managedUrl ?? baseUrl;
-  const busy = updateConfig.isPending;
+  const usesKey = providerUsesApiKey(kind);
+  // A session with nothing on file has nothing to show either, so the row opens
+  // ready for a key rather than displaying a stand-in for one that is not there.
+  const editingKey = keyDraft !== null || !initial.api_key_env;
+  const draftKey = (keyDraft ?? "").trim();
+  const storedKeyEnv = editingKey ? "" : (initial.api_key_env ?? "");
+
+  // A pasted key is checked against the provider, and one already on file is
+  // checked by name — either way by listing the models it reaches, so the same
+  // answer says whether the credential works and what the session may run.
+  const debouncedKey = useDebouncedValue(draftKey, KEY_DEBOUNCE_MS);
+  const debouncedBaseUrl = useDebouncedValue(baseUrl.trim(), KEY_DEBOUNCE_MS);
+  const draftQuery = useProviderModels(
+    kind,
+    debouncedKey,
+    debouncedBaseUrl || null,
+    usesKey && editingKey,
+  );
+  const storedQuery = useStoredKeyProviderModels(
+    kind,
+    storedKeyEnv,
+    debouncedBaseUrl || null,
+    usesKey && !editingKey,
+  );
+  const keyQuery = editingKey ? draftQuery : storedQuery;
+  const validation: Validation = !usesKey
+    ? { status: "idle" }
+    : keyQuery.isFetching
+      ? { status: "validating" }
+      : keyQuery.isError
+        ? { status: "error", message: errorMessage(keyQuery.error) }
+        : keyQuery.data
+          ? {
+              status: "ready",
+              models: keyQuery.data.models,
+              baseUrl: keyQuery.data.base_url,
+            }
+          : { status: "idle" };
+
+  const { provider, signedIn } = useManagedSignIn(kind);
+  const loginQuery = useManagedProviderModels(kind, Boolean(provider) && signedIn);
+  const models =
+    (usesKey
+      ? validation.status === "ready"
+        ? validation.models
+        : []
+      : loginQuery.data?.models) ?? [];
+
+  // The provider decides the mode: a managed backend authenticates from its
+  // stored login, and everywhere else a named key is the only other source.
+  const credentialMode: CredentialMode = usesKey ? "variable" : "none";
+  // What blocks a save is a credential known to be unusable, not one that has
+  // merely not been checked: an unreachable provider should never stand between
+  // the user and renaming their session.
+  const missingKey = usesKey && editingKey && draftKey.length === 0;
+  const blocked =
+    missingKey ||
+    validation.status === "error" ||
+    Boolean(provider && !signedIn);
+  const busy =
+    updateConfig.isPending || updatePresentation.isPending || storeKey.isPending;
+
+  const saveTitle = async () => {
+    if (title.trim() === initialTitle.trim()) return;
+    try {
+      await updatePresentation.mutateAsync({
+        id,
+        title: title.trim(),
+        pinned: Boolean(summary?.pinned),
+        expectedVersion: summary?.presentation_version ?? 0,
+      });
+    } catch (saveError) {
+      const conflict = saveError instanceof ApiError && saveError.status === 409;
+      toast.error(
+        conflict
+          ? "The title was not saved — the session changed in the meantime"
+          : `The title was not saved: ${errorMessage(saveError)}`,
+      );
+    }
+  };
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || blocked) return;
 
-    let patch;
+    const valuesWith = (apiKeyEnv: string) => ({
+      model,
+      backend,
+      base_url: baseUrl,
+      reasoning_effort: reasoning,
+      credential_mode: credentialMode,
+      api_key_env: apiKeyEnv,
+      extra_headers: headers,
+    });
+
+    // Nothing is filed away until the rest of the form is known to be good, so
+    // a rejected header map cannot leave an orphaned key behind. The stand-in
+    // only stands where the generated name will, and never reaches the server.
     try {
-      patch = buildSettingsPatch(
-        {
-          model,
-          backend,
-          base_url: baseUrl,
-          reasoning_effort: reasoning,
-          credential_mode: credentialMode,
-          api_key_env: apiKeyEnv,
-          extra_headers: headers,
-        },
+      buildSettingsPatch(
+        valuesWith(draftKey ? PENDING_KEY_NAME : storedKeyEnv),
         initial,
       );
     } catch (validationError) {
@@ -176,13 +324,35 @@ function SettingsForm({
       return;
     }
 
-    if (Object.keys(patch).length === 0) {
-      toast.info("No changes to save");
-      onClose();
+    let apiKeyEnv = storedKeyEnv;
+    if (usesKey && draftKey) {
+      try {
+        apiKeyEnv = (await storeKey.mutateAsync(draftKey)).name;
+      } catch (storeError) {
+        setError(`The key was not stored: ${errorMessage(storeError)}`);
+        return;
+      }
+    }
+
+    let patch;
+    try {
+      patch = buildSettingsPatch(valuesWith(apiKeyEnv), initial);
+    } catch (validationError) {
+      setError(errorMessage(validationError));
       return;
     }
 
     setError("");
+    // The title lives on a different endpoint, so it is saved either way — a
+    // rename should not be lost because the configuration happened to be
+    // untouched, nor the other way round.
+    await saveTitle();
+
+    if (Object.keys(patch).length === 0) {
+      onClose();
+      return;
+    }
+
     try {
       await updateConfig.mutateAsync({ id, patch });
       toast.success("Session settings saved");
@@ -201,6 +371,7 @@ function SettingsForm({
     <>
       <Button
         variant={ButtonVariant.Tertiary}
+        size={ButtonSize.Large}
         content={ButtonContent.Text}
         onClick={onClose}
         disabled={busy}
@@ -209,8 +380,10 @@ function SettingsForm({
       </Button>
       <Button
         variant={ButtonVariant.Primary}
+        size={ButtonSize.Large}
         content={ButtonContent.Text}
         onClick={submit}
+        disabled={blocked}
         loading={busy}
       >
         Save
@@ -219,16 +392,10 @@ function SettingsForm({
   );
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Session settings"
-      size={ModalSize.Medium}
-      footer={footer}
-    >
-      <div className="flex flex-col gap-4">
+    <SettingsShell onClose={onClose} footer={footer}>
+      <div className="flex flex-col gap-6 [&>*]:shrink-0">
         {diagnostics.length > 0 ? (
-          <div className="rounded-lg border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
+          <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
             <div className="label-small mb-1">Repair required</div>
             {diagnostics.map((diagnostic) => (
               <div key={diagnostic}>• {diagnostic}</div>
@@ -236,75 +403,314 @@ function SettingsForm({
           </div>
         ) : null}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Backend">
+        <Input
+          label="Session title"
+          inputSize={InputSize.Medium}
+          placeholder={displaySessionTitle(summary) || "Session name"}
+          hintText="Leave empty to restore the automatic title (the last prompt)."
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+        />
+
+        <Separator />
+
+        <div className="grid grid-cols-2 gap-4">
+          <InputWrapper label="Provider">
             <Select
               items={BACKEND_OPTIONS}
               value={backend}
               onValueChange={setBackend}
               className="w-full"
+              triggerClassName="w-full"
               panelClassName="max-h-64 overflow-auto"
             />
-          </Field>
-          <Input label="Model" value={model} onChange={(e) => setModel(e.target.value)} />
+          </InputWrapper>
+          <Input
+            label="Base URL"
+            inputSize={InputSize.Medium}
+            value={displayBaseUrl}
+            isDisabled={locked}
+            hintText={locked ? "Managed by the selected provider." : undefined}
+            onChange={(event) => setBaseUrl(event.target.value)}
+          />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Reasoning effort">
+        {usesKey ? (
+          <ApiKeyField
+            editing={editingKey}
+            draft={keyDraft ?? ""}
+            stored={initial.api_key_env ?? ""}
+            validation={validation}
+            onDraft={setKeyDraft}
+            onClear={() => setKeyDraft("")}
+            onRestore={() => setKeyDraft(null)}
+          />
+        ) : (
+          <AuthenticationField backend={kind} />
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <ModelField
+            value={model}
+            models={modelItems(models)}
+            available={!blocked}
+            onChange={setModel}
+          />
+          <InputWrapper label="Reasoning effort">
             <Select
               items={REASONING_OPTIONS}
               value={reasoning}
               onValueChange={setReasoning}
               className="w-full"
+              triggerClassName="w-full"
               panelClassName="max-h-64 overflow-auto"
             />
-          </Field>
-          <Input
-            label="Base URL"
-            value={displayBaseUrl}
-            isDisabled={locked}
-            hintText={locked ? "Managed by the selected backend." : undefined}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
+          </InputWrapper>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Credentials">
-            <Select
-              items={SETTINGS_CREDENTIAL_OPTIONS}
-              value={effectiveCredMode}
-              onValueChange={(value) => setCredentialMode(value as CredentialMode)}
-              disabled={locked}
-              className="w-full"
-            />
-          </Field>
-          <Input
-            label="API key env var"
-            placeholder="OPENAI_API_KEY"
-            value={apiKeyEnv}
-            isDisabled={locked || effectiveCredMode !== "variable"}
-            onChange={(e) => setApiKeyEnv(e.target.value)}
-          />
-        </div>
+        <Separator />
 
-        {!locked && effectiveCredMode === "variable" ? (
-          <Field label="Stored API key">
-            <StoredApiKey name={apiKeyEnv} />
-          </Field>
-        ) : null}
-
-        <Field label="Extra headers (JSON)">
-          <textarea
-            className="input rounded-[4px] px-3 py-2 font-mono text-micro resize-none min-h-[80px]"
-            spellCheck={false}
-            placeholder='{ "X-Header": "value" }'
-            value={headers}
-            onChange={(e) => setHeaders(e.target.value)}
-          />
-        </Field>
+        <TextArea
+          label="Extra headers (JSON object)"
+          hintText="Blank sends none; header values must be strings."
+          placeholder='{ "X-Title": "nac" }'
+          value={headers}
+          onChange={(event) => setHeaders(event.target.value)}
+          textAreaClassName="h-[160px] resize-none font-mono"
+        />
 
         {error ? <p className="text-error-primary text-micro">{error}</p> : null}
       </div>
-    </Modal>
+    </SettingsShell>
+  );
+}
+
+/**
+ * The key a key-authenticated session runs on. A stored key never comes back
+ * from the server, so it can only be replaced, not read: the row shows a
+ * stand-in until the user starts typing a new one, and reports how the key
+ * checked out through the glyph in the leading slot.
+ */
+function ApiKeyField({
+  editing,
+  draft,
+  stored,
+  validation,
+  onDraft,
+  onClear,
+  onRestore,
+}: {
+  editing: boolean;
+  draft: string;
+  /** The selector the session currently authenticates through, if any. */
+  stored: string;
+  validation: Validation;
+  onDraft: (value: string) => void;
+  /**
+   * Empties the field. Replacing a key and removing one arrive at the same
+   * place — a key that cannot be read back can only be overwritten — so the two
+   * buttons differ in what they say rather than in what they leave behind.
+   */
+  onClear: () => void;
+  onRestore: () => void;
+}) {
+  const invalid = validation.status === "error";
+  const hint = editing
+    ? "Paste the provider key. nac keeps it and hands the session a selector, never the secret."
+    : isGeneratedCredentialName(stored)
+      ? "Kept by nac for this session. Replacing it files a new key and leaves the old one where it is."
+      : `Read from ${stored}: the environment variable, or a key of that name kept by nac.`;
+
+  return (
+    <InputWrapper
+      label="API key"
+      required
+      validation={invalid}
+      validationText={invalid ? validation.message : undefined}
+      hintText={hint}
+    >
+      <div className="flex items-center gap-2">
+        <Input
+          className="flex-1 min-w-0"
+          inputSize={InputSize.Medium}
+          type="password"
+          autoComplete="off"
+          placeholder="Paste the provider key"
+          value={editing ? draft : MASKED_KEY}
+          readOnly={!editing}
+          validation={invalid}
+          leadingSlot={<KeyStatus status={validation.status} />}
+          onChange={(event) => onDraft(event.target.value)}
+        />
+        <Tooltip
+          title={editing ? "Keep the current key" : "Replace the key"}
+          position={TooltipPosition.TopCenter}
+        >
+          <Button
+            variant={ButtonVariant.Secondary}
+            size={ButtonSize.Medium}
+            content={ButtonContent.Icon}
+            aria-label={editing ? "Keep the current key" : "Replace the key"}
+            disabled={editing && !stored}
+            onClick={editing ? onRestore : onClear}
+          >
+            <Icon iconName={editing ? IconName.Close : IconName.Edit} />
+          </Button>
+        </Tooltip>
+        <Tooltip
+          title="Remove the key from this session"
+          position={TooltipPosition.TopCenter}
+        >
+          <Button
+            variant={ButtonVariant.SecondaryDestructive}
+            size={ButtonSize.Medium}
+            content={ButtonContent.Icon}
+            aria-label="Remove the key from this session"
+            disabled={editing && !draft}
+            onClick={onClear}
+          >
+            <Icon iconName={IconName.Trash} />
+          </Button>
+        </Tooltip>
+      </div>
+    </InputWrapper>
+  );
+}
+
+/**
+ * What a managed provider shows in place of a key: the credential is a browser
+ * login shared by every session on that provider, so this row signs in and out
+ * rather than editing anything the session owns.
+ */
+function AuthenticationField({ backend }: { backend: BackendKind }) {
+  const { provider, signedIn } = useManagedSignIn(backend);
+  const { state, start, cancel } = useDeviceLogin();
+  const logout = useManagedLogout();
+
+  if (!provider) return null;
+
+  const failed = state.status === "failed";
+  const control =
+    state.status === "waiting" ? (
+      <div className="flex items-center gap-2">
+        <Loader size={LoaderSize.Micro} />
+        {state.prompt.user_code ? (
+          <>
+            <span className="text-micro text-basic-muted">Code</span>
+            <span className="label-small text-basic-primary tabular-nums">
+              {state.prompt.user_code}
+            </span>
+          </>
+        ) : (
+          <span className="text-micro text-basic-muted">
+            Waiting for the browser
+          </span>
+        )}
+        <Button
+          variant={ButtonVariant.Ghost}
+          size={ButtonSize.Medium}
+          content={ButtonContent.Text}
+          onClick={() => void cancel()}
+        >
+          Cancel
+        </Button>
+      </div>
+    ) : signedIn ? (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+          <Icon
+            iconName={IconName.CheckCircle}
+            className="text-success-primary"
+          />
+          <span className="label-small text-success-primary">Logged in</span>
+        </div>
+        <Button
+          variant={ButtonVariant.Ghost}
+          size={ButtonSize.Medium}
+          content={ButtonContent.Text}
+          loading={logout.isPending}
+          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
+        >
+          Logout
+        </Button>
+      </div>
+    ) : (
+      <Button
+        variant={ButtonVariant.Primary}
+        size={ButtonSize.Medium}
+        content={ButtonContent.IconRight}
+        loading={state.status === "starting"}
+        onClick={() => void start(provider)}
+      >
+        <span>Login</span>
+        <Icon iconName={IconName.External} />
+      </Button>
+    );
+
+  return (
+    <InputWrapper
+      label="Authentication"
+      validation={failed}
+      validationText={failed ? state.message : undefined}
+      hintText={
+        signedIn
+          ? "Signed in through the browser; every session on this provider shares the login."
+          : "This provider signs in through the browser, and the session cannot run until it has."
+      }
+    >
+      <div className="flex items-center">{control}</div>
+    </InputWrapper>
+  );
+}
+
+/**
+ * The model the session runs. A provider that answers with a model index picks
+ * from that list; a hand-written gateway that has none is typed in, and a
+ * credential that is not working yet has nothing to offer either way.
+ */
+function ModelField({
+  value,
+  models,
+  available,
+  onChange,
+}: {
+  value: string;
+  models: SelectItem[];
+  /** Whether the credential is in a state that can reach a model at all. */
+  available: boolean;
+  onChange: (model: string) => void;
+}) {
+  if (models.length === 0 && available) {
+    return (
+      <Input
+        label="Model"
+        inputSize={InputSize.Medium}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    );
+  }
+
+  // A model configured earlier may no longer be listed — a renamed or retired
+  // one still has to show as what the session runs today.
+  const items = models.some((item) => item.id === value)
+    ? models
+    : value
+      ? [...models, { id: value, label: value }]
+      : models;
+
+  return (
+    <InputWrapper label="Model">
+      <Select
+        items={items}
+        value={value}
+        onValueChange={onChange}
+        disabled={!available}
+        placeholder="–"
+        className="w-full"
+        triggerClassName="w-full"
+        panelClassName="max-h-64 overflow-auto"
+      />
+    </InputWrapper>
   );
 }

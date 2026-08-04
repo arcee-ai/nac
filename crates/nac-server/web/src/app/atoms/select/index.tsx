@@ -22,6 +22,12 @@ interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /**
+   * Applied to the trigger button. The wrapper stretching is not enough on its
+   * own — the button hugs its label — so a select that has to fill a form
+   * column needs `w-full` here as well as on `className`.
+   */
+  triggerClassName?: string;
   panelClassName?: string;
 }
 
@@ -42,6 +48,7 @@ const Select: React.FC<SelectProps> = ({
   placeholder = "Select...",
   disabled = false,
   className = "",
+  triggerClassName = "",
   panelClassName = "",
 }) => {
   const [open, setOpen] = useState(false);
@@ -64,11 +71,7 @@ const Select: React.FC<SelectProps> = ({
         <TabButton
           key={item.id}
           size={tabSizeFor[size]}
-          variant={
-            item.id === value
-              ? TabButtonVariant.Accent
-              : TabButtonVariant.Regular
-          }
+          variant={TabButtonVariant.Regular}
           active={item.id === value}
           onClick={() => select(item.id)}
         >
@@ -82,6 +85,7 @@ const Select: React.FC<SelectProps> = ({
         size={size}
         disabled={disabled}
         content={ButtonContent.IconRight}
+        className={`${triggerClassName} overflow-hidden max-w-full`}
         onClick={() => !disabled && setOpen(!open)}
         aria-expanded={open}
       >

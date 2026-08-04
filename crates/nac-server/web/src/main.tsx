@@ -21,10 +21,24 @@ const queryClient = new QueryClient({
 
 // Alt-click jumps from a rendered element to its source. The import is dynamic
 // and guarded so the tool never reaches the committed production bundle; the
-// element ids it reads are stamped by the Babel plugin the dev server adds.
+// data attributes it reads are stamped by the Babel plugin the dev server adds.
 if (import.meta.env.DEV) {
   void import("@locator/runtime").then(({ default: setupLocatorUI }) => {
-    setupLocatorUI();
+    setupLocatorUI({
+      // React 19 has no fiber `_debugSource`; force the data-attribute adapter.
+      adapter: "jsx",
+      // Prefer Cursor so Alt-click / copied links open with `:line:column`.
+      targets: {
+        cursor: {
+          url: "cursor://file${projectPath}${filePath}:${line}:${column}",
+          label: "Cursor",
+        },
+        vscode: {
+          url: "vscode://file${projectPath}${filePath}:${line}:${column}",
+          label: "VSCode",
+        },
+      },
+    });
   });
 }
 

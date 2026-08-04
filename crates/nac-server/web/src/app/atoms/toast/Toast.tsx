@@ -52,11 +52,15 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
       >
         <div
           className={[
-            "rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-btn-primary shadow-2xl overflow-hidden w-[360px]",
+            "rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-notification shadow-2xl overflow-hidden w-[360px]",
             VARIANT_STYLES[variant],
           ].join(" ")}
         >
-          <Icon iconName={VARIANT_ICONS[variant]} size={20} className="flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px]" color="!fill-white" />
+          <Icon
+            iconName={VARIANT_ICONS[variant]}
+            size={20}
+            className="flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] [&>path]:fill-notification"
+          />
           <span className="notification-title label-small flex-grow min-w-0 break-words whitespace-pre-line">
             {content}
           </span>
@@ -66,7 +70,11 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
             className="absolute top-1 right-1 btn-icon-rotate flex-shrink-0"
             onClick={onClose}
           >
-            <Icon iconName={IconName.Close} color="!fill-btn-primary" />
+            {/* Beat `.btn-ghost .icon path { fill: … }` from atoms.css. */}
+            <Icon
+              iconName={IconName.Close}
+              className="[&>path]:!fill-notification"
+            />
           </Button>
         </div>
       </div>

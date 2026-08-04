@@ -18,6 +18,7 @@ const API_PREFIXES = [
   "/health",
   "/store",
   "/sessions",
+  "/auth",
   "/credentials",
   "/fs",
   "/providers",
@@ -33,6 +34,14 @@ const API_TARGET = process.env.NAC_API_URL ?? "http://127.0.0.1:3210";
  * back to a file. The React plugin runs on oxc and no longer takes Babel
  * plugins, hence this pass, which stays ahead of the JSX transform and is
  * confined to `apply: "serve"` so the committed bundle never carries it.
+ *
+ * `cwd` is pinned to this package root so `projectPath` + `filePath` always
+ * recombine to an absolute path, even when Vite is started from the monorepo
+ * root via `npm --prefix`.
+ *
+ * `dataAttribute: "path"` embeds `file:line:column` on the element itself, so
+ * links stay correct even if `window.__LOCATOR_DATA__` is briefly stale after
+ * HMR.
  */
 function locatorJsx(): Plugin {
   return {
@@ -46,16 +55,43 @@ function locatorJsx(): Plugin {
 
       const result = await transformAsync(code, {
         filename: file,
+        cwd: __dirname,
         babelrc: false,
         configFile: false,
         sourceMaps: true,
         // Only the Locator plugin runs here: TypeScript and JSX are parsed but
         // printed back untouched, leaving both transforms to Vite.
         parserOpts: { plugins: ["typescript", "jsx"] },
-        plugins: ["@locator/babel-jsx/dist"],
+        plugins: [
+          [
+            "@locator/babel-jsx/dist",
+            { dataAttribute: "path" },
+          ],
+        ],
       });
       if (!result?.code) return null;
       return { code: result.code, map: result.map };
+    },
+  };
+}
+
+/**
+ * Upstream Locator "Copy path" writes only `filePath` (no line/column), so
+ * pasting into Cursor opens the file at the top. Rewrite that call to include
+ * the absolute path and exact position.
+ */
+function locatorCopyWithLine(): Plugin {
+  const needle = "navigator.clipboard.writeText(linkProps.filePath)";
+  const replacement =
+    "navigator.clipboard.writeText(`${linkProps.projectPath}${linkProps.filePath}:${linkProps.line}:${linkProps.column}`)";
+  return {
+    name: "nac:locator-copy-with-line",
+    apply: "serve",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.includes("@locator/runtime")) return null;
+      if (!code.includes(needle)) return null;
+      return { code: code.replaceAll(needle, replacement), map: null };
     },
   };
 }
@@ -64,9 +100,14 @@ export default defineConfig(({ command }) => ({
   // Only the built bundle lives under the embedded asset prefix; the dev server
   // owns its whole origin and proxies the API, so it serves from the root.
   base: command === "build" ? BASE : "/",
-  plugins: [locatorJsx(), react(), tailwindcss()],
+  plugins: [locatorJsx(), locatorCopyWithLine(), react(), tailwindcss()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
+  },
+  optimizeDeps: {
+    // Keep Locator unbundled so `locatorCopyWithLine` can rewrite its
+    // clipboard helper; esbuild prebundle would bake the upstream string in.
+    exclude: ["@locator/runtime"],
   },
   server: {
     port: 5173,

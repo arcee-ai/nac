@@ -39,30 +39,6 @@ import {
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
 
-function Banner({
-  message,
-  action,
-}: {
-  message: string;
-  action?: { label: string; onClick: () => void };
-}) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-2 rounded-[8px] border border-error-muted bg-error-tertiary text-error-primary shrink-0">
-      <Icon iconName={IconName.Repair} />
-      <div className="flex-grow min-w-0 label-small truncate">{message}</div>
-      {action ? (
-        <button
-          type="button"
-          className="label-small underline shrink-0 hover:opacity-80"
-          onClick={action.onClick}
-        >
-          {action.label}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 /** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
   const { sessionId, panel } = useParams<{
@@ -92,10 +68,21 @@ export default function SessionPage() {
 
   const entry = sessions.find((item) => item.summary.session_id === id) ?? null;
   const configError = entry?.summary.model_config_error;
-  // The repair banner already explains a broken config, and that is exactly why
+  // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
   const fetchError =
     !configError && !snapshot && error ? errorMessage(error) : null;
+  const errorNotice = configError
+    ? {
+        message: `Configuration needs repair: ${configError}`,
+        action: {
+          label: "Open settings",
+          onClick: () => actions.settings(id),
+        },
+      }
+    : fetchError
+      ? { message: fetchError }
+      : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
@@ -144,22 +131,6 @@ export default function SessionPage() {
             collapsed && "opacity-0",
           )}
         >
-          {configError ? (
-            <div className="pb-2">
-              <Banner
-                message={`Configuration needs repair: ${configError}`}
-                action={{
-                  label: "Open settings",
-                  onClick: () => actions.settings(id),
-                }}
-              />
-            </div>
-          ) : null}
-          {fetchError ? (
-            <div className="pb-2">
-              <Banner message={fetchError} />
-            </div>
-          ) : null}
           {/* While the dialog is up it owns the panels, so this half stays
               empty behind the scrim instead of running them twice. */}
           <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
@@ -173,9 +144,16 @@ export default function SessionPage() {
           collapsed ? "pl-2" : "pl-6",
         )}
       >
-        <div className="flex flex-col flex-1 min-h-0 w-full max-w-[840px]">
-          <Transcript snapshot={snapshot} onFocusPanel={focusPanel} />
-          <div className="shrink-0 py-2">
+        <div className="flex flex-col flex-1 min-h-0 w-full relative">
+          <Transcript
+            sessionId={id}
+            snapshot={snapshot}
+            panel={panel}
+            onFocusPanel={focusPanel}
+            errorNotice={errorNotice}
+          />
+
+          <div className="mx-auto max-w-[840px] absolute bottom-0 left-0 right-0 pb-2">
             <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
           </div>
         </div>

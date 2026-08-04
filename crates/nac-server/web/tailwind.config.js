@@ -255,6 +255,8 @@ const config = {
         "tertiary-inverse": "var(--color-text-tertiary-inverse)",
         "muted-inverse": "var(--color-text-muted-inverse)",
 
+        notification: "var(--color-text-notification)",
+
         "success-primary": "var(--color-text-success-primary)",
         "success-secondary": "var(--color-text-success-secondary)",
         "success-tertiary": "var(--color-text-success-tertiary)",
@@ -345,6 +347,8 @@ const config = {
         "secondary-inversed": "var(--color-fill-secondary-inversed)",
         "tertiary-inversed": "var(--color-fill-tertiary-inversed)",
         "muted-inversed": "var(--color-fill-muted-inversed)",
+
+        notification: "var(--color-fill-notification)",
 
         "success-primary": "var(--color-fill-success-primary)",
         "success-secondary": "var(--color-fill-success-secondary)",

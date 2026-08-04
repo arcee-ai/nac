@@ -276,7 +276,8 @@ impl ModelClient {
                 self.send_openai_responses(messages, tools, on_delta).await
             }
             BackendKind::AnthropicMessages => {
-                self.send_anthropic_messages(messages, tools, on_delta).await
+                self.send_anthropic_messages(messages, tools, on_delta)
+                    .await
             }
             BackendKind::ChatGptCodexResponses => {
                 chatgpt_codex::send_responses(
@@ -551,7 +552,9 @@ impl ModelClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
-        let response = self.send_with_retry_headers(url, body, apply_headers).await?;
+        let response = self
+            .send_with_retry_headers(url, body, apply_headers)
+            .await?;
         let status = response.status();
         let body_text = read_response_body(response).await?;
         serde_json::from_str::<Value>(&body_text).map_err(|e| ModelHttpError {

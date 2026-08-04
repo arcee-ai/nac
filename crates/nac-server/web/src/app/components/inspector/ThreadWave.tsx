@@ -1,4 +1,5 @@
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
+import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
 import { cn } from "@/app/lib/cn";
 import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
 
@@ -8,13 +9,11 @@ interface ThreadBoxProps {
   onSelect: (name: string) => void;
 }
 
-const STATE_ORDER: Record<ThreadState, number> = { error: 0, running: 1, done: 2 };
-
-/** Older commands recede rather than compete with the newest one. */
-function tailOpacity(distanceFromNewest: number): string {
-  if (distanceFromNewest === 0) return "";
-  return distanceFromNewest === 1 ? "opacity-30" : "opacity-10";
-}
+const STATE_ORDER: Record<ThreadState, number> = {
+  error: 0,
+  running: 1,
+  done: 2,
+};
 
 function StateIcon({ state }: { state: ThreadState }) {
   if (state === "running") {
@@ -22,15 +21,31 @@ function StateIcon({ state }: { state: ThreadState }) {
   }
   if (state === "error") {
     return (
-      <Icon iconName={IconName.Danger} size={20} className="text-error-primary" />
+      <Icon
+        iconName={IconName.Danger}
+        size={20}
+        // Beat `.btn-ghost .icon path { fill: … }` from atoms.css.
+        className="[&>path]:!fill-error-primary"
+      />
     );
   }
-  return <Icon iconName={IconName.CheckCircle} size={20} />;
+  return (
+    <Icon
+      iconName={IconName.CheckCircle}
+      size={20}
+      className="[&>path]:!fill-basic-primary"
+    />
+  );
 }
 
 /** One dispatched thread: name, live state and the newest line it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   const running = thread.state === "running";
+  // Before the first command there is nothing to tail, so the card keeps
+  // showing what the thread was asked to do.
+  const tail = thread.log.length
+    ? thread.log
+    : [{ key: "action", text: thread.action, isError: false }];
 
   return (
     // The ghost button paints its own transparent background, so the elevation
@@ -50,7 +65,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
         aria-pressed={selected}
         onClick={() => onSelect(thread.name)}
       >
-        <div className="flex items-center gap-[10px] shrink-0 p-2 w-full">
+        <div className="flex items-center gap-2 shrink-0 p-2 w-full">
           <StateIcon state={thread.state} />
           <span
             className={cn(
@@ -59,35 +74,24 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
                 ? "text-shimmer-basic"
                 : thread.state === "error"
                   ? "text-error-primary"
-                  : "text-basic-secondary",
+                  : "text-basic-primary",
             )}
           >
             {thread.name}
           </span>
         </div>
         {running ? (
-          // The tail is bottom-aligned and clipped at the top, so the newest
-          // command sits still while older ones fade out of the card.
-          <div className="flex flex-col justify-end flex-1 min-h-0 w-full px-2 pb-2 overflow-hidden">
-            {thread.details.map((line, index) => (
-              <p
-                key={`${index}-${line}`}
-                className={cn(
-                  "w-full truncate code text-basic-muted text-[12px] leading-[16px]",
-                  tailOpacity(thread.details.length - 1 - index),
-                )}
-              >
-                {line}
-              </p>
-            ))}
-          </div>
+          <ThreadLogTail
+            lines={tail}
+            className="flex-1 min-h-0 w-full px-2 pb-2"
+          />
         ) : (
           // Chrome blockifies `-webkit-box` flex items, so the clamped text
           // needs a plain wrapper to stay clamped.
-          <div className="w-full px-2 pb-2">
-            <p className="line-clamp-2 text-[12px] leading-[16px] text-basic-tertiary">
-              {thread.details[0]}
-            </p>
+          <div className="w-full px-2 pt-2">
+            <span className="line-clamp-2 text-micro text-basic-muted !my-0">
+              {thread.summary}
+            </span>
           </div>
         )}
       </button>
@@ -115,7 +119,7 @@ export function ThreadWave({ threads, selected, onSelect }: ThreadWaveProps) {
   return (
     <div
       className={cn(
-        "flex items-start gap-2 pl-2 py-3 w-full border-l-2 border-solid",
+        "pl-4 py-3 my-8 w-full border-l-2 border-solid",
         "overflow-x-auto hide-scrollbar",
         // Fade the row out on the right so a wave reads as scrollable.
         "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
@@ -123,17 +127,19 @@ export function ThreadWave({ threads, selected, onSelect }: ThreadWaveProps) {
           ? "border-error-primary"
           : state === "running"
             ? "border-primary"
-            : "border-muted",
+            : "border-tertiary",
       )}
     >
-      {threads.map((thread) => (
-        <ThreadBox
-          key={thread.callId}
-          thread={thread}
-          selected={selected === thread.name}
-          onSelect={onSelect}
-        />
-      ))}
+      <div className="flex items-start gap-1 pr-12 w-fit">
+        {threads.map((thread) => (
+          <ThreadBox
+            key={thread.callId}
+            thread={thread}
+            selected={selected === thread.name}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
     </div>
   );
 }

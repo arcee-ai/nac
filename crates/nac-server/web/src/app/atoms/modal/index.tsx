@@ -150,6 +150,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   // On a phone the close affordance leads the header, the way a back button
   // does — unless the dialog is explicitly full screen.
   const closeLeads = isMobile && !fullScreen;
+  // Chromeless fullscreen still needs a way out; regular chrome already puts
+  // Close in the header row.
+  const chromelessClose = chromeless && fullScreen && onClose;
 
   const headerRow = (
     <div
@@ -199,7 +202,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       <div
         className={cn(
           "fixed inset-0 z-[100] flex pointer-events-none",
-          !isMobile && "items-center justify-center p-4",
+          fullScreen ? "p-2" : !isMobile && "items-center justify-center p-4",
         )}
       >
         <div
@@ -208,7 +211,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           aria-modal="true"
           tabIndex={-1}
           className={cn(
-            "flex flex-col shadow-2xl pointer-events-auto outline-none",
+            "relative flex flex-col shadow-2xl pointer-events-auto outline-none",
             isMobile
               ? cn(
                   "slide-in-right w-full h-[100dvh] rounded-none",
@@ -221,21 +224,29 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                     ? "shadow-none"
                     : flush
                       ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
-                      : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-secondary",
+                      : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-muted",
+                  // Fill the padded viewport (8px inset via parent `p-2`).
                   fullScreen &&
-                    "max-w-none min-w-[calc(100vw-64px)] min-h-[calc(100vh-64px)] max-h-[calc(100vh-64px)]",
+                    "max-w-none w-full h-full min-w-0 min-h-0 max-h-none overflow-hidden",
+                  fullScreen && !chromeless && "rounded-[8px]",
                 ),
             className,
           )}
         >
+          {chromelessClose ? (
+            <div className="absolute top-1 right-2 z-10">
+              {closeButton(IconName.Close, false)}
+            </div>
+          ) : null}
           {header}
           <div
             className={cn(
               chromeless
-                ? "flex flex-col flex-1 min-h-0"
+                ? "flex flex-col flex-1 min-h-0 w-full"
                 : cn(
                     "paragraph-medium text-basic-secondary",
                     chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
+                    fullScreen && "flex-1 min-h-0 w-full",
                   ),
             )}
           >

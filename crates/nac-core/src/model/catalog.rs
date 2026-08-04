@@ -16,6 +16,14 @@ const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(20);
 /// only far enough to carry the message.
 const MAX_PROVIDER_ERROR_BODY: usize = 400;
 
+/// The Codex model index hides every model whose `minimal_client_version` is
+/// above the version the caller reports, so asking without one lists nothing.
+///
+/// This is sent only when reading the index — inference never reports a version
+/// — and is set well ahead of the models currently gated behind it. A model
+/// released above this floor stays invisible until the number is raised.
+const CODEX_MODEL_INDEX_CLIENT_VERSION: &str = "0.200.0";
+
 /// The inference URL used when a provider is chosen by name rather than by URL.
 ///
 /// This is deliberately separate from [`managed_backend_base_url`], which feeds
@@ -45,23 +53,26 @@ pub struct ProviderModel {
     pub display_name: Option<String>,
 }
 
-/// Where a backend lists the models a key may use.
+/// Where a backend lists the models it can reach.
 ///
 /// Anthropic mounts its REST surface under `/v1`, matching how the messages
-/// endpoint is built; every other supported provider speaks the OpenAI shape
-/// where the base URL already includes any version segment.
+/// endpoint is built; Codex keeps its index beside the responses endpoint
+/// rather than at the OpenAI-shaped path; every other supported provider
+/// speaks the OpenAI shape where the base URL already includes any version
+/// segment.
 fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
     let trimmed = base_url.trim_end_matches('/');
     match backend {
         BackendKind::AnthropicMessages => Some(format!("{trimmed}/v1/models")),
+        BackendKind::ChatGptCodexResponses => Some(format!(
+            "{trimmed}/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
+        )),
         BackendKind::OpenAiResponses
         | BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
-        | BackendKind::ArceeApi => Some(format!("{trimmed}/models")),
-        // Codex and managed Arcee logins have no key to validate and no model
-        // index to read.
-        BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => None,
+        | BackendKind::ArceeApi
+        | BackendKind::ArceeAuth => Some(format!("{trimmed}/models")),
     }
 }
 
@@ -72,7 +83,16 @@ fn model_from_value(value: &Value) -> Option<ProviderModel> {
             display_name: None,
         });
     }
-    let id = value.get("id").and_then(Value::as_str)?;
+    // Codex marks the models it does not mean to offer directly, such as the
+    // one backing its review command.
+    if value.get("visibility").and_then(Value::as_str) == Some("hide") {
+        return None;
+    }
+    // Codex names a model by its slug where the OpenAI shape uses an id.
+    let id = value
+        .get("id")
+        .or_else(|| value.get("slug"))
+        .and_then(Value::as_str)?;
     Some(ProviderModel {
         id: id.to_string(),
         display_name: value
@@ -118,14 +138,20 @@ pub async fn list_provider_models(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<ProviderModel>> {
-    let base_url = resolve_model_base_url(backend, Some(base_url.to_string()))?;
-    let url = models_url(backend, &base_url).ok_or_else(|| {
-        anyhow!("backend '{backend}' authenticates with a stored login and has no model index")
-    })?;
+    // A backend that signs in through a browser has a model index, but it is
+    // read with the stored login; a key offered for one is a caller mistake and
+    // must not be forwarded.
+    if ManagedAuthProvider::for_backend(backend).is_some() {
+        return Err(anyhow!(
+            "backend '{backend}' authenticates with a stored login, so it takes no API key"
+        ));
+    }
 
-    let request = client::no_redirect_model_client()?
-        .get(&url)
-        .timeout(MODEL_DISCOVERY_TIMEOUT);
+    let base_url = resolve_model_base_url(backend, Some(base_url.to_string()))?;
+    let url = models_url(backend, &base_url)
+        .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+
+    let request = model_index_request(&url)?;
     let request = match backend {
         BackendKind::AnthropicMessages => request
             .header("x-api-key", api_key)
@@ -133,8 +159,60 @@ pub async fn list_provider_models(
         _ => request.bearer_auth(api_key),
     };
 
-    // Provider hostnames and status codes are safe to surface; the request
-    // itself is never echoed, because it carries the key.
+    read_model_list(request, &base_url, "the provider rejected this API key").await
+}
+
+/// Ask a provider signed in through the browser which models the login reaches.
+///
+/// This doubles as a check that the stored credential still works, the way
+/// listing with a key doubles as key validation — which is what lets the launch
+/// UI report a login as good without a separate probe.
+pub async fn list_managed_provider_models(
+    provider: ManagedAuthProvider,
+) -> Result<Vec<ProviderModel>> {
+    let backend = provider.backend();
+    let client = client::no_redirect_model_client()?;
+
+    let (base_url, request) = match provider {
+        ManagedAuthProvider::Arcee => {
+            // The login names the endpoint it belongs to, so the token is never
+            // offered to an origin other than the one that issued it.
+            let base_url = arcee::read_stored_auth()?.base_url;
+            let token = arcee::fresh_access_token(&client, &base_url).await?;
+            let url = models_url(backend, &base_url)
+                .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+            (base_url, model_index_request(&url)?.bearer_auth(token))
+        }
+        ManagedAuthProvider::Codex => {
+            let base_url = resolve_model_base_url(backend, None)?;
+            let (token, account_id) = chatgpt_codex::stored_auth_for_request(&client).await?;
+            let url = models_url(backend, &base_url)
+                .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+            let request = model_index_request(&url)?
+                .bearer_auth(token)
+                .header("ChatGPT-Account-Id", account_id);
+            (base_url, request)
+        }
+    };
+
+    read_model_list(request, &base_url, "the provider rejected this login").await
+}
+
+fn model_index_request(url: &str) -> Result<reqwest::RequestBuilder> {
+    Ok(client::no_redirect_model_client()?
+        .get(url)
+        .timeout(MODEL_DISCOVERY_TIMEOUT))
+}
+
+/// Sends a prepared model-index request and turns the answer into models.
+///
+/// Provider hostnames and status codes are safe to surface; the request itself
+/// is never echoed, because it carries the credential.
+async fn read_model_list(
+    request: reqwest::RequestBuilder,
+    base_url: &str,
+    rejected: &str,
+) -> Result<Vec<ProviderModel>> {
     let response = request
         .send()
         .await
@@ -143,7 +221,7 @@ pub async fn list_provider_models(
     let body = response.text().await.unwrap_or_default();
 
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(anyhow!("the provider rejected this API key ({status})"));
+        return Err(anyhow!("{rejected} ({status})"));
     }
     if !status.is_success() {
         return Err(anyhow!(
@@ -207,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn only_key_authenticated_backends_expose_a_model_index() {
+    fn every_backend_exposes_a_model_index_however_it_authenticates() {
         for backend in ALL_BACKENDS {
             assert_eq!(
                 provider_uses_api_key(backend),
@@ -215,10 +293,9 @@ mod tests {
                 "{backend} is classified inconsistently"
             );
             let base_url = provider_default_base_url(backend).expect("default base URL");
-            assert_eq!(
+            assert!(
                 models_url(backend, base_url).is_some(),
-                expects_api_key(backend),
-                "{backend} disagrees on having a model index"
+                "{backend} has no model index"
             );
         }
     }
@@ -238,9 +315,16 @@ mod tests {
             models_url(BackendKind::TogetherChat, "https://api.together.xyz/v1/"),
             Some("https://api.together.xyz/v1/models".to_string())
         );
+        // Codex keeps its index off the OpenAI-shaped path, and hides every
+        // model unless the request says which client version is asking.
         assert_eq!(
-            models_url(BackendKind::ChatGptCodexResponses, "https://chatgpt.com"),
-            None
+            models_url(
+                BackendKind::ChatGptCodexResponses,
+                "https://chatgpt.com/backend-api"
+            ),
+            Some(format!(
+                "https://chatgpt.com/backend-api/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
+            ))
         );
     }
 
@@ -450,7 +534,7 @@ mod tests {
             "unused",
         )
         .await
-        .expect_err("a stored login has no key to validate");
+        .expect_err("a stored login takes no key");
 
         assert!(error.to_string().contains("stored login"));
     }

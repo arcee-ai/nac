@@ -25,7 +25,7 @@ export function FieldLabel({
         {label}
       </div>
       {hint ? (
-        <HoverHint title={hint} position={TooltipPosition.BottomLeft} />
+        <HoverHint title={hint} position={TooltipPosition.TopCenter} />
       ) : null}
       {required ? (
         <div className="flex-1 text-right text-micro text-basic-muted">
@@ -57,8 +57,8 @@ export function ConfigRow({
   control: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1 w-full min-h-5">
-      <div className="flex items-center gap-1 flex-1 min-w-0">
+    <div className="flex items-center justify-between w-full min-h-5">
+      <div className="flex items-center gap-1 flex-1 min-w-0 max-w-[220px]">
         <div
           className={cn(
             "truncate",
@@ -76,7 +76,7 @@ export function ConfigRow({
           {required ? "*" : ""}
         </div>
         {hint ? (
-          <HoverHint title={hint} position={TooltipPosition.BottomLeft} />
+          <HoverHint title={hint} position={TooltipPosition.TopCenter} />
         ) : null}
       </div>
       <div className="shrink-0">{control}</div>

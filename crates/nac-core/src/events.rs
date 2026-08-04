@@ -308,6 +308,12 @@ pub enum SessionEvent {
     TranscriptAppended {
         transcript_len: u64,
     },
+    /// Live-only signal that a revert cut the transcript back to
+    /// `transcript_len` messages. Subscribers must refetch rather than apply a
+    /// delta: unlike an append, everything they hold past this point is gone.
+    TranscriptReverted {
+        transcript_len: u64,
+    },
 }
 
 /// A slice of model output as it is being produced. Rides its own channel

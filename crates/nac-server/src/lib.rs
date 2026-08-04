@@ -1,8 +1,18 @@
 mod compaction;
 mod filesystem;
+mod managed_auth;
+mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
+pub use managed_auth::{
+    DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
+    ManagedAuthStatusResponse,
+};
+pub use revert::{
+    RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
+    RevertSessionResponse,
+};
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -33,11 +43,12 @@ use nac_core::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
     model::{
-        list_provider_models, list_stored_api_keys, managed_backend_base_url,
-        provider_default_base_url, provider_uses_api_key, remove_api_key, resolve_backend_api_key,
-        resolve_model_base_url, store_api_key, validate_caller_supplied_base_url,
-        validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
-        ProviderModel, ReasoningEffort,
+        list_managed_provider_models, list_provider_models, list_stored_api_keys,
+        managed_backend_base_url, provider_default_base_url, provider_uses_api_key, remove_api_key,
+        resolve_backend_api_key, resolve_model_base_url, store_api_key,
+        validate_caller_supplied_base_url, validate_model_configuration, BackendKind,
+        EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError, ProviderModel,
+        ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     runtime::{
@@ -91,6 +102,7 @@ struct SessionManagerInner {
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
+    managed_logins: managed_auth::ManagedLoginRegistry,
 }
 
 struct ResolvedLaunchLocation {
@@ -308,6 +320,9 @@ pub struct ResolvedModelConfiguration {
 pub struct ProviderModelsRequest {
     pub backend: BackendKind,
     pub api_key: Option<String>,
+    /// Names a key already held in the environment or in NAC home, for a caller
+    /// that has one on file and no copy of the secret to send.
+    pub api_key_env: Option<String>,
     /// Overrides the provider's canonical URL, for a proxy or a custom gateway.
     pub base_url: Option<String>,
 }
@@ -323,6 +338,11 @@ pub struct ProviderModelList {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StoreCredentialRequest {
     pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeneratedCredential {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -579,6 +599,7 @@ impl SessionManager {
                 active_sessions: RwLock::new(HashMap::new()),
                 lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
+                managed_logins: managed_auth::ManagedLoginRegistry::default(),
             }),
         })
     }
@@ -1632,7 +1653,20 @@ fn api_router(manager: SessionManager) -> Router {
             "/model-configs/{config_id}/models",
             post(saved_model_config_models_handler),
         )
-        .route("/credentials", get(list_credentials_handler))
+        .route("/auth", get(managed_auth::list_handler))
+        .route("/auth/{provider}", delete(managed_auth::logout_handler))
+        .route(
+            "/auth/{provider}/login",
+            post(managed_auth::start_login_handler),
+        )
+        .route(
+            "/auth/{provider}/login/{login_id}",
+            get(managed_auth::poll_login_handler).delete(managed_auth::cancel_login_handler),
+        )
+        .route(
+            "/credentials",
+            get(list_credentials_handler).post(store_generated_credential_handler),
+        )
         .route(
             "/credentials/{name}",
             put(store_credential_handler).delete(delete_credential_handler),
@@ -1684,6 +1718,11 @@ fn api_router(manager: SessionManager) -> Router {
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/compact", post(compaction::handler))
+        .route("/sessions/{session_id}/revert", post(revert::handler))
+        .route(
+            "/sessions/{session_id}/regenerate",
+            post(revert::regenerate_handler),
+        )
         .route(
             "/sessions/{session_id}/steering",
             post(queue_orchestrator_steering_handler),
@@ -1789,11 +1828,13 @@ async fn browse_filesystem_handler(
     Ok(Json(listing))
 }
 
-/// Validate an API key by asking its provider which models it may use.
+/// Validate a credential by asking its provider which models it may use.
 ///
-/// The key arrives in the request body and is forwarded once; it is never
-/// stored by this route, and the destination goes through the same credential
-/// trust check as a session launch.
+/// A key arrives in the request body and is forwarded once; it is never stored
+/// by this route, and the destination goes through the same credential trust
+/// check as a session launch. A provider signed in through the browser has no
+/// key to send, so the stored login answers instead — and its answer is the
+/// same evidence the launch UI needs that the login still works.
 async fn provider_models_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<ProviderModelsRequest>, JsonRejection>,
@@ -1802,14 +1843,43 @@ async fn provider_models_handler(
     let backend = request.backend;
 
     let api_key = request.api_key.unwrap_or_default();
-    if !provider_uses_api_key(backend) {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!(
-                "backend '{backend}' authenticates with a stored login, so it has no API key to validate"
-            ),
-        });
+    let api_key_env = request
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(provider) = ManagedAuthProvider::for_backend(backend) {
+        if !api_key.trim().is_empty() || api_key_env.is_some() {
+            return Err(ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: format!(
+                    "backend '{backend}' authenticates with a stored login and accepts no API key"
+                ),
+            });
+        }
+        let models = list_managed_provider_models(provider)
+            .await
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_GATEWAY,
+                message: error.to_string(),
+            })?;
+        // The endpoint belongs to the login rather than to the caller, so it is
+        // reported back the same way a validated key's is.
+        let base_url = provider_default_base_url(backend)
+            .map(str::to_string)
+            .unwrap_or_default();
+        return Ok(Json(ProviderModelList { base_url, models }));
     }
+    // A key already filed away is named rather than sent, so a setup that is
+    // only being reviewed never has to hand its secret back to the page first.
+    let api_key = match api_key_env {
+        Some(name) if api_key.trim().is_empty() => resolve_backend_api_key(backend, Some(name))
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: error.to_string(),
+            })?,
+        _ => api_key,
+    };
     if api_key.trim().is_empty() {
         return Err(ApiError {
             status: StatusCode::BAD_REQUEST,
@@ -2035,22 +2105,28 @@ async fn resolve_configuration(
         &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
     )?;
 
-    let models = if provider_uses_api_key(backend) {
-        let api_key =
-            resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: error.to_string(),
-            })?;
-        list_provider_models(backend, &base_url, &api_key)
+    let models = match ManagedAuthProvider::for_backend(backend) {
+        // A stored login has no key to check, but it does reach a model index,
+        // so a saved setup offers the same choice a fresh one does. Being
+        // signed out is not fatal here: the configuration still names a model.
+        Some(provider) => list_managed_provider_models(provider)
             .await
-            .map_err(|error| ApiError {
-                status: StatusCode::BAD_GATEWAY,
-                message: error.to_string(),
-            })?
-    } else {
-        // A stored login has no key to check and no model index to read; the
-        // configured model is the only one on offer.
-        Vec::new()
+            .unwrap_or_default(),
+        None => {
+            let api_key =
+                resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| {
+                    ApiError {
+                        status: StatusCode::BAD_REQUEST,
+                        message: error.to_string(),
+                    }
+                })?;
+            list_provider_models(backend, &base_url, &api_key)
+                .await
+                .map_err(|error| ApiError {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: error.to_string(),
+                })?
+        }
     };
 
     Ok(Json(ResolvedModelConfiguration {
@@ -2104,6 +2180,21 @@ async fn store_credential_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     store_api_key(&name, &request.value)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Files a key away without the caller having to name it. The generated name is
+/// what a session stores in place of the secret, and its prefix marks the key as
+/// this server's to clean up rather than one the operator manages by hand.
+async fn store_generated_credential_handler(
+    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
+) -> std::result::Result<Json<GeneratedCredential>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let name = format!(
+        "{GENERATED_CREDENTIAL_PREFIX}{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    store_api_key(&name, &request.value)?;
+    Ok(Json(GeneratedCredential { name }))
 }
 
 async fn delete_credential_handler(

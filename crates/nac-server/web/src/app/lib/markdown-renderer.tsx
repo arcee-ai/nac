@@ -1,10 +1,9 @@
-import { isValidElement, memo } from "react";
+import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
-import CopyButton from "@/app/atoms/button/CopyButton";
-import { AnchorPlacement } from "@/app/lib/anchor";
+import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -44,42 +43,96 @@ const rehypePlugins = [
 ];
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
-function textOf(node: React.ReactNode): string {
+function textOf(node: ReactNode): string {
   if (typeof node === "string") return node;
   if (typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
-  if (isValidElement<{ children?: React.ReactNode }>(node)) {
+  if (isValidElement<{ children?: ReactNode }>(node)) {
     return textOf(node.props.children);
   }
   return "";
 }
 
+function languageOf(node: ReactNode): string {
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(node)) {
+    return "plaintext";
+  }
+  const className = node.props.className ?? "";
+  const match = /language-([\w+-]+)/.exec(className);
+  if (match?.[1]) return match[1];
+  return languageOf(node.props.children);
+}
+
 /**
- * Fenced block with a copy affordance that only appears on hover, so a long
- * transcript is not littered with buttons.
+ * Fenced block rendered as the design-system CodeBlock (header, copy,
+ * fullscreen) — same chrome ArceeFM uses via CodeInput, with matching `my-6`.
  */
-function CodeFence({ children, ...props }: React.ComponentPropsWithoutRef<"pre">) {
+function CodeFence({ children }: { children?: ReactNode }) {
+  const code = textOf(children).replace(/\n$/, "");
+  const language = languageOf(children);
   return (
-    <div className="group relative">
-      <pre {...props}>{children}</pre>
-      <CopyButton
-        value={textOf(children)}
-        title="Copy code"
-        position={AnchorPlacement.BottomLeft}
-        className="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-      />
-    </div>
+    <CodeBlock
+      code={code}
+      language={language === "plaintext" ? undefined : language}
+      title={language}
+      size={CodeBlockSize.Small}
+      copyable
+      expandable
+      className="my-6"
+    />
   );
+}
+
+function wrapStreaming(children: ReactNode, streaming: boolean): ReactNode {
+  if (!streaming) return children;
+  return <span className="streaming-chunk">{children}</span>;
+}
+
+interface MarkdownRendererProps {
+  children: string;
+  /** Fade newly painted prose while the turn is still streaming. */
+  streaming?: boolean;
 }
 
 // react-markdown never injects raw HTML, so no sanitizer is needed; links still
 // have to be neutered because the model controls their target.
-const components = {
-  a: ({ ...props }: React.ComponentPropsWithoutRef<"a">) => (
-    <a {...props} target="_blank" rel="noopener noreferrer nofollow" />
-  ),
-  pre: CodeFence,
-};
+function buildComponents(streaming: boolean) {
+  return {
+    a: ({ ...props }: React.ComponentPropsWithoutRef<"a">) => (
+      <a {...props} target="_blank" rel="noopener noreferrer nofollow" />
+    ),
+    pre: ({ children }: { children?: ReactNode }) => (
+      <CodeFence>{children}</CodeFence>
+    ),
+    table: ({ ...props }: React.ComponentPropsWithoutRef<"table">) => (
+      <table {...props} />
+    ),
+    p: ({ children, ...props }: React.ComponentPropsWithoutRef<"p">) => (
+      <p {...props}>{wrapStreaming(children, streaming)}</p>
+    ),
+    li: ({ children, ...props }: React.ComponentPropsWithoutRef<"li">) => (
+      <li {...props}>{wrapStreaming(children, streaming)}</li>
+    ),
+    h1: ({ children, ...props }: React.ComponentPropsWithoutRef<"h1">) => (
+      <h1 {...props}>{wrapStreaming(children, streaming)}</h1>
+    ),
+    h2: ({ children, ...props }: React.ComponentPropsWithoutRef<"h2">) => (
+      <h2 {...props}>{wrapStreaming(children, streaming)}</h2>
+    ),
+    h3: ({ children, ...props }: React.ComponentPropsWithoutRef<"h3">) => (
+      <h3 {...props}>{wrapStreaming(children, streaming)}</h3>
+    ),
+    h4: ({ children, ...props }: React.ComponentPropsWithoutRef<"h4">) => (
+      <h4 {...props}>{wrapStreaming(children, streaming)}</h4>
+    ),
+    h5: ({ children, ...props }: React.ComponentPropsWithoutRef<"h5">) => (
+      <h5 {...props}>{wrapStreaming(children, streaming)}</h5>
+    ),
+    h6: ({ children, ...props }: React.ComponentPropsWithoutRef<"h6">) => (
+      <h6 {...props}>{wrapStreaming(children, streaming)}</h6>
+    ),
+  };
+}
 
 /**
  * Heavy half of the markdown support: the parser plus the syntax highlighter.
@@ -87,15 +140,14 @@ const components = {
  */
 const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
-}: {
-  children: string;
-}) {
+  streaming = false,
+}: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
       rehypePlugins={rehypePlugins as any}
-      components={components}
+      components={buildComponents(streaming)}
     >
       {children}
     </ReactMarkdown>

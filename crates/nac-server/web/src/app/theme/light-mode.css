@@ -130,15 +130,15 @@
   --color-bg-success-inverse: var(--green-500);
 
   /* Border / Accent */
-  --color-border-accent-primary: var(--brand-trans-600);
-  --color-border-accent-secondary: var(--brand-trans-300);
+  --color-border-accent-primary: var(--brand-trans-800);
+  --color-border-accent-secondary: var(--brand-trans-500);
   --color-border-accent-tertiary: var(--brand-trans-100);
   --color-border-accent-muted: var(--brand-trans-50);
 
   /* Border / Basic */
-  --color-border-primary: var(--dark-trans-300);
-  --color-border-secondary: var(--dark-trans-100);
-  --color-border-tertiary: var(--dark-trans-50);
+  --color-border-primary: var(--black);
+  --color-border-secondary: var(--dark-trans-600);
+  --color-border-tertiary: var(--dark-trans-100);
   --color-border-muted: var(--dark-trans-25);
 
   /* Border / Code-Input */
@@ -146,32 +146,32 @@
   --color-border-code-input-hovered: var(--dark-trans-200);
 
   /* Border / Danger */
-  --color-border-danger-primary: var(--yellow-trans-600);
-  --color-border-danger-secondary: var(--yellow-trans-300);
+  --color-border-danger-primary: var(--yellow-trans-800);
+  --color-border-danger-secondary: var(--yellow-trans-500);
   --color-border-danger-tertiary: var(--yellow-trans-100);
   --color-border-danger-muted: var(--yellow-trans-50);
 
   /* Border / Error */
-  --color-border-error-primary: var(--red-trans-600);
-  --color-border-error-secondary: var(--red-trans-200);
+  --color-border-error-primary: var(--red-trans-800);
+  --color-border-error-secondary: var(--red-trans-500);
   --color-border-error-tertiary: var(--red-trans-100);
   --color-border-error-muted: var(--red-trans-50);
 
   /* Border / Info */
-  --color-border-info-primary: var(--blue-trans-600);
-  --color-border-info-secondary: var(--blue-trans-300);
+  --color-border-info-primary: var(--blue-trans-800);
+  --color-border-info-secondary: var(--blue-trans-500);
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
 
   /* Border / Inversed */
-  --color-border-primary-inversed: var(--white-trans-300);
-  --color-border-secondary-inversed: var(--white-trans-200);
+  --color-border-primary-inversed: var(--white);
+  --color-border-secondary-inversed: var(--white-trans-600);
   --color-border-tertiary-inversed: var(--white-trans-100);
   --color-border-muted-inversed: var(--white-trans-50);
 
   /* Border / Success */
-  --color-border-success-primary: var(--green-trans-600);
-  --color-border-success-secondary: var(--green-trans-300);
+  --color-border-success-primary: var(--green-trans-800);
+  --color-border-success-secondary: var(--green-trans-500);
   --color-border-success-tertiary: var(--green-trans-100);
   --color-border-success-muted: var(--green-trans-50);
 
@@ -205,6 +205,16 @@
   --color-fill-btn-ghost-pressed: var(--dark-trans-800);
   --color-fill-btn-ghost-disabled: var(--dark-trans-200);
 
+  --color-fill-btn-secondary-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-hovered: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-pressed: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-disabled: var(--dark-trans-300);
+
+  --color-fill-btn-ghost-highlighted: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-hovered: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-pressed: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-disabled: var(--dark-trans-300);
+
   --color-fill-btn-destructive: var(--red-600);
   --color-fill-btn-destructive-hovered: var(--red-trans-900);
   --color-fill-btn-destructive-pressed: var(--red-trans-700);
@@ -233,6 +243,9 @@
   --color-fill-secondary-inversed: var(--white-trans-600);
   --color-fill-tertiary-inversed: var(--white-trans-500);
   --color-fill-muted-inversed: var(--white-trans-300);
+
+  /* fill / Notification */
+  --color-fill-notification: var(--white);
 
   /* fill / Success */
   --color-fill-success-primary: var(--green-600);
@@ -275,6 +288,16 @@
   --color-text-btn-ghost-pressed: var(--dark-trans-900);
   --color-text-btn-ghost-disabled: var(--dark-trans-300);
 
+  --color-text-btn-secondary-highlighted: var(--gray-900);
+  --color-text-btn-secondary-highlighted-hovered: var(--gray-900);
+  --color-text-btn-secondary-highlighted-pressed: var(--gray-900);
+  --color-text-btn-secondary-highlighted-disabled: var(--dark-trans-300);
+
+  --color-text-btn-ghost-highlighted: var(--gray-900);
+  --color-text-btn-ghost-highlighted-hovered: var(--gray-900);
+  --color-text-btn-ghost-highlighted-pressed: var(--gray-900);
+  --color-text-btn-ghost-highlighted-disabled: var(--dark-trans-300);
+
   --color-text-btn-destructive: var(--red-600);
   --color-text-btn-destructive-hovered: var(--red-700);
   --color-text-btn-destructive-pressed: var(--red-800);
@@ -310,6 +333,10 @@
   --color-text-tertiary-inverse: var(--white-trans-600);
   --color-text-muted-inverse: var(--white-trans-400);
 
+  /* Text / Notification. A toast sits on a saturated surface in both themes,
+     so its label does not follow the mode the way the rest of the text does. */
+  --color-text-notification: var(--white);
+
   /* Text / Success */
   --color-text-success-primary: var(--green-600);
   --color-text-success-secondary: var(--green-trans-900);
@@ -317,20 +344,43 @@
   --color-text-success-muted: var(--green-trans-400);
 
   /* Shadows */
-  --shadow-xs: 0 0 4px 0 rgba(1, 80, 80, 0.08), -1px -1px 0 0 rgba(71, 104, 104, 0.05), 1px 1px 0 0 rgba(71, 104, 104, 0.05), 0 0 0 1px rgba(71, 104, 104, 0.1) inset;
-  --shadow-sm: -1px -1px 0 0 rgba(89, 71, 104, 0.04),
-    0 1px 6px 0 rgba(43, 1, 80, 0.1), 0 0 1px 0 rgba(43, 1, 80, 0.06),
-    1px 1px 0 0 rgba(89, 71, 104, 0.04),
+  --shadow-xs:
+    0 0 4px 0 rgba(1, 80, 80, 0.08), -1px -1px 0 0 rgba(71, 104, 104, 0.05),
+    1px 1px 0 0 rgba(71, 104, 104, 0.05),
+    0 0 0 1px rgba(71, 104, 104, 0.1) inset;
+  --shadow-sm:
+    -1px -1px 0 0 rgba(89, 71, 104, 0.04), 0 1px 6px 0 rgba(43, 1, 80, 0.1),
+    0 0 1px 0 rgba(43, 1, 80, 0.06), 1px 1px 0 0 rgba(89, 71, 104, 0.04),
     0 0 0 1px rgba(91, 71, 104, 0.1) inset;
-  --shadow-md: 0 0 1px 0 rgba(9, 37, 61, 0.15), 0 3px 8px 0 rgba(5, 23, 37, 0.12), 0 0 0 1px rgba(71, 104, 104, 0.1) inset;
-  --shadow-lg: 0 1px 6px 0 rgba(9, 37, 61, 0.05), 0 0 1px 0 rgba(9, 37, 61, 0.10), 0 4px 13px 0 rgba(5, 23, 37, 0.12), 0 0 0 1px rgba(71, 104, 104, 0.08) inset;
-  --shadow-xl: -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 7px 32px 0 rgba(1, 80, 80, 0.14), 0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02), 0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
+  --shadow-md:
+    0 0 1px 0 rgba(9, 37, 61, 0.15), 0 3px 8px 0 rgba(5, 23, 37, 0.12),
+    0 0 0 1px rgba(71, 104, 104, 0.1) inset;
+  --shadow-lg:
+    0 1px 6px 0 rgba(9, 37, 61, 0.05), 0 0 1px 0 rgba(9, 37, 61, 0.1),
+    0 4px 13px 0 rgba(5, 23, 37, 0.12), 0 0 0 1px rgba(71, 104, 104, 0.08) inset;
+  --shadow-xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 7px 32px 0 rgba(1, 80, 80, 0.14),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
 
-  --shadow-2xl: -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 8px 40px 0 rgba(1, 80, 80, 0.16), 0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02), 0 0 0 1px rgba(71, 104, 104, 0.08);
+  --shadow-2xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 8px 40px 0 rgba(1, 80, 80, 0.16),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 0 0 1px rgba(71, 104, 104, 0.08);
 
-  --shadow-3xl: -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 10px 48px 0 rgba(1, 80, 80, 0.20), 0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02), 0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
-  --shadow-convex: 0 0 1px 0 rgba(71, 104, 104, 0.15), 0 0 0 1px rgba(71, 104, 104, 0.15) inset, 0 -1px 0 0 rgba(71, 104, 104, 0.1) inset;
-  --shadow-concave: 0 0 0 1px rgba(71, 104, 104, 0.08) inset, 0 1px 0 0 rgba(71, 104, 104, 0.04) inset;
-  --left-sidebar-closed: 2px 0 4px 0 rgba(1, 80, 80, 0.03), 1px 0 0 0 rgba(71, 104, 104, 0.06);
-  --left-sidebar-open: 2px 0 16px 0 rgba(1, 80, 80, 0.08), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+  --shadow-3xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 10px 48px 0 rgba(1, 80, 80, 0.2),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
+  --shadow-convex:
+    0 0 1px 0 rgba(71, 104, 104, 0.15),
+    0 0 0 1px rgba(71, 104, 104, 0.15) inset,
+    0 -1px 0 0 rgba(71, 104, 104, 0.1) inset;
+  --shadow-concave:
+    0 0 0 1px rgba(71, 104, 104, 0.08) inset,
+    0 1px 0 0 rgba(71, 104, 104, 0.04) inset;
+  --left-sidebar-closed:
+    2px 0 4px 0 rgba(1, 80, 80, 0.03), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+  --left-sidebar-open:
+    2px 0 16px 0 rgba(1, 80, 80, 0.08), 1px 0 0 0 rgba(71, 104, 104, 0.06);
 }

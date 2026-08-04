@@ -43,7 +43,8 @@ pub use backend::{
     validate_model_reasoning_effort,
 };
 pub use catalog::{
-    list_provider_models, provider_default_base_url, provider_uses_api_key, ProviderModel,
+    list_managed_provider_models, list_provider_models, provider_default_base_url,
+    provider_uses_api_key, ProviderModel,
 };
 
 /// Resolve the API key a backend would use at run time.
@@ -157,6 +158,188 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
         ArceeAuthAction::Login => arcee_auth_login().await,
         ArceeAuthAction::Status => arcee_auth_status(),
         ArceeAuthAction::Logout => arcee_auth_logout(),
+    }
+}
+
+/// A provider that authenticates from a browser login rather than an API key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedAuthProvider {
+    Arcee,
+    Codex,
+}
+
+/// Every provider a login can be performed for, in the order they are listed.
+pub const MANAGED_AUTH_PROVIDERS: [ManagedAuthProvider; 2] =
+    [ManagedAuthProvider::Arcee, ManagedAuthProvider::Codex];
+
+impl ManagedAuthProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Arcee => "arcee",
+            Self::Codex => "codex",
+        }
+    }
+
+    /// Accepts the short name and the backend it belongs to, so a caller
+    /// holding either spelling does not have to translate first.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "arcee" | "arcee-auth" => Some(Self::Arcee),
+            "codex" | "chatgpt-codex-responses" => Some(Self::Codex),
+            _ => None,
+        }
+    }
+
+    pub fn backend(self) -> BackendKind {
+        match self {
+            Self::Arcee => BackendKind::ArceeAuth,
+            Self::Codex => BackendKind::ChatGptCodexResponses,
+        }
+    }
+
+    /// The login a backend authenticates through, or `None` when it uses a key.
+    pub fn for_backend(backend: BackendKind) -> Option<Self> {
+        match backend {
+            BackendKind::ArceeAuth => Some(Self::Arcee),
+            BackendKind::ChatGptCodexResponses => Some(Self::Codex),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ManagedAuthProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// What the user has to do in a browser before a login can finish.
+#[derive(Debug, Clone)]
+pub struct DeviceLoginPrompt {
+    /// The page to open.
+    pub verification_uri: String,
+    /// A code to confirm against what the page shows, when the flow has one.
+    /// The loopback flow has nothing to confirm, and Arcee builds its code into
+    /// the URL, so only Codex's device flow leaves anything to read out.
+    pub user_code: Option<String>,
+    /// How long the provider will keep accepting this authorization.
+    pub expires_in_secs: u64,
+}
+
+/// How the user is sent to the provider and how the answer gets back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginStyle {
+    /// The provider redirects the browser to a port this process listens on.
+    /// Nothing has to be typed, but the browser has to be able to reach that
+    /// port, which is only true when it runs on the same machine.
+    Loopback,
+    /// The provider hands over a code and waits for it to be approved. Slower
+    /// and more to read, but it works no matter where the browser is.
+    DeviceCode,
+}
+
+/// The state of what a provider has stored for us, whether or not anyone is
+/// signed in. The credential path is always reported so a failure has somewhere
+/// to point.
+#[derive(Debug, Clone)]
+pub struct ManagedAuthSnapshot {
+    pub provider: ManagedAuthProvider,
+    pub signed_in: bool,
+    /// Workspace name for Arcee, ChatGPT account id for Codex.
+    pub account: Option<String>,
+    pub organization: Option<String>,
+    pub base_url: Option<String>,
+    pub expires_at_ms: Option<u64>,
+    pub path: String,
+}
+
+/// A login the provider has issued a code for, waiting on the user's browser.
+///
+/// Splitting the wait from the start is what lets a caller show the code while
+/// the authorization is still outstanding; the CLI does the two back to back,
+/// and the HTTP API keeps the pending half alive between requests.
+pub struct PendingDeviceLogin {
+    inner: PendingDeviceLoginKind,
+}
+
+enum PendingDeviceLoginKind {
+    Arcee(arcee::ArceeDeviceLogin),
+    Codex(chatgpt_codex::CodexDeviceLogin),
+    CodexLoopback(chatgpt_codex::CodexLoopbackLogin),
+}
+
+impl PendingDeviceLogin {
+    pub fn provider(&self) -> ManagedAuthProvider {
+        match &self.inner {
+            PendingDeviceLoginKind::Arcee(_) => ManagedAuthProvider::Arcee,
+            PendingDeviceLoginKind::Codex(_) | PendingDeviceLoginKind::CodexLoopback(_) => {
+                ManagedAuthProvider::Codex
+            }
+        }
+    }
+
+    pub fn prompt(&self) -> DeviceLoginPrompt {
+        match &self.inner {
+            PendingDeviceLoginKind::Arcee(login) => login.prompt(),
+            PendingDeviceLoginKind::Codex(login) => login.prompt(),
+            PendingDeviceLoginKind::CodexLoopback(login) => login.prompt(),
+        }
+    }
+
+    /// Waits for the user to authorize, then stores the credential. Runs for as
+    /// long as the authorization is valid, so callers that cannot wait that
+    /// long are expected to drop the future instead.
+    pub async fn complete(self) -> Result<ManagedAuthSnapshot> {
+        match self.inner {
+            PendingDeviceLoginKind::Arcee(login) => login.complete().await,
+            PendingDeviceLoginKind::Codex(login) => login.complete().await,
+            PendingDeviceLoginKind::CodexLoopback(login) => login.complete().await,
+        }
+    }
+}
+
+/// Starts a login in whichever style the caller can support.
+///
+/// Nothing is stored until the returned login completes, so abandoning it
+/// leaves the existing credential alone.
+///
+/// `style` is a preference rather than an instruction: Arcee only offers a
+/// device flow, and it needs nothing typed anyway because its verification URL
+/// carries the code. A loopback attempt that cannot claim its port fails here,
+/// before the user has been sent anywhere, which is what lets a caller fall
+/// back to the device flow without anyone noticing.
+pub async fn begin_login(
+    provider: ManagedAuthProvider,
+    style: LoginStyle,
+) -> Result<PendingDeviceLogin> {
+    let inner = match (provider, style) {
+        (ManagedAuthProvider::Arcee, _) => {
+            PendingDeviceLoginKind::Arcee(arcee::begin_arcee_device_login().await?)
+        }
+        (ManagedAuthProvider::Codex, LoginStyle::Loopback) => {
+            PendingDeviceLoginKind::CodexLoopback(
+                chatgpt_codex::begin_codex_loopback_login().await?,
+            )
+        }
+        (ManagedAuthProvider::Codex, LoginStyle::DeviceCode) => {
+            PendingDeviceLoginKind::Codex(chatgpt_codex::begin_codex_device_login().await?)
+        }
+    };
+    Ok(PendingDeviceLogin { inner })
+}
+
+pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAuthSnapshot> {
+    match provider {
+        ManagedAuthProvider::Arcee => arcee::arcee_auth_snapshot(),
+        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_snapshot(),
+    }
+}
+
+/// Removes the stored credential, reporting whether there was one to remove.
+pub fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
+    match provider {
+        ManagedAuthProvider::Arcee => arcee::arcee_auth_remove(),
+        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove(),
     }
 }
 

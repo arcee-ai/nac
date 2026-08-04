@@ -19,14 +19,3 @@ export const REASONING_OPTIONS: SelectItem[] = [
   { id: "high", label: "High" },
   { id: "xhigh", label: "X-High" },
 ];
-
-export const CREDENTIAL_OPTIONS: SelectItem[] = [
-  { id: "inherit", label: "Inherit config" },
-  { id: "none", label: "No API key environment variable" },
-  { id: "variable", label: "Environment variable" },
-];
-
-/** Settings has no inherited state: the row already holds a concrete value. */
-export const SETTINGS_CREDENTIAL_OPTIONS = CREDENTIAL_OPTIONS.filter(
-  (option) => option.id !== "inherit",
-);

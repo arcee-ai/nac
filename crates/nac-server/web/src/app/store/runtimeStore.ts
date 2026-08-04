@@ -5,6 +5,7 @@
 
 import { createStore } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
+import { threadLogLine, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
@@ -37,12 +38,18 @@ export interface RuntimeThread {
   action: string;
   exitCode: number | null;
   isError: boolean;
-  /** Newest commands the thread issued, oldest first, for the card's log tail. */
-  commands: string[];
+  /**
+   * The commands the thread has issued and their results, oldest first. The
+   * card tails the last few lines of it and the side panel shows all of them.
+   */
+  log: ThreadLogLine[];
 }
 
-/** How many commands a thread card shows at once. */
-export const THREAD_COMMAND_TAIL = 3;
+/**
+ * How much of a thread's log is kept. Long enough to scroll back through in the
+ * side panel, which is the only place that shows more than the newest lines.
+ */
+const THREAD_LOG_LIMIT = 200;
 
 interface RuntimeState {
   sessionId: string | null;
@@ -167,7 +174,7 @@ const emptyThread = (name: string): RuntimeThread => ({
   action: "",
   exitCode: null,
   isError: false,
-  commands: [],
+  log: [],
 });
 
 function updateThread(name: string, patch: Partial<RuntimeThread>) {
@@ -180,13 +187,22 @@ function updateThread(name: string, patch: Partial<RuntimeThread>) {
   }));
 }
 
-/** Append to a thread's log tail, dropping whatever no longer fits the card. */
-function pushThreadCommand(name: string, command: string) {
-  if (!name || !command) return;
+/** Identifies the log lines whose events carry no id of their own. */
+let logSequence = 0;
+
+/**
+ * Append what an event says about a thread to that thread's log, dropping
+ * whatever has scrolled out of reach.
+ */
+function pushThreadLog(name: string | undefined, event: AgentEvent) {
+  if (!name) return;
+  logSequence += 1;
+  const line = threadLogLine(event, logSequence);
+  if (!line) return;
   setState((state) => {
     const thread = state.threads[name] ?? emptyThread(name);
-    const commands = [...thread.commands, command].slice(-THREAD_COMMAND_TAIL);
-    return { threads: { ...state.threads, [name]: { ...thread, commands } } };
+    const log = [...thread.log, line].slice(-THREAD_LOG_LIMIT);
+    return { threads: { ...state.threads, [name]: { ...thread, log } } };
   });
 }
 
@@ -247,6 +263,18 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       // A message was committed, so the buffers now describe the past.
       setState({ streamSettled: true });
       return true;
+    case "transcript_reverted":
+      // The messages the buffers were catching up to no longer exist, so the
+      // leftovers would be replayed against a transcript that never had them.
+      // The live threads went with those messages, and a rerun that dispatches
+      // the same name again would otherwise inherit the discarded run's log.
+      setState({
+        streamSettled: true,
+        streamText: "",
+        streamReasoning: "",
+        threads: {},
+      });
+      return true;
     case "agent":
       return applyAgent(seq, event.event);
     default:
@@ -258,14 +286,9 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
   switch (event.type) {
     case "tool_call_started":
       setState({ activity: `Tool: ${event.name}` });
-      // A thread's own calls also feed the log tail on its card in the chat,
-      // which is why they are kept per thread rather than only in the log below.
-      if (event.thread_name) {
-        pushThreadCommand(
-          event.thread_name,
-          `${event.name}: ${event.args_preview}`,
-        );
-      }
+      // A thread's own calls also feed its card in the chat and its tail in the
+      // side panel, which is why they are kept per thread as well as below.
+      pushThreadLog(event.thread_name, event);
       pushEvent({
         seq,
         kind: "tool",
@@ -273,7 +296,13 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         isError: false,
       });
       return false;
+    case "thread_log":
+      // Deliberately not in the log below: the worker prints these as it works,
+      // and at that rate they would push everything else out of the events tab.
+      pushThreadLog(event.name, event);
+      return false;
     case "tool_call_finished":
+      pushThreadLog(event.thread_name, event);
       pushEvent({
         seq,
         kind: "tool",
@@ -296,7 +325,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         isError: false,
         // A name can be dispatched again, and the previous run's commands are
         // not this one's.
-        commands: [],
+        log: [],
       });
       return false;
     case "thread_finished":

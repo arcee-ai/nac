@@ -80,7 +80,7 @@ export function PanelRow({
 /** Placeholder for an empty or not-yet-selected panel. */
 export function PanelEmpty({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-1 items-center justify-center p-6 text-center label-small text-basic-muted">
+    <div className="flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0">
       {children}
     </div>
   );

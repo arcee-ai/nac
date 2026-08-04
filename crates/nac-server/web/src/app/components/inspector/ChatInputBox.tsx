@@ -101,7 +101,7 @@ export function ChatInputBox({
   return (
     <form
       className={cn(
-        "flex flex-col gap-4 px-4 pt-4 pb-2 rounded-[8px]",
+        "flex flex-col gap-4 p-4 rounded-[8px]",
         "bg-elevation-level-1 shadow-2xl",
       )}
       onSubmit={(e) => {

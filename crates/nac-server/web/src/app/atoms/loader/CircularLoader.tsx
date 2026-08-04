@@ -24,7 +24,7 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
   Variant: typeof CircularLoaderVariant;
 } = ({
   size = LoaderSize.Medium,
-  variant = CircularLoaderVariant.Brand,
+  variant = CircularLoaderVariant.Neutral,
   strokeWidth = 2,
   className = "",
   ...props
@@ -41,8 +41,8 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
       {...props}
     >
       <svg
-        width={size}
-        height={size}
+        width={size - 2}
+        height={size - 2}
         viewBox="0 0 24 24"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"

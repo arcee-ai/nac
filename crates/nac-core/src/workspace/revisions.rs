@@ -83,6 +83,42 @@ pub fn capture(root: &Path, session_id: &str, previous: Option<&str>) -> Result<
     })
 }
 
+/// Put the working tree back to what `commit` captured.
+///
+/// The safety story is the one `capture` tells: the user's own index, HEAD and
+/// branches come out untouched, because the only index this reads and writes is
+/// nac's private one. What does change is the files — that is the point — so a
+/// caller must have established that nobody is working in the checkout.
+///
+/// The two-tree form of `read-tree` is what makes this a restore rather than an
+/// overlay: given where the tree is now and where it should be, git also
+/// removes the files the revision never had.
+pub fn restore(root: &Path, session_id: &str, commit: &str) -> Result<()> {
+    let repo_root = repo_root(root)?;
+    let index = index_path(&repo_root, session_id)?;
+
+    git_with_index(&repo_root, &index, &["add", "--all"])
+        .context("failed to record the working tree before restoring a revision")?;
+    let current = git_with_index(&repo_root, &index, &["write-tree"])
+        .context("failed to write the working tree before restoring a revision")?;
+    git_with_index(
+        &repo_root,
+        &index,
+        &["read-tree", "-m", "-u", current.as_str(), commit],
+    )
+    .context("failed to restore the working tree to a workspace revision")?;
+    Ok(())
+}
+
+/// Point a session's revision ref back at `commit`, so the revisions dropped by
+/// a revert stop pinning objects git could otherwise reclaim.
+pub fn rewind_ref(root: &Path, session_id: &str, commit: &str) -> Result<()> {
+    let repo_root = repo_root(root)?;
+    run_git(&repo_root, &["update-ref", &ref_name(session_id), commit])
+        .context("failed to rewind a workspace revision chain")?;
+    Ok(())
+}
+
 /// Drop a session's revision chain, letting git reclaim the objects it pinned.
 pub fn forget(root: &Path, session_id: &str) -> Result<()> {
     let repo_root = repo_root(root)?;

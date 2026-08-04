@@ -375,6 +375,12 @@ export type AgentEvent =
       call_id: string;
       name: string;
       args_preview: string;
+      /**
+       * The one argument worth reading in a list: the path for a file tool, the
+       * command for `exec_command`. Absent on an event the server had no reason
+       * to reduce, and empty when the tool has no such argument.
+       */
+      key_arg_preview?: string | null;
       args_detail?: string | null;
     }
   | {
@@ -391,6 +397,12 @@ export type AgentEvent =
       action: string;
       source_threads: string[];
     }
+  /**
+   * A line the thread's worker printed that was not itself an event — its plain
+   * log output. Streamed but never persisted, so it is only ever available for
+   * a run this client watched.
+   */
+  | { type: "thread_log"; name: string; line: string }
   | {
       type: "thread_steering_queued";
       name: string;
@@ -480,7 +492,9 @@ export type SessionEvent =
   | { type: "run_failed"; message: string }
   | { type: "snapshot_saved"; session_id: string }
   /** The orchestrator transcript grew: a message was committed to the log. */
-  | { type: "transcript_appended"; transcript_len: number };
+  | { type: "transcript_appended"; transcript_len: number }
+  /** A revert cut the transcript back; everything past this length is gone. */
+  | { type: "transcript_reverted"; transcript_len: number };
 
 export interface SessionEventEnvelope {
   session_id: string | null;
@@ -546,12 +560,18 @@ export interface MessageCycleMetadata {
 
 export interface MessagesPageResponse {
   messages: Message[];
+  created_at?: (string | null)[];
   page: MessagePageMetadata;
 }
 
 export interface SessionFrontendSnapshot {
   metadata: SessionMetadata;
   messages: Message[];
+  /**
+   * One entry per message, or absent entirely on a snapshot that has no
+   * transcript log. `null` where the message predates the log.
+   */
+  message_created_at?: (string | null)[];
   response_timing: ResponseTimingSnapshot;
   active_run?: ActiveRunSnapshot;
   active_compaction?: ActiveCompactionSnapshot;
@@ -622,6 +642,50 @@ export interface StoredCredentialList {
   credentials: StoredCredentialSummary[];
 }
 
+/** The name the server filed a key under when the caller supplied none. */
+export interface GeneratedCredential {
+  name: string;
+}
+
+/** Providers that sign in through a browser instead of taking an API key. */
+export type ManagedAuthProvider = "arcee" | "codex";
+
+/** What a managed provider currently has stored, signed in or not. */
+export interface ManagedAuthStatus {
+  provider: ManagedAuthProvider;
+  /** The backend a session picks to use this login. */
+  backend: BackendKind;
+  signed_in: boolean;
+  /** Workspace name for Arcee, ChatGPT account id for Codex. */
+  account: string | null;
+  organization: string | null;
+  base_url: string | null;
+  expires_at_ms: number | null;
+  path: string;
+}
+
+export interface ManagedAuthList {
+  providers: ManagedAuthStatus[];
+}
+
+/** A device login the provider has issued a code for. */
+export interface DeviceLoginStarted {
+  login_id: string;
+  provider: ManagedAuthProvider;
+  verification_uri: string;
+  /**
+   * Null when the login is settled by a redirect back to this machine, which
+   * leaves nothing for the user to read out.
+   */
+  user_code: string | null;
+  expires_in_secs: number;
+}
+
+export type DeviceLoginState =
+  | { state: "pending" }
+  | { state: "complete"; auth: ManagedAuthStatus }
+  | { state: "failed"; error: string };
+
 /** One entry of `GET /fs/browse`, listed from the machine running the server. */
 export interface BrowseEntry {
   name: string;
@@ -647,6 +711,8 @@ export interface ProviderModel {
 export interface ProviderModelsRequest {
   backend: BackendKind;
   api_key?: string | null;
+  /** Names a key already on file, for a caller that holds no copy of it. */
+  api_key_env?: string | null;
   /** Overrides the provider's canonical URL. */
   base_url?: string | null;
 }
@@ -776,6 +842,26 @@ export type CompactSessionResponse =
       compaction_id: string;
       reason: CompactionSkipReason;
     };
+
+export interface RevertSessionRequest {
+  /** Snapshot index of the user message to go back to; it is dropped too. */
+  message_idx: number;
+}
+
+export interface RevertSessionResponse {
+  transcript_len: number;
+  messages_removed: number;
+  /** False when the session has no captured revision covering that point. */
+  workspace_restored: boolean;
+  revisions_removed: number;
+  /** Threads the discarded messages dispatched and nothing else refers to. */
+  threads_removed: number;
+}
+
+export interface RegenerateSessionRequest {
+  /** Snapshot index of the user message to answer again. */
+  message_idx: number;
+}
 
 export interface SteeringRequest {
   instruction: string;

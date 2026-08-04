@@ -269,6 +269,35 @@ pub struct TranscriptLogWriter {
     connection: Mutex<Connection>,
 }
 
+/// Length of the log tail relative to a snapshot blob of `blob_len` messages,
+/// read from the newest row's `idx`. Callers hold the connection lock, so the
+/// extent cannot shift under a window read taken with it.
+fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
+    let mut statement = connection.prepare(
+        "SELECT id, event_json
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+         ORDER BY id DESC
+         LIMIT 1",
+    )?;
+    let last_row = statement
+        .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .optional()?;
+    match last_row {
+        None => Ok(0),
+        Some((id, event_json)) => {
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            Ok((entry.idx + 1).saturating_sub(blob_len))
+        }
+    }
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -355,31 +384,7 @@ impl TranscriptLogWriter {
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let tail_len = {
-            let mut statement = connection.prepare(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id DESC
-                 LIMIT 1",
-            )?;
-            let last_row = statement
-                .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })
-                .optional()?;
-            match last_row {
-                None => 0,
-                Some((id, event_json)) => {
-                    let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                        anyhow!(
-                            "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                        )
-                    })?;
-                    (entry.idx + 1).saturating_sub(blob_len)
-                }
-            }
-        };
+        let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
             return Ok((tail_len, Vec::new()));
         }
@@ -427,6 +432,52 @@ impl TranscriptLogWriter {
             expected_idx += 1;
         }
         Ok((tail_len, entries))
+    }
+
+    /// Row creation times for the same window [`TranscriptLogWriter::read_tail_window`]
+    /// returns, aligned with it position by position.
+    ///
+    /// The canonical message bytes carry no timestamp — adding one would change
+    /// the digest the compaction planner hashes — so the closest thing to "when
+    /// this message entered the transcript" is the log row's own `created_at`.
+    /// Messages carried by the snapshot blob predate the log and have none.
+    pub fn read_tail_window_times(
+        &self,
+        session_id: &str,
+        blob_len: u64,
+        tail_start: u64,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tail_len = tail_len_of(&connection, session_id, blob_len)?;
+        if tail_start >= tail_len || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let end = tail_start.saturating_add(limit as u64).min(tail_len);
+        let count = end - tail_start;
+        let skip_from_end = tail_len - end;
+        let mut statement = connection.prepare(
+            "SELECT created_at
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2
+             ORDER BY id DESC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id,
+                ORCHESTRATOR_STEERING_TARGET,
+                count as i64,
+                skip_from_end as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut times = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        times.reverse();
+        Ok(times)
     }
 
     /// Read committed entries with `idx >= from_idx`, in log (append) order.

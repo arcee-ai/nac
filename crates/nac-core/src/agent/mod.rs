@@ -493,11 +493,7 @@ impl Agent {
             .then_some(&push_delta);
             let turn = self
                 .client
-                .send_turn_streaming(
-                    provider_view.messages,
-                    self.tool_defs.clone(),
-                    delta_sink,
-                )
+                .send_turn_streaming(provider_view.messages, self.tool_defs.clone(), delta_sink)
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();

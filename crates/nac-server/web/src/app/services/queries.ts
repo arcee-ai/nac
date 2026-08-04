@@ -20,6 +20,8 @@ import type {
   ModelConfigurationList,
   ProviderModelList,
   RawSessionConfig,
+  ManagedAuthList,
+  ManagedAuthProvider,
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
@@ -41,10 +43,16 @@ export const SESSIONS_POLL_MS = 5000;
 export const queryKeys = {
   storeInfo: ["store"] as const,
   credentials: ["credentials"] as const,
+  managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
   providerModels: (backend: string, apiKey: string, baseUrl: string) =>
     ["provider-models", { backend, apiKey, baseUrl }] as const,
+  storedKeyProviderModels: (backend: string, apiKeyEnv: string, baseUrl: string) =>
+    ["stored-key-provider-models", { backend, apiKeyEnv, baseUrl }] as const,
+  managedProviderModels: (backend: string) =>
+    ["managed-provider-models", backend] as const,
+  managedProviderModelsAll: ["managed-provider-models"] as const,
   resolvedModelConfig: (configId: string) =>
     ["model-config-resolved", configId] as const,
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
@@ -103,12 +111,53 @@ export function useStoreCredential() {
   });
 }
 
+/**
+ * Files a key away and reports the name it was given. Used where the key is the
+ * thing the user supplies and the selector is an implementation detail.
+ */
+export function useStoreGeneratedCredential() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (value: string) => api.storeGeneratedCredential(value),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+  });
+}
+
 export function useDeleteCredential() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteCredential(name),
     onSuccess: () =>
       client.invalidateQueries({ queryKey: queryKeys.credentials }),
+  });
+}
+
+/**
+ * Whether the providers that sign in through a browser are signed in. Reported
+ * per provider rather than per configuration, because the credential is one
+ * file in NAC home that every session using that backend shares.
+ */
+export function useManagedAuth(enabled = true) {
+  return useQuery<ManagedAuthList>({
+    queryKey: queryKeys.managedAuth,
+    queryFn: ({ signal }) => api.listManagedAuth(signal),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useManagedLogout() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: ManagedAuthProvider) => api.managedLogout(provider),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.managedAuth });
+      // The model index was only readable through the login that just went
+      // away, so what is cached from it is no longer true.
+      client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
+    },
   });
 }
 
@@ -158,6 +207,52 @@ export function useProviderModels(
     retry: false,
     staleTime: 5 * 60_000,
     gcTime: 60_000,
+  });
+}
+
+/**
+ * The same check as `useProviderModels` for a key that is already on file: the
+ * server resolves the name and asks the provider, so an editor that never held
+ * the secret can still tell whether it still works and what it can reach.
+ */
+export function useStoredKeyProviderModels(
+  backend: BackendKind,
+  apiKeyEnv: string,
+  baseUrl: string | null,
+  enabled: boolean,
+) {
+  return useQuery<ProviderModelList>({
+    queryKey: queryKeys.storedKeyProviderModels(backend, apiKeyEnv, baseUrl ?? ""),
+    queryFn: () =>
+      api.listProviderModels({
+        backend,
+        api_key_env: apiKeyEnv,
+        base_url: baseUrl,
+      }),
+    enabled: enabled && apiKeyEnv.length > 0,
+    retry: false,
+    staleTime: 5 * 60_000,
+    gcTime: 60_000,
+  });
+}
+
+/**
+ * The models a browser login can reach. There is no key to pass, so the stored
+ * credential answers, and a rejection here means the login has gone stale.
+ *
+ * Invalidated when a login completes, which is what turns the model picker from
+ * empty into populated without a reload.
+ */
+export function useManagedProviderModels(
+  backend: BackendKind,
+  enabled: boolean,
+) {
+  return useQuery<ProviderModelList>({
+    queryKey: queryKeys.managedProviderModels(backend),
+    queryFn: () => api.listProviderModels({ backend }),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -453,5 +548,39 @@ export function useCompactSession() {
   return useMutation({
     mutationFn: (id: string) => api.compactSession(id),
     onSuccess: (_data, id) => invalidate.session(id),
+  });
+}
+
+/**
+ * A revert rewrites the transcript and the checkout at once. The session key is
+ * the prefix of every workspace key, so invalidating it also drops the file and
+ * revision views, which would otherwise keep diffing against revisions the
+ * revert has just discarded.
+ */
+export function useRevertSession() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
+      api.revertSession(id, messageIdx),
+    onSuccess: (_data, { id }) => {
+      void invalidate.session(id);
+      void invalidate.sessions();
+    },
+  });
+}
+
+/**
+ * Answering a prompt again is a revert plus a run, so it drops the same views a
+ * revert does before the new run starts filling them back in.
+ */
+export function useRegenerateRun() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
+      api.regenerateRun(id, messageIdx),
+    onSuccess: (_data, { id }) => {
+      void invalidate.session(id);
+      void invalidate.sessions();
+    },
   });
 }

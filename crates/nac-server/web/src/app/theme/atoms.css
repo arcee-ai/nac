@@ -75,11 +75,11 @@
 .btn-secondary-accent.btn-disabled { box-shadow: none; color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-disabled); }
 .btn-secondary-accent.btn-disabled:hover, .btn-secondary-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-secondary-accent-disabled); }
 
-.btn-secondary-highlighted { color: var(--color-text-btn-secondary); background-color: var(--color-bg-btn-secondary-highlighted); box-shadow: var(--shadow-convex); }
-.btn-secondary-highlighted:hover { color: var(--color-text-btn-secondary-hovered); background-color: var(--color-bg-btn-secondary-highlighted-hovered); }
-.btn-secondary-highlighted:active { color: var(--color-text-btn-secondary-pressed); background-color: var(--color-bg-btn-secondary-highlighted-pressed); }
-.btn-secondary-highlighted.btn-disabled { box-shadow: none; color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
-.btn-secondary-highlighted.btn-disabled:hover, .btn-secondary-highlighted.btn-disabled:active { color: var(--color-text-btn-secondary-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
+.btn-secondary-highlighted { color: var(--color-text-btn-secondary-highlighted); background-color: var(--color-bg-btn-secondary-highlighted); box-shadow: var(--shadow-convex); }
+.btn-secondary-highlighted:hover { color: var(--color-text-btn-secondary-highlighted-hovered); background-color: var(--color-bg-btn-secondary-highlighted-hovered); }
+.btn-secondary-highlighted:active { color: var(--color-text-btn-secondary-highlighted-pressed); background-color: var(--color-bg-btn-secondary-highlighted-pressed); }
+.btn-secondary-highlighted.btn-disabled { box-shadow: none; color: var(--color-text-btn-secondary-highlighted-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
+.btn-secondary-highlighted.btn-disabled:hover, .btn-secondary-highlighted.btn-disabled:active { color: var(--color-text-btn-secondary-highlighted-disabled); background-color: var(--color-bg-btn-secondary-highlighted-disabled); }
 
 .btn-secondary-accent-highlighted { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-secondary-accent-highlighted); box-shadow: var(--shadow-convex); }
 .btn-secondary-accent-highlighted:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered); }
@@ -105,11 +105,11 @@
 .btn-ghost-accent.btn-disabled { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-disabled); }
 .btn-ghost-accent.btn-disabled:hover, .btn-ghost-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); background-color: var(--color-bg-btn-ghost-accent-disabled); }
 
-.btn-ghost-highlighted { color: var(--color-text-btn-ghost); background-color: var(--color-bg-btn-ghost-highlighted); }
-.btn-ghost-highlighted:hover { color: var(--color-text-btn-ghost-hovered); background-color: var(--color-bg-btn-ghost-highlighted-hovered); }
-.btn-ghost-highlighted:active { color: var(--color-text-btn-ghost-pressed); background-color: var(--color-bg-btn-ghost-highlighted-pressed); }
-.btn-ghost-highlighted.btn-disabled { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
-.btn-ghost-highlighted.btn-disabled:hover, .btn-ghost-highlighted.btn-disabled:active { color: var(--color-text-btn-ghost-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
+.btn-ghost-highlighted { color: var(--color-text-btn-ghost-highlighted); background-color: var(--color-bg-btn-ghost-highlighted); }
+.btn-ghost-highlighted:hover { color: var(--color-text-btn-ghost-highlighted-hovered); background-color: var(--color-bg-btn-ghost-highlighted-hovered); }
+.btn-ghost-highlighted:active { color: var(--color-text-btn-ghost-highlighted-pressed); background-color: var(--color-bg-btn-ghost-highlighted-pressed); }
+.btn-ghost-highlighted.btn-disabled { color: var(--color-text-btn-ghost-highlighted-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
+.btn-ghost-highlighted.btn-disabled:hover, .btn-ghost-highlighted.btn-disabled:active { color: var(--color-text-btn-ghost-highlighted-disabled); background-color: var(--color-bg-btn-ghost-highlighted-disabled); }
 
 .btn-ghost-highlighted-accent { color: var(--color-text-btn-accent); background-color: var(--color-bg-btn-ghost-accent-highlighted); }
 .btn-ghost-highlighted-accent:hover { color: var(--color-text-btn-accent-hovered); background-color: var(--color-bg-btn-ghost-accent-highlighted-hovered); }
@@ -144,10 +144,18 @@
 /* icon fill per variant/state */
 .btn-primary .icon path { fill: var(--color-fill-btn-primary); }
 .btn-primary.btn-disabled .icon path { fill: var(--color-fill-btn-primary-disabled); }
-.btn-secondary .icon path, .btn-secondary-highlighted .icon path, .btn-ghost .icon path, .btn-tertiary .icon path, .btn-ghost-highlighted .icon path { fill: var(--color-fill-btn-secondary); }
-.btn-secondary:hover .icon path, .btn-secondary-highlighted:hover .icon path, .btn-ghost:hover .icon path, .btn-tertiary:hover .icon path, .btn-ghost-highlighted:hover .icon path { fill: var(--color-fill-btn-secondary-hovered); }
-.btn-secondary:active .icon path, .btn-secondary-highlighted:active .icon path, .btn-ghost:active .icon path, .btn-tertiary:active .icon path, .btn-ghost-highlighted:active .icon path { fill: var(--color-fill-btn-secondary-pressed); }
-.btn-secondary.btn-disabled .icon path, .btn-secondary-highlighted.btn-disabled .icon path, .btn-ghost.btn-disabled .icon path, .btn-tertiary.btn-disabled .icon path, .btn-ghost-highlighted.btn-disabled .icon path { fill: var(--color-fill-btn-secondary-disabled); }
+.btn-secondary .icon path, .btn-ghost .icon path, .btn-tertiary .icon path { fill: var(--color-fill-btn-secondary); }
+.btn-secondary:hover .icon path, .btn-ghost:hover .icon path, .btn-tertiary:hover .icon path { fill: var(--color-fill-btn-secondary-hovered); }
+.btn-secondary:active .icon path, .btn-ghost:active .icon path, .btn-tertiary:active .icon path { fill: var(--color-fill-btn-secondary-pressed); }
+.btn-secondary.btn-disabled .icon path, .btn-ghost.btn-disabled .icon path, .btn-tertiary.btn-disabled .icon path { fill: var(--color-fill-btn-secondary-disabled); }
+.btn-secondary-highlighted .icon path { fill: var(--color-fill-btn-secondary-highlighted); }
+.btn-secondary-highlighted:hover .icon path { fill: var(--color-fill-btn-secondary-highlighted-hovered); }
+.btn-secondary-highlighted:active .icon path { fill: var(--color-fill-btn-secondary-highlighted-pressed); }
+.btn-secondary-highlighted.btn-disabled .icon path { fill: var(--color-fill-btn-secondary-highlighted-disabled); }
+.btn-ghost-highlighted .icon path { fill: var(--color-fill-btn-ghost-highlighted); }
+.btn-ghost-highlighted:hover .icon path { fill: var(--color-fill-btn-ghost-highlighted-hovered); }
+.btn-ghost-highlighted:active .icon path { fill: var(--color-fill-btn-ghost-highlighted-pressed); }
+.btn-ghost-highlighted.btn-disabled .icon path { fill: var(--color-fill-btn-ghost-highlighted-disabled); }
 .btn-secondary-accent .icon path, .btn-secondary-accent-highlighted .icon path, .btn-ghost-accent .icon path, .btn-tertiary-accent .icon path, .btn-ghost-highlighted-accent .icon path { fill: var(--color-fill-btn-accent); }
 .btn-secondary-accent:hover .icon path, .btn-secondary-accent-highlighted:hover .icon path, .btn-ghost-accent:hover .icon path, .btn-tertiary-accent:hover .icon path, .btn-ghost-highlighted-accent:hover .icon path { fill: var(--color-fill-btn-accent-hovered); }
 .btn-secondary-accent:active .icon path, .btn-secondary-accent-highlighted:active .icon path, .btn-ghost-accent:active .icon path, .btn-tertiary-accent:active .icon path, .btn-ghost-highlighted-accent:active .icon path { fill: var(--color-fill-btn-accent-pressed); }
@@ -193,7 +201,6 @@
   border-radius: 8px 8px 0 0;
 }
 .horizontal-tab-item-active { border-bottom-color: var(--color-border-primary); }
-.horizontal-tab-item-active.btn-ghost-highlighted { color: var(--color-text-basic-primary); }
 
 /* ============================ TOOLTIP ============================ */
 .tooltip-box { pointer-events: none; }

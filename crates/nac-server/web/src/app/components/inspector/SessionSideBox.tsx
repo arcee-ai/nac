@@ -16,6 +16,7 @@ import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
+import { cn } from "@/app/lib/cn";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
   selectRevision,
@@ -57,8 +58,12 @@ function FooterChip({
 }) {
   return (
     <div className="flex items-center gap-[6px] shrink-0 min-w-0 pl-1 pr-3 py-1 rounded-[4px]">
-      <Icon iconName={iconName} size={16} />
-      <span className="label-micro text-btn-secondary truncate">{label}</span>
+      <Icon
+        iconName={iconName}
+        size={16}
+        color="var(--color-fill-basic-tertiary)"
+      />
+      <span className="label-micro text-basic-tertiary truncate">{label}</span>
     </div>
   );
 }
@@ -122,7 +127,13 @@ export function SessionSideBox({
 
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
-      <div className="flex items-center gap-4 pl-1 pr-2 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 h">
+      <div
+        className={cn(
+          "flex items-center gap-4 pl-1 pt-1 shrink-0 border-b border-muted bg-elevation-level-1",
+          // Room for the Modal's Close when this box is the fullscreen body.
+          expanded ? "pr-10" : "pr-2",
+        )}
+      >
         <div className="flex flex-1 min-w-0 items-center gap-1" role="tablist">
           {SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
@@ -137,27 +148,20 @@ export function SessionSideBox({
             </HorizontalTabsItem>
           ))}
         </div>
-        <div className="flex items-center gap-2 pb-[2px] shrink-0">
-          <Tooltip
-            title={expanded ? "Restore split" : "Expand panel"}
-            position={TooltipPosition.BottomLeft}
-          >
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label={expanded ? "Restore split" : "Expand panel"}
-              onClick={toggleSidePanelExpanded}
-            >
-              <Icon
-                iconName={
-                  expanded ? IconName.FullScreenExit : IconName.FullScreen
-                }
-              />
-            </Button>
-          </Tooltip>
-          {/* Hiding has no meaning once the box covers the screen. */}
-          {expanded ? null : (
+        {/* Expand/hide live here in the split; once fullscreen the Modal owns Close. */}
+        {expanded ? null : (
+          <div className="flex items-center gap-2 pb-[2px] shrink-0">
+            <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft}>
+              <Button
+                size={ButtonSize.Medium}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Expand panel"
+                onClick={toggleSidePanelExpanded}
+              >
+                <Icon iconName={IconName.FullScreen} />
+              </Button>
+            </Tooltip>
             <Tooltip title="Hide panel" position={TooltipPosition.BottomLeft}>
               <Button
                 size={ButtonSize.Medium}
@@ -169,8 +173,8 @@ export function SessionSideBox({
                 <Icon iconName={IconName.CloseSidebar} />
               </Button>
             </Tooltip>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">

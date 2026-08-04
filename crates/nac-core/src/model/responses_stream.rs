@@ -53,7 +53,8 @@ impl StreamFold for ResponsesStreamFold<'_> {
                         .and_then(Value::as_u64)
                         .and_then(|index| usize::try_from(index).ok())
                         .unwrap_or(self.output_items.len());
-                    self.output_items.retain(|(index, _)| *index != output_index);
+                    self.output_items
+                        .retain(|(index, _)| *index != output_index);
                     self.output_items.push((output_index, item));
                 }
             }

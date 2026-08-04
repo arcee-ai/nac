@@ -11,8 +11,14 @@ import type {
   CompactSessionResponse,
   CreateModelConfigurationRequest,
   CreateSessionRequest,
+  DeviceLoginStarted,
+  DeviceLoginState,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
+  ManagedAuthList,
+  ManagedAuthProvider,
+  ManagedAuthStatus,
+  GeneratedCredential,
   ManagedSessionSummary,
   MessagesPageResponse,
   ModelConfigurationList,
@@ -25,6 +31,7 @@ import type {
   ReorderSessionsRequest,
   ReorderSessionsResponse,
   ResolvedModelConfiguration,
+  RevertSessionResponse,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
   StoredCredentialList,
@@ -153,8 +160,47 @@ export const api = {
       body: { value },
     }),
 
+  /** Files a key under a server-generated name and reports what it was. */
+  storeGeneratedCredential: (value: string) =>
+    request<GeneratedCredential>("POST", "/credentials", { body: { value } }),
+
   deleteCredential: (name: string) =>
     request<void>("DELETE", `/credentials/${encodeURIComponent(name)}`),
+
+  // Managed providers sign in with a device login: the server hands back a
+  // code to show, waits for the browser approval on its own, and the outcome
+  // is collected by polling.
+  listManagedAuth: (signal?: AbortSignal) =>
+    request<ManagedAuthList>("GET", "/auth", { signal }),
+
+  startManagedLogin: (provider: ManagedAuthProvider) =>
+    request<DeviceLoginStarted>(
+      "POST",
+      `/auth/${encodeURIComponent(provider)}/login`,
+    ),
+
+  pollManagedLogin: (
+    provider: ManagedAuthProvider,
+    loginId: string,
+    signal?: AbortSignal,
+  ) =>
+    request<DeviceLoginState>(
+      "GET",
+      `/auth/${encodeURIComponent(provider)}/login/${encodeURIComponent(loginId)}`,
+      { signal },
+    ),
+
+  cancelManagedLogin: (provider: ManagedAuthProvider, loginId: string) =>
+    request<void>(
+      "DELETE",
+      `/auth/${encodeURIComponent(provider)}/login/${encodeURIComponent(loginId)}`,
+    ),
+
+  managedLogout: (provider: ManagedAuthProvider) =>
+    request<ManagedAuthStatus>(
+      "DELETE",
+      `/auth/${encodeURIComponent(provider)}`,
+    ),
 
   // Browsers withhold absolute paths from every file-picking API, so a local
   // path is chosen against the filesystem the server sees.
@@ -358,6 +404,16 @@ export const api = {
 
   compactSession: (id: string) =>
     request<CompactSessionResponse>("POST", `${sessionPath(id)}/compact`),
+
+  revertSession: (id: string, messageIdx: number) =>
+    request<RevertSessionResponse>("POST", `${sessionPath(id)}/revert`, {
+      body: { message_idx: messageIdx },
+    }),
+
+  regenerateRun: (id: string, messageIdx: number) =>
+    request<SubmitPromptResponse>("POST", `${sessionPath(id)}/regenerate`, {
+      body: { message_idx: messageIdx },
+    }),
 
   steerOrchestrator: (id: string, instruction: string) =>
     request<OrchestratorSteeringResponse>("POST", `${sessionPath(id)}/steering`, {

@@ -1,11 +1,13 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
 import Icon, { IconName } from "../icon";
+import CircularLoader from "../loader/CircularLoader";
+import { LoaderSize } from "../loader";
 
 /** Pixel diameters of the avatar. */
 export enum ModelPillSize {
   Small = 24,
-  Medium = 36,
+  Medium = 32,
 }
 
 interface ModelPillProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -13,6 +15,16 @@ interface ModelPillProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Swaps the static rim for a spinner while the orchestrator is working. */
   active?: boolean;
 }
+
+const sizeIconPx: Record<ModelPillSize, number> = {
+  [ModelPillSize.Medium]: 16,
+  [ModelPillSize.Small]: 18,
+};
+
+const sizeLoaderSize: Record<ModelPillSize, LoaderSize> = {
+  [ModelPillSize.Medium]: LoaderSize.Large,
+  [ModelPillSize.Small]: LoaderSize.Small,
+};
 
 /** Round avatar for the orchestrator, shown beside every model message. */
 const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
@@ -23,20 +35,34 @@ const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
 }) => (
   <div
     className={cn(
-      "relative flex shrink-0 items-center justify-center rounded-full",
-      active
-        ? ""
-        : "border-2 border-solid border-tertiary bg-[linear-gradient(to_bottom,var(--color-bg-divider-primary),transparent)]",
+      "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full",
+      size === ModelPillSize.Medium ? "border" : "border",
+      active ? "border-transparent" : "border-secondary",
       className,
     )}
     style={{ width: size, height: size }}
     {...props}
   >
-    <Icon iconName={IconName.Brain} size={size - 16} />
+    {/* Active pills already carry the spinning CircularLoader as their visual
+        anchor, so we drop the brand gradient there to avoid layering two
+        attention-grabbing effects on top of each other. */}
+    {!active ? (
+      <div
+        aria-hidden
+        className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--color-fill-basic-muted)] to-transparent [html.light_&]:bg-gradient-to-t"
+      />
+    ) : null}
+    <Icon
+      iconName={IconName.Brain}
+      size={sizeIconPx[size]}
+      color="var(--color-fill-basic-primary)"
+      className="relative"
+    />
     {active ? (
-      <div className="absolute inset-0 flex animate-spin items-center justify-center">
-        <Icon iconName={IconName.Loader} size={size} />
-      </div>
+      <CircularLoader
+        size={sizeLoaderSize[size]}
+        className="absolute inset-0 m-auto"
+      />
     ) : null}
   </div>
 );
