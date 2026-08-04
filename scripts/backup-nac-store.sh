@@ -46,11 +46,10 @@ temp_dir=$(mktemp -d "$backup_dir/.backup.XXXXXX")
 temp_path="$temp_dir/store.db"
 
 cleanup() {
-  if [ -n "${temp_path:-}" ] && [ -f "$temp_path" ]; then
-    rm -f -- "$temp_path"
-  fi
+  # Integrity checks may create SQLite sidecars; remove the whole private temp
+  # directory rather than leaving stale .backup.* directories behind.
   if [ -n "${temp_dir:-}" ] && [ -d "$temp_dir" ]; then
-    rmdir "$temp_dir" 2>/dev/null || true
+    rm -rf -- "$temp_dir"
   fi
 }
 trap cleanup EXIT HUP INT TERM
@@ -109,7 +108,8 @@ else
     "$timestamp" "$git_head" "$reason" "$selected" "$digest" >> "$manifest"
 fi
 
-# Keep only the newest configured number of database copies.
+# Keep only the newest configured number of rotating database copies. Pinned
+# snapshots live under backups/pinned/ and intentionally never match this glob.
 for candidate in "$backup_dir"/store-*.db; do
   [ -f "$candidate" ] && printf '%s\n' "$candidate"
 done \

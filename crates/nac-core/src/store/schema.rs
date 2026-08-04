@@ -1,6 +1,6 @@
 use super::*;
 
-const STORE_SCHEMA_VERSION: i64 = 3;
+const STORE_SCHEMA_VERSION: i64 = 4;
 
 /// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
@@ -38,7 +38,17 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
+    let store_existed = path.is_file();
     let mut conn = connect(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if store_existed && schema_version != STORE_SCHEMA_VERSION {
+        super::backup::ensure_pre_branching_snapshot(&conn, path).with_context(|| {
+            format!(
+                "refusing to migrate store {} without a valid pre-branching snapshot",
+                path.display()
+            )
+        })?;
+    }
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA journal_mode = WAL;",
@@ -89,10 +99,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -107,6 +117,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         ),
     )?;
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
+    create_session_forks_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -547,6 +558,24 @@ fn restore_autoincrement_sequence(
             params![table, prior_sequence],
         )?;
     }
+    Ok(())
+}
+
+fn create_session_forks_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_forks (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             source_session_id TEXT NOT NULL,
+             copied_message_count INTEGER NOT NULL
+                 CHECK (copied_message_count >= 0),
+             source_message_count INTEGER NOT NULL
+                 CHECK (source_message_count >= copied_message_count),
+             created_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_forks_source_session
+             ON session_forks(source_session_id);",
+    )?;
     Ok(())
 }
 

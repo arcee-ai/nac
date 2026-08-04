@@ -12,6 +12,7 @@ use crate::types::Message;
 
 mod codec;
 mod db;
+mod lineage;
 mod operation_lease;
 mod snapshot;
 mod summary;
@@ -21,6 +22,7 @@ pub use db::{
     load_session_config, reorder_sessions, save_session, save_session_run_state, session_exists,
     update_raw_session_config, update_session_config, update_session_presentation,
 };
+pub use lineage::{load_session_fork, record_session_fork, SessionForkLineage};
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
 };

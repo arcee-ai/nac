@@ -16,7 +16,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "for
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 libc = "0.2"
 portable-pty = "0.8"

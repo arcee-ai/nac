@@ -228,6 +228,20 @@ fn assert_current_schema(conn: &Connection) {
         .unwrap();
     assert!(latest_index_exists);
 
+    assert_eq!(
+        table_columns(conn, "session_forks"),
+        [
+            "session_id",
+            "source_session_id",
+            "copied_message_count",
+            "source_message_count",
+            "created_at",
+        ]
+    );
+    // Only the forked child is session-owned. The source ID is durable
+    // historical metadata and deliberately has no foreign key.
+    assert_session_cascade(conn, "session_forks");
+
     let violation_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
             row.get(0)
@@ -764,25 +778,67 @@ fn future_schema_version_is_rejected_without_changes() {
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future = Connection::open(&path).unwrap();
-    future.pragma_update(None, "user_version", 4).unwrap();
+    future.pragma_update(None, "user_version", 5).unwrap();
     drop(future);
 
     let error = initialize(&path).unwrap_err();
     assert!(error
         .to_string()
-        .contains("unsupported store schema version 4"));
+        .contains("unsupported store schema version 5"));
     let unchanged = Connection::open(&path).unwrap();
     let version: i64 = unchanged
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
     drop(unchanged);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn opening_v3_store_is_idempotent() {
+fn v3_migration_creates_pinned_snapshot_before_schema_v4() {
+    let path = temp_store_path("v3_to_v4");
+    initialize(&path).unwrap();
+    let old = Connection::open(&path).unwrap();
+    old.execute_batch(
+        "CREATE TABLE v3_marker (value TEXT NOT NULL);
+         INSERT INTO v3_marker VALUES ('before-v4');
+         DROP TABLE session_forks;
+         PRAGMA user_version = 3;",
+    )
+    .unwrap();
+    drop(old);
+
+    initialize(&path).unwrap();
+
+    let current = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&current);
+    assert!(table_exists(&current, "session_forks").unwrap());
+    drop(current);
+    let (snapshot, digest) = crate::paths::pre_branching_snapshot_paths(&path);
+    assert!(snapshot.is_file());
+    assert!(digest.is_file());
+    let pinned = Connection::open(snapshot).unwrap();
+    assert_eq!(
+        pinned
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        pinned
+            .query_row("SELECT value FROM v3_marker", [], |row| row
+                .get::<_, String>(0))
+            .unwrap(),
+        "before-v4"
+    );
+    assert!(!table_exists(&pinned, "session_forks").unwrap());
+    drop(pinned);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn opening_v4_store_is_idempotent() {
     let path = temp_store_path("idempotent");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
@@ -806,5 +862,129 @@ fn opening_v3_store_is_idempotent() {
         .unwrap();
     assert_eq!(stored_id, event_id);
     drop(reopened);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn migration_gate_snapshots_committed_wal_once_and_preserves_it() {
+    let path = temp_store_path("pinned_wal");
+    initialize(&path).unwrap();
+    let writer = Connection::open(&path).unwrap();
+    writer
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA wal_autocheckpoint = 0;
+             CREATE TABLE pinned_marker (value TEXT NOT NULL);
+             INSERT INTO pinned_marker VALUES ('committed-in-wal');
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+
+    initialize(&path).unwrap();
+    let (snapshot, digest) = crate::paths::pre_branching_snapshot_paths(&path);
+    let first_bytes = std::fs::read(&snapshot).unwrap();
+    let first_digest = std::fs::read_to_string(&digest).unwrap();
+    let pinned = Connection::open(&snapshot).unwrap();
+    assert_eq!(
+        pinned
+            .query_row("SELECT value FROM pinned_marker", [], |row| row
+                .get::<_, String>(0))
+            .unwrap(),
+        "committed-in-wal"
+    );
+    assert_eq!(
+        pinned
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(pinned);
+
+    writer
+        .execute_batch(
+            "INSERT INTO pinned_marker VALUES ('later');
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    initialize(&path).unwrap();
+    assert_eq!(std::fs::read(&snapshot).unwrap(), first_bytes);
+    assert_eq!(std::fs::read_to_string(&digest).unwrap(), first_digest);
+
+    drop(writer);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn invalid_existing_snapshot_blocks_migration_without_changing_version() {
+    let path = temp_store_path("pinned_invalid");
+    initialize(&path).unwrap();
+    let source = Connection::open(&path).unwrap();
+    source.pragma_update(None, "user_version", 2).unwrap();
+    drop(source);
+
+    let (snapshot, digest) = crate::paths::pre_branching_snapshot_paths(&path);
+    std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    std::fs::write(&snapshot, b"not sqlite").unwrap();
+    std::fs::write(&digest, b"incorrect\n").unwrap();
+
+    let error = initialize(&path).unwrap_err();
+    assert!(error.to_string().contains("refusing to migrate store"));
+    let unchanged = Connection::open(&path).unwrap();
+    assert_eq!(
+        unchanged
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(unchanged);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn rotating_backup_retention_does_not_remove_pinned_snapshot() {
+    if !std::process::Command::new("sqlite3")
+        .arg("-version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+    {
+        eprintln!("skipping retention interaction test: sqlite3 is unavailable");
+        return;
+    }
+
+    let path = temp_store_path("pinned_retention");
+    initialize(&path).unwrap();
+    let source = Connection::open(&path).unwrap();
+    crate::store::backup::ensure_pre_branching_snapshot(&source, &path).unwrap();
+    drop(source);
+    let (snapshot, digest) = crate::paths::pre_branching_snapshot_paths(&path);
+    let snapshot_before = std::fs::read(&snapshot).unwrap();
+    let digest_before = std::fs::read(&digest).unwrap();
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("scripts/backup-nac-store.sh");
+
+    for value in ["first", "second"] {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE IF NOT EXISTS retention_marker (value TEXT); INSERT INTO retention_marker VALUES ('{value}');"
+        ))
+        .unwrap();
+        drop(conn);
+        let output = std::process::Command::new(&script)
+            .arg("retention-test")
+            .env("NAC_STORE_PATH", &path)
+            .env("NAC_STORE_BACKUP_KEEP", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "backup script failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert_eq!(std::fs::read(&snapshot).unwrap(), snapshot_before);
+    assert_eq!(std::fs::read(&digest).unwrap(), digest_before);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

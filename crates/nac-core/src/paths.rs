@@ -61,3 +61,13 @@ pub fn nac_home_dir() -> Option<PathBuf> {
 pub fn nac_config_path() -> Option<PathBuf> {
     nac_home_dir().map(|dir| dir.join("config.toml"))
 }
+
+/// Fixed, non-rotating files used to preserve the store before branching migrations.
+pub fn pre_branching_snapshot_paths(store_path: &Path) -> (PathBuf, PathBuf) {
+    let store_dir = store_path.parent().unwrap_or_else(|| Path::new("."));
+    let pinned_dir = store_dir.join("backups").join("pinned");
+    (
+        pinned_dir.join("pre-branching.db"),
+        pinned_dir.join("pre-branching.sha256"),
+    )
+}
