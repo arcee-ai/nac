@@ -39,7 +39,7 @@ dev:
 			printf 'error: make dev requires %s\n' "$$BROWSER_OPEN"; \
 			exit 1; \
 		}; \
-		if curl -fsS -- "$${DEV_URL}health" >/dev/null 2>&1; then \
+		if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$${DEV_URL}health" >/dev/null 2>&1; then \
 			printf 'error: NAC is already responding at %s\n' "$$DEV_URL"; \
 			exit 1; \
 		fi; \
@@ -47,7 +47,7 @@ dev:
 		server_pid=$$!; \
 		trap 'kill "$$server_pid" 2>/dev/null || true' EXIT; \
 		trap 'exit 130' INT TERM; \
-		until curl -fsS -- "$${DEV_URL}health" >/dev/null 2>&1; do \
+		until curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$${DEV_URL}health" >/dev/null 2>&1; do \
 			if ! kill -0 "$$server_pid" 2>/dev/null; then \
 				wait "$$server_pid"; \
 				exit $$?; \
