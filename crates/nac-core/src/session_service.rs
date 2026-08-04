@@ -234,6 +234,11 @@ pub struct MessagePageMetadata {
     pub end: usize,
     pub total: usize,
     pub has_older: bool,
+    /// Absolute indices in the canonical transcript, paired positionally with
+    /// the messages in this page. These are assigned before system-message
+    /// visibility filtering, so they remain stable across `include_system`.
+    #[serde(default)]
+    pub canonical_indices: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1177,32 +1182,36 @@ impl SessionService {
         let start = end.saturating_sub(limit);
 
         let blob_end = end.min(blob_visible);
-        let blob_part: Vec<Message> = if start < blob_end {
+        let blob_part: Vec<(usize, Message)> = if start < blob_end {
             let snapshot = self.session_snapshot.lock().await;
             let blob = snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.messages.as_slice())
                 .unwrap_or_default();
             blob.iter()
-                .filter(is_visible)
+                .enumerate()
+                .filter(|(_, message)| is_visible(message))
                 .skip(start)
                 .take(blob_end - start)
-                .cloned()
+                .map(|(canonical_index, message)| (canonical_index, message.clone()))
                 .collect()
         } else {
             Vec::new()
         };
-        let log_part: Vec<Message> = if end > blob_visible {
+        let log_part: Vec<(usize, Message)> = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
             let (_, rows) = self
                 .read_log_tail_window(blob_len, tail_start, end - blob_visible - tail_start)
                 .await?;
-            rows.into_iter().map(|(_, message)| message).collect()
+            rows.into_iter()
+                .map(|(canonical_index, message)| (canonical_index as usize, message))
+                .collect()
         } else {
             Vec::new()
         };
-        let mut messages = blob_part;
-        messages.extend(log_part);
+        let mut indexed_messages = blob_part;
+        indexed_messages.extend(log_part);
+        let (canonical_indices, messages) = indexed_messages.into_iter().unzip();
         Ok(MessagesPageSnapshot {
             messages,
             page: MessagePageMetadata {
@@ -1210,6 +1219,7 @@ impl SessionService {
                 end,
                 total,
                 has_older: start > 0,
+                canonical_indices,
             },
         })
     }
@@ -2104,13 +2114,15 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     let end = request.before.unwrap_or(total).min(total);
     let limit = request.limit.max(1);
     let start = end.saturating_sub(limit);
-    let messages = messages
+    let indexed_messages: Vec<(usize, Message)> = messages
         .iter()
-        .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+        .enumerate()
+        .filter(|(_, message)| request.include_system || !matches!(message, Message::System { .. }))
         .skip(start)
         .take(end - start)
-        .cloned()
+        .map(|(canonical_index, message)| (canonical_index, message.clone()))
         .collect();
+    let (canonical_indices, messages) = indexed_messages.into_iter().unzip();
     MessagesPageSnapshot {
         messages,
         page: MessagePageMetadata {
@@ -2118,6 +2130,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
             end,
             total,
             has_older: start > 0,
+            canonical_indices,
         },
     }
 }
@@ -2403,19 +2416,31 @@ pub(super) mod tests {
     ) -> MessagesPageSnapshot {
         let visible = messages
             .iter()
-            .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
-            .cloned()
+            .enumerate()
+            .filter(|(_, message)| {
+                request.include_system || !matches!(message, Message::System { .. })
+            })
+            .map(|(canonical_index, message)| (canonical_index, message.clone()))
             .collect::<Vec<_>>();
         let total = visible.len();
         let end = request.before.unwrap_or(total).min(total);
         let start = end.saturating_sub(request.limit.max(1));
+        let canonical_indices = visible[start..end]
+            .iter()
+            .map(|(canonical_index, _)| *canonical_index)
+            .collect();
+        let messages = visible[start..end]
+            .iter()
+            .map(|(_, message)| message.clone())
+            .collect();
         MessagesPageSnapshot {
-            messages: visible[start..end].to_vec(),
+            messages,
             page: MessagePageMetadata {
                 start,
                 end,
                 total,
                 has_older: start > 0,
+                canonical_indices,
             },
         }
     }
@@ -2454,6 +2479,53 @@ pub(super) mod tests {
         assert_eq!(beyond_end.page.end, beyond_end.page.total);
         assert_eq!(beyond_end.page.total, 10);
         assert_eq!(beyond_end.messages.len(), 4);
+    }
+
+    #[test]
+    fn canonical_indices_are_assigned_before_visibility_filtering_and_pagination() {
+        let messages = vec![
+            Message::System {
+                content: "first system".to_string(),
+            },
+            Message::User {
+                content: "request".to_string(),
+            },
+            Message::System {
+                content: "second system".to_string(),
+            },
+            Message::Assistant {
+                content: Some("answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+            },
+        ];
+
+        let hidden_systems = page_messages(
+            &messages,
+            MessagePageRequest {
+                before: None,
+                limit: 10,
+                include_system: false,
+            },
+        );
+        assert_eq!(hidden_systems.page.start, 0);
+        assert_eq!(hidden_systems.page.end, 2);
+        assert_eq!(hidden_systems.page.total, 2);
+        assert_eq!(hidden_systems.page.canonical_indices, vec![1, 3]);
+
+        let visible_systems = page_messages(
+            &messages,
+            MessagePageRequest {
+                before: Some(3),
+                limit: 2,
+                include_system: true,
+            },
+        );
+        assert_eq!(visible_systems.page.start, 1);
+        assert_eq!(visible_systems.page.end, 3);
+        assert_eq!(visible_systems.page.total, 4);
+        assert_eq!(visible_systems.page.canonical_indices, vec![1, 2]);
     }
 
     #[test]
@@ -3870,10 +3942,7 @@ pub(super) mod tests {
         assert_eq!(loaded.previous_response_duration_ms, Some(999));
         assert_eq!(loaded.token_usages.len(), 2);
         assert!(loaded.token_usages[0].is_none());
-        assert_eq!(
-            loaded.token_usages[1].as_ref().unwrap().input_tokens,
-            10
-        );
+        assert_eq!(loaded.token_usages[1].as_ref().unwrap().input_tokens, 10);
         let blob_json_after: String = crate::store::open_connection(&store_path)
             .unwrap()
             .query_row(

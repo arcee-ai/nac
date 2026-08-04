@@ -24,7 +24,7 @@ pub use transcript::*;
 pub use worksets::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};
-use time::now_utc;
+pub(crate) use time::now_utc;
 
 #[cfg(test)]
 pub(crate) fn insert_test_session(path: &Path, session_id: &str) {

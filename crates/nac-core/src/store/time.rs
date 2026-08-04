@@ -1,4 +1,4 @@
-pub(super) fn now_utc() -> String {
+pub(crate) fn now_utc() -> String {
     let d = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
