@@ -658,7 +658,7 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   ui.renderOrchestratorChatRail({
     messages: [
       { role: "user", content: "build the feature" },
-      { role: "assistant", content: "private intermediate narration", reasoning_text: "private reasoning", tool_calls: [
+      { role: "assistant", content: "I’m starting the implementation now.", reasoning_text: "private reasoning", tool_calls: [
         { id: "call-workset", function: { name: "workset_define", arguments: '{"id":"ui-refresh","goal":"RAW_WORKSET_GOAL"}' } },
         { id: "call-one", function: { name: "thread", arguments: '{"name":"impl/shell","action":"RAW_THREAD_ACTION"}' } },
         { id: "call-two", function: { name: "thread", arguments: '{"name":"verify/ui","action":"RAW_THREAD_ACTION_TWO"}' } },
@@ -671,6 +671,7 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   });
   const html = ui.el.orchestratorChatContent.innerHTML;
   assert.match(html, /build the feature/);
+  assert.match(html, /I’m starting the implementation now\./);
   assert.match(html, /The feature is complete\./);
   assert.match(html, /tool-block/);
   assert.match(html, /workset_define/);
@@ -682,7 +683,33 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   assert.match(html, /tool-block-thread/);
   assert.match(html, /RAW_THREAD_ACTION/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
-  assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL/);
+  assert.doesNotMatch(html, /private reasoning|RAW_WORKSET_GOAL/);
+});
+
+test("steering responses on tool-call turns remain visible in the orchestrator chat", () => {
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail({
+    messages: [
+      { role: "user", content: "add a validation table" },
+      { role: "assistant", content: null, tool_calls: [
+        { id: "call-thread", function: { name: "thread", arguments: '{"name":"docs/validation-evidence-matrix"}' } },
+      ] },
+      { role: "tool", tool_call_id: "call-thread", content: "started" },
+      { role: "user", content: "what are you doing now?" },
+      { role: "assistant", content: "I’m adding the validation and evidence table you requested.", tool_calls: [
+        { id: "call-threads", function: { name: "threads", arguments: "{}" } },
+        { id: "call-wait", function: { name: "thread_wait", arguments: "{}" } },
+      ] },
+    ],
+    active_run: { run_id: "run-steered" },
+  });
+
+  const html = ui.el.orchestratorChatContent.innerHTML;
+  assert.match(html, /what are you doing now\?/);
+  assert.match(html, /I’m adding the validation and evidence table you requested\./);
+  assert.equal(occurrences(html, /I’m adding the validation and evidence table you requested\./g), 1);
+  assert.match(html, /threads/);
+  assert.match(html, /thread_wait/);
 });
 
 test("orchestrator Now follows only the current run and projects live model and tool activity", () => {
@@ -933,10 +960,11 @@ scenario("Transcript privacy", "shared transcript message rendering excludes sys
   assert.match(assistant, /tool-block/);
   assert.match(assistant, /thread/);
   assert.match(assistant, /review\/&lt;unsafe&gt;/);
-  // The dispatch instruction renders as an escaped preview by design; call
-  // IDs, reasoning, and assistant content stay hidden.
+  // The dispatch instruction renders as an escaped preview by design. Public
+  // assistant text remains visible, while call IDs and reasoning stay hidden.
   assert.match(assistant, /RAW_TOOL_ARGUMENT_CANARY/);
-  assert.doesNotMatch(assistant, /call-&lt;42&gt;|reason &lt;carefully&gt;|answer &lt;safely&gt;/);
+  assert.match(assistant, /answer &lt;safely&gt;/);
+  assert.doesNotMatch(assistant, /call-&lt;42&gt;|reason &lt;carefully&gt;/);
   assert.doesNotMatch(assistant, /<unsafe>|<carefully>|<safely>/);
   const tool = ui.renderFocusMessage({ role: "tool", tool_call_id: "call-<42>", content: "RAW_TOOL_RESULT_CANARY" });
   assert.equal(tool, "");

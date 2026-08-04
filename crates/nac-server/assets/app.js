@@ -2895,9 +2895,9 @@ function orchestratorNowEntries(snapshot, sessionId = state.currentId) {
     }
   }
   // Assistant text that accompanies a tool-call turn is canonical public
-  // output, but the transcript intentionally renders that turn as tool blocks.
-  // Associate the text with any call from the same turn so the Now panel can
-  // place the update immediately before the first observed tool starts. Raw
+  // output and renders above those tool blocks in the transcript. Associate
+  // the same text with a call from that turn so the Now panel can also place
+  // the update immediately before the first observed tool starts. Raw
   // reasoning fields and tool-result messages never enter this path.
   const updatesByCallId = new Map();
   for (const [messageIndex, message] of (snapshot?.messages || []).entries()) {
@@ -3523,6 +3523,12 @@ function formatToolCall(toolCall) {
 
 function renderOrchestratorToolTurn(message) {
   const calls = message?.tool_calls || [];
+  const content = message?.content !== null && message?.content !== undefined
+    ? String(message.content)
+    : "";
+  const copy = content
+    ? `<div class="focus-message-copy">${renderFocusMarkdown(content)}</div>`
+    : "";
   const blocks = calls.map((call) => {
     const { name, args, action } = formatToolCall(call);
     if (isThreadToolName(name)) {
@@ -3540,7 +3546,7 @@ function renderOrchestratorToolTurn(message) {
     const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
     return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
   }).join("");
-  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-body">${blocks}</div></article>`;
+  return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-body">${copy}${blocks}</div></article>`;
 }
 
 function renderFocusMessage(message) {
