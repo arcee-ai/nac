@@ -50,7 +50,7 @@ function loadApp(overrides = {}) {
       orchestratorNowPresentation, threadNowPresentation, renderOrchestratorNow, renderThreadNow,
       recordNowPanelViewport, restoreNowPanelViewport,
       renderFocusActions, toolDisplayName, actionIcon, formatActionArgs, isToolAction, isTileVisibleAction,
-      formatToolCall, threadDispatchContext, threadDispatchStatus,
+      formatToolCall, threadDispatchContext, threadDispatchStatus, isBackgroundThreadDispatchAcceptance,
       threadDispatchesFromMessage, threadHistoryGroups, threadGroupProgress, renderThreadGroup,
       captureThreadGroupExpansion, handleThreadOverviewScroll,
       guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
@@ -2317,6 +2317,28 @@ test("thread focus shows the in-flight dispatch instruction in a Current action 
     "the instruction renders like an episode's action");
   assert.ok(html.indexOf("focus-current-action") < html.indexOf("<h3>Episodes</h3>"),
     "the section sits directly above Episodes");
+});
+
+test("background dispatch acknowledgement keeps the assigned prompt visible until terminal lifecycle evidence", () => {
+  const snapshot = sessionSnapshot("inflight-background-ack", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "thread dispatched", source_threads: [] },
+    ] },
+    messages: [
+      { role: "user", content: "please work" },
+      threadDispatchMessage("call_1", "worker", "keep this assigned prompt visible"),
+      { role: "tool", tool_call_id: "call_1",
+        content: "Thread 'worker' started in the background. Use thread_wait to receive its result without blocking user guidance." },
+    ],
+  });
+  assert.equal(ui.isBackgroundThreadDispatchAcceptance(snapshot.messages[2].content), true);
+  assert.equal(ui.threadInflightDispatch("worker", snapshot).action, "keep this assigned prompt visible");
+  const html = renderWorkerFocus(snapshot);
+  assert.match(html, /focus-current-action/);
+  assert.match(html, /keep this assigned prompt visible/);
+  assert.match(html, /focus-current-action-status">Running/);
 });
 
 test("Current action hides once the dispatch result arrives and the episode renders below", () => {

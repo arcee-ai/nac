@@ -3546,6 +3546,12 @@ function formatToolCall(toolCall) {
   return { name, args: argsLabel, action: dispatchAction, result: "" };
 }
 
+function isBackgroundThreadDispatchAcceptance(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.includes("started in the background")
+    || normalized.includes("use thread_wait to receive its result");
+}
+
 function threadDispatchContext(snapshot) {
   const toolResults = new Map();
   for (const message of snapshot?.messages || []) {
@@ -3576,8 +3582,7 @@ function threadDispatchStatus(call, context) {
   const normalizedResult = String(result || "").trim().toLowerCase();
   const completionPreview = String(completion?.content_preview || "").trim().toLowerCase();
   const backgroundAccepted = !completion?.is_error && (Boolean(completion)
-    || normalizedResult.includes("started in the background")
-    || normalizedResult.includes("use thread_wait to receive its result"));
+    || isBackgroundThreadDispatchAcceptance(normalizedResult));
 
   if (completion?.is_error) {
     return completionPreview.includes("timed out")
@@ -3928,16 +3933,15 @@ function renderThreadFocus(name, model, snapshot) {
 }
 
 function threadInflightDispatch(name, snapshot) {
-  // The `thread` dispatch tool blocks until the worker finishes, so an
-  // assistant tool call with no matching tool-result message later in the
-  // transcript is a dispatch still in flight. Result-arrived is the source of
-  // truth for completion; crash-resume normalization appends a synthetic
-  // result for dangling calls, so interrupted runs resolve the same way. The
-  // latest unanswered call wins, so a re-dispatch shows its own instruction.
+  // Background dispatch acknowledgements arrive immediately and do not settle
+  // the worker. Only a non-acknowledgement tool result answers the call here;
+  // renderThreadCurrentAction separately uses terminal lifecycle evidence to
+  // hide the instruction when the background worker actually stops.
   const messages = snapshot?.messages || [];
   const answered = new Set();
   for (const message of messages) {
     if (message?.role === "tool" && message.tool_call_id !== null && message.tool_call_id !== undefined) {
+      if (isBackgroundThreadDispatchAcceptance(message.content)) continue;
       answered.add(String(message.tool_call_id));
     }
   }
