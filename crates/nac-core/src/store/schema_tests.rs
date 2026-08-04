@@ -130,9 +130,14 @@ fn assert_session_cascade(conn: &Connection, table: &str) {
 }
 
 fn assert_current_schema(conn: &Connection) {
-    assert!(table_columns(conn, "sessions")
-        .iter()
-        .any(|column| column == "orchestrator_compaction_threshold"));
+    let session_columns = table_columns(conn, "sessions");
+    for expected in [
+        "orchestrator_compaction_threshold",
+        "visible_message_count",
+        "last_user_prompt",
+    ] {
+        assert!(session_columns.iter().any(|column| column == expected));
+    }
     assert_eq!(
         table_columns(conn, "thread_steering"),
         [
@@ -237,7 +242,7 @@ fn assert_current_schema(conn: &Connection) {
 }
 
 #[test]
-fn main_v0_store_migrates_directly_to_v3() {
+fn main_v0_store_migrates_directly_to_v4() {
     let path = temp_store_path("main_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -315,7 +320,7 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 }
 
 #[test]
-fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
+fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
     let path = temp_store_path("v1");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -472,7 +477,7 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
 fn transcript_log_rows_survive_thread_events_rebuild_migration() {
     // Pins the invariant that the thread_events sanitize-drop rebuild (and any
     // future rebuild-migration) carries transcript log rows through verbatim.
-    // Current v3 DBs never re-run this migration, but the assertion keeps the
+    // Current v4 DBs never re-run this migration, but the assertion keeps the
     // pattern honest for future rebuilds.
     let path = temp_store_path("transcript_survival");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -565,7 +570,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
 }
 
 #[test]
-fn v2_to_v3_adds_threshold_and_empty_checkpoint_storage() {
+fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let path = temp_store_path("v2");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
@@ -640,6 +645,90 @@ fn v2_to_v3_adds_threshold_and_empty_checkpoint_storage() {
             [],
         )
         .unwrap();
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v3_to_v4_backfills_materialized_session_summaries() {
+    let path = temp_store_path("v3_blob_summary");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    let messages = serde_json::to_string(&vec![
+        crate::types::Message::System {
+            content: "system".to_string(),
+        },
+        crate::types::Message::User {
+            content: "first prompt".to_string(),
+        },
+        crate::types::Message::Assistant {
+            content: Some("answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        },
+        crate::types::Message::User {
+            content: "latest prompt".to_string(),
+        },
+    ])
+    .unwrap();
+    conn.execute(
+        "INSERT INTO sessions
+             (session_id, cwd, store_path, model, base_url, messages_json,
+              created_at, updated_at)
+         VALUES ('owned', '/tmp/project', '/tmp/store.db', 'model',
+                 'https://example.invalid', ?1, 'created', 'updated')",
+        params![messages],
+    )
+    .unwrap();
+    let covered_log_entry = encode_transcript_log_entry(
+        1,
+        &crate::types::Message::User {
+            content: "covered log prompt".to_string(),
+        },
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+         VALUES ('owned', ?1, ?2, 'created')",
+        params![ORCHESTRATOR_STEERING_TARGET, covered_log_entry],
+    )
+    .unwrap();
+    let log_entry = encode_transcript_log_entry(
+        4,
+        &crate::types::Message::User {
+            content: "log prompt".to_string(),
+        },
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+         VALUES ('owned', ?1, ?2, 'created')",
+        params![ORCHESTRATOR_STEERING_TARGET, log_entry],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE sessions DROP COLUMN last_user_prompt;
+         ALTER TABLE sessions DROP COLUMN visible_message_count;
+         PRAGMA user_version = 3;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    let summary: (i64, Option<String>) = migrated
+        .query_row(
+            "SELECT visible_message_count, last_user_prompt
+             FROM sessions WHERE session_id = 'owned'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(summary, (4, Some("log prompt".to_string())));
+
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -747,25 +836,25 @@ fn future_schema_version_is_rejected_without_changes() {
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future = Connection::open(&path).unwrap();
-    future.pragma_update(None, "user_version", 4).unwrap();
+    future.pragma_update(None, "user_version", 5).unwrap();
     drop(future);
 
     let error = initialize(&path).unwrap_err();
     assert!(error
         .to_string()
-        .contains("unsupported store schema version 4"));
+        .contains("unsupported store schema version 5"));
     let unchanged = Connection::open(&path).unwrap();
     let version: i64 = unchanged
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
     drop(unchanged);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn opening_v3_store_is_idempotent() {
+fn opening_v4_store_is_idempotent() {
     let path = temp_store_path("idempotent");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();

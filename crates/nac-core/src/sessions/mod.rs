@@ -30,7 +30,7 @@ pub type SessionRunLeaseError = SessionOperationLeaseError;
 pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
 
 use codec::*;
-use summary::*;
+pub(crate) use summary::{last_user_prompt, visible_message_count};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawSessionConfig {
