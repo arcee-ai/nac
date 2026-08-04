@@ -2592,19 +2592,19 @@ test("orchestrator chat thread dispatches wait for lifecycle evidence before sho
     threads: ["queued", "running", "race-running", "ack-only", "finished", "failed", "timed-out"].map((name) => ({ name })),
     thread_events: {
       queued: [],
-      running: [{ type: "thread_started", name: "running", action: "work on running", source_threads: [] }],
-      "race-running": [{ type: "thread_started", name: "race-running", action: "work on race-running", source_threads: [] }],
+      running: [{ type: "thread_started", name: "running", action: "thread dispatched", source_threads: [] }],
+      "race-running": [{ type: "thread_started", name: "race-running", action: "thread dispatched", source_threads: [] }],
       "ack-only": [],
       finished: [
-        { type: "thread_started", name: "finished", action: "work on finished", source_threads: [] },
+        { type: "thread_started", name: "finished", action: "thread dispatched", source_threads: [] },
         { type: "thread_finished", name: "finished", exit_code: 0, timed_out: false },
       ],
       failed: [
-        { type: "thread_started", name: "failed", action: "work on failed", source_threads: [] },
+        { type: "thread_started", name: "failed", action: "thread dispatched", source_threads: [] },
         { type: "thread_finished", name: "failed", exit_code: 1, timed_out: false },
       ],
       "timed-out": [
-        { type: "thread_started", name: "timed-out", action: "work on timed-out", source_threads: [] },
+        { type: "thread_started", name: "timed-out", action: "thread dispatched", source_threads: [] },
         { type: "thread_finished", name: "timed-out", exit_code: 124, timed_out: true },
       ],
     },

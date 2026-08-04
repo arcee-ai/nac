@@ -3544,7 +3544,6 @@ function threadDispatchContext(snapshot) {
 function threadDispatchStatus(call, context) {
   const args = focusToolArguments(call);
   const threadName = focusToolTarget(args, "name");
-  const dispatchAction = focusToolTarget(args, "action");
   const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
   const result = callId ? context?.toolResults?.get(callId) : null;
   const completion = callId ? context?.completions?.get(callId) : null;
@@ -3574,9 +3573,9 @@ function threadDispatchStatus(call, context) {
     if (!backgroundAccepted) return { state: "finished", label: "Finished" };
   }
 
-  const lifecycleMatchesDispatch = Boolean(model?.start)
-    && (!dispatchAction || model.start.action === dispatchAction);
-  if (lifecycleMatchesDispatch && model.terminal) {
+  if (model?.state === "running") return { state: "running", label: "Running" };
+  if (model?.state === "queued") return { state: "queued", label: "Queued" };
+  if (model?.terminal) {
     if (model.finish?.timed_out || String(model.outcome || "").toLowerCase().includes("timed out")) {
       return { state: "timed-out", label: "Timed out" };
     }
@@ -3585,7 +3584,9 @@ function threadDispatchStatus(call, context) {
     }
     return { state: "finished", label: "Finished" };
   }
-  if (lifecycleMatchesDispatch) return { state: "running", label: "Running" };
+  // A start without terminal evidence remains running even if a slightly stale
+  // active-thread snapshot has already dropped it.
+  if (model?.start) return { state: "running", label: "Running" };
   return { state: "queued", label: "Queued" };
 }
 
