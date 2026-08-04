@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::AbortHandle;
 
 use crate::events::EventSink;
 use crate::mcp::McpRegistry;
@@ -19,34 +20,94 @@ pub mod thread;
 pub mod workset;
 pub mod write;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ToolResult {
     pub content: String,
     pub is_error: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadCompletion {
+    pub thread_name: String,
+    pub dispatch_id: String,
+    pub content: String,
+    pub is_error: bool,
+}
+
 #[derive(Default)]
+struct ActiveThreadState {
+    dispatches: HashMap<String, ActiveThreadDispatch>,
+    completions: VecDeque<ThreadCompletion>,
+}
+
+struct ActiveThreadDispatch {
+    dispatch_id: String,
+    abort_handle: Option<AbortHandle>,
+}
+
 pub struct ActiveThreadRegistry {
-    dispatches: StdMutex<HashMap<String, String>>,
+    state: StdMutex<ActiveThreadState>,
+    activity: Notify,
+}
+
+impl Default for ActiveThreadRegistry {
+    fn default() -> Self {
+        Self {
+            state: StdMutex::new(ActiveThreadState::default()),
+            activity: Notify::new(),
+        }
+    }
 }
 
 impl ActiveThreadRegistry {
     pub fn names(&self) -> Vec<String> {
-        self.lock().keys().cloned().collect()
+        self.lock().dispatches.keys().cloned().collect()
     }
 
     pub fn is_active(&self, thread_name: &str) -> bool {
-        self.lock().contains_key(thread_name)
+        self.lock().dispatches.contains_key(thread_name)
+    }
+
+    pub fn matches(&self, thread_name: &str, dispatch_id: &str) -> bool {
+        self.lock()
+            .dispatches
+            .get(thread_name)
+            .is_some_and(|dispatch| dispatch.dispatch_id == dispatch_id)
     }
 
     pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
-        let mut dispatches = self.lock();
-        if dispatches.contains_key(thread_name) {
+        let mut state = self.lock();
+        if state.dispatches.contains_key(thread_name) {
             false
         } else {
-            dispatches.insert(thread_name.to_string(), dispatch_id.to_string());
+            state.dispatches.insert(
+                thread_name.to_string(),
+                ActiveThreadDispatch {
+                    dispatch_id: dispatch_id.to_string(),
+                    abort_handle: None,
+                },
+            );
             true
         }
+    }
+
+    pub fn attach_abort_handle(
+        &self,
+        thread_name: &str,
+        dispatch_id: &str,
+        abort_handle: AbortHandle,
+    ) -> bool {
+        let mut state = self.lock();
+        let Some(dispatch) = state.dispatches.get_mut(thread_name) else {
+            abort_handle.abort();
+            return false;
+        };
+        if dispatch.dispatch_id != dispatch_id {
+            abort_handle.abort();
+            return false;
+        }
+        dispatch.abort_handle = Some(abort_handle);
+        true
     }
 
     pub fn queue(
@@ -56,20 +117,21 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         instruction: &str,
     ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
-        let dispatches = self.lock();
-        let Some(dispatch_id) = dispatches.get(thread_name) else {
+        let state = self.lock();
+        let Some(dispatch) = state.dispatches.get(thread_name) else {
             return Ok(None);
         };
         crate::store::queue_thread_steering(
             store_path,
             session_id,
             thread_name,
-            dispatch_id,
+            &dispatch.dispatch_id,
             instruction,
         )
         .map(Some)
     }
 
+    #[cfg(test)]
     pub fn close(
         &self,
         store_path: &Path,
@@ -77,13 +139,85 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         dispatch_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        if dispatches.get(thread_name).map(String::as_str) != Some(dispatch_id) {
+        let mut state = self.lock();
+        if state
+            .dispatches
+            .get(thread_name)
+            .map(|dispatch| dispatch.dispatch_id.as_str())
+            != Some(dispatch_id)
+        {
             return Ok(Vec::new());
         }
         let expired = crate::store::expire_thread_steering(store_path, session_id, dispatch_id)?;
-        dispatches.remove(thread_name);
+        state.dispatches.remove(thread_name);
+        drop(state);
+        self.activity.notify_one();
         Ok(expired)
+    }
+
+    pub fn complete(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        completion: ThreadCompletion,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut state = self.lock();
+        if state
+            .dispatches
+            .get(&completion.thread_name)
+            .map(|dispatch| dispatch.dispatch_id.as_str())
+            != Some(completion.dispatch_id.as_str())
+        {
+            return Ok(Vec::new());
+        }
+        let expired =
+            crate::store::expire_thread_steering(store_path, session_id, &completion.dispatch_id);
+        state.dispatches.remove(&completion.thread_name);
+        state.completions.push_back(completion);
+        drop(state);
+        self.activity.notify_one();
+        expired
+    }
+
+    pub fn take_completions(&self, thread_names: &HashSet<String>) -> Vec<ThreadCompletion> {
+        let mut state = self.lock();
+        if thread_names.is_empty() {
+            return state.completions.drain(..).collect();
+        }
+
+        let mut matching = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(completion) = state.completions.pop_front() {
+            if thread_names.contains(&completion.thread_name) {
+                matching.push(completion);
+            } else {
+                retained.push_back(completion);
+            }
+        }
+        state.completions = retained;
+        matching
+    }
+
+    pub fn has_completions(&self) -> bool {
+        !self.lock().completions.is_empty()
+    }
+
+    pub fn active_names_matching(&self, thread_names: &HashSet<String>) -> Vec<String> {
+        let state = self.lock();
+        state
+            .dispatches
+            .keys()
+            .filter(|name| thread_names.is_empty() || thread_names.contains(*name))
+            .cloned()
+            .collect()
+    }
+
+    pub fn signal_activity(&self) {
+        self.activity.notify_one();
+    }
+
+    pub async fn wait_for_activity(&self) {
+        self.activity.notified().await;
     }
 
     pub fn close_all(
@@ -91,27 +225,48 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        let targets = dispatches
+        let mut state = self.lock();
+        let targets = state
+            .dispatches
             .iter()
-            .map(|(name, dispatch_id)| (name.clone(), dispatch_id.clone()))
+            .map(|(name, dispatch)| {
+                (
+                    name.clone(),
+                    dispatch.dispatch_id.clone(),
+                    dispatch.abort_handle.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         let mut expired = Vec::new();
-        for (name, dispatch_id) in targets {
-            expired.extend(crate::store::expire_thread_steering(
-                store_path,
-                session_id,
-                &dispatch_id,
-            )?);
-            if dispatches.get(&name) == Some(&dispatch_id) {
-                dispatches.remove(&name);
+        let mut first_error = None;
+        for (name, dispatch_id, abort_handle) in targets {
+            if let Some(abort_handle) = abort_handle {
+                abort_handle.abort();
+            }
+            match crate::store::expire_thread_steering(store_path, session_id, &dispatch_id) {
+                Ok(records) => expired.extend(records),
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+            if state
+                .dispatches
+                .get(&name)
+                .is_some_and(|dispatch| dispatch.dispatch_id == dispatch_id)
+            {
+                state.dispatches.remove(&name);
             }
         }
-        Ok(expired)
+        state.completions.clear();
+        drop(state);
+        self.activity.notify_one();
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(expired),
+        }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
-        self.dispatches
+    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveThreadState> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -207,6 +362,7 @@ pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<Tool
     vec![
         thread::dispatch_definition(skills),
         thread::threads_definition(),
+        thread::thread_wait_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
         workset::define_definition(),
@@ -304,6 +460,7 @@ pub async fn execute_tool(
         },
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
+        "thread_wait" => thread::execute_thread_wait(args, runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
         "thread_delete" => thread::execute_thread_delete(args, runtime).await,
         "workset_define" => workset::execute_define(args, runtime).await,

@@ -12,7 +12,7 @@ use crate::model::{ModelClient, TokenUsage};
 use crate::sandbox::SandboxSession;
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
-use crate::types::{Message, ToolCall, ToolDefinition};
+use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
@@ -39,6 +39,41 @@ pub(crate) use preview::key_arg_preview;
 use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
+
+fn inject_background_thread_wait(
+    assistant: &mut crate::model::AssistantTurn,
+    should_wait: bool,
+) -> bool {
+    if !should_wait
+        || assistant
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+    {
+        return false;
+    }
+    assistant
+        .tool_calls
+        .get_or_insert_with(Vec::new)
+        .push(ToolCall {
+            id: format!("nac-thread-wait-{}", uuid::Uuid::new_v4()),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "thread_wait".to_string(),
+                arguments: "{}".to_string(),
+            },
+        });
+    if assistant
+        .content
+        .as_deref()
+        .is_none_or(|content| content.trim().is_empty())
+    {
+        assistant.content = Some(
+            "The threads are still running. I’ll continue as results arrive.".to_string(),
+        );
+    }
+    true
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
@@ -289,9 +324,16 @@ impl Agent {
                      reject them. This enables patterns like best-of-N: dispatch multiple \
                      independent explorations in one response, then a synthesis thread that takes \
                      all of them as source threads and waits for them to finish.\n\n\
+                     Thread dispatch is asynchronous: thread(...) acknowledges the dispatch immediately \
+                     while the worker continues in the background. After dispatching, give the user a \
+                     concise progress update instead of going silent, then use thread_wait(names?, timeout?) \
+                     to receive completions. thread_wait also returns early when new user guidance arrives; \
+                     respond to that guidance and wait again while relevant threads are still running. Do \
+                     not claim the task is complete while required background work remains.\n\n\
                      Your tools:\n\
                      - thread(name, action, threads?, skills?, timeout?)\n\
                      - threads()\n\
+                     - thread_wait(names?, timeout?)\n\
                      - thread_read(name)\n\
                      - thread_delete(name)\n\
                      - workset_define(id, goal, status, summary, verification_recipe?, workset_items[])\n\
@@ -471,7 +513,7 @@ impl Agent {
                 iteration,
             });
 
-            let response = match self
+            let mut response = match self
                 .client
                 .send_turn(provider_view.messages, self.tool_defs.clone())
                 .await
@@ -528,12 +570,30 @@ impl Agent {
                 return Err(error);
             }
 
-            let has_tool_calls = response
+            let provider_has_tool_calls = response
                 .assistant
                 .tool_calls
                 .as_ref()
                 .map(|tool_calls| !tool_calls.is_empty())
                 .unwrap_or(false);
+
+            // A model may try to finish immediately after accepting
+            // asynchronous thread dispatches. Convert that premature finish
+            // into a real thread_wait tool turn so the assistant text is
+            // visible now, the run stays alive, and worker results or new user
+            // guidance can resume the same orchestrator safely.
+            inject_background_thread_wait(
+                &mut response.assistant,
+                !provider_has_tool_calls
+                    && self.thread_name.is_none()
+                    && (!self.tool_runtime.active_threads.names().is_empty()
+                        || self.tool_runtime.active_threads.has_completions()),
+            );
+            let has_tool_calls = response
+                .assistant
+                .tool_calls
+                .as_ref()
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
 
             // Transcript commit point (assistant): durable at push.
             if let Err(error) = self
@@ -562,6 +622,26 @@ impl Agent {
                     self.messages.len(),
                     provider_view.checkpoint_id,
                 );
+            }
+
+            // Providers may return user-facing text alongside tool calls.
+            // Surface that text immediately instead of hiding it until the
+            // whole tool batch (which can include long-running threads)
+            // finishes.
+            if has_tool_calls && self.thread_name.is_none() {
+                if let Some(content) = response
+                    .assistant
+                    .content
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|content| !content.is_empty())
+                {
+                    self.emit(AgentEvent::AssistantMessage {
+                        thread_name: self.thread_name.clone(),
+                        content: content.to_string(),
+                        usage: Some(accumulated_usage.clone()),
+                    });
+                }
             }
 
             if !has_tool_calls {

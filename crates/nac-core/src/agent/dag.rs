@@ -23,6 +23,190 @@ pub(crate) struct DagExecContext {
     pub agent_thread_name: Option<String>,
 }
 
+/// Accept a batch of thread dispatches immediately, then execute its dependency
+/// DAG in the background. The orchestrator receives tool results for dispatch
+/// acceptance right away and can make another model call while workers run.
+pub(crate) fn launch_background_threads(
+    thread_dispatches: Vec<ParsedThreadDispatch>,
+    dag: Dag,
+    ctx: DagExecContext,
+) -> Vec<(usize, String, String, ToolResult)> {
+    let mut immediate = Vec::with_capacity(thread_dispatches.len());
+    let mut failed_indices = HashSet::new();
+
+    for (index, dispatch) in thread_dispatches.iter().enumerate() {
+        ctx.event_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: ctx.agent_thread_name.clone(),
+            call_id: dispatch.tool_call_id.clone(),
+            name: "thread".to_string(),
+            args_preview: preview_tool_args("thread", &dispatch.args_str),
+            key_arg_preview: None,
+            args_detail: Some(tool_args_detail(&dispatch.args_str)),
+        });
+
+        let result = if thread::mark_thread_active(
+            &ctx.runtime,
+            &dispatch.params.thread_name,
+            &dispatch.params.dispatch_id,
+        ) {
+            ToolResult {
+                content: format!(
+                    "Thread '{}' started in the background. Use thread_wait to receive its result without blocking user guidance.",
+                    dispatch.params.thread_name
+                ),
+                is_error: false,
+            }
+        } else {
+            failed_indices.insert(index);
+            ToolResult {
+                content: format!(
+                    "Thread '{}' is already running; steer it or wait for the current dispatch to complete.",
+                    dispatch.params.thread_name
+                ),
+                is_error: true,
+            }
+        };
+
+        ctx.event_sink.emit(AgentEvent::ToolCallFinished {
+            thread_name: ctx.agent_thread_name.clone(),
+            call_id: dispatch.tool_call_id.clone(),
+            name: "thread".to_string(),
+            content_preview: preview_tool_result("thread", &result),
+            is_error: result.is_error,
+        });
+        immediate.push((
+            dispatch.original_index,
+            dispatch.tool_call_id.clone(),
+            "thread".to_string(),
+            result,
+        ));
+    }
+
+    if failed_indices.len() < thread_dispatches.len() {
+        tokio::spawn(run_background_dag(
+            thread_dispatches,
+            dag,
+            ctx,
+            failed_indices,
+        ));
+    }
+
+    immediate
+}
+
+async fn run_background_dag(
+    thread_dispatches: Vec<ParsedThreadDispatch>,
+    dag: Dag,
+    ctx: DagExecContext,
+    mut failed_indices: HashSet<usize>,
+) {
+    let Dag {
+        waves,
+        in_batch_deps,
+    } = dag;
+
+    for wave in waves {
+        let mut join_set: JoinSet<(usize, ToolResult)> = JoinSet::new();
+        let mut in_flight = HashSet::new();
+
+        for dispatch_idx in wave {
+            if failed_indices.contains(&dispatch_idx) {
+                continue;
+            }
+            let dispatch = &thread_dispatches[dispatch_idx];
+            let failed_dependency = in_batch_deps[dispatch_idx]
+                .iter()
+                .find(|dependency| failed_indices.contains(dependency))
+                .copied();
+
+            if let Some(dependency) = failed_dependency {
+                let dependency_name = &thread_dispatches[dependency].params.thread_name;
+                let result = ToolResult {
+                    content: format!(
+                        "Source thread '{}' failed; dispatch '{}' was skipped.",
+                        dependency_name, dispatch.params.thread_name
+                    ),
+                    is_error: true,
+                };
+                ctx.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(dispatch.params.thread_name.clone()),
+                    message: result.content.clone(),
+                });
+                thread::complete_thread_dispatch(
+                    &ctx.runtime,
+                    &dispatch.params.session_id,
+                    &dispatch.params.thread_name,
+                    &dispatch.params.dispatch_id,
+                    &result,
+                );
+                failed_indices.insert(dispatch_idx);
+                continue;
+            }
+
+            if !ctx
+                .runtime
+                .active_threads
+                .matches(&dispatch.params.thread_name, &dispatch.params.dispatch_id)
+            {
+                failed_indices.insert(dispatch_idx);
+                continue;
+            }
+
+            let runtime = ctx.runtime.clone();
+            let client = ctx.client.clone();
+            let params = dispatch.params.clone();
+            let thread_name = params.thread_name.clone();
+            let dispatch_id = params.dispatch_id.clone();
+            let abort_handle = join_set.spawn(async move {
+                let result = thread::execute_parsed_dispatch(params, &runtime, &client).await;
+                (dispatch_idx, result)
+            });
+            if ctx.runtime.active_threads.attach_abort_handle(
+                &thread_name,
+                &dispatch_id,
+                abort_handle,
+            ) {
+                in_flight.insert(dispatch_idx);
+            } else {
+                failed_indices.insert(dispatch_idx);
+            }
+        }
+
+        while let Some(join_result) = join_set.join_next().await {
+            match join_result {
+                Ok((dispatch_idx, result)) => {
+                    in_flight.remove(&dispatch_idx);
+                    if result.is_error {
+                        failed_indices.insert(dispatch_idx);
+                    }
+                }
+                Err(error) => {
+                    join_set.abort_all();
+                    for dispatch_idx in in_flight.drain() {
+                        let dispatch = &thread_dispatches[dispatch_idx];
+                        let result = ToolResult {
+                            content: format!("Background thread task failed: {error}"),
+                            is_error: true,
+                        };
+                        ctx.event_sink.emit(AgentEvent::Error {
+                            thread_name: Some(dispatch.params.thread_name.clone()),
+                            message: result.content.clone(),
+                        });
+                        thread::complete_thread_dispatch(
+                            &ctx.runtime,
+                            &dispatch.params.session_id,
+                            &dispatch.params.thread_name,
+                            &dispatch.params.dispatch_id,
+                            &result,
+                        );
+                        failed_indices.insert(dispatch_idx);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Partition a batch of tool calls into:
 ///
 /// 1. `Vec<ParsedThreadDispatch>` — successfully parsed `thread` calls
@@ -316,6 +500,8 @@ pub(crate) fn spawn_non_thread_into(
 /// The caller is responsible for calling [`partition_tool_calls`] and
 /// [`build_dag`] first.  This function manages the `active_threads` lifecycle
 /// for all thread dispatches in the batch.
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) async fn execute_with_dag(
     thread_dispatches: Vec<ParsedThreadDispatch>,
     other_calls: Vec<(usize, String, String, String)>,
@@ -720,6 +906,28 @@ mod tests {
         for i in 0..3 {
             assert!(dag.in_batch_deps[i].is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn background_launch_returns_dispatch_acceptance_immediately() {
+        let dispatches = vec![make_dispatch(0, "A", &[])];
+        let dag = build_dag(&dispatches).unwrap();
+        let runtime = test_runtime();
+        let results = launch_background_threads(
+            dispatches,
+            dag,
+            DagExecContext {
+                runtime: runtime.clone(),
+                client: ModelClient::new_for_test(),
+                event_sink: EventSink::none(),
+                agent_thread_name: None,
+            },
+        );
+
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].3.is_error);
+        assert!(results[0].3.content.contains("started in the background"));
+        assert!(runtime.active_threads.is_active("A"));
     }
 
     #[test]

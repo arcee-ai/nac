@@ -3877,6 +3877,7 @@ function actionIcon(action) {
   const tool = String(action.name || "").toLowerCase();
   if (tool === "command" || tool === "exec_command" || tool === "bash" || tool === "shell" || tool === "exec") return "$";
   if (tool === "read" || tool === "thread_read") return "▾";
+  if (tool === "thread_wait") return "…";
   if (tool === "write") return "✎";
   if (tool === "edit") return "✸";
   if (tool === "grep" || tool === "search" || tool === "searchgithub") return "?";
@@ -4258,7 +4259,7 @@ function toolDisplayName(value) {
   const names = {
     read: "Read", exec_command: "Command", shell: "Command", exec: "Command", bash: "Command",
     write: "Write", edit: "Edit", write_stdin: "Terminal input", thread: "Thread",
-    threads: "Threads", thread_read: "Read thread", thread_delete: "Delete thread",
+    threads: "Threads", thread_wait: "Waiting for threads", thread_read: "Read thread", thread_delete: "Delete thread",
     workset_define: "Define workset", workset_read: "Read workset", workset_list: "List worksets",
     web_search_exa: "Web search", web_fetch_exa: "Web fetch", searchgithub: "GitHub search",
     resolve_library_id: "Context library lookup", query_docs: "Context documentation",

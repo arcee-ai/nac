@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -735,6 +735,7 @@ impl SessionService {
     /// even if other `Arc` references (e.g. from SSE handlers) keep the
     /// `SessionService` alive.
     pub async fn destroy_sandbox(&self) {
+        self.close_active_thread_dispatches();
         let sandbox = {
             let agent = self.agent.lock().await;
             agent.sandbox_session()
@@ -811,6 +812,9 @@ impl SessionService {
             instruction,
         )?;
         drop(active_operation);
+        // Wake an orchestrator that is deliberately parked while background
+        // threads run so it can consume and answer this guidance promptly.
+        self.active_threads.signal_activity();
         self.event_bus
             .emit_agent(AgentEvent::OrchestratorSteeringQueued {
                 steering_id: record.id,
@@ -1607,22 +1611,56 @@ impl SessionService {
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let mut expired =
+                // A prior run can intentionally leave background workers
+                // active. Recover only durable steering that has no matching
+                // live local dispatch; clearing the whole registry here would
+                // orphan those workers as soon as the user sends a follow-up.
+                let expired = if self.active_threads.names().is_empty() {
                     crate::store::expire_session_steering(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
                             message: SessionCoordinationError::store(format!(
                                 "failed to recover stale steering: {error:#}"
                             )),
-                        })?;
-                expired.extend(
-                    self.active_threads
-                        .close_all(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
+                        })?
+                } else {
+                    let records =
+                        crate::store::list_thread_steering(&self.metadata.store_path, session_id)
+                            .map_err(|error| SessionSubmitError::Coordination {
                             message: SessionCoordinationError::store(format!(
-                                "failed to clear stale worker targets: {error:#}"
+                                "failed to inspect stale steering: {error:#}"
                             )),
-                        })?,
-                );
+                        })?;
+                    let stale_dispatches = records
+                        .iter()
+                        .filter(|record| {
+                            matches!(record.status.as_str(), "queued" | "claimed")
+                                && (record.thread_name
+                                    == crate::store::ORCHESTRATOR_STEERING_TARGET
+                                    || !self
+                                        .active_threads
+                                        .matches(&record.thread_name, &record.dispatch_id))
+                        })
+                        .map(|record| record.dispatch_id.clone())
+                        .collect::<HashSet<_>>();
+                    let mut expired = Vec::new();
+                    for dispatch_id in stale_dispatches {
+                        expired.extend(
+                            crate::store::expire_thread_steering(
+                                &self.metadata.store_path,
+                                session_id,
+                                &dispatch_id,
+                            )
+                            .map_err(|error| {
+                                SessionSubmitError::Coordination {
+                                    message: SessionCoordinationError::store(format!(
+                                        "failed to recover stale steering: {error:#}"
+                                    )),
+                                }
+                            })?,
+                        );
+                    }
+                    expired
+                };
                 self.emit_steering_expired(expired);
             }
         }
@@ -3164,6 +3202,12 @@ pub(super) mod tests {
         );
         assert_eq!(queued.status, "queued");
         assert_eq!(queued.dispatch_id, active.run_id.as_str());
+        assert!(tokio::time::timeout(
+            Duration::from_millis(50),
+            service.active_threads.wait_for_activity(),
+        )
+        .await
+        .is_ok());
 
         assert!(
             service

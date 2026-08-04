@@ -42,20 +42,25 @@ pub(super) async fn execute_tools_parallel(
         }
     };
 
-    // 4. Execute with the DAG coordinator.
-    dag::execute_with_dag(
+    // 4. Accept thread dispatches immediately and run their DAG in the
+    // background. Non-thread tools in the same assistant turn still execute
+    // normally before this tool-result batch is committed.
+    let mut all_results = dag::collect_parse_errors(parse_errors, &event_sink, &thread_name);
+    all_results.extend(dag::launch_background_threads(
         thread_dispatches,
-        other_calls,
-        parse_errors,
         dag,
         dag::DagExecContext {
-            runtime,
-            client,
-            event_sink,
-            agent_thread_name: thread_name,
+            runtime: runtime.clone(),
+            client: client.clone(),
+            event_sink: event_sink.clone(),
+            agent_thread_name: thread_name.clone(),
         },
-    )
-    .await
+    ));
+    all_results.extend(
+        spawn_and_collect_non_thread(other_calls, &runtime, &client, &event_sink, &thread_name)
+            .await,
+    );
+    dag::sort_and_strip_index(all_results)
 }
 
 /// Execute a batch of non-thread tool calls, emitting start/finish events for

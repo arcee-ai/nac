@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Duration;
+
 use serde_json::Value;
 
 use crate::events::AgentEvent;
@@ -67,7 +70,7 @@ pub fn threads_definition() -> ToolDefinition {
     use serde_json::json;
     def(
         "threads",
-        "List active threads in the current orchestrator session.",
+        "List known threads in the current orchestrator session and show which background dispatches are running.",
         json!({
             "type": "object",
             "properties": {}
@@ -86,6 +89,30 @@ pub fn thread_read_definition() -> ToolDefinition {
                 "name": { "type": "string", "description": "Thread name." }
             },
             "required": ["name"]
+        }),
+    )
+}
+
+pub fn thread_wait_definition() -> ToolDefinition {
+    use serde_json::json;
+    def(
+        "thread_wait",
+        "Wait for background thread progress. Returns when a selected thread finishes, new user guidance is queued for the orchestrator, or the timeout elapses.",
+        json!({
+            "type": "object",
+            "properties": {
+                "names": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "uniqueItems": true,
+                    "description": "Optional thread names to wait for. Omit to wait for any active thread."
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum wait in seconds. Defaults to the configured thread timeout."
+                }
+            }
         }),
     )
 }
@@ -179,8 +206,6 @@ pub async fn execute_parsed_dispatch(
     )
     .await;
 
-    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
-
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
     if let Ok(run) = &result {
@@ -190,7 +215,7 @@ pub async fn execute_parsed_dispatch(
         }
     }
 
-    match result {
+    let tool_result = match result {
         Err(e) => {
             runtime.event_sink.emit(AgentEvent::Error {
                 thread_name: Some(thread_name.clone()),
@@ -257,7 +282,16 @@ pub async fn execute_parsed_dispatch(
                 is_error: false,
             }
         }
-    }
+    };
+
+    complete_thread_dispatch(
+        runtime,
+        &session_id,
+        &thread_name,
+        &dispatch_id,
+        &tool_result,
+    );
+    tool_result
 }
 
 pub async fn execute_dispatch(
@@ -280,11 +314,27 @@ pub async fn execute_dispatch(
             is_error: true,
         };
     }
-    let result = execute_parsed_dispatch(params, runtime, client).await;
-    if let Some(session_id) = runtime.session_id.as_deref() {
-        close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
+    let background_runtime = runtime.clone();
+    let background_client = client.clone();
+    let abort_handle = tokio::spawn(async move {
+        execute_parsed_dispatch(params, &background_runtime, &background_client).await
+    })
+    .abort_handle();
+    if !runtime
+        .active_threads
+        .attach_abort_handle(&thread_name, &dispatch_id, abort_handle)
+    {
+        return ToolResult {
+            content: format!("Thread '{thread_name}' could not be started."),
+            is_error: true,
+        };
     }
-    result
+    ToolResult {
+        content: format!(
+            "Thread '{thread_name}' started in the background. Use thread_wait to receive its result without blocking user guidance."
+        ),
+        is_error: false,
+    }
 }
 
 pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
@@ -312,27 +362,168 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             }
         };
 
-    if threads.is_empty() {
+    let mut active = runtime.active_threads.names();
+    active.sort();
+    let active_set = active.iter().cloned().collect::<HashSet<_>>();
+
+    if threads.is_empty() && active.is_empty() {
         return ToolResult {
-            content: "No active threads in this session.".to_string(),
+            content: "No threads in this session.".to_string(),
             is_error: false,
         };
     }
 
-    let mut output = String::from("Active threads:");
+    let mut output = String::from("Threads:");
+    let mut persisted_names = HashSet::new();
     for thread in threads {
+        persisted_names.insert(thread.name.clone());
+        let status = if active_set.contains(&thread.name) {
+            "running"
+        } else {
+            "idle"
+        };
         output.push_str(&format!(
-            "\n- {} | {} episodes | created {} | updated {}",
-            thread.name, thread.episode_count, thread.created_at, thread.updated_at
+            "\n- {} | {} | {} episodes | created {} | updated {}",
+            thread.name, status, thread.episode_count, thread.created_at, thread.updated_at
         ));
         if let Some(action) = thread.latest_action.as_deref() {
             output.push_str(&format!(" | last action: {}", action));
+        }
+    }
+    for name in active {
+        if !persisted_names.contains(&name) {
+            output.push_str(&format!("\n- {name} | running | no completed episodes"));
         }
     }
 
     ToolResult {
         content: output,
         is_error: false,
+    }
+}
+
+pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResult {
+    let names = match require_string_array(&args, "names") {
+        Ok(names) => names,
+        Err(error) => return error,
+    };
+    if names.iter().any(|name| name.trim().is_empty()) {
+        return ToolResult {
+            content: "Error: 'names' entries must not be empty".to_string(),
+            is_error: true,
+        };
+    }
+    let names = names.into_iter().collect::<HashSet<_>>();
+    let timeout_secs = args
+        .get("timeout")
+        .and_then(Value::as_u64)
+        .unwrap_or(runtime.thread_timeout_secs)
+        .max(1);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+    loop {
+        let completions = runtime.active_threads.take_completions(&names);
+        if !completions.is_empty() {
+            let mut output = String::from("Thread updates:");
+            for completion in completions {
+                output.push_str(&format!(
+                    "\n\n## {} ({})\n{}",
+                    completion.thread_name,
+                    if completion.is_error {
+                        "failed"
+                    } else {
+                        "completed"
+                    },
+                    completion.content.trim()
+                ));
+            }
+            let mut still_active = runtime.active_threads.active_names_matching(&names);
+            still_active.sort();
+            if !still_active.is_empty() {
+                output.push_str(&format!("\n\nStill running: {}", still_active.join(", ")));
+            }
+            return ToolResult {
+                content: output,
+                is_error: false,
+            };
+        }
+
+        let session_id = match require_session(runtime) {
+            Ok(session_id) => session_id.to_string(),
+            Err(error) => return error,
+        };
+        let store_path = runtime.store_path.clone();
+        let guidance_pending = match tokio::task::spawn_blocking(move || {
+            store::list_thread_steering(&store_path, &session_id).map(|records| {
+                records.iter().any(|record| {
+                    record.thread_name == store::ORCHESTRATOR_STEERING_TARGET
+                        && record.status == "queued"
+                })
+            })
+        })
+        .await
+        {
+            Ok(Ok(pending)) => pending,
+            Ok(Err(error)) => {
+                return ToolResult {
+                    content: format!("Error checking orchestrator guidance: {error}"),
+                    is_error: true,
+                }
+            }
+            Err(error) => {
+                return ToolResult {
+                    content: format!("Internal error checking orchestrator guidance: {error}"),
+                    is_error: true,
+                }
+            }
+        };
+        if guidance_pending {
+            return ToolResult {
+                content: "New user guidance is pending for the orchestrator. Respond to it now; the background threads are still running.".to_string(),
+                is_error: false,
+            };
+        }
+
+        let mut active = runtime.active_threads.active_names_matching(&names);
+        active.sort();
+        if active.is_empty() {
+            let target = if names.is_empty() {
+                "No background threads are running.".to_string()
+            } else {
+                format!("None of these threads are running: {}", {
+                    let mut names = names.iter().cloned().collect::<Vec<_>>();
+                    names.sort();
+                    names.join(", ")
+                })
+            };
+            return ToolResult {
+                content: target,
+                is_error: false,
+            };
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return ToolResult {
+                content: format!(
+                    "Wait timed out after {timeout_secs}s. Still running: {}",
+                    active.join(", ")
+                ),
+                is_error: false,
+            };
+        }
+        if tokio::time::timeout(deadline - now, runtime.active_threads.wait_for_activity())
+            .await
+            .is_err()
+        {
+            return ToolResult {
+                content: format!(
+                    "Wait timed out after {timeout_secs}s. Still running: {}",
+                    active.join(", ")
+                ),
+                is_error: false,
+            };
+        }
     }
 }
 
@@ -484,6 +675,7 @@ pub(crate) fn mark_thread_active(
     runtime.active_threads.mark(thread_name, dispatch_id)
 }
 
+#[cfg(test)]
 pub(crate) fn close_thread_dispatch(
     runtime: &ToolRuntime,
     session_id: &str,
@@ -493,6 +685,39 @@ pub(crate) fn close_thread_dispatch(
     match runtime
         .active_threads
         .close(&runtime.store_path, session_id, thread_name, dispatch_id)
+    {
+        Ok(expired) => {
+            for record in expired {
+                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
+                    name: record.thread_name,
+                    steering_id: record.id,
+                    instruction_preview: record.instruction.chars().take(160).collect(),
+                });
+            }
+        }
+        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
+            thread_name: Some(thread_name.to_string()),
+            message: format!("failed to expire undelivered steering: {error}"),
+        }),
+    }
+}
+
+pub(crate) fn complete_thread_dispatch(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+    result: &ToolResult,
+) {
+    let completion = crate::tools::ThreadCompletion {
+        thread_name: thread_name.to_string(),
+        dispatch_id: dispatch_id.to_string(),
+        content: result.content.clone(),
+        is_error: result.is_error,
+    };
+    match runtime
+        .active_threads
+        .complete(&runtime.store_path, session_id, completion)
     {
         Ok(expired) => {
             for record in expired {
@@ -547,6 +772,20 @@ mod tests {
         let mut rt = test_runtime();
         rt.skills = Some(Arc::new(test_registry()));
         rt
+    }
+
+    fn test_runtime_with_store(label: &str) -> ToolRuntime {
+        let mut runtime = test_runtime();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        runtime.store_path = std::env::temp_dir()
+            .join(format!("nac_thread_{label}_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "test-session");
+        runtime
     }
 
     #[test]
@@ -728,6 +967,91 @@ mod tests {
             .queue(&runtime.store_path, "test-session", "worker", "too late",)
             .unwrap()
             .is_none());
+        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn thread_wait_returns_a_completed_background_result() {
+        let runtime = test_runtime_with_store("wait_completion");
+        assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
+        complete_thread_dispatch(
+            &runtime,
+            "test-session",
+            "worker",
+            "dispatch-a",
+            &ToolResult {
+                content: "implemented the change".to_string(),
+                is_error: false,
+            },
+        );
+
+        let result =
+            execute_thread_wait(json!({ "names": ["worker"], "timeout": 1 }), &runtime).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("worker (completed)"));
+        assert!(result.content.contains("implemented the change"));
+        assert!(!runtime.active_threads.is_active("worker"));
+        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn thread_wait_wakes_for_new_orchestrator_guidance() {
+        let runtime = test_runtime_with_store("wait_guidance");
+        assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
+        let waiting_runtime = runtime.clone();
+        let wait = tokio::spawn(async move {
+            execute_thread_wait(json!({ "timeout": 30 }), &waiting_runtime).await
+        });
+        tokio::task::yield_now().await;
+
+        crate::store::queue_thread_steering(
+            &runtime.store_path,
+            "test-session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-a",
+            "answer this now",
+        )
+        .unwrap();
+        runtime.active_threads.signal_activity();
+
+        let result = wait.await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("New user guidance is pending"));
+        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
+        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn closing_all_threads_aborts_workers_and_discards_pending_completions() {
+        let runtime = test_runtime_with_store("abort_all");
+        assert!(mark_thread_active(&runtime, "completed", "dispatch-complete"));
+        complete_thread_dispatch(
+            &runtime,
+            "test-session",
+            "completed",
+            "dispatch-complete",
+            &ToolResult {
+                content: "old result".to_string(),
+                is_error: false,
+            },
+        );
+        assert!(runtime.active_threads.has_completions());
+
+        assert!(mark_thread_active(&runtime, "running", "dispatch-running"));
+        let task = tokio::spawn(std::future::pending::<()>());
+        assert!(runtime.active_threads.attach_abort_handle(
+            "running",
+            "dispatch-running",
+            task.abort_handle(),
+        ));
+        runtime
+            .active_threads
+            .close_all(&runtime.store_path, "test-session")
+            .unwrap();
+
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(runtime.active_threads.names().is_empty());
+        assert!(!runtime.active_threads.has_completions());
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
     }
 }

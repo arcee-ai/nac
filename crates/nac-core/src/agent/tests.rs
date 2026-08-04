@@ -9,6 +9,41 @@ fn test_agent_creation() {
 }
 
 #[test]
+fn background_threads_force_a_real_wait_tool_turn_without_hiding_text() {
+    let mut assistant = crate::model::AssistantTurn {
+        content: Some("I started the implementation thread.".to_string()),
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: None,
+    };
+
+    assert!(inject_background_thread_wait(&mut assistant, true));
+    assert_eq!(
+        assistant.content.as_deref(),
+        Some("I started the implementation thread.")
+    );
+    let calls = assistant.tool_calls.as_ref().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].id.starts_with("nac-thread-wait-"));
+    assert_eq!(calls[0].function.name, "thread_wait");
+    assert_eq!(calls[0].function.arguments, "{}");
+    assert!(!inject_background_thread_wait(&mut assistant, true));
+    assert_eq!(assistant.tool_calls.as_ref().unwrap().len(), 1);
+
+    let mut silent = crate::model::AssistantTurn {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: None,
+    };
+    assert!(inject_background_thread_wait(&mut silent, true));
+    assert_eq!(
+        silent.content.as_deref(),
+        Some("The threads are still running. I’ll continue as results arrive.")
+    );
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(
@@ -164,6 +199,17 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
         .as_str()
         .unwrap()
         .contains("workers cannot activate skills themselves"));
+    assert!(orchestrator
+        .tool_defs
+        .iter()
+        .any(|definition| definition.function.name == "thread_wait"));
+    assert!(orchestrator.messages.iter().any(|message| match message {
+        Message::System { content } => {
+            content.contains("Thread dispatch is asynchronous")
+                && content.contains("thread_wait(names?, timeout?)")
+        }
+        _ => false,
+    }));
 }
 
 #[test]

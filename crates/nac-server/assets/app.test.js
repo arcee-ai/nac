@@ -49,7 +49,7 @@ function loadApp(overrides = {}) {
       orchestratorNowEntries, latestThreadActivityEntries, projectNowActivity,
       orchestratorNowPresentation, threadNowPresentation, renderOrchestratorNow, renderThreadNow,
       recordNowPanelViewport, restoreNowPanelViewport,
-      renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
+      renderFocusActions, toolDisplayName, actionIcon, formatActionArgs, isToolAction, isTileVisibleAction,
       formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
@@ -2545,6 +2545,11 @@ test("formatActionArgs extracts the relevant argument per tool type", () => {
   assert.equal(ui.formatActionArgs({ name: "response", usage: { input_tokens: 160, output_tokens: 32 } }), "↑160 ↓32");
   assert.equal(ui.formatActionArgs({ name: "guidance", result: "queued" }), "queued");
   assert.equal(ui.formatActionArgs({ name: "agent run", result: "started" }), "started");
+});
+
+test("background thread waits use a plain-language activity label", () => {
+  assert.equal(ui.toolDisplayName("thread_wait"), "Waiting for threads");
+  assert.equal(ui.actionIcon({ name: "thread_wait" }), "…");
 });
 
 test("formatActionArgs prefers keyArgPreview over JSON parsing", () => {
