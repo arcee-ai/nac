@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+exec "$repo_root/scripts/backup-nac-store.sh" pre-commit
