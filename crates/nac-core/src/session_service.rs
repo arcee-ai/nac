@@ -2769,13 +2769,8 @@ pub(super) mod tests {
             usage: None,
         })
         .unwrap();
-        crate::store::append_thread_event(
-            &store_path,
-            "connection-session",
-            "worker",
-            &event_json,
-        )
-        .unwrap();
+        crate::store::append_thread_event(&store_path, "connection-session", "worker", &event_json)
+            .unwrap();
         crate::store::queue_thread_steering(
             &store_path,
             "connection-session",
