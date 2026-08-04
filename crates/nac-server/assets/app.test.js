@@ -81,6 +81,7 @@ function loadApp(overrides = {}) {
       loadLaunchDefaultsPreview, managedLaunchDefaults, renderLaunchDefaultsPreviewHtml,
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
+      updateLiveThreadUpdates,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
     };`,
     context, { filename: "app.js" });
@@ -188,6 +189,7 @@ class FakeFormData {
 function sessionSnapshot(sessionId, overrides = {}) {
   return { metadata: { session_id: sessionId }, messages: [],
     active_run: null, active_threads: [], threads: [],
+    live_thread_updates: true,
     thread_events: {}, thread_episodes: {}, thread_steering: [],
     worksets: { items: [], error: null }, ...overrides, };
 }
@@ -271,12 +273,12 @@ function fakeElement() {
 }
 
 function installWorkspaceElements(uiInstance) {
-  const element = () => ({ ...fakeElement(), style: {}, value: "", scrollHeight: 40,
+  const element = () => ({ ...fakeElement(), style: {}, value: "", checked: true, scrollHeight: 40,
     hidden: false, innerHTML: "", querySelector() { return null; }, querySelectorAll() { return []; }, });
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
     "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun", "viewToggle",
-    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent",
+    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent", "liveThreadUpdates",
     "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
     "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
@@ -733,6 +735,40 @@ test("orchestrator Now follows only the current run and projects live model and 
   const finishedActions = ui.projectNowActivity(ui.orchestratorNowEntries(finishedSnapshot));
   assert.deepEqual(plain(ui.orchestratorNowPresentation(finishedSnapshot, finishedActions)), { label: "Done", state: "done" });
   assert.equal(finishedActions.at(-1).label, "Run finished");
+});
+
+test("orchestrator Now exposes a nearby live-response checkbox", () => {
+  const start = indexSource.indexOf('<section id="orchestratorNow"');
+  const panel = indexSource.slice(start, indexSource.indexOf("</section>", start));
+  assert.match(panel, /<input id="liveThreadUpdates" type="checkbox" checked>/);
+  assert.match(panel, /Respond live/);
+  assert.ok(panel.indexOf('id="liveThreadUpdates"') < panel.indexOf('id="orchestratorNowState"'),
+    "the control sits beside the Now state rather than in distant settings");
+  assert.match(redesignSource, /\.thread-update-control \{[^}]*display: inline-flex;/s);
+});
+
+test("live-response checkbox changes the current session runtime policy", async () => {
+  const requests = [];
+  const isolated = loadApp({
+    fetch: async (path, options) => {
+      requests.push({ path, method: options.method, body: JSON.parse(options.body) });
+      return jsonResponse({});
+    },
+    window: { setTimeout: () => 17, clearTimeout() {} },
+  });
+  installComposerElements(isolated, "mode/session");
+  isolated.el.liveThreadUpdates.checked = false;
+
+  await isolated.updateLiveThreadUpdates({ currentTarget: isolated.el.liveThreadUpdates });
+
+  assert.deepEqual(requests, [{
+    path: "/sessions/mode%2Fsession/thread-updates",
+    method: "PUT",
+    body: { live: false },
+  }]);
+  assert.equal(isolated.state.snapshots.get("mode/session").live_thread_updates, false);
+  assert.equal(isolated.el.liveThreadUpdates.disabled, false);
+  assert.equal(isolated.el.sessionNavStatus.textContent, "Waiting for all threads");
 });
 
 test("orchestrator Now rolls active thread model calls up as safe thinking updates", () => {
@@ -1814,6 +1850,7 @@ test("composer fallback and accepted-run state stay bound to the originating ses
   isolated.state.currentId = "session-A";
   isolated.state.snapshots.set("session-A", sessionSnapshot("session-A", {
     active_run: { run_id: "ending-A", started_at_epoch_ms: 1 },
+    live_thread_updates: false,
   }));
   isolated.el.promptInput = {
     value: "continue A", scrollHeight: 40, style: {},
@@ -1828,7 +1865,7 @@ test("composer fallback and accepted-run state stay bound to the originating ses
   steering.resolve(errorResponse(409, { error: "no active run" }));
   await submission;
   assert.deepEqual(requests.map((request) => request.path), ["/sessions/session-A/steering", "/sessions/session-A/runs"]);
-  assert.deepEqual(requests[1].body, { prompt: "continue A" });
+  assert.deepEqual(requests[1].body, { prompt: "continue A", live_thread_updates: false });
   assert.equal(isolated.state.pendingEchoes.get("session-A").run_id, "run-A");
   assert.equal(isolated.state.pendingEchoes.has("session-B"), false);
   assert.equal(isolated.state.snapshotTimers.has("session-A"), true);

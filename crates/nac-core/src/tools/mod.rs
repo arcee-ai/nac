@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::Value;
@@ -48,6 +49,7 @@ struct ActiveThreadDispatch {
 pub struct ActiveThreadRegistry {
     state: StdMutex<ActiveThreadState>,
     activity: Notify,
+    live_thread_updates: AtomicBool,
 }
 
 impl Default for ActiveThreadRegistry {
@@ -55,6 +57,7 @@ impl Default for ActiveThreadRegistry {
         Self {
             state: StdMutex::new(ActiveThreadState::default()),
             activity: Notify::new(),
+            live_thread_updates: AtomicBool::new(true),
         }
     }
 }
@@ -213,6 +216,17 @@ impl ActiveThreadRegistry {
     }
 
     pub fn signal_activity(&self) {
+        self.activity.notify_one();
+    }
+
+    pub fn live_thread_updates(&self) -> bool {
+        self.live_thread_updates.load(Ordering::Acquire)
+    }
+
+    pub fn set_live_thread_updates(&self, enabled: bool) {
+        self.live_thread_updates.store(enabled, Ordering::Release);
+        // A mode change must wake a parked thread_wait so switching from
+        // all-at-once to live can immediately deliver buffered completions.
         self.activity.notify_one();
     }
 

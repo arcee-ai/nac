@@ -300,6 +300,14 @@ pub struct ReorderSessionsResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
+    /// Omitted preserves the session's current runtime preference.
+    #[serde(default)]
+    pub live_thread_updates: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadUpdateModeRequest {
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -932,6 +940,9 @@ impl SessionManager {
                 frontend_command_name(command)
             )),
             PreparedUserInput::SubmitPrompt(prompt) => {
+                if let Some(enabled) = request.live_thread_updates {
+                    service.set_live_thread_updates(enabled);
+                }
                 let display_prompt = prompt.display_prompt.clone();
                 let handle = client
                     .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
@@ -939,6 +950,13 @@ impl SessionManager {
                 Ok(submit_response(handle, display_prompt))
             }
         }
+    }
+
+    pub async fn set_live_thread_updates(&self, session_id: &str, enabled: bool) -> Result<()> {
+        self.attach_session(session_id)
+            .await?
+            .set_live_thread_updates(enabled);
+        Ok(())
     }
 
     pub async fn queue_thread_steering(
@@ -1255,6 +1273,10 @@ pub fn router(manager: SessionManager) -> Router {
             get(session_config_handler).patch(update_config_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route(
+            "/sessions/{session_id}/thread-updates",
+            put(update_thread_updates_handler),
+        )
         .route("/sessions/{session_id}/compact", post(compaction::handler))
         .route(
             "/sessions/{session_id}/steering",
@@ -1493,6 +1515,17 @@ async fn submit_prompt(
         StatusCode::ACCEPTED,
         Json(manager.submit_prompt(&session_id, request).await?),
     ))
+}
+
+async fn update_thread_updates_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(request): Json<ThreadUpdateModeRequest>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager
+        .set_live_thread_updates(&session_id, request.live)
+        .await?;
+    Ok(StatusCode::OK)
 }
 
 async fn queue_orchestrator_steering_handler(
@@ -2131,6 +2164,16 @@ mod tests {
 
     #[path = "compaction.rs"]
     mod compaction;
+
+    #[test]
+    fn submit_prompt_thread_update_mode_is_optional_and_explicit() {
+        let inherited: SubmitPromptRequest = serde_json::from_str(r#"{"prompt":"work"}"#).unwrap();
+        assert_eq!(inherited.live_thread_updates, None);
+
+        let buffered: SubmitPromptRequest =
+            serde_json::from_str(r#"{"prompt":"work","live_thread_updates":false}"#).unwrap();
+        assert_eq!(buffered.live_thread_updates, Some(false));
+    }
 
     #[test]
     fn model_request_fields_distinguish_omitted_null_and_values() {
@@ -3549,6 +3592,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "begin the original task".to_string(),
+                    live_thread_updates: None,
                 },
             )
             .await
@@ -3570,6 +3614,34 @@ thread_timeout_secs = 7200
 
         manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn thread_update_mode_route_changes_the_runtime_snapshot() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("thread_update_mode");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/sessions/session/thread-updates")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"live":false}"#))
+            .unwrap();
+
+        let response = router(manager.clone()).oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            !manager
+                .snapshot("session")
+                .await
+                .unwrap()
+                .live_thread_updates
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3597,6 +3669,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "must not revive deleted state".to_string(),
+                        live_thread_updates: None,
                     },
                 )
                 .await
@@ -3643,6 +3716,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "hold this run open".to_string(),
+                        live_thread_updates: None,
                     },
                 )
                 .await
@@ -3748,6 +3822,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "use committed settings".to_string(),
+                        live_thread_updates: None,
                     },
                 )
                 .await
@@ -3811,6 +3886,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "hold cross-process lease".to_string(),
+                    live_thread_updates: None,
                 },
             )
             .await
@@ -3891,6 +3967,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "must use externally committed authority".to_string(),
+                    live_thread_updates: None,
                 },
             )
             .await

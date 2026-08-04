@@ -413,7 +413,7 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: true,
         };
     }
-    let names = names.into_iter().collect::<HashSet<_>>();
+    let requested_names = names.into_iter().collect::<HashSet<_>>();
     let timeout_secs = args
         .get("timeout")
         .and_then(Value::as_u64)
@@ -422,30 +422,48 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
 
     loop {
-        let completions = runtime.active_threads.take_completions(&names);
-        if !completions.is_empty() {
-            let mut output = String::from("Thread updates:");
-            for completion in completions {
-                output.push_str(&format!(
-                    "\n\n## {} ({})\n{}",
-                    completion.thread_name,
-                    if completion.is_error {
-                        "failed"
-                    } else {
-                        "completed"
-                    },
-                    completion.content.trim()
-                ));
+        let live_updates = runtime.active_threads.live_thread_updates();
+        // In all-at-once mode, ignore a model-selected subset: the user asked
+        // for one response after every deployed thread has finished.
+        let all_threads = HashSet::new();
+        let effective_names = if live_updates {
+            &requested_names
+        } else {
+            &all_threads
+        };
+        let mut active = runtime
+            .active_threads
+            .active_names_matching(effective_names);
+        active.sort();
+
+        if live_updates || active.is_empty() {
+            let completions = runtime.active_threads.take_completions(effective_names);
+            if !completions.is_empty() {
+                let mut output = String::from("Thread updates:");
+                for completion in completions {
+                    output.push_str(&format!(
+                        "\n\n## {} ({})\n{}",
+                        completion.thread_name,
+                        if completion.is_error {
+                            "failed"
+                        } else {
+                            "completed"
+                        },
+                        completion.content.trim()
+                    ));
+                }
+                let mut still_active = runtime
+                    .active_threads
+                    .active_names_matching(effective_names);
+                still_active.sort();
+                if !still_active.is_empty() {
+                    output.push_str(&format!("\n\nStill running: {}", still_active.join(", ")));
+                }
+                return ToolResult {
+                    content: output,
+                    is_error: false,
+                };
             }
-            let mut still_active = runtime.active_threads.active_names_matching(&names);
-            still_active.sort();
-            if !still_active.is_empty() {
-                output.push_str(&format!("\n\nStill running: {}", still_active.join(", ")));
-            }
-            return ToolResult {
-                content: output,
-                is_error: false,
-            };
         }
 
         let session_id = match require_session(runtime) {
@@ -484,14 +502,12 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             };
         }
 
-        let mut active = runtime.active_threads.active_names_matching(&names);
-        active.sort();
         if active.is_empty() {
-            let target = if names.is_empty() {
+            let target = if requested_names.is_empty() || !live_updates {
                 "No background threads are running.".to_string()
             } else {
                 format!("None of these threads are running: {}", {
-                    let mut names = names.iter().cloned().collect::<Vec<_>>();
+                    let mut names = requested_names.iter().cloned().collect::<Vec<_>>();
                     names.sort();
                     names.join(", ")
                 })
@@ -995,8 +1011,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thread_wait_buffers_completions_until_all_threads_finish_when_live_updates_are_off() {
+        let runtime = test_runtime_with_store("wait_for_all");
+        runtime.active_threads.set_live_thread_updates(false);
+        assert!(mark_thread_active(&runtime, "first", "dispatch-first"));
+        assert!(mark_thread_active(&runtime, "second", "dispatch-second"));
+
+        let waiting_runtime = runtime.clone();
+        let wait = tokio::spawn(async move {
+            execute_thread_wait(
+                json!({ "names": ["first"], "timeout": 30 }),
+                &waiting_runtime,
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+
+        complete_thread_dispatch(
+            &runtime,
+            "test-session",
+            "first",
+            "dispatch-first",
+            &ToolResult {
+                content: "first result".to_string(),
+                is_error: false,
+            },
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !wait.is_finished(),
+            "the first completion must stay buffered while another thread runs"
+        );
+
+        complete_thread_dispatch(
+            &runtime,
+            "test-session",
+            "second",
+            "dispatch-second",
+            &ToolResult {
+                content: "second result".to_string(),
+                is_error: false,
+            },
+        );
+        let result = tokio::time::timeout(Duration::from_secs(1), wait)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.content.contains("first result"));
+        assert!(result.content.contains("second result"));
+        assert!(!runtime.active_threads.has_completions());
+        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn thread_wait_wakes_for_new_orchestrator_guidance() {
         let runtime = test_runtime_with_store("wait_guidance");
+        runtime.active_threads.set_live_thread_updates(false);
         assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
         let waiting_runtime = runtime.clone();
         let wait = tokio::spawn(async move {
@@ -1024,7 +1094,11 @@ mod tests {
     #[tokio::test]
     async fn closing_all_threads_aborts_workers_and_discards_pending_completions() {
         let runtime = test_runtime_with_store("abort_all");
-        assert!(mark_thread_active(&runtime, "completed", "dispatch-complete"));
+        assert!(mark_thread_active(
+            &runtime,
+            "completed",
+            "dispatch-complete"
+        ));
         complete_thread_dispatch(
             &runtime,
             "test-session",

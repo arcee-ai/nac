@@ -72,7 +72,14 @@
             <h2 class="rail-heading">Orchestrator</h2>
             <div id="orchestratorChatContent" class="orchestrator-chat-content"></div>
             <section id="orchestratorNow" class="now-panel orchestrator-now-panel" aria-label="Orchestrator current activity">
-              <header class="now-panel-header"><h3>Now</h3><span id="orchestratorNowState" data-state="idle">Idle</span></header>
+              <header class="now-panel-header">
+                <h3>Now</h3>
+                <label class="thread-update-control" title="When off, the orchestrator waits for every deployed thread before reacting to thread results.">
+                  <input id="liveThreadUpdates" type="checkbox" checked>
+                  <span>Respond live</span>
+                </label>
+                <span id="orchestratorNowState" data-state="idle">Idle</span>
+              </header>
               <div id="orchestratorNowContent" class="now-panel-content" role="log" aria-live="polite" aria-label="Live orchestrator activity" tabindex="0"></div>
             </section>
           </aside>

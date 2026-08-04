@@ -449,10 +449,15 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 }
 
 .now-panel { min-width: 0; min-height: 0; flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: #101010; }
-.now-panel-header { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 8px 14px; border-bottom: 1px solid #242424; }
-.now-panel-header h3 { margin: 0; color: var(--ink-soft); font: var(--fw-semibold) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wider); text-transform: uppercase; }
+.now-panel-header { min-height: 32px; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 14px; border-bottom: 1px solid #242424; }
+.now-panel-header h3 { margin: 0 auto 0 0; color: var(--ink-soft); font: var(--fw-semibold) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wider); text-transform: uppercase; }
 .now-panel-header span { color: var(--ink-muted); font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
 .now-panel-header span[data-state="running"], .now-panel-header span[data-state="queued"] { color: var(--paper); }
+.thread-update-control { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
+.thread-update-control input { width: 13px; height: 13px; margin: 0; accent-color: var(--paper); cursor: pointer; }
+.thread-update-control span { color: inherit; font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-normal); text-transform: none; }
+.thread-update-control:has(input:checked) { color: var(--ink-soft); }
+.thread-update-control:has(input:disabled) { opacity: .55; cursor: wait; }
 .now-panel-header span[data-state="failed"] { color: var(--danger); }
 .now-panel-content { height: clamp(96px, 18dvh, 156px); min-height: 0; overflow: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
 .now-panel-content:focus-visible { outline: 1px solid #555; outline-offset: -1px; }

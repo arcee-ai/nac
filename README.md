@@ -48,6 +48,7 @@ Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes
 - `PATCH /sessions/{session_id}/config`
 - `POST /sessions/{session_id}/compact`
 - `POST /sessions/{session_id}/runs`
+- `PUT /sessions/{session_id}/thread-updates`
 - `POST /sessions/{session_id}/steering`
 - `POST /sessions/{session_id}/threads/{thread_name}/steering`
 - `GET /sessions/{session_id}/events?after_sequence_id=0`

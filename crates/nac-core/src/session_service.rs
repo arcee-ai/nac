@@ -167,6 +167,10 @@ pub struct SessionFrontendSnapshot {
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
     pub active_threads: Vec<String>,
+    /// Runtime presentation policy only; this intentionally is not persisted
+    /// in the session database.
+    #[serde(default = "default_live_thread_updates")]
+    pub live_thread_updates: bool,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     #[serde(default)]
@@ -184,6 +188,10 @@ pub struct SessionFrontendSnapshot {
     pub covered_orchestrator_steering_ids: Vec<i64>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
+}
+
+fn default_live_thread_updates() -> bool {
+    true
 }
 
 /// A visible-message cursor request. `before` is an index in the filtered
@@ -753,6 +761,14 @@ impl SessionService {
         names
     }
 
+    pub fn live_thread_updates(&self) -> bool {
+        self.active_threads.live_thread_updates()
+    }
+
+    pub fn set_live_thread_updates(&self, enabled: bool) {
+        self.active_threads.set_live_thread_updates(enabled);
+    }
+
     pub async fn queue_thread_steering(
         &self,
         thread_name: &str,
@@ -1051,6 +1067,7 @@ impl SessionService {
                 Vec::new()
             },
             active_threads: self.active_thread_names().await,
+            live_thread_updates: self.live_thread_updates(),
             threads: self.list_threads()?,
             thread_episodes: self.all_thread_episodes()?,
             thread_events: decoded_thread_events.events,

@@ -35,6 +35,7 @@ const state = {
   sessionRunActivity: new Map(),
   pendingEchoes: new Map(),
   nowViewports: new Map(),
+  threadUpdateRequests: new Set(),
   runtimeTimer: null,
   launchMode: "local",
   launchCwdDrafts: { localSandbox: null, ssh: null },
@@ -92,7 +93,7 @@ function bindElements() {
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
     "metricChanges", "sessionNavStatus", "stopRun", "viewToggle",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
-    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent",
+    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent", "liveThreadUpdates",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
@@ -125,6 +126,7 @@ function bindEvents() {
   el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
   el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
   el.orchestratorNowContent.addEventListener("scroll", handleNowPanelScroll, true);
+  el.liveThreadUpdates.addEventListener("change", updateLiveThreadUpdates);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
@@ -3076,11 +3078,43 @@ function renderOrchestratorNow(snapshot) {
   el.orchestratorNow.dataset.state = presentation.state;
   el.orchestratorNowState.dataset.state = presentation.state;
   el.orchestratorNowState.textContent = presentation.label;
+  if (el.liveThreadUpdates) {
+    el.liveThreadUpdates.checked = snapshot?.live_thread_updates !== false;
+    el.liveThreadUpdates.disabled = state.threadUpdateRequests.has(state.currentId);
+  }
   el.orchestratorNowContent.dataset.nowKey = key;
   el.orchestratorNowContent.innerHTML = nowPanelRows(actions);
   requestAnimationFrame(() => {
     if (el.orchestratorNowContent?.dataset?.nowKey === key) restoreNowPanelViewport(el.orchestratorNowContent);
   });
+}
+
+async function updateLiveThreadUpdates(event) {
+  const sessionId = state.currentId;
+  const control = event?.currentTarget || el.liveThreadUpdates;
+  const snapshot = sessionId ? state.snapshots.get(sessionId) : null;
+  if (!sessionId || !control || state.threadUpdateRequests.has(sessionId)) return;
+
+  const previous = snapshot?.live_thread_updates !== false;
+  const live = Boolean(control.checked);
+  if (snapshot) snapshot.live_thread_updates = live;
+  state.threadUpdateRequests.add(sessionId);
+  control.disabled = true;
+  try {
+    await apiPut(`/sessions/${encodeURIComponent(sessionId)}/thread-updates`, { live });
+    if (state.currentId === sessionId) {
+      showToast(live ? "Live thread responses enabled" : "Waiting for all threads");
+    }
+  } catch (error) {
+    if (snapshot) snapshot.live_thread_updates = previous;
+    if (state.currentId === sessionId) {
+      control.checked = previous;
+      showToast(error.message, true);
+    }
+  } finally {
+    state.threadUpdateRequests.delete(sessionId);
+    if (state.currentId === sessionId) control.disabled = false;
+  }
 }
 
 function renderThreadNow(name, model, entries) {
@@ -4549,7 +4583,8 @@ async function submitComposer(event) {
 
   const target = state.targetedThread;
   const activeAtSubmission = !target && Boolean(state.snapshots.get(sessionId)?.active_run);
-  const submission = { sessionId, target };
+  const liveThreadUpdates = state.snapshots.get(sessionId)?.live_thread_updates !== false;
+  const submission = { sessionId, target, liveThreadUpdates };
   state.submittingSessions.add(sessionId);
   el.sendPrompt.disabled = true;
   const contextIsCurrent = () => state.currentId === sessionId;
@@ -4584,7 +4619,10 @@ async function submitComposer(event) {
       } catch (error) {
         const runEnded = error.status === 409 && /no active run|finishing/i.test(error.message);
         if (!runEnded) throw error;
-        const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: input });
+        const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, {
+          prompt: input,
+          live_thread_updates: submission.liveThreadUpdates,
+        });
         notePendingEcho(sessionId, accepted?.run_id, accepted?.display_prompt ?? input);
         noteSessionRunEvent(sessionId, "run_started");
         steered = false;
@@ -4597,7 +4635,10 @@ async function submitComposer(event) {
         loadSessions({ workspaceStats: false });
       }
     } else {
-      const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, { prompt: input });
+      const accepted = await apiPost(`/sessions/${encodeURIComponent(sessionId)}/runs`, {
+        prompt: input,
+        live_thread_updates: submission.liveThreadUpdates,
+      });
       noteAcceptedRun(accepted);
     }
   } catch (error) {
