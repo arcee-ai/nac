@@ -3544,17 +3544,20 @@ function threadDispatchContext(snapshot) {
 function threadDispatchStatus(call, context) {
   const args = focusToolArguments(call);
   const threadName = focusToolTarget(args, "name");
+  const dispatchAction = focusToolTarget(args, "action");
   const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
   const result = callId ? context?.toolResults?.get(callId) : null;
   const completion = callId ? context?.completions?.get(callId) : null;
   const model = threadName ? context?.models?.get(threadName) : null;
   const hasResult = result !== null && result !== undefined;
   const normalizedResult = String(result || "").trim().toLowerCase();
+  const completionPreview = String(completion?.content_preview || "").trim().toLowerCase();
+  const backgroundAccepted = !completion?.is_error && (Boolean(completion)
+    || normalizedResult.includes("started in the background")
+    || normalizedResult.includes("use thread_wait to receive its result"));
 
-  if (completion) {
-    if (!completion.is_error) return { state: "finished", label: "Finished" };
-    const preview = String(completion.content_preview || "").trim().toLowerCase();
-    return preview === "timed out"
+  if (completion?.is_error) {
+    return completionPreview.includes("timed out")
       ? { state: "timed-out", label: "Timed out" }
       : { state: "failed", label: "Failed" };
   }
@@ -3565,12 +3568,15 @@ function threadDispatchStatus(call, context) {
     if (/^(failed to spawn thread\b|thread .+ failed \(exit\b|thread .+ is already running\b|error:|duplicate thread name\b|circular dependency\b)/.test(normalizedResult)) {
       return { state: "failed", label: "Failed" };
     }
-    return { state: "finished", label: "Finished" };
+    // Older synchronous dispatches returned the worker's terminal result here.
+    // Background dispatches only acknowledge that the worker was accepted; the
+    // real outcome arrives later through the thread lifecycle.
+    if (!backgroundAccepted) return { state: "finished", label: "Finished" };
   }
 
-  if (model?.state === "running") return { state: "running", label: "Running" };
-  if (model?.state === "queued") return { state: "queued", label: "Queued" };
-  if (model?.state === "finished") {
+  const lifecycleMatchesDispatch = Boolean(model?.start)
+    && (!dispatchAction || model.start.action === dispatchAction);
+  if (lifecycleMatchesDispatch && model.terminal) {
     if (model.finish?.timed_out || String(model.outcome || "").toLowerCase().includes("timed out")) {
       return { state: "timed-out", label: "Timed out" };
     }
@@ -3579,6 +3585,7 @@ function threadDispatchStatus(call, context) {
     }
     return { state: "finished", label: "Finished" };
   }
+  if (lifecycleMatchesDispatch) return { state: "running", label: "Running" };
   return { state: "queued", label: "Queued" };
 }
 
@@ -4118,7 +4125,7 @@ function threadLifecycleFromEvidence(entries, active) {
     outcome = "no start/finish lifecycle evidence in the current window";
   }
   return {
-    state: stateName, outcome,
+    state: stateName, outcome, terminal: terminalIsCurrent,
     start: latestStart?.event || null,
     finish: terminalIsCurrent && latestFinish === terminal ? latestFinish.event : null,
     startSequence: latestStart?.sequenceId ?? null,

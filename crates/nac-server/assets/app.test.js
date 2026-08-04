@@ -2579,45 +2579,62 @@ test("thread-tool turns render one consistent structure with a truncated same-si
   assert.equal(ui.formatToolCall({ function: { name: "threads", arguments: "{}" } }).args, "");
 });
 
-test("orchestrator chat thread dispatches show queued, running, and terminal status", () => {
+test("orchestrator chat thread dispatches wait for lifecycle evidence before showing terminal status", () => {
   const sessionId = "thread-status-chat";
   ui.state.currentId = sessionId;
+  const accepted = (id) => ({ role: "tool", tool_call_id: id,
+    content: "Thread accepted started in the background. Use thread_wait to receive its result without blocking user guidance." });
   const dispatch = (id, name) => ({ role: "assistant", content: null, tool_calls: [
     { id, function: { name: "thread", arguments: JSON.stringify({ name, action: `work on ${name}` }) } },
   ] });
   const snapshot = sessionSnapshot(sessionId, {
     active_threads: ["queued", "running"],
-    threads: ["queued", "running", "finished", "failed", "timed-out"].map((name) => ({ name })),
+    threads: ["queued", "running", "race-running", "ack-only", "finished", "failed", "timed-out"].map((name) => ({ name })),
     thread_events: {
       queued: [],
-      running: [{ type: "thread_started", name: "running", action: "thread dispatched", source_threads: [] }],
+      running: [{ type: "thread_started", name: "running", action: "work on running", source_threads: [] }],
+      "race-running": [{ type: "thread_started", name: "race-running", action: "work on race-running", source_threads: [] }],
+      "ack-only": [],
       finished: [
-        { type: "thread_started", name: "finished", action: "thread dispatched", source_threads: [] },
+        { type: "thread_started", name: "finished", action: "work on finished", source_threads: [] },
         { type: "thread_finished", name: "finished", exit_code: 0, timed_out: false },
       ],
       failed: [
-        { type: "thread_started", name: "failed", action: "thread dispatched", source_threads: [] },
+        { type: "thread_started", name: "failed", action: "work on failed", source_threads: [] },
         { type: "thread_finished", name: "failed", exit_code: 1, timed_out: false },
       ],
       "timed-out": [
-        { type: "thread_started", name: "timed-out", action: "thread dispatched", source_threads: [] },
+        { type: "thread_started", name: "timed-out", action: "work on timed-out", source_threads: [] },
         { type: "thread_finished", name: "timed-out", exit_code: 124, timed_out: true },
       ],
     },
-    message_cycle: { marker: "status-cycle", thread_names: ["queued", "running", "finished", "failed", "timed-out"] },
+    message_cycle: { marker: "status-cycle",
+      thread_names: ["queued", "running", "race-running", "ack-only", "finished", "failed", "timed-out"] },
     messages: [
       dispatch("call-finished", "finished"),
-      { role: "tool", tool_call_id: "call-finished", content: "Completed timeout and error-handling documentation" },
+      accepted("call-finished"),
       dispatch("call-failed", "failed"),
-      { role: "tool", tool_call_id: "call-failed", content: "Thread 'failed' failed (exit 1)" },
+      accepted("call-failed"),
       dispatch("call-timeout", "timed-out"),
-      { role: "tool", tool_call_id: "call-timeout", content: "Thread 'timed-out' timed out after 900s" },
+      accepted("call-timeout"),
+      dispatch("call-race-running", "race-running"),
+      accepted("call-race-running"),
+      dispatch("call-ack-only", "ack-only"),
+      accepted("call-ack-only"),
       { role: "assistant", content: "The remaining workers are starting.", tool_calls: [
-        { id: "call-queued", function: { name: "thread", arguments: '{"name":"queued","action":"wait to start"}' } },
-        { id: "call-running", function: { name: "thread", arguments: '{"name":"running","action":"keep working"}' } },
+        { id: "call-queued", function: { name: "thread", arguments: '{"name":"queued","action":"work on queued"}' } },
+        { id: "call-running", function: { name: "thread", arguments: '{"name":"running","action":"work on running"}' } },
       ] },
+      accepted("call-queued"),
+      accepted("call-running"),
     ],
   });
+
+  ui.state.events.set(sessionId, [agentEnvelope(1, {
+    type: "tool_call_finished", thread_name: null, call_id: "call-running", name: "thread",
+    content_preview: "Thread 'running' started in the background. Use thread_wait to receive its result without blocking user guidance.",
+    is_error: false,
+  })]);
 
   ui.el.orchestratorChatContent = fakeElement();
   ui.renderOrchestratorChatRail(snapshot);
@@ -2632,6 +2649,8 @@ test("orchestrator chat thread dispatches show queued, running, and terminal sta
   for (const [name, stateName, label] of [
     ["queued", "queued", "Queued"],
     ["running", "running", "Running"],
+    ["race-running", "running", "Running"],
+    ["ack-only", "queued", "Queued"],
     ["finished", "finished", "Finished"],
     ["failed", "failed", "Failed"],
     ["timed-out", "timed-out", "Timed out"],
