@@ -3128,6 +3128,7 @@ function renderOrchestratorChatRail(snapshot) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
   const guidance = orchestratorGuidanceEntries(snapshot);
+  const dispatchContext = threadDispatchContext(snapshot);
   const transcriptEntries = [
     ...messages.map((message) => ({ message })),
     ...guidance.map((record) => ({ guidance: record })),
@@ -3135,7 +3136,7 @@ function renderOrchestratorChatRail(snapshot) {
   ];
   const transcript = transcriptEntries
     .filter((entry) => entry.guidance || (entry.message?.role !== "system" && entry.message?.role !== "tool"))
-    .map((entry) => entry.guidance ? renderOrchestratorGuidance(entry.guidance) : renderFocusMessage(entry.message))
+    .map((entry) => entry.guidance ? renderOrchestratorGuidance(entry.guidance) : renderFocusMessage(entry.message, dispatchContext))
     .join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
@@ -3521,7 +3522,67 @@ function formatToolCall(toolCall) {
   return { name, args: argsLabel, action: dispatchAction, result: "" };
 }
 
-function renderOrchestratorToolTurn(message) {
+function threadDispatchContext(snapshot) {
+  const toolResults = new Map();
+  for (const message of snapshot?.messages || []) {
+    if (message?.role !== "tool" || message.tool_call_id === null || message.tool_call_id === undefined) continue;
+    toolResults.set(String(message.tool_call_id), String(message.content || ""));
+  }
+
+  const completions = new Map();
+  const sessionId = state.currentId || snapshot?.metadata?.session_id;
+  for (const envelope of state.events.get(sessionId) || []) {
+    const event = agentEvent(envelope);
+    if (event?.type !== "tool_call_finished" || event.name !== "thread" || !event.call_id) continue;
+    completions.set(String(event.call_id), event);
+  }
+
+  const models = new Map(buildThreadModels(snapshot).map((model) => [model.name, model]));
+  return { toolResults, completions, models };
+}
+
+function threadDispatchStatus(call, context) {
+  const args = focusToolArguments(call);
+  const threadName = focusToolTarget(args, "name");
+  const callId = call?.id === null || call?.id === undefined ? "" : String(call.id);
+  const result = callId ? context?.toolResults?.get(callId) : null;
+  const completion = callId ? context?.completions?.get(callId) : null;
+  const model = threadName ? context?.models?.get(threadName) : null;
+  const hasResult = result !== null && result !== undefined;
+  const normalizedResult = String(result || "").trim().toLowerCase();
+
+  if (completion) {
+    if (!completion.is_error) return { state: "finished", label: "Finished" };
+    const preview = String(completion.content_preview || "").trim().toLowerCase();
+    return preview === "timed out"
+      ? { state: "timed-out", label: "Timed out" }
+      : { state: "failed", label: "Failed" };
+  }
+  if (hasResult) {
+    if (/^thread .+ timed out after\b/.test(normalizedResult)) {
+      return { state: "timed-out", label: "Timed out" };
+    }
+    if (/^(failed to spawn thread\b|thread .+ failed \(exit\b|thread .+ is already running\b|error:|duplicate thread name\b|circular dependency\b)/.test(normalizedResult)) {
+      return { state: "failed", label: "Failed" };
+    }
+    return { state: "finished", label: "Finished" };
+  }
+
+  if (model?.state === "running") return { state: "running", label: "Running" };
+  if (model?.state === "queued") return { state: "queued", label: "Queued" };
+  if (model?.state === "finished") {
+    if (model.finish?.timed_out || String(model.outcome || "").toLowerCase().includes("timed out")) {
+      return { state: "timed-out", label: "Timed out" };
+    }
+    if (model.latestError || String(model.outcome || "").toLowerCase().includes("failed")) {
+      return { state: "failed", label: "Failed" };
+    }
+    return { state: "finished", label: "Finished" };
+  }
+  return { state: "queued", label: "Queued" };
+}
+
+function renderOrchestratorToolTurn(message, dispatchContext = null) {
   const calls = message?.tool_calls || [];
   const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)
@@ -3541,7 +3602,14 @@ function renderOrchestratorToolTurn(message) {
       const preview = previewText
         ? `<div class="tool-block-preview" title="${escapeAttr(previewText)}">${escapeHtml(previewText)}</div>`
         : "";
-      return `<div class="tool-block tool-block-thread" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${separator}${argsSpan}</div>${preview}</div>`;
+      const dispatch = name === "thread" ? threadDispatchStatus(call, dispatchContext) : null;
+      const dispatchClass = dispatch ? " tool-block-thread-dispatch" : "";
+      const threadAttribute = dispatch ? ` data-thread-name="${escapeAttr(args)}"` : "";
+      const blockState = dispatch?.state || "done";
+      const status = dispatch
+        ? `<span class="tool-block-status" data-state="${escapeAttr(dispatch.state)}" aria-label="Thread status: ${escapeAttr(dispatch.label)}">${escapeHtml(dispatch.label)}</span>`
+        : "";
+      return `<div class="tool-block tool-block-thread${dispatchClass}" data-tool="${escapeAttr(name)}"${threadAttribute} data-state="${escapeAttr(blockState)}"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${separator}${argsSpan}${status}</div>${preview}</div>`;
     }
     const argsSpan = args ? `<span class="tool-block-args">${escapeHtml(args)}</span>` : "";
     return `<div class="tool-block" data-tool="${escapeAttr(name)}" data-state="done"><div class="tool-block-header"><span class="tool-block-name">${escapeHtml(name)}</span>${argsSpan}</div></div>`;
@@ -3549,11 +3617,11 @@ function renderOrchestratorToolTurn(message) {
   return `<article class="focus-message is-tool-turn" data-role="assistant"><div class="focus-message-body">${copy}${blocks}</div></article>`;
 }
 
-function renderFocusMessage(message) {
+function renderFocusMessage(message, dispatchContext = null) {
   if (message?.role === "system" || message?.role === "tool") return "";
   const role = message?.role || "message";
   if (role === "assistant" && message?.tool_calls?.length) {
-    return renderOrchestratorToolTurn(message);
+    return renderOrchestratorToolTurn(message, dispatchContext);
   }
   const content = message?.content !== null && message?.content !== undefined
     ? String(message.content)

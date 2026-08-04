@@ -50,7 +50,8 @@ function loadApp(overrides = {}) {
       orchestratorNowPresentation, threadNowPresentation, renderOrchestratorNow, renderThreadNow,
       recordNowPanelViewport, restoreNowPanelViewport,
       renderFocusActions, toolDisplayName, actionIcon, formatActionArgs, isToolAction, isTileVisibleAction,
-      formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
+      formatToolCall, threadDispatchContext, threadDispatchStatus,
+      guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
       renderSessionCard, sessionExecutionTopology, sessionExecutionLocationPresentation,
       applySessionExecutionLocation, sessionReorderControlLabel, reorderAnnouncement,
@@ -2535,7 +2536,7 @@ test("thread-tool turns render one consistent structure with a truncated same-si
     { id: "call-3", function: { name: "thread_delete", arguments: '{"name":"impl/old"}' } },
     { id: "call-4", function: { name: "threads", arguments: "{}" } },
   ] });
-  assert.match(html, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(html, /<div class="tool-block tool-block-thread tool-block-thread-dispatch" data-tool="thread"/);
   assert.match(html, /<span class="tool-block-name">thread<\/span><span class="tool-block-separator" aria-hidden="true">·<\/span><span class="tool-block-args">impl\/retry<\/span>/);
   const preview = html.match(/<div class="tool-block-preview" title="([^"]*)">([^<]*)<\/div>/);
   assert.ok(preview, "dispatch preview line present");
@@ -2564,7 +2565,7 @@ test("thread-tool turns render one consistent structure with a truncated same-si
   const bare = ui.renderFocusMessage({ role: "assistant", content: null, tool_calls: [
     { id: "call-5", function: { name: "thread", arguments: '{"name":"impl/retry"}' } },
   ] });
-  assert.match(bare, /<div class="tool-block tool-block-thread" data-tool="thread"/);
+  assert.match(bare, /<div class="tool-block tool-block-thread tool-block-thread-dispatch" data-tool="thread"/);
   assert.match(bare, /tool-block-separator/);
   assert.doesNotMatch(bare, /tool-block-preview/);
   // Key-arg extraction covers every thread tool the backend registers.
@@ -2576,6 +2577,73 @@ test("thread-tool turns render one consistent structure with a truncated same-si
   assert.equal(ui.formatToolCall({ function: { name: "thread_read", arguments: '{"name":"w"}' } }).args, "w");
   assert.equal(ui.formatToolCall({ function: { name: "thread_delete", arguments: '{"name":"w"}' } }).args, "w");
   assert.equal(ui.formatToolCall({ function: { name: "threads", arguments: "{}" } }).args, "");
+});
+
+test("orchestrator chat thread dispatches show queued, running, and terminal status", () => {
+  const sessionId = "thread-status-chat";
+  ui.state.currentId = sessionId;
+  const dispatch = (id, name) => ({ role: "assistant", content: null, tool_calls: [
+    { id, function: { name: "thread", arguments: JSON.stringify({ name, action: `work on ${name}` }) } },
+  ] });
+  const snapshot = sessionSnapshot(sessionId, {
+    active_threads: ["queued", "running"],
+    threads: ["queued", "running", "finished", "failed", "timed-out"].map((name) => ({ name })),
+    thread_events: {
+      queued: [],
+      running: [{ type: "thread_started", name: "running", action: "thread dispatched", source_threads: [] }],
+      finished: [
+        { type: "thread_started", name: "finished", action: "thread dispatched", source_threads: [] },
+        { type: "thread_finished", name: "finished", exit_code: 0, timed_out: false },
+      ],
+      failed: [
+        { type: "thread_started", name: "failed", action: "thread dispatched", source_threads: [] },
+        { type: "thread_finished", name: "failed", exit_code: 1, timed_out: false },
+      ],
+      "timed-out": [
+        { type: "thread_started", name: "timed-out", action: "thread dispatched", source_threads: [] },
+        { type: "thread_finished", name: "timed-out", exit_code: 124, timed_out: true },
+      ],
+    },
+    message_cycle: { marker: "status-cycle", thread_names: ["queued", "running", "finished", "failed", "timed-out"] },
+    messages: [
+      dispatch("call-finished", "finished"),
+      { role: "tool", tool_call_id: "call-finished", content: "Completed timeout and error-handling documentation" },
+      dispatch("call-failed", "failed"),
+      { role: "tool", tool_call_id: "call-failed", content: "Thread 'failed' failed (exit 1)" },
+      dispatch("call-timeout", "timed-out"),
+      { role: "tool", tool_call_id: "call-timeout", content: "Thread 'timed-out' timed out after 900s" },
+      { role: "assistant", content: "The remaining workers are starting.", tool_calls: [
+        { id: "call-queued", function: { name: "thread", arguments: '{"name":"queued","action":"wait to start"}' } },
+        { id: "call-running", function: { name: "thread", arguments: '{"name":"running","action":"keep working"}' } },
+      ] },
+    ],
+  });
+
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(snapshot);
+  const html = ui.el.orchestratorChatContent.innerHTML;
+  const block = (name) => {
+    const start = html.indexOf(`data-thread-name="${name}"`);
+    assert.ok(start >= 0, `${name} dispatch block exists`);
+    const end = html.indexOf('<div class="tool-block ', start + 1);
+    return html.slice(start, end < 0 ? html.length : end);
+  };
+
+  for (const [name, stateName, label] of [
+    ["queued", "queued", "Queued"],
+    ["running", "running", "Running"],
+    ["finished", "finished", "Finished"],
+    ["failed", "failed", "Failed"],
+    ["timed-out", "timed-out", "Timed out"],
+  ]) {
+    const dispatchBlock = block(name);
+    assert.match(dispatchBlock, new RegExp(`data-state="${stateName}"`));
+    assert.match(dispatchBlock, new RegExp(`aria-label="Thread status: ${label}">${label}<\\/span>`));
+  }
+
+  assert.match(redesignSource, /\.tool-block-status \{[^}]*display: inline-flex;[^}]*margin-left: auto;/s);
+  assert.match(redesignSource, /\.tool-block-status\[data-state="running"\]::before \{[^}]*animation: pending-badge-pulse/s);
+  assert.match(redesignSource, /\.tool-block-status\[data-state="failed"\], \.tool-block-status\[data-state="timed-out"\] \{ color: var\(--danger\); \}/);
 });
 
 test("thread tile ledgers are always exactly ten lines tall", () => {

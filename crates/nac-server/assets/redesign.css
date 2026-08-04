@@ -749,6 +749,13 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 }
 .tool-block-thread .tool-block-name { font-size: var(--fs-md); font-weight: var(--fw-medium); }
 .tool-block-separator { flex: none; color: var(--ink-faint); font: var(--fs-md)/var(--lh-none) var(--mono); }
+.tool-block-status { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
+.tool-block-status::before { content: ""; width: 6px; height: 6px; border: 1px solid #696969; border-radius: 50%; }
+.tool-block-status[data-state="queued"]::before { border-style: dashed; }
+.tool-block-status[data-state="running"] { color: var(--ink); }
+.tool-block-status[data-state="running"]::before { border-color: #8aad8a; background: #8aad8a; animation: pending-badge-pulse 1.8s ease-in-out infinite; }
+.tool-block-status[data-state="failed"], .tool-block-status[data-state="timed-out"] { color: var(--danger); }
+.tool-block-status[data-state="failed"]::before, .tool-block-status[data-state="timed-out"]::before { border-color: var(--danger); background: var(--danger-bg); }
 .tool-block-preview {
   margin-top: 2px;
   color: var(--ink-muted);
