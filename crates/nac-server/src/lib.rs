@@ -5,10 +5,14 @@ pub use compaction::{CompactSessionError, CompactSessionResponse};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
+    fmt,
     net::SocketAddr,
     path::PathBuf,
-    sync::{Arc, Mutex as StdMutex, Weak},
-    time::{Duration, Instant},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex as StdMutex, Weak,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -37,8 +41,8 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -60,12 +64,59 @@ const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
 const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
 const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
+static FORK_SESSION_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct ForkedSession {
+    pub fork: sessions::SessionForkResult,
+    pub snapshot: SessionFrontendSnapshot,
+}
+
+#[derive(Debug)]
+pub enum ForkSessionLifecycleError {
+    ActiveOperation(String),
+    Lease(sessions::SessionOperationLeaseError),
+    Fork(sessions::SessionForkError),
+    Attachment {
+        fork: sessions::SessionForkResult,
+        source: anyhow::Error,
+    },
+}
+
+impl fmt::Display for ForkSessionLifecycleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ActiveOperation(session_id) => write!(
+                formatter,
+                "session '{session_id}' is busy with an active operation"
+            ),
+            Self::Lease(error) => error.fmt(formatter),
+            Self::Fork(error) => error.fmt(formatter),
+            Self::Attachment { fork, .. } => write!(
+                formatter,
+                "forked session '{}' was created but could not be attached",
+                fork.session_id
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ForkSessionLifecycleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Lease(error) => Some(error),
+            Self::Fork(error) => Some(error),
+            Self::Attachment { source, .. } => Some(source.as_ref()),
+            Self::ActiveOperation(_) => None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -243,6 +294,28 @@ pub struct SandboxRequest {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+pub struct ForkSessionRequest {
+    pub title: Option<String>,
+    /// Raw canonical index of an assistant message immediately followed by a user message.
+    pub through_message_index: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ForkLineageResponse {
+    pub source_session_id: String,
+    pub copied_message_count: usize,
+    pub source_message_count: usize,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ForkSessionResponse {
+    #[serde(flatten)]
+    pub snapshot: SessionFrontendSnapshot,
+    pub fork: ForkLineageResponse,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateConfigRequest {
     #[serde(default)]
     pub model: RequestField<String>,
@@ -377,6 +450,8 @@ pub struct MessagePageMetadata {
     pub end: usize,
     pub total: usize,
     pub has_older: bool,
+    /// Absolute canonical transcript indices paired with the returned messages.
+    pub canonical_indices: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -408,6 +483,7 @@ impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadat
             end: page.end,
             total: page.total,
             has_older: page.has_older,
+            canonical_indices: page.canonical_indices,
         }
     }
 }
@@ -767,6 +843,73 @@ impl SessionManager {
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         self.attach_session_locked(session_id).await
+    }
+
+    /// Creates a durable child while the source is quiescent, then releases all
+    /// source coordination before attaching the child through the normal resume
+    /// path. An attachment error retains the successful fork result so callers
+    /// can recover the independently resumable child.
+    pub async fn fork_session(
+        &self,
+        source_session_id: &str,
+        child_session_id: &str,
+        boundary: sessions::SessionForkBoundary,
+    ) -> std::result::Result<ForkedSession, ForkSessionLifecycleError> {
+        let gate = self.lifecycle_gate(source_session_id);
+        let lifecycle = gate.lock().await;
+
+        if self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(source_session_id)
+            .is_some_and(|service| service.has_active_operation())
+        {
+            return Err(ForkSessionLifecycleError::ActiveOperation(
+                source_session_id.to_string(),
+            ));
+        }
+
+        // Acquisition is deliberately nonblocking. The lease closes the
+        // cross-process gap between local lifecycle admission and the core
+        // transaction's transcript snapshot.
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, source_session_id)
+                .map_err(ForkSessionLifecycleError::Lease)?;
+        let store_path = self.inner.store_path.clone();
+        let source = source_session_id.to_string();
+        let child = child_session_id.to_string();
+        let fork = tokio::task::spawn_blocking(move || {
+            sessions::fork_session(&store_path, &source, &child, boundary)
+        })
+        .await
+        .map_err(|error| {
+            ForkSessionLifecycleError::Fork(sessions::SessionForkError::Store(anyhow!(
+                "session fork task failed: {error}"
+            )))
+        })?
+        .map_err(ForkSessionLifecycleError::Fork)?;
+
+        // Never resume while holding source coordination: the child receives a
+        // fresh service/agent/sandbox through the ordinary attachment path.
+        drop(operation_lease);
+        drop(lifecycle);
+
+        let service = self
+            .attach_session(&fork.session_id)
+            .await
+            .map_err(|source| ForkSessionLifecycleError::Attachment {
+                fork: fork.clone(),
+                source,
+            })?;
+        let snapshot = service.frontend_snapshot().await.map_err(|source| {
+            ForkSessionLifecycleError::Attachment {
+                fork: fork.clone(),
+                source,
+            }
+        })?;
+        Ok(ForkedSession { fork, snapshot })
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
@@ -1259,6 +1402,7 @@ pub fn router(manager: SessionManager) -> Router {
             put(update_session_presentation_handler),
         )
         .route("/sessions/{session_id}/messages", get(session_messages))
+        .route("/sessions/{session_id}/fork", post(fork_session_handler))
         .route(
             "/sessions/{session_id}/threads/{thread_name}/events",
             get(thread_events),
@@ -1430,6 +1574,82 @@ async fn create_session(
     ))
 }
 
+async fn fork_session_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(source_session_id): AxumPath<String>,
+    payload: std::result::Result<Option<Json<ForkSessionRequest>>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ForkSessionResponse>), ApiError> {
+    let request = payload.map_err(ApiError::from)?.ok_or_else(|| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: "fork request body is required".to_string(),
+    })?;
+    let request = request.0;
+    let through_message_index = request.through_message_index.ok_or_else(|| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: "through_message_index is required".to_string(),
+    })?;
+    let title = request
+        .title
+        .as_deref()
+        .map(validate_fork_title)
+        .transpose()?;
+    let child_session_id = new_fork_session_id();
+    let boundary = sessions::SessionForkBoundary::AfterAssistant(through_message_index);
+    let forked = manager
+        .fork_session(&source_session_id, &child_session_id, boundary)
+        .await?;
+
+    if let Some(title) = title {
+        // The core fork creates presentation version zero. Validation happened
+        // before durable creation, so this update cannot fail for user input.
+        manager
+            .update_session_presentation(&child_session_id, &title, false, 0)
+            .await?;
+    }
+    // Reload after an optional title update so the returned child is immediately
+    // usable and its embedded sessions projection is current.
+    let snapshot = manager.snapshot(&child_session_id).await?;
+    let fork = forked.fork;
+    Ok((
+        StatusCode::CREATED,
+        Json(ForkSessionResponse {
+            snapshot,
+            fork: ForkLineageResponse {
+                source_session_id: fork.source_session_id,
+                copied_message_count: fork.copied_message_count,
+                source_message_count: fork.source_message_count,
+                created_at: fork.created_at,
+            },
+        }),
+    ))
+}
+
+fn validate_fork_title(title: &str) -> std::result::Result<String, ApiError> {
+    if title.chars().any(char::is_control) {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "session title must not contain control characters".to_string(),
+        });
+    }
+    let title = title.trim();
+    if title.chars().count() > 120 {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "session title must not exceed 120 characters".to_string(),
+        });
+    }
+    Ok(title.to_string())
+}
+
+fn new_fork_session_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = FORK_SESSION_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("fork-{nanos:032x}-{sequence:016x}")
+}
+
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -1496,7 +1716,6 @@ async fn thread_events(
             .await?,
     ))
 }
-
 
 async fn workspace_diff(
     State(manager): State<SessionManager>,
@@ -2036,6 +2255,33 @@ impl From<JsonRejection> for ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: format!("invalid JSON request body: {error}"),
+        }
+    }
+}
+
+impl From<ForkSessionLifecycleError> for ApiError {
+    fn from(error: ForkSessionLifecycleError) -> Self {
+        let status = match &error {
+            ForkSessionLifecycleError::ActiveOperation(_) => StatusCode::CONFLICT,
+            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Busy(_)) => {
+                StatusCode::CONFLICT
+            }
+            ForkSessionLifecycleError::Fork(sessions::SessionForkError::InvalidInput(_)) => {
+                StatusCode::BAD_REQUEST
+            }
+            ForkSessionLifecycleError::Fork(sessions::SessionForkError::NotFound(_)) => {
+                StatusCode::NOT_FOUND
+            }
+            ForkSessionLifecycleError::Fork(sessions::SessionForkError::Conflict(_)) => {
+                StatusCode::CONFLICT
+            }
+            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Store(_))
+            | ForkSessionLifecycleError::Fork(sessions::SessionForkError::Store(_))
+            | ForkSessionLifecycleError::Attachment { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
         }
     }
 }
@@ -2658,6 +2904,363 @@ mod tests {
         decoded
     }
 
+    async fn post_json_response(app: Router, uri: &str, body: Option<&str>) -> Response {
+        let mut request = Request::builder().method("POST").uri(uri);
+        let body = match body {
+            Some(body) => {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+                Body::from(body.to_string())
+            }
+            None => Body::empty(),
+        };
+        app.oneshot(request.body(body).unwrap()).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn fork_http_api_returns_usable_titled_snapshot_with_raw_boundary_and_lineage() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_http_success");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_session_with_messages(
+            &root,
+            "source",
+            "2026-01-01 00:00:00.000000000",
+            vec![
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "first user".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("selected assistant".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+                Message::User {
+                    content: "excluded user".to_string(),
+                },
+            ],
+        );
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+
+        let response = post_json_response(
+            app,
+            "/sessions/source/fork",
+            Some(r#"{"title":"  Fork title  ","through_message_index":2}"#),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let json = response_json(response).await;
+        let child_id = json["metadata"]["session_id"].as_str().unwrap();
+        assert_ne!(child_id, "source");
+        assert_eq!(json["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(json["messages"][0]["role"], "system");
+        assert_eq!(json["messages"][2]["role"], "assistant");
+        assert_eq!(json["fork"]["source_session_id"], "source");
+        assert_eq!(json["fork"]["copied_message_count"], 3);
+        assert_eq!(json["fork"]["source_message_count"], 4);
+        assert!(json["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|summary| summary["session_id"] == child_id && summary["title"] == "Fork title"));
+        assert!(sessions::session_exists(&root.join("store.db"), child_id).unwrap());
+
+        manager.delete_session("source").await.unwrap();
+        let child = manager.snapshot(child_id).await.unwrap();
+        assert_eq!(child.metadata.session_id.as_deref(), Some(child_id));
+        assert_eq!(
+            child.messages.len(),
+            3,
+            "child remains independent of source"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_http_api_maps_request_source_boundary_and_lease_failures_without_children() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_http_errors");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        seed_session_with_messages(
+            &root,
+            "trailing-assistant",
+            "2026-01-01 00:00:00.000000000",
+            vec![assistant_message("trailing")],
+        );
+        seed_session_with_messages(
+            &root,
+            "non-user-successor",
+            "2026-01-01 00:00:00.000000000",
+            vec![
+                assistant_message("selected"),
+                Message::System {
+                    content: "intervening system".to_string(),
+                },
+                Message::User {
+                    content: "later user".to_string(),
+                },
+            ],
+        );
+        let manager = test_manager(&root);
+        let initial_count = sessions::list_sessions(&root.join("store.db"))
+            .unwrap()
+            .len();
+
+        for (source, body) in [
+            ("source", None),
+            ("source", Some("")),
+            ("source", Some("{}")),
+            ("trailing-assistant", Some(r#"{"through_message_index":0}"#)),
+            ("source", Some(r#"{"through_message_index":0}"#)),
+            ("non-user-successor", Some(r#"{"through_message_index":0}"#)),
+        ] {
+            let response = post_json_response(
+                router(manager.clone()),
+                &format!("/sessions/{source}/fork"),
+                body,
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "source={source}, body={body:?}"
+            );
+        }
+
+        let invalid_title = post_json_response(
+            router(manager.clone()),
+            "/sessions/source/fork",
+            Some(r#"{"title":"bad\ttitle","through_message_index":1}"#),
+        )
+        .await;
+        assert_eq!(invalid_title.status(), StatusCode::BAD_REQUEST);
+
+        let missing = post_json_response(
+            router(manager.clone()),
+            "/sessions/missing/fork",
+            Some(r#"{"through_message_index":1}"#),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        let _lease =
+            sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source").unwrap();
+        let busy = post_json_response(
+            router(manager),
+            "/sessions/source/fork",
+            Some(r#"{"through_message_index":1}"#),
+        )
+        .await;
+        assert_eq!(busy.status(), StatusCode::CONFLICT);
+
+        let summaries = sessions::list_sessions(&root.join("store.db")).unwrap();
+        assert_eq!(
+            summaries.len(),
+            initial_count,
+            "failed forks must not create children"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_lifecycle_creates_durable_child_and_attaches_fresh_service() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_lifecycle_success");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        let manager = test_manager(&root);
+        let source = manager.attach_session("source").await.unwrap();
+
+        let result = manager
+            .fork_session(
+                "source",
+                "child",
+                sessions::SessionForkBoundary::AfterAssistant(1),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.fork.session_id, "child");
+        assert_eq!(
+            result.snapshot.metadata.session_id.as_deref(),
+            Some("child")
+        );
+        let child = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("child")
+            .cloned()
+            .expect("child attached normally");
+        assert!(!Arc::ptr_eq(&source, &child));
+        let lineage = sessions::load_session_fork(&root.join("store.db"), "child")
+            .unwrap()
+            .unwrap();
+        assert_eq!(lineage.source_session_id, "source");
+        sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source")
+            .expect("source lease released before return");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_lifecycle_waits_for_source_gate_and_rejects_external_lease_without_writes() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_lifecycle_coordination");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        let manager = test_manager(&root);
+
+        let gate = manager.lifecycle_gate("source");
+        let blocker = gate.lock().await;
+        let task_manager = manager.clone();
+        let fork = tokio::spawn(async move {
+            task_manager
+                .fork_session(
+                    "source",
+                    "child",
+                    sessions::SessionForkBoundary::AfterAssistant(1),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !fork.is_finished(),
+            "fork must serialize on source lifecycle"
+        );
+        drop(blocker);
+        tokio::time::timeout(Duration::from_secs(2), fork)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let _lease =
+            sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source").unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(2),
+            manager.fork_session(
+                "source",
+                "blocked-child",
+                sessions::SessionForkBoundary::AfterAssistant(1),
+            ),
+        )
+        .await
+        .expect("operation lease acquisition is nonblocking")
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        assert!(!sessions::session_exists(&root.join("store.db"), "blocked-child").unwrap());
+        drop(_lease);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_lifecycle_rejects_local_active_operation_without_creating_child() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_lifecycle_active");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        let endpoint = point_session_at_hanging_endpoint(&root, "source").await;
+        let manager = test_manager(&root);
+        manager
+            .submit_prompt(
+                "source",
+                SubmitPromptRequest {
+                    prompt: "hold source active".to_string(),
+                    live_thread_updates: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let error = manager
+            .fork_session(
+                "source",
+                "child",
+                sessions::SessionForkBoundary::AfterAssistant(1),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ForkSessionLifecycleError::ActiveOperation(ref id) if id == "source"
+        ));
+        assert!(!sessions::session_exists(&root.join("store.db"), "child").unwrap());
+
+        manager.cancel_active_run("source").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_attachment_failure_preserves_resumable_durable_child() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_attachment_failure");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        let store_path = root.join("store.db");
+        let mut source = sessions::load_session(&store_path, "source").unwrap();
+        source.backend = BackendKind::ArceeApi;
+        source.base_url = "https://api.arcee.ai/api/v1".to_string();
+        source.api_key_env = None;
+        sessions::update_session_config(&store_path, &source).unwrap();
+        let manager = test_manager(&root);
+
+        let error = manager
+            .fork_session(
+                "source",
+                "child",
+                sessions::SessionForkBoundary::AfterAssistant(1),
+            )
+            .await
+            .unwrap_err();
+        let fork = match error {
+            ForkSessionLifecycleError::Attachment { fork, .. } => fork,
+            other => panic!("expected attachment failure, got {other:?}"),
+        };
+        assert_eq!(fork.session_id, "child");
+        assert!(sessions::session_exists(&store_path, "child").unwrap());
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("child"));
+
+        let mut child = sessions::load_session(&store_path, "child").unwrap();
+        child.backend = BackendKind::OpenAiResponses;
+        child.base_url = "https://api.openai.com/v1".to_string();
+        child.api_key_env = Some("OPENAI_API_KEY".to_string());
+        sessions::update_session_config(&store_path, &child).unwrap();
+        drop(manager);
+        let restarted = test_manager(&root);
+        assert_eq!(
+            restarted
+                .snapshot("child")
+                .await
+                .unwrap()
+                .metadata
+                .session_id
+                .as_deref(),
+            Some("child")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn launch_defaults_reload_config_after_manager_boot() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
@@ -3102,6 +3705,32 @@ mod tests {
         snapshot.created_at = created_at.to_string();
         snapshot.updated_at = created_at.to_string();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed session messages");
+    }
+
+    fn assistant_message(content: &str) -> Message {
+        Message::Assistant {
+            content: Some(content.to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        }
+    }
+
+    fn seed_forkable_session(root: &std::path::Path, session_id: &str) {
+        seed_session_with_messages(
+            root,
+            session_id,
+            "2026-01-01 00:00:00.000000000",
+            vec![
+                Message::User {
+                    content: "first user".to_string(),
+                },
+                assistant_message("completed assistant"),
+                Message::User {
+                    content: "following user".to_string(),
+                },
+            ],
+        );
     }
 
     fn seed_editable_session(root: &std::path::Path, session_id: &str) {
@@ -5688,6 +6317,23 @@ api_key_env = "OPENAI_API_KEY"
         .unwrap();
         assert!(snapshot_query.include_system);
         assert!(messages_query.include_system);
+    }
+
+    #[test]
+    fn message_page_projection_exposes_canonical_indices() {
+        let projected: MessagePageMetadata = nac_core::session_service::MessagePageMetadata {
+            start: 2,
+            end: 4,
+            total: 7,
+            has_older: true,
+            canonical_indices: vec![3, 6],
+        }
+        .into();
+        assert_eq!(projected.canonical_indices, vec![3, 6]);
+        assert_eq!(
+            serde_json::to_value(projected).unwrap()["canonical_indices"],
+            serde_json::json!([3, 6])
+        );
     }
 
     #[tokio::test]
