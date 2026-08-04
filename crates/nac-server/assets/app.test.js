@@ -68,7 +68,7 @@ function loadApp(overrides = {}) {
       captureFocusTarget, restoreFocusTarget,
       captureFormControlStates, restoreFormControlStates, captureScrollPositions,
       restoreScrollPositions, openFocusView, closeFocusView, renderFocusView, renderCommandReference,
-      handleOrchestratorChatScroll,
+      handleOrchestratorChatScroll, handleThreadClick,
       setWorkspaceView, captureWorkspaceViewScroll, restoreWorkspaceViewScroll,
       renderConfigRepairGuidance, recordSessionEnvelope,
       connectEventStream, worksetsPresentation, renderWorksetsFocus,
@@ -4082,6 +4082,27 @@ test("workspace view toggle flips layout class and button state, defaulting to c
   assert.ok(!(isolated.el.sessionLayout.classList.contains("is-threads-view")));
   assert.equal(isolated.el.viewToggle.dataset.view, "chat");
   assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
+});
+
+test("targeting a thread returns mobile users to the visible composer", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "mobile-target";
+  isolated.state.snapshots.set("mobile-target", sessionSnapshot("mobile-target", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+  }));
+  isolated.el.promptInput.focus = function focus() { this.focused = true; };
+  isolated.setWorkspaceView("threads");
+  const button = { dataset: { threadName: "worker", threadState: "running" } };
+  isolated.handleThreadClick({
+    target: { closest(selector) { return selector === "[data-thread-name]" ? button : null; } },
+  });
+  assert.equal(isolated.state.targetedThread, "worker");
+  assert.equal(isolated.state.workspaceView, "chat");
+  assert.ok(!isolated.el.sessionLayout.classList.contains("is-threads-view"));
+  assert.equal(isolated.el.viewToggle.getAttribute("aria-pressed"), "false");
+  assert.equal(isolated.el.promptInput.focused, true);
 });
 
 test("workspace view switching preserves each pane's scroll position", () => {

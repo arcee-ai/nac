@@ -4094,7 +4094,10 @@ function handleThreadClick(event) {
   if (["running", "queued"].includes(button.dataset.threadState)) {
     state.targetedThread = state.targetedThread === name ? null : name;
     renderThreads(currentSnapshot());
-    if (state.targetedThread) el.promptInput.focus();
+    if (state.targetedThread) {
+      setWorkspaceView("chat");
+      el.promptInput.focus();
+    }
   } else openFocusView("thread", name);
 }
 
