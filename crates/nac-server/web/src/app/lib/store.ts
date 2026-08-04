@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { perfMark } from "@/app/lib/perfDebug";
+
 // Minimal external store. Server data lives in TanStack Query; this is only for
 // client state that several unrelated components read, such as the current
 // selection or the live run status derived from the event stream.
@@ -14,7 +16,11 @@ export interface Store<S> {
   useStore: <T = S>(selector?: (state: S) => T) => T;
 }
 
-export function createStore<S extends object>(initial: S): Store<S> {
+export function createStore<S extends object>(
+  initial: S,
+  /** Names the store in the dev perf report; has no effect otherwise. */
+  name = "store",
+): Store<S> {
   let state = initial;
   const listeners = new Set<Listener>();
 
@@ -24,6 +30,10 @@ export function createStore<S extends object>(initial: S): Store<S> {
     const next = typeof patch === "function" ? patch(state) : patch;
     if (!next || (next as unknown) === (state as unknown)) return;
     state = { ...state, ...next };
+    perfMark(`store:${name}.notify`, {
+      fields: { keys: Object.keys(next).join("+"), listeners: listeners.size },
+      throttleMs: 1000,
+    });
     listeners.forEach((listener) => listener());
   };
 

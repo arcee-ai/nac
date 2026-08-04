@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::workspace::GitTarget;
 use crate::{sessions, store};
 
 pub use store::WorkspaceRevisionRecord;
@@ -370,27 +370,24 @@ fn load_workset_records(store_path: &Path, session_id: &str) -> Result<Vec<Works
 
 pub fn workspace_diff_totals(
     workspace_display: &str,
-    host_root: Option<&Path>,
+    target: Option<&GitTarget>,
 ) -> WorkspaceDiffTotals {
-    let Some(cwd) = host_root else {
+    let Some(target) = target else {
         return WorkspaceDiffTotals {
             total_additions: 0,
             total_deletions: 0,
-            error: Some(format!(
-                "workspace '{}' is remote/sandbox-only; host-side inspection unavailable",
-                workspace_display
-            )),
+            error: Some(unreachable_workspace_message(workspace_display)),
         };
     };
 
-    let Some(diff_raw) = run_git(cwd, &["diff", "--numstat"]) else {
+    let Some(diff_raw) = run_git(target, &["diff", "--numstat"]) else {
         return WorkspaceDiffTotals {
             total_additions: 0,
             total_deletions: 0,
             error: Some("git diff unavailable".to_string()),
         };
     };
-    let Some(cached_raw) = run_git(cwd, &["diff", "--cached", "--numstat"]) else {
+    let Some(cached_raw) = run_git(target, &["diff", "--cached", "--numstat"]) else {
         return WorkspaceDiffTotals {
             total_additions: 0,
             total_deletions: 0,
@@ -406,8 +403,11 @@ pub fn workspace_diff_totals(
     }
 }
 
-pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> WorkspaceSnapshot {
-    let Some(cwd) = host_root else {
+pub fn workspace_snapshot(
+    workspace_display: &str,
+    target: Option<&GitTarget>,
+) -> WorkspaceSnapshot {
+    let Some(target) = target else {
         return WorkspaceSnapshot {
             host_root: None,
             workspace_display: workspace_display.to_string(),
@@ -416,14 +416,11 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
             changed_files: Vec::new(),
             total_additions: 0,
             total_deletions: 0,
-            error: Some(format!(
-                "workspace '{}' is remote/sandbox-only; host-side inspection unavailable",
-                workspace_display
-            )),
+            error: Some(unreachable_workspace_message(workspace_display)),
         };
     };
 
-    let root = run_git(cwd, &["rev-parse", "--show-toplevel"]).and_then(|path| {
+    let root = run_git(target, &["rev-parse", "--show-toplevel"]).and_then(|path| {
         if path.is_empty() {
             None
         } else {
@@ -431,8 +428,8 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
         }
     });
 
-    let branch = run_git(cwd, &["branch", "--show-current"]).filter(|value| !value.is_empty());
-    let remote = run_git(cwd, &["config", "--get", "remote.origin.url"]);
+    let branch = run_git(target, &["branch", "--show-current"]).filter(|value| !value.is_empty());
+    let remote = run_git(target, &["config", "--get", "remote.origin.url"]);
     let repo_label = remote.as_deref().and_then(parse_remote_label).or_else(|| {
         root.as_ref()
             .and_then(|path| path.file_name())
@@ -440,11 +437,11 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
             .map(|value| value.to_string())
     });
 
-    let status_raw = match run_git(cwd, &["status", "--porcelain"]) {
+    let status_raw = match run_git(target, &["status", "--porcelain"]) {
         Some(value) => value,
         None => {
             return WorkspaceSnapshot {
-                host_root: Some(cwd.to_path_buf()),
+                host_root: Some(target.root().to_path_buf()),
                 workspace_display: workspace_display.to_string(),
                 repo_label,
                 branch,
@@ -456,8 +453,8 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
         }
     };
 
-    let diff_raw = run_git(cwd, &["diff", "--numstat"]).unwrap_or_default();
-    let cached_raw = run_git(cwd, &["diff", "--cached", "--numstat"]).unwrap_or_default();
+    let diff_raw = run_git(target, &["diff", "--numstat"]).unwrap_or_default();
+    let cached_raw = run_git(target, &["diff", "--cached", "--numstat"]).unwrap_or_default();
 
     let (_, mut file_map) = parse_status_porcelain(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&diff_raw, &cached_raw);
@@ -494,7 +491,7 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
     });
 
     WorkspaceSnapshot {
-        host_root: Some(cwd.to_path_buf()),
+        host_root: Some(target.root().to_path_buf()),
         workspace_display: workspace_display.to_string(),
         repo_label,
         branch,
@@ -505,11 +502,22 @@ pub fn workspace_snapshot(workspace_display: &str, host_root: Option<&Path>) -> 
     }
 }
 
+/// Why a session has no checkout nac can look at. The only case left is a
+/// sandbox whose working directory is not mounted from the host: its files live
+/// inside a container that `podman run --rm` takes away with the session, so
+/// there is nothing durable to inspect or restore.
+fn unreachable_workspace_message(workspace_display: &str) -> String {
+    format!(
+        "workspace '{}' lives only inside the sandbox; mount a working directory to inspect it",
+        workspace_display
+    )
+}
+
 /// Which files a captured revision changed, in the same shape the live
 /// workspace reports, so the panel can render either without knowing which it
 /// is looking at.
 pub fn revision_changes(
-    host_root: &Path,
+    target: &GitTarget,
     base: Option<&str>,
     commit: &str,
 ) -> WorkspaceRevisionChanges {
@@ -519,13 +527,13 @@ pub fn revision_changes(
         return WorkspaceRevisionChanges::default();
     };
 
-    let Some(status_raw) = run_git(host_root, &["diff", "--name-status", base, commit]) else {
+    let Some(status_raw) = run_git(target, &["diff", "--name-status", base, commit]) else {
         return WorkspaceRevisionChanges {
             error: Some("git diff unavailable".to_string()),
             ..WorkspaceRevisionChanges::default()
         };
     };
-    let numstat_raw = run_git(host_root, &["diff", "--numstat", base, commit]).unwrap_or_default();
+    let numstat_raw = run_git(target, &["diff", "--numstat", base, commit]).unwrap_or_default();
 
     let mut file_map = parse_name_status(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&numstat_raw, "");
@@ -590,12 +598,8 @@ fn parse_name_status(raw: &str) -> HashMap<String, ChangedFileStat> {
     file_map
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+fn run_git(target: &GitTarget, args: &[&str]) -> Option<String> {
+    let output = target.output(target.root(), args).ok()?;
     if !output.status.success() {
         return None;
     }

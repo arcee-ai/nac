@@ -1,9 +1,10 @@
-use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command as StdCommand, Output};
+use std::process::Output;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::workspace::{GitTarget, WorktreeRead};
 
 const WORKSPACE_DIFF_MAX_FILE_BYTES: u64 = 512 * 1024;
 const WORKSPACE_DIFF_MAX_HUNKS: usize = 256;
@@ -71,17 +72,21 @@ impl WorkspaceDiffStage {
 }
 
 pub fn workspace_file_diff(
-    host_root: &Path,
+    target: &GitTarget,
     path: &str,
     stage: WorkspaceDiffStage,
     context: usize,
 ) -> Result<WorkspaceFileDiff> {
     let relpath = validate_workspace_relpath(path)?;
-    let repo_root = resolve_git_root(host_root)?;
-    let head_blob = git_head_blob(&repo_root, &relpath)?;
-    let index_blob = git_index_blob(&repo_root, &relpath)?;
+    let repo_root = target.repo_root()?;
+    let repo = Repo {
+        target,
+        root: &repo_root,
+    };
+    let head_blob = git_head_blob(repo, &relpath)?;
+    let index_blob = git_index_blob(repo, &relpath)?;
     let has_unstaged = git_path_list_contains_exact(
-        &repo_root,
+        repo,
         &[
             "--literal-pathspecs",
             "ls-files",
@@ -94,7 +99,7 @@ pub fn workspace_file_diff(
         &relpath,
     )?;
     let is_untracked = git_path_list_contains_exact(
-        &repo_root,
+        repo,
         &[
             "--literal-pathspecs",
             "ls-files",
@@ -112,7 +117,7 @@ pub fn workspace_file_diff(
         && blob_changed(head_blob.as_ref(), index_blob.as_ref())
     {
         sections.push(build_diff_section(
-            &repo_root,
+            repo,
             &relpath,
             "staged",
             staged_status(head_blob.as_ref(), index_blob.as_ref()),
@@ -128,10 +133,10 @@ pub fn workspace_file_diff(
     ) && has_unstaged
     {
         sections.push(build_diff_section(
-            &repo_root,
+            repo,
             &relpath,
             "unstaged",
-            unstaged_status(index_blob.as_ref(), &repo_root, &relpath),
+            unstaged_status(repo, index_blob.as_ref(), &relpath),
             blob_side(index_blob.clone()),
             DiffSide::Worktree,
             context,
@@ -144,7 +149,7 @@ pub fn workspace_file_diff(
     ) && is_untracked
     {
         sections.push(build_diff_section(
-            &repo_root,
+            repo,
             &relpath,
             "untracked",
             "untracked",
@@ -168,24 +173,28 @@ pub fn workspace_file_diff(
 /// separate here: a revision is a single frozen tree, so the answer is always
 /// at most one section.
 pub fn revision_file_diff(
-    host_root: &Path,
+    target: &GitTarget,
     base: Option<&str>,
     commit: &str,
     path: &str,
     context: usize,
 ) -> Result<WorkspaceFileDiff> {
     let relpath = validate_workspace_relpath(path)?;
-    let repo_root = resolve_git_root(host_root)?;
+    let repo_root = target.repo_root()?;
+    let repo = Repo {
+        target,
+        root: &repo_root,
+    };
     let old_blob = match base {
-        Some(base) => git_tree_blob(&repo_root, base, &relpath)?,
+        Some(base) => git_tree_blob(repo, base, &relpath)?,
         None => None,
     };
-    let new_blob = git_tree_blob(&repo_root, commit, &relpath)?;
+    let new_blob = git_tree_blob(repo, commit, &relpath)?;
 
     let mut sections = Vec::new();
     if blob_changed(old_blob.as_ref(), new_blob.as_ref()) {
         sections.push(build_diff_section(
-            &repo_root,
+            repo,
             &relpath,
             "revision",
             staged_status(old_blob.as_ref(), new_blob.as_ref()),
@@ -201,6 +210,15 @@ pub fn revision_file_diff(
         sections,
         error: None,
     })
+}
+
+/// A repository and where its git runs. The two always travel together — every
+/// command below needs both — and resolving the root costs a round trip on a
+/// remote checkout, so it is resolved once per request and carried.
+#[derive(Debug, Clone, Copy)]
+struct Repo<'a> {
+    target: &'a GitTarget,
+    root: &'a Path,
 }
 
 #[derive(Debug, Clone)]
@@ -273,23 +291,9 @@ pub(super) fn validate_workspace_relpath(path: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("invalid path: path must be UTF-8"))
 }
 
-pub(super) fn resolve_git_root(cwd: &Path) -> Result<PathBuf> {
-    let raw = run_git_bytes(cwd, &["rev-parse", "--show-toplevel"])?;
-    let path = String::from_utf8(raw)
-        .map_err(|_| anyhow!("git repository path is not valid UTF-8"))?
-        .trim()
-        .to_string();
-    if path.is_empty() {
-        bail!("git repository not found");
-    }
-    PathBuf::from(path)
-        .canonicalize()
-        .with_context(|| "failed to resolve git repository root")
-}
-
-fn git_head_blob(repo_root: &Path, relpath: &str) -> Result<Option<GitBlobRef>> {
+fn git_head_blob(repo: Repo<'_>, relpath: &str) -> Result<Option<GitBlobRef>> {
     let Some(raw) = run_git_bytes_optional_missing_head(
-        repo_root,
+        repo,
         &[
             "--literal-pathspecs",
             "ls-tree",
@@ -305,17 +309,17 @@ fn git_head_blob(repo_root: &Path, relpath: &str) -> Result<Option<GitBlobRef>> 
     parse_ls_tree_blob(&raw)
 }
 
-fn git_tree_blob(repo_root: &Path, rev: &str, relpath: &str) -> Result<Option<GitBlobRef>> {
+fn git_tree_blob(repo: Repo<'_>, rev: &str, relpath: &str) -> Result<Option<GitBlobRef>> {
     let raw = run_git_bytes(
-        repo_root,
+        repo,
         &["--literal-pathspecs", "ls-tree", "-z", rev, "--", relpath],
     )?;
     parse_ls_tree_blob(&raw)
 }
 
-fn git_index_blob(repo_root: &Path, relpath: &str) -> Result<Option<GitBlobRef>> {
+fn git_index_blob(repo: Repo<'_>, relpath: &str) -> Result<Option<GitBlobRef>> {
     let raw = run_git_bytes(
-        repo_root,
+        repo,
         &["--literal-pathspecs", "ls-files", "-z", "-s", "--", relpath],
     )?;
     parse_ls_files_stage0_blob(&raw)
@@ -381,8 +385,8 @@ fn split_once_byte(bytes: &[u8], needle: u8) -> Option<(&[u8], &[u8])> {
     Some((&bytes[..index], &bytes[index + 1..]))
 }
 
-fn git_path_list_contains_exact(repo_root: &Path, args: &[&str], relpath: &str) -> Result<bool> {
-    let raw = run_git_bytes(repo_root, args)?;
+fn git_path_list_contains_exact(repo: Repo<'_>, args: &[&str], relpath: &str) -> Result<bool> {
+    let raw = run_git_bytes(repo, args)?;
     let relpath = relpath.as_bytes();
     let contains = nul_records(&raw).any(|record| record == relpath);
     Ok(contains)
@@ -408,19 +412,19 @@ fn staged_status(head: Option<&GitBlobRef>, index: Option<&GitBlobRef>) -> &'sta
     }
 }
 
-fn unstaged_status(index: Option<&GitBlobRef>, repo_root: &Path, relpath: &str) -> &'static str {
+fn unstaged_status(repo: Repo<'_>, index: Option<&GitBlobRef>, relpath: &str) -> &'static str {
     if index.is_none() {
         return "added";
     }
-    match fs::symlink_metadata(repo_root.join(relpath)) {
-        Ok(_) => "modified",
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "deleted",
-        Err(_) => "modified",
+    if repo.target.worktree_exists(repo.root, relpath) {
+        "modified"
+    } else {
+        "deleted"
     }
 }
 
 fn build_diff_section(
-    repo_root: &Path,
+    repo: Repo<'_>,
     relpath: &str,
     stage: &str,
     status: &str,
@@ -440,7 +444,7 @@ fn build_diff_section(
         error: None,
     };
 
-    let old_bytes = match read_diff_side(repo_root, relpath, old_side) {
+    let old_bytes = match read_diff_side(repo, relpath, old_side) {
         Ok(LimitedBytes::Bytes(bytes)) => bytes,
         Ok(LimitedBytes::TooLarge) => {
             section.too_large = true;
@@ -451,7 +455,7 @@ fn build_diff_section(
             return section;
         }
     };
-    let new_bytes = match read_diff_side(repo_root, relpath, new_side) {
+    let new_bytes = match read_diff_side(repo, relpath, new_side) {
         Ok(LimitedBytes::Bytes(bytes)) => bytes,
         Ok(LimitedBytes::TooLarge) => {
             section.too_large = true;
@@ -491,16 +495,16 @@ fn build_diff_section(
     section
 }
 
-fn read_diff_side(repo_root: &Path, relpath: &str, side: DiffSide) -> Result<LimitedBytes> {
+fn read_diff_side(repo: Repo<'_>, relpath: &str, side: DiffSide) -> Result<LimitedBytes> {
     match side {
         DiffSide::Empty => Ok(LimitedBytes::Bytes(Vec::new())),
-        DiffSide::Blob(blob) => read_git_blob(repo_root, &blob),
-        DiffSide::Worktree => read_worktree_file(repo_root, relpath),
+        DiffSide::Blob(blob) => read_git_blob(repo, &blob),
+        DiffSide::Worktree => read_worktree_file(repo, relpath),
     }
 }
 
-fn read_git_blob(repo_root: &Path, blob: &GitBlobRef) -> Result<LimitedBytes> {
-    let size_raw = run_git_bytes(repo_root, &["cat-file", "-s", &blob.oid])?;
+fn read_git_blob(repo: Repo<'_>, blob: &GitBlobRef) -> Result<LimitedBytes> {
+    let size_raw = run_git_bytes(repo, &["cat-file", "-s", &blob.oid])?;
     let size = String::from_utf8_lossy(&size_raw)
         .trim()
         .parse::<u64>()
@@ -508,61 +512,41 @@ fn read_git_blob(repo_root: &Path, blob: &GitBlobRef) -> Result<LimitedBytes> {
     if size > WORKSPACE_DIFF_MAX_FILE_BYTES {
         return Ok(LimitedBytes::TooLarge);
     }
-    let bytes = run_git_bytes(repo_root, &["cat-file", "blob", &blob.oid])?;
+    let bytes = run_git_bytes(repo, &["cat-file", "blob", &blob.oid])?;
     if bytes.len() as u64 > WORKSPACE_DIFF_MAX_FILE_BYTES {
         return Ok(LimitedBytes::TooLarge);
     }
     Ok(LimitedBytes::Bytes(bytes))
 }
 
-fn read_worktree_file(repo_root: &Path, relpath: &str) -> Result<LimitedBytes> {
-    let path = repo_root.join(relpath);
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(LimitedBytes::Bytes(Vec::new()))
+/// The working-tree side of a diff. A file that is gone is the empty side,
+/// because that is exactly what a deletion looks like; a path that resolves out
+/// of the repository is refused instead of served.
+fn read_worktree_file(repo: Repo<'_>, relpath: &str) -> Result<LimitedBytes> {
+    match repo
+        .target
+        .read_worktree(repo.root, relpath, WORKSPACE_DIFF_MAX_FILE_BYTES)?
+    {
+        WorktreeRead::Missing => Ok(LimitedBytes::Bytes(Vec::new())),
+        WorktreeRead::NotRegular => bail!("path '{}' is not a regular file", relpath),
+        WorktreeRead::Symlink { escapes: true, .. }
+        | WorktreeRead::Regular { escapes: true, .. } => {
+            bail!("invalid path: path escapes repository root")
         }
-        Err(error) => return Err(error).with_context(|| format!("failed to stat {}", relpath)),
-    };
+        WorktreeRead::Symlink { target, .. } => Ok(limited(target)),
+        WorktreeRead::Regular { bytes: None, .. } => Ok(LimitedBytes::TooLarge),
+        WorktreeRead::Regular {
+            bytes: Some(bytes), ..
+        } => Ok(limited(bytes)),
+    }
+}
 
-    if metadata.file_type().is_symlink() {
-        let parent = path.parent().unwrap_or(repo_root);
-        let resolved_parent = parent
-            .canonicalize()
-            .with_context(|| format!("failed to resolve parent for {}", relpath))?;
-        if !resolved_parent.starts_with(repo_root) {
-            bail!("invalid path: path escapes repository root");
-        }
-        let target = fs::read_link(&path)
-            .with_context(|| format!("failed to read symlink target for {}", relpath))?;
-        let bytes = target
-            .as_os_str()
-            .to_string_lossy()
-            .into_owned()
-            .into_bytes();
-        if bytes.len() as u64 > WORKSPACE_DIFF_MAX_FILE_BYTES {
-            return Ok(LimitedBytes::TooLarge);
-        }
-        return Ok(LimitedBytes::Bytes(bytes));
-    }
-
-    if !metadata.is_file() {
-        bail!("path '{}' is not a regular file", relpath);
-    }
-    let resolved = path
-        .canonicalize()
-        .with_context(|| format!("failed to resolve {}", relpath))?;
-    if !resolved.starts_with(repo_root) {
-        bail!("invalid path: path escapes repository root");
-    }
-    if metadata.len() > WORKSPACE_DIFF_MAX_FILE_BYTES {
-        return Ok(LimitedBytes::TooLarge);
-    }
-    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", relpath))?;
+fn limited(bytes: Vec<u8>) -> LimitedBytes {
     if bytes.len() as u64 > WORKSPACE_DIFF_MAX_FILE_BYTES {
-        return Ok(LimitedBytes::TooLarge);
+        LimitedBytes::TooLarge
+    } else {
+        LimitedBytes::Bytes(bytes)
     }
-    Ok(LimitedBytes::Bytes(bytes))
 }
 
 fn diff_text_to_hunks(
@@ -698,30 +682,28 @@ fn diff_line_content(line: &str) -> (String, bool, bool) {
     (limited, has_trailing_newline, truncated)
 }
 
-fn run_git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = run_git_output(cwd, args)?;
+fn run_git_bytes(repo: Repo<'_>, args: &[&str]) -> Result<Vec<u8>> {
+    let output = run_git_output(repo, args)?;
     if !output.status.success() {
-        return Err(git_failure(args, &output.stderr));
+        return Err(git_failure(repo.target, args, &output));
     }
     Ok(output.stdout)
 }
 
-fn run_git_bytes_optional_missing_head(cwd: &Path, args: &[&str]) -> Result<Option<Vec<u8>>> {
-    let output = run_git_output(cwd, args)?;
+fn run_git_bytes_optional_missing_head(repo: Repo<'_>, args: &[&str]) -> Result<Option<Vec<u8>>> {
+    let output = run_git_output(repo, args)?;
     if output.status.success() {
         return Ok(Some(output.stdout));
     }
     if git_error_is_missing_head(&output.stderr) {
         return Ok(None);
     }
-    Err(git_failure(args, &output.stderr))
+    Err(git_failure(repo.target, args, &output))
 }
 
-fn run_git_output(cwd: &Path, args: &[&str]) -> Result<Output> {
-    StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
+fn run_git_output(repo: Repo<'_>, args: &[&str]) -> Result<Output> {
+    repo.target
+        .output(repo.root, args)
         .with_context(|| format!("failed to run git {}", args.join(" ")))
 }
 
@@ -732,8 +714,11 @@ fn git_error_is_missing_head(stderr: &[u8]) -> bool {
         || stderr.contains("bad revision 'HEAD'")
 }
 
-fn git_failure(args: &[&str], stderr: &[u8]) -> anyhow::Error {
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+fn git_failure(target: &GitTarget, args: &[&str], output: &Output) -> anyhow::Error {
+    if let Some(reason) = target.unavailable_reason(output) {
+        return anyhow!("{reason}");
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
         anyhow!("git {} failed", args.join(" "))
     } else {
@@ -841,7 +826,8 @@ mod tests {
         std::fs::write(root.join("file.txt"), "one\nTWO\nthree\n").unwrap();
         std::fs::write(root.join("new.txt"), "new\n").unwrap();
 
-        let file_diff = workspace_file_diff(&root, "file.txt", WorkspaceDiffStage::All, 0).unwrap();
+        let file_diff =
+            workspace_file_diff(&target(&root), "file.txt", WorkspaceDiffStage::All, 0).unwrap();
         assert_eq!(file_diff.path, "file.txt");
         assert_eq!(file_diff.old_path, None);
         assert_eq!(file_diff.sections.len(), 2);
@@ -854,7 +840,8 @@ mod tests {
         assert_eq!(file_diff.sections[1].additions, 1);
         assert_eq!(file_diff.sections[1].deletions, 0);
 
-        let untracked = workspace_file_diff(&root, "new.txt", WorkspaceDiffStage::All, 3).unwrap();
+        let untracked =
+            workspace_file_diff(&target(&root), "new.txt", WorkspaceDiffStage::All, 3).unwrap();
         assert_eq!(untracked.old_path, None);
         assert_eq!(untracked.sections.len(), 1);
         assert_eq!(untracked.sections[0].stage, "untracked");
@@ -864,7 +851,8 @@ mod tests {
 
         std::fs::write(root.join("space [x].txt"), "new\n").unwrap();
         let literal_path =
-            workspace_file_diff(&root, "space [x].txt", WorkspaceDiffStage::All, 3).unwrap();
+            workspace_file_diff(&target(&root), "space [x].txt", WorkspaceDiffStage::All, 3)
+                .unwrap();
         assert_eq!(literal_path.old_path, None);
         assert_eq!(literal_path.sections.len(), 1);
         assert_eq!(literal_path.sections[0].stage, "unstaged");
@@ -891,12 +879,14 @@ mod tests {
         )
         .unwrap();
 
-        let binary = workspace_file_diff(&root, "binary.bin", WorkspaceDiffStage::All, 3).unwrap();
+        let binary =
+            workspace_file_diff(&target(&root), "binary.bin", WorkspaceDiffStage::All, 3).unwrap();
         assert_eq!(binary.sections.len(), 1);
         assert!(binary.sections[0].binary);
         assert!(binary.sections[0].hunks.is_empty());
 
-        let large = workspace_file_diff(&root, "large.txt", WorkspaceDiffStage::All, 3).unwrap();
+        let large =
+            workspace_file_diff(&target(&root), "large.txt", WorkspaceDiffStage::All, 3).unwrap();
         assert_eq!(large.sections.len(), 1);
         assert!(large.sections[0].too_large);
         assert!(large.sections[0].hunks.is_empty());
@@ -910,7 +900,8 @@ mod tests {
         git(&root, &["init"]);
         std::fs::write(root.join("new.txt"), "new\n").unwrap();
 
-        let diff = workspace_file_diff(&root, "new.txt", WorkspaceDiffStage::All, 3).unwrap();
+        let diff =
+            workspace_file_diff(&target(&root), "new.txt", WorkspaceDiffStage::All, 3).unwrap();
 
         assert_eq!(diff.old_path, None);
         assert_eq!(diff.sections.len(), 1);
@@ -930,8 +921,12 @@ mod tests {
         root
     }
 
+    fn target(root: &Path) -> GitTarget {
+        GitTarget::local(root)
+    }
+
     fn git(cwd: &Path, args: &[&str]) {
-        let output = StdCommand::new("git")
+        let output = std::process::Command::new("git")
             .args(args)
             .current_dir(cwd)
             .output()

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { DropdownContent, Icon, IconName } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
+import { perfRender } from "@/app/lib/perfDebug";
 
 /** How tall a body that is still being written may get before it scrolls. */
 const LIVE_BODY_MAX_HEIGHT = 240;
@@ -32,6 +33,7 @@ export function ChatBadge({
   body,
   onClick,
 }: ChatBadgeProps) {
+  perfRender("ChatBadge");
   const [open, setOpen] = useState(false);
   const collapsible = Boolean(body);
   const interactive = collapsible || Boolean(onClick);

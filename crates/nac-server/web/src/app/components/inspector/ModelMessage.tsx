@@ -9,6 +9,7 @@ import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
+import { perfRender } from "@/app/lib/perfDebug";
 import type { ModelTurn } from "@/app/lib/transcript";
 
 /** Exact assistant marker written by the agent on session cancel. */
@@ -58,6 +59,7 @@ export function ModelMessage({
   onSelectThread,
   onSelectWorkset,
 }: ModelMessageProps) {
+  perfRender("ModelMessage");
   return (
     <div
       className={cn(

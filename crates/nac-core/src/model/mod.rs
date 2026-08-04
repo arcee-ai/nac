@@ -27,6 +27,7 @@ mod chat;
 mod chat_stream;
 mod chatgpt_codex;
 mod client;
+mod pseudo_tool_calls;
 mod requests;
 mod responses;
 mod responses_stream;

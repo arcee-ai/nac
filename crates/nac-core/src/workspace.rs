@@ -8,15 +8,16 @@
 //! the submodule change nothing the user can observe: they only add objects and
 //! one ref under `refs/nac/`.
 
-use std::path::Path;
-use std::process::Command as StdCommand;
-
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
+mod git;
 mod revisions;
 
+pub use git::GitTarget;
 pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};
+
+pub(crate) use git::{first_stderr_line, WorktreeRead};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Branch {
@@ -34,9 +35,9 @@ pub struct BranchList {
 }
 
 /// Local branches, most recently used first, plus the state of the tree.
-pub fn list_branches(root: &Path) -> Result<BranchList> {
+pub fn list_branches(target: &GitTarget) -> Result<BranchList> {
     let raw = run_git(
-        root,
+        target,
         &[
             "for-each-ref",
             "--sort=-committerdate",
@@ -44,7 +45,7 @@ pub fn list_branches(root: &Path) -> Result<BranchList> {
             "refs/heads",
         ],
     )?;
-    let current = run_git(root, &["branch", "--show-current"])?;
+    let current = run_git(target, &["branch", "--show-current"])?;
     let current = (!current.is_empty()).then_some(current);
 
     let branches = raw
@@ -60,24 +61,24 @@ pub fn list_branches(root: &Path) -> Result<BranchList> {
     Ok(BranchList {
         current,
         branches,
-        dirty: is_dirty(root)?,
+        dirty: is_dirty(target)?,
     })
 }
 
 /// Create a branch off the current HEAD and switch to it, carrying any
 /// uncommitted work along, which is what makes this safe on a dirty tree.
-pub fn create_branch(root: &Path, name: &str) -> Result<BranchList> {
-    let name = validate_branch_name(root, name)?;
-    run_git(root, &["switch", "--create", &name])?;
-    list_branches(root)
+pub fn create_branch(target: &GitTarget, name: &str) -> Result<BranchList> {
+    let name = validate_branch_name(target, name)?;
+    run_git(target, &["switch", "--create", &name])?;
+    list_branches(target)
 }
 
 /// Switch to an existing branch. The caller must have established that the
 /// tree is clean; git is still the final arbiter and its refusal is passed on.
-pub fn switch_branch(root: &Path, name: &str) -> Result<BranchList> {
-    let name = validate_branch_name(root, name)?;
-    run_git(root, &["switch", &name])?;
-    list_branches(root)
+pub fn switch_branch(target: &GitTarget, name: &str) -> Result<BranchList> {
+    let name = validate_branch_name(target, name)?;
+    run_git(target, &["switch", &name])?;
+    list_branches(target)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,25 +97,27 @@ pub struct CommitOutcome {
 /// leaves their identity, hooks and signing configuration to decide the rest;
 /// whatever git refuses is passed back verbatim. Everything is staged because
 /// the panel that calls this offers no way to pick a subset.
-pub fn commit_all(root: &Path, message: &str) -> Result<CommitOutcome> {
+pub fn commit_all(target: &GitTarget, message: &str) -> Result<CommitOutcome> {
     let message = message.trim();
     if message.is_empty() {
         return Err(anyhow!("commit message is empty"));
     }
 
-    run_git(root, &["add", "--all"])?;
+    run_git(target, &["add", "--all"])?;
     // Committing an empty index either fails or, with a hook in play, succeeds
     // confusingly, so the caller is told plainly instead.
-    if run_git(root, &["diff", "--cached", "--name-only"])?.is_empty() {
+    if run_git(target, &["diff", "--cached", "--name-only"])?.is_empty() {
         return Err(anyhow!("nothing to commit: the checkout matches HEAD"));
     }
-    run_git(root, &["commit", "--message", message])?;
+    run_git(target, &["commit", "--message", message])?;
 
-    let branch = run_git(root, &["branch", "--show-current"])?;
-    let (files_changed, additions, deletions) =
-        sum_numstat(&run_git(root, &["show", "--numstat", "--format=", "HEAD"])?);
+    let branch = run_git(target, &["branch", "--show-current"])?;
+    let (files_changed, additions, deletions) = sum_numstat(&run_git(
+        target,
+        &["show", "--numstat", "--format=", "HEAD"],
+    )?);
     Ok(CommitOutcome {
-        sha: run_git(root, &["rev-parse", "HEAD"])?,
+        sha: run_git(target, &["rev-parse", "HEAD"])?,
         branch: (!branch.is_empty()).then_some(branch),
         files_changed,
         additions,
@@ -145,14 +148,14 @@ fn sum_numstat(raw: &str) -> (usize, u64, u64) {
     (files, additions, deletions)
 }
 
-fn is_dirty(root: &Path) -> Result<bool> {
+fn is_dirty(target: &GitTarget) -> Result<bool> {
     // Untracked files travel across a switch untouched, so they do not count;
     // git refuses on its own in the rare case one would be overwritten.
-    let status = run_git(root, &["status", "--porcelain", "--untracked-files=no"])?;
+    let status = run_git(target, &["status", "--porcelain", "--untracked-files=no"])?;
     Ok(!status.trim().is_empty())
 }
 
-fn validate_branch_name(root: &Path, name: &str) -> Result<String> {
+fn validate_branch_name(target: &GitTarget, name: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() {
         return Err(anyhow!("invalid branch name: the name is empty"));
@@ -165,27 +168,24 @@ fn validate_branch_name(root: &Path, name: &str) -> Result<String> {
     if name.chars().any(char::is_whitespace) {
         return Err(anyhow!("invalid branch name: it may not contain spaces"));
     }
-    if run_git(root, &["check-ref-format", "--branch", name]).is_err() {
+    if run_git(target, &["check-ref-format", "--branch", name]).is_err() {
         return Err(anyhow!("invalid branch name: git rejected '{}'", name));
     }
     Ok(name.to_string())
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| anyhow!("could not run git: {}", error))?;
+fn run_git(target: &GitTarget, args: &[&str]) -> Result<String> {
+    let output = target.output(target.root(), args)?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let message = stderr
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .unwrap_or("git reported no details");
-        return Err(anyhow!("git {} failed: {}", args[0], message));
+        if let Some(reason) = target.unavailable_reason(&output) {
+            return Err(anyhow!("{reason}"));
+        }
+        return Err(anyhow!(
+            "git {} failed: {}",
+            args[0],
+            first_stderr_line(&output.stderr)
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout)

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { perfMark } from "@/app/lib/perfDebug";
 import { queryKeys } from "@/app/services/queries";
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
 import {
@@ -36,6 +37,7 @@ export function useSessionStream(sessionId: string | null): void {
       if (reloadTimer.current) return;
       reloadTimer.current = setTimeout(() => {
         reloadTimer.current = null;
+        perfMark("query:invalidate.session", { throttleMs: 0 });
         void client.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
       }, RELOAD_DEBOUNCE_MS);
     };

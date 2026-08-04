@@ -5,6 +5,7 @@
 // with backoff sits on top. Reconnects resume from the last sequence id seen,
 // which the backend replays from, so no event is lost across a gap.
 
+import { perfEpoch, perfMark } from "@/app/lib/perfDebug";
 import { api } from "@/app/services/api";
 import type {
   AssistantStreamDelta,
@@ -15,11 +16,7 @@ import type {
 } from "@/app/types/api";
 
 export type StreamStatus =
-  | "idle"
-  | "connecting"
-  | "live"
-  | "reconnecting"
-  | "error";
+  "idle" | "connecting" | "live" | "reconnecting" | "error";
 
 export interface SessionStreamHandlers {
   onEnvelope: (envelope: SessionEventEnvelope) => void;
@@ -90,6 +87,10 @@ export function subscribeToSessionEvents(
       );
       if (!envelope) return;
       lastSequenceId = envelope.sequence_id;
+      perfMark("sse:session_event", {
+        fields: { type: envelope.event.type },
+        throttleMs: 0,
+      });
       handlers.onEnvelope(envelope);
     });
 
@@ -97,7 +98,16 @@ export function subscribeToSessionEvents(
       const parsed = parseEvent<AssistantStreamDelta>(
         event as MessageEvent<string>,
       );
-      if (parsed) handlers.onAssistantDelta?.(parsed);
+      if (!parsed) return;
+      perfEpoch();
+      perfMark("sse:assistant_delta", {
+        fields: {
+          chars: (parsed.text?.length ?? 0) + (parsed.reasoning?.length ?? 0),
+          thread: parsed.thread_name ?? "-",
+        },
+        throttleMs: 1000,
+      });
+      handlers.onAssistantDelta?.(parsed);
     });
 
     source.addEventListener("replay_boundary", (event) => {

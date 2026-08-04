@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,7 @@ use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
     WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
 };
+use crate::workspace::GitTarget;
 
 mod manual_compaction;
 
@@ -417,6 +418,11 @@ impl SessionClientHandle {
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     metadata: Arc<SessionMetadata>,
+    /// Where git runs for this session's checkout — locally, or on the ssh host
+    /// the session is working on. `None` for a sandbox with no mounted working
+    /// directory, which is why such a session gets no revisions: its files do
+    /// not outlive the container.
+    workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
@@ -566,9 +572,13 @@ impl SessionService {
             .agent
             .set_event_sink(EventSink::bus(event_bus.clone()));
 
+        let workspace_git = run_config.workspace_git;
         let metadata = SessionMetadata {
             cwd: run_config.workspace_display,
-            workspace_host_path: run_config.workspace_host_path,
+            workspace_host_path: workspace_git
+                .as_ref()
+                .and_then(|target| target.local_path())
+                .map(Path::to_path_buf),
             store_path,
             model: run_config.client.model.clone(),
             backend: run_config.client.backend().as_str().to_string(),
@@ -597,6 +607,7 @@ impl SessionService {
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
+            workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             transcript_log,
@@ -946,10 +957,7 @@ impl SessionService {
     }
 
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
-        view::workspace_snapshot(
-            &self.metadata.cwd,
-            self.metadata.workspace_host_path.as_deref(),
-        )
+        view::workspace_snapshot(&self.metadata.cwd, self.workspace_git.as_ref())
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
@@ -1295,7 +1303,7 @@ impl SessionService {
         }
 
         let store_path = self.metadata.store_path.clone();
-        let workspace_root = self.metadata.workspace_host_path.clone();
+        let workspace_git = self.workspace_git.clone();
         let revision = {
             let store_path = store_path.clone();
             let session_id = session_id.clone();
@@ -1310,14 +1318,14 @@ impl SessionService {
             .map_err(|error| anyhow::anyhow!("workspace revision lookup task failed: {error}"))??
         };
 
-        let workspace_restored = match (&workspace_root, &revision) {
-            (Some(root), Some(revision)) => {
-                let root = root.clone();
+        let workspace_restored = match (&workspace_git, &revision) {
+            (Some(target), Some(revision)) => {
+                let target = target.clone();
                 let session_id = session_id.clone();
                 let commit = revision.commit_sha.clone();
                 tokio::task::spawn_blocking(move || {
-                    crate::workspace::restore(&root, &session_id, &commit)?;
-                    crate::workspace::rewind_ref(&root, &session_id, &commit)
+                    crate::workspace::restore(&target, &session_id, &commit)?;
+                    crate::workspace::rewind_ref(&target, &session_id, &commit)
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("workspace restore task failed: {error}"))??;
@@ -2014,10 +2022,9 @@ impl SessionService {
     /// failure here is reported and swallowed: a repository nac cannot capture
     /// still gets its run finished normally.
     async fn capture_workspace_revision(&self, run: &ActiveRunSnapshot) {
-        let (Some(session_id), Some(root)) = (
-            self.metadata.session_id.clone(),
-            self.metadata.workspace_host_path.clone(),
-        ) else {
+        let (Some(session_id), Some(target)) =
+            (self.metadata.session_id.clone(), self.workspace_git.clone())
+        else {
             return;
         };
         let store_path = self.metadata.store_path.clone();
@@ -2031,7 +2038,7 @@ impl SessionService {
         let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
             let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
                 .map(|revision| revision.commit_sha);
-            let captured = crate::workspace::capture(&root, &session_id, previous.as_deref())?;
+            let captured = crate::workspace::capture(&target, &session_id, previous.as_deref())?;
             crate::store::append_workspace_revision(
                 &store_path,
                 &session_id,
@@ -2842,7 +2849,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         })
     }
@@ -2883,7 +2890,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
@@ -3022,7 +3029,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
@@ -3258,7 +3265,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -3822,7 +3829,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "loaded".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -3872,7 +3879,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4135,7 +4142,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4221,7 +4228,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4334,7 +4341,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4458,7 +4465,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         // Inject the log failure precisely at the tool-result commit point:
@@ -4621,7 +4628,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4708,7 +4715,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut agent_events = parts.service.subscribe_agent_events();
@@ -4818,7 +4825,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5041,7 +5048,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5133,7 +5140,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5250,7 +5257,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();

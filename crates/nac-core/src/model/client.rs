@@ -1,5 +1,6 @@
 use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
+use super::pseudo_tool_calls::recover_reasoning_tool_calls;
 use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response, StreamFold};
 use super::*;
@@ -403,7 +404,9 @@ impl ModelClient {
                     .await?
             }
         };
-        parse_chat_completions_response(&value, url.as_str())
+        let mut response = parse_chat_completions_response(&value, url.as_str())?;
+        recover_reasoning_tool_calls(&mut response, &tools);
+        Ok(response)
     }
 
     async fn send_deepseek_chat(

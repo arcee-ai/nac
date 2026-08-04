@@ -10,6 +10,7 @@ mod backend;
 mod podman;
 mod smolvm;
 mod ssh;
+pub(crate) mod ssh_command;
 
 #[cfg(test)]
 pub use backend::execution_backend_from_sandbox;

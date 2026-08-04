@@ -63,7 +63,9 @@ function FooterChip({
         size={16}
         color="var(--color-fill-basic-tertiary)"
       />
-      <span className="label-micro text-basic-tertiary truncate">{label}</span>
+      <span className="label-micro text-basic-tertiary truncate max-w-[128px]">
+        {label}
+      </span>
     </div>
   );
 }

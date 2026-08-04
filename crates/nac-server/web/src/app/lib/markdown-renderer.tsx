@@ -4,6 +4,8 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
+import { PerfProfiler } from "@/app/lib/PerfProfiler";
+import { perfRender } from "@/app/lib/perfDebug";
 
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -142,15 +144,18 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
   streaming = false,
 }: MarkdownRendererProps) {
+  perfRender("Markdown");
   return (
-    <ReactMarkdown
-      remarkPlugins={remarkPlugins}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
-      rehypePlugins={rehypePlugins as any}
-      components={buildComponents(streaming)}
-    >
-      {children}
-    </ReactMarkdown>
+    <PerfProfiler id="markdown">
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
+        rehypePlugins={rehypePlugins as any}
+        components={buildComponents(streaming)}
+      >
+        {children}
+      </ReactMarkdown>
+    </PerfProfiler>
   );
 });
 

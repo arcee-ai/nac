@@ -11,15 +11,13 @@
 //! see a checkout frozen at the end of some earlier run, and they never touch
 //! the disk at all.
 
-use std::fs;
-use std::io;
 use std::path::Path;
-use std::process::Command as StdCommand;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::workspace_diff::{resolve_git_root, validate_workspace_relpath};
+use super::workspace_diff::validate_workspace_relpath;
+use crate::workspace::{first_stderr_line, GitTarget, WorktreeRead};
 
 /// Enough for any repository a person browses by hand; past this the tree is
 /// unusable as a list anyway.
@@ -50,9 +48,10 @@ pub struct WorkspaceFileContent {
 /// Every file git considers part of the project, tracked or not, ignoring the
 /// ones it is told to ignore. Paths are relative to the repository root, which
 /// is what `git status --porcelain` reports too, so the two line up.
-pub fn list_files(host_root: &Path) -> Result<WorkspaceFileList> {
+pub fn list_files(target: &GitTarget) -> Result<WorkspaceFileList> {
     let raw = run_git(
-        host_root,
+        target,
+        target.root(),
         &[
             "ls-files",
             "-z",
@@ -79,36 +78,34 @@ pub fn list_files(host_root: &Path) -> Result<WorkspaceFileList> {
 
 /// Working-tree contents of one file, refusing anything that is not plain text
 /// small enough to render.
-pub fn read_file(host_root: &Path, path: &str) -> Result<WorkspaceFileContent> {
+pub fn read_file(target: &GitTarget, path: &str) -> Result<WorkspaceFileContent> {
     let relpath = validate_workspace_relpath(path)?;
-    let repo_root = resolve_git_root(host_root)?;
-    let full = repo_root.join(&relpath);
+    let repo_root = target.repo_root()?;
 
-    // symlink_metadata does not follow links, so a link pointing outside the
-    // repository is reported as what it is and never read through.
-    let metadata = match fs::symlink_metadata(&full) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            bail!("file not found: '{}'", relpath)
+    // A symlink is reported as what it is and never read through, so a link
+    // pointing outside the repository cannot serve its contents from here.
+    let bytes = match target.read_worktree(&repo_root, &relpath, MAX_FILE_BYTES)? {
+        WorktreeRead::Missing => bail!("file not found: '{}'", relpath),
+        WorktreeRead::NotRegular | WorktreeRead::Symlink { .. } => {
+            bail!("invalid path: '{}' is not a regular file", relpath)
         }
-        Err(error) => return Err(error).with_context(|| format!("cannot stat '{}'", relpath)),
+        WorktreeRead::Regular {
+            size, bytes: None, ..
+        } => {
+            return Ok(WorkspaceFileContent {
+                path: relpath,
+                content: None,
+                size,
+                binary: false,
+                too_large: true,
+            })
+        }
+        WorktreeRead::Regular {
+            bytes: Some(bytes), ..
+        } => bytes,
     };
-    if !metadata.is_file() {
-        bail!("invalid path: '{}' is not a regular file", relpath);
-    }
 
-    let size = metadata.len();
-    if size > MAX_FILE_BYTES {
-        return Ok(WorkspaceFileContent {
-            path: relpath,
-            content: None,
-            size,
-            binary: false,
-            too_large: true,
-        });
-    }
-
-    let bytes = fs::read(&full).with_context(|| format!("cannot read '{}'", relpath))?;
+    let size = bytes.len() as u64;
     let binary = bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0);
     let content = if binary {
         None
@@ -137,9 +134,13 @@ pub fn read_file(host_root: &Path, path: &str) -> Result<WorkspaceFileContent> {
 }
 
 /// The same listing as [`list_files`], as it stood in a captured revision.
-pub fn list_revision_files(host_root: &Path, commit: &str) -> Result<WorkspaceFileList> {
-    let repo_root = resolve_git_root(host_root)?;
-    let raw = run_git(&repo_root, &["ls-tree", "-r", "-z", "--full-tree", commit])?;
+pub fn list_revision_files(target: &GitTarget, commit: &str) -> Result<WorkspaceFileList> {
+    let repo_root = target.repo_root()?;
+    let raw = run_git(
+        target,
+        &repo_root,
+        &["ls-tree", "-r", "-z", "--full-tree", commit],
+    )?;
 
     let mut files: Vec<String> = raw
         .split(|byte| *byte == 0)
@@ -157,24 +158,24 @@ pub fn list_revision_files(host_root: &Path, commit: &str) -> Result<WorkspaceFi
 
 /// Contents of one file as of a captured revision.
 pub fn read_revision_file(
-    host_root: &Path,
+    target: &GitTarget,
     commit: &str,
     path: &str,
 ) -> Result<WorkspaceFileContent> {
     let relpath = validate_workspace_relpath(path)?;
-    let repo_root = resolve_git_root(host_root)?;
+    let repo_root = target.repo_root()?;
     // A path can never be mistaken for an option here: it is glued behind
     // "<commit>:" and reaches git as a single argument, never a shell word.
     let object = format!("{commit}:{relpath}");
 
-    let Some(kind) = run_git_optional(&repo_root, &["cat-file", "-t", &object])? else {
+    let Some(kind) = run_git_optional(target, &repo_root, &["cat-file", "-t", &object])? else {
         bail!("file not found: '{}'", relpath);
     };
     if String::from_utf8_lossy(&kind).trim() != "blob" {
         bail!("invalid path: '{}' is not a regular file", relpath);
     }
 
-    let size = String::from_utf8_lossy(&run_git(&repo_root, &["cat-file", "-s", &object])?)
+    let size = String::from_utf8_lossy(&run_git(target, &repo_root, &["cat-file", "-s", &object])?)
         .trim()
         .parse::<u64>()
         .with_context(|| format!("cannot measure '{}'", relpath))?;
@@ -188,7 +189,7 @@ pub fn read_revision_file(
         });
     }
 
-    let bytes = run_git(&repo_root, &["cat-file", "blob", &object])?;
+    let bytes = run_git(target, &repo_root, &["cat-file", "blob", &object])?;
     let binary = bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0);
     let content = if binary {
         None
@@ -217,30 +218,31 @@ fn parse_tree_blob_path(record: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&record[tab + 1..]).into_owned())
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| anyhow!("could not run git: {}", error))?;
+fn run_git(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let output = target.output(cwd, args)?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(reason) = target.unavailable_reason(&output) {
+            bail!("{reason}");
+        }
         bail!(
             "git {} failed: {}",
             args[0],
-            stderr.lines().next().unwrap_or("git reported no details")
+            first_stderr_line(&output.stderr)
         );
     }
     Ok(output.stdout)
 }
 
 /// None when git refused, which for an object lookup means "no such object"
-/// rather than a real failure.
-fn run_git_optional(cwd: &Path, args: &[&str]) -> Result<Option<Vec<u8>>> {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| anyhow!("could not run git: {}", error))?;
-    Ok(output.status.success().then_some(output.stdout))
+/// rather than a real failure. A connection that never reached git is a real
+/// failure, so it is reported rather than read as a missing object.
+fn run_git_optional(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Option<Vec<u8>>> {
+    let output = target.output(cwd, args)?;
+    if !output.status.success() {
+        if let Some(reason) = target.unavailable_reason(&output) {
+            bail!("{reason}");
+        }
+        return Ok(None);
+    }
+    Ok(Some(output.stdout))
 }

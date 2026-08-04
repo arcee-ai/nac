@@ -24,6 +24,7 @@ use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
+use crate::workspace::GitTarget;
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct NacConfig {
@@ -415,7 +416,11 @@ pub struct OrchestratorRunConfig {
     pub(crate) sandbox_status: String,
     pub(crate) agents_md_status: String,
     pub(crate) workspace_display: String,
-    pub(crate) workspace_host_path: Option<PathBuf>,
+    /// Where git can be run for this session's checkout. `None` is a sandbox
+    /// whose working directory is not mounted from the host: nothing outside
+    /// the container can see those files, and the container does not outlive
+    /// the session.
+    pub(crate) workspace_git: Option<GitTarget>,
     pub(crate) resume_base_cwd: PathBuf,
 }
 
@@ -645,6 +650,7 @@ pub async fn build_run_config(
     if let Some(ssh_host) = ssh_host {
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
+        let workspace_git = GitTarget::ssh(ssh_host.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
         let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
@@ -699,7 +705,7 @@ pub async fn build_run_config(
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: working_directory,
-            workspace_host_path: None,
+            workspace_git: Some(workspace_git),
             resume_base_cwd: config_cwd,
         });
     }
@@ -719,10 +725,10 @@ pub async fn build_run_config(
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
-        session.host_workdir()
+    let workspace_git = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir().map(GitTarget::local)
     } else {
-        Some(workspace_cwd.clone())
+        Some(GitTarget::local(workspace_cwd.clone()))
     };
     let sandbox_status = sandbox
         .as_ref()
@@ -783,7 +789,7 @@ pub async fn build_run_config(
         sandbox_status,
         agents_md_status,
         workspace_display: working_directory,
-        workspace_host_path,
+        workspace_git,
         resume_base_cwd: workspace_cwd,
     })
 }
@@ -1047,12 +1053,16 @@ async fn build_resume_config_from_snapshot(
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_host_path = if ssh_host.is_some() {
-        None
-    } else if let Some(session) = sandbox.as_ref() {
-        session.host_workdir()
-    } else {
-        Some(workspace_cwd.clone())
+    let workspace_git = match ssh_host.as_deref() {
+        Some(host) => Some(GitTarget::ssh(
+            host.to_string(),
+            workspace_cwd.clone(),
+            &config_cwd,
+        )),
+        None => match sandbox.as_ref() {
+            Some(session) => session.host_workdir().map(GitTarget::local),
+            None => Some(GitTarget::local(workspace_cwd.clone())),
+        },
     };
     let sandbox_status = sandbox
         .as_ref()
@@ -1104,7 +1114,7 @@ async fn build_resume_config_from_snapshot(
         sandbox_status,
         agents_md_status,
         workspace_display: working_directory,
-        workspace_host_path,
+        workspace_git,
         resume_base_cwd,
     })
 }
@@ -2497,7 +2507,10 @@ url = "https://mcp.context7.com/mcp"
             "resume should not mutate the process cwd"
         );
         assert_eq!(
-            run_config.workspace_host_path.as_deref(),
+            run_config
+                .workspace_git
+                .as_ref()
+                .and_then(|target| target.local_path()),
             Some(canonical_session_cwd.as_path())
         );
         assert_eq!(run_config.session.session_id(), Some("resume-session"));
@@ -2816,8 +2829,14 @@ url = "https://mcp.context7.com/mcp"
             run_config.workspace_display,
             remote_cwd.display().to_string()
         );
+        let workspace_git = run_config
+            .workspace_git
+            .as_ref()
+            .expect("a remote session must still have a git target");
+        assert_eq!(workspace_git.ssh_host(), Some("build-box"));
         assert_eq!(
-            run_config.workspace_host_path, None,
+            workspace_git.local_path(),
+            None,
             "remote sessions must not expose a local path for git inspection"
         );
         assert_eq!(run_config.sandbox_status, "off");

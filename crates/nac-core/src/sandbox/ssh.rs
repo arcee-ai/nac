@@ -1,8 +1,6 @@
 //! OpenSSH execution backend.
 
-use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -17,6 +15,10 @@ use uuid::Uuid;
 use crate::paths::PathContext;
 
 use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
+use super::ssh_command::{
+    prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
+    shell_quote_path, ssh_args, ssh_control_path,
+};
 
 const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -49,18 +51,7 @@ impl SshBackend {
     }
 
     fn ssh_args(&self) -> Vec<String> {
-        vec![
-            "-o".to_string(),
-            "ControlMaster=auto".to_string(),
-            "-o".to_string(),
-            format!("ControlPath={}", self.control_path.display()),
-            "-o".to_string(),
-            "ControlPersist=60s".to_string(),
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            "-o".to_string(),
-            "ConnectTimeout=10".to_string(),
-        ]
+        ssh_args(&self.control_path)
     }
 
     fn ssh_command(&self, remote_command: &str) -> Command {
@@ -78,39 +69,20 @@ impl SshBackend {
         envs: &[(String, String)],
         words: &[String],
     ) -> String {
-        let mut parts = vec![
-            "cd".to_string(),
-            shell_quote_path(&dir.display().to_string()),
-            "&&".to_string(),
-        ];
-        if !envs.is_empty() {
-            parts.push("env".to_string());
-            for (key, value) in envs {
-                parts.push(shell_quote(&format!("{key}={value}")));
-            }
-        }
-        parts.extend(words.iter().cloned());
-        parts.join(" ")
+        remote_command_in_dir(dir, envs, words)
     }
 
     fn quoted_program_and_args(program: &str, args: &[String]) -> Vec<String> {
-        let mut words = Vec::with_capacity(args.len() + 1);
-        words.push(shell_quote(program));
-        words.extend(args.iter().map(|arg| shell_quote(arg)));
-        words
+        quoted_program_and_args(program, args)
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
-        if let Some(dir) = self.control_path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| {
-                format!("failed to create ssh control directory {}", dir.display())
-            })?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-            }
-        }
+        prepare_control_socket_dir(&self.control_path).with_context(|| {
+            format!(
+                "failed to create ssh control directory for {}",
+                self.control_path.display()
+            )
+        })?;
 
         let remote = self.remote_command_in_dir(&self.remote_cwd, &[], &["true".to_string()]);
         let mut command = self.ssh_command(&remote);
@@ -270,24 +242,6 @@ impl SshBackend {
     }
 }
 
-fn ssh_control_path(ssh_host: &str, paths: &PathContext) -> PathBuf {
-    let dir = paths
-        .nac_home_dir()
-        .unwrap_or_else(|| std::env::temp_dir().join("nac"))
-        .join("ssh");
-    dir.join(format!(
-        "{}-{:016x}.sock",
-        sanitize_socket_name(ssh_host),
-        stable_hash(ssh_host)
-    ))
-}
-
-fn stable_hash(value: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
-}
-
 fn make_ssh_pidfile() -> String {
     format!("{SSH_PIDFILE_DIR}/{}.pid", Uuid::new_v4().simple())
 }
@@ -300,41 +254,6 @@ mkdir -p "$pidfile_dir" || exit 125
 chmod 700 "$HOME/.cache/nac" "$pidfile_dir" || exit 125
 {wrapper}"#
     )
-}
-
-fn sanitize_socket_name(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('-');
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    let shortened: String = trimmed.chars().take(48).collect();
-    if shortened.is_empty() {
-        "host".to_string()
-    } else {
-        shortened
-    }
-}
-
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn shell_quote_path(value: &str) -> String {
-    if value == "~" {
-        return "~".to_string();
-    }
-    if let Some(rest) = value.strip_prefix("~/") {
-        return format!("~/{}", shell_quote(rest));
-    }
-    shell_quote(value)
 }
 
 #[cfg(test)]

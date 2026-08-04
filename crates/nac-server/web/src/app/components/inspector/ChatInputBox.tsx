@@ -12,9 +12,11 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { cn } from "@/app/lib/cn";
 import { formatClock, formatTokensCompact, runMetrics } from "@/app/lib/format";
 import { useNow } from "@/app/hooks/useNow";
+import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useSubmitRun } from "@/app/services/queries";
@@ -62,6 +64,7 @@ export function ChatInputBox({
   snapshot,
   entry,
 }: ChatInputBoxProps) {
+  perfRender("ChatInputBox");
   const [value, setValue] = useState("");
   const running = useRunning();
   const toast = useToast();
@@ -135,30 +138,18 @@ export function ChatInputBox({
             void submit();
           }}
         />
-        {running ? (
-          <button
-            type="button"
-            className="absolute bottom-0 right-0 flex items-center justify-center p-3 rounded-[4px] bg-btn-primary text-btn-primary"
-            aria-label="Stop run"
-            onClick={() => void stop()}
-          >
-            <Icon iconName={IconName.Stop} size={24} />
-          </button>
-        ) : (
-          <button
-            type="submit"
-            className={cn(
-              "absolute bottom-0 right-0 flex items-center justify-center p-3 rounded-[4px]",
-              canSend
-                ? "bg-btn-primary text-btn-primary"
-                : "bg-btn-primary-disabled text-btn-primary-disabled",
-            )}
-            disabled={!canSend}
-            aria-label="Send"
-          >
-            <Icon iconName={IconName.Plane} size={24} />
-          </button>
-        )}
+        <Button
+          className="absolute bottom-0 right-0"
+          size={ButtonSize.Large}
+          variant={ButtonVariant.Primary}
+          content={ButtonContent.Icon}
+          type={running ? "button" : "submit"}
+          disabled={!running && !canSend}
+          aria-label={running ? "Stop run" : "Send"}
+          onClick={running ? () => void stop() : undefined}
+        >
+          <Icon iconName={running ? IconName.Stop : IconName.Plane} size={24} />
+        </Button>
       </div>
 
       <div className="flex items-center gap-[10px]">
@@ -175,12 +166,12 @@ export function ChatInputBox({
             </Button>
           </Tooltip>
 
-          <div className="flex items-center gap-[6px] pl-1 pr-3 py-1 shrink-0">
-            <Icon iconName={IconName.Brain} size={16} />
-            <span className="label-micro text-btn-secondary truncate">
-              {metrics.model}
-            </span>
-          </div>
+          <ModelPicker
+            sessionId={sessionId}
+            metadata={snapshot?.metadata ?? null}
+            label={metrics.model}
+            disabled={busy}
+          />
 
           <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
             {metrics.env}

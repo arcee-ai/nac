@@ -20,6 +20,7 @@ import {
   useSessionStream,
 } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
+import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -47,6 +48,8 @@ export default function SessionPage() {
   }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
+
+  perfRender("SessionPage");
 
   const { data: snapshot = null, error } = useSessionSnapshot(id);
   const { data: sessions = [] } = useSessions();

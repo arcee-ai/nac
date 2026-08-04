@@ -64,7 +64,7 @@ use nac_core::{
     sessions,
     types::Message,
     view::{self, SessionSummarySnapshot},
-    workspace,
+    workspace::{self, GitTarget},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -82,6 +82,20 @@ const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
 const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
 const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
+/// A failed measurement is cached too, and for less time: an unreachable host
+/// must not be dialled once per session on every refresh of the list, but it
+/// must also start working again shortly after it comes back.
+const WORKSPACE_DIFF_ERROR_CACHE_TTL: Duration = Duration::from_secs(30);
+/// How long the session list is willing to wait for measurements it does not
+/// have cached. A remote checkout can be slow, and the list is worth more on
+/// time and incomplete than late and exact — the answer lands in the cache and
+/// shows up on the next refresh.
+const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
+/// How long a working git target is taken on trust before it is checked again.
+const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
+/// A target that failed is rechecked sooner, so bringing a host back does not
+/// mean waiting out a long cache.
+const GIT_PROBE_ERROR_CACHE_TTL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
@@ -101,8 +115,22 @@ struct SessionManagerInner {
     worker_executable: PathBuf,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
-    workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
+    workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
+    git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
     managed_logins: managed_auth::ManagedLoginRegistry,
+}
+
+/// Identifies a checkout across sessions. The host has to be part of it: two
+/// sessions on the same path of different machines are different checkouts, and
+/// — the reason this is a pair rather than a path — two sessions on the same
+/// path of the *same* remote machine are the same one.
+type GitTargetKey = (Option<String>, PathBuf);
+
+fn git_target_key(target: &GitTarget) -> GitTargetKey {
+    (
+        target.ssh_host().map(str::to_string),
+        target.root().to_path_buf(),
+    )
 }
 
 struct ResolvedLaunchLocation {
@@ -115,6 +143,35 @@ struct ResolvedLaunchLocation {
 struct WorkspaceDiffCacheEntry {
     updated_at: Instant,
     totals: view::WorkspaceDiffTotals,
+}
+
+impl WorkspaceDiffCacheEntry {
+    fn is_fresh(&self, now: Instant) -> bool {
+        let ttl = if self.totals.error.is_some() {
+            WORKSPACE_DIFF_ERROR_CACHE_TTL
+        } else {
+            WORKSPACE_DIFF_CACHE_TTL
+        };
+        now.duration_since(self.updated_at) < ttl
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GitProbeCacheEntry {
+    checked_at: Instant,
+    /// The message to report, or `None` when the target answered.
+    failure: Option<String>,
+}
+
+impl GitProbeCacheEntry {
+    fn is_fresh(&self, now: Instant) -> bool {
+        let ttl = if self.failure.is_some() {
+            GIT_PROBE_ERROR_CACHE_TTL
+        } else {
+            GIT_PROBE_CACHE_TTL
+        };
+        now.duration_since(self.checked_at) < ttl
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -599,6 +656,7 @@ impl SessionManager {
                 active_sessions: RwLock::new(HashMap::new()),
                 lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
+                git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
             }),
         })
@@ -748,65 +806,101 @@ impl SessionManager {
         })?
     }
 
+    /// Attach "+n −m" to every row of the session list.
+    ///
+    /// Sessions sharing a checkout are measured once, and the answer is cached,
+    /// because this runs on every refresh of the list. Remote checkouts are the
+    /// reason for the rest of the care here: measuring one means talking to
+    /// another machine, so a host that is slow or gone must cost the list a
+    /// bounded wait once rather than a connect timeout per row.
     async fn populate_workspace_diff(&self, sessions: &mut [ManagedSessionSummary]) -> Result<()> {
-        let mut workspace_displays = HashMap::new();
+        let mut targets: HashMap<GitTargetKey, (GitTarget, String)> = HashMap::new();
+        let mut key_by_session: HashMap<String, GitTargetKey> = HashMap::new();
         for entry in sessions.iter() {
-            if let Some(path) = entry.summary.workspace_host_path.clone() {
-                workspace_displays
-                    .entry(path)
-                    .or_insert_with(|| entry.summary.cwd.display().to_string());
-            }
+            let Ok(target) = self.git_target(&entry.summary) else {
+                continue;
+            };
+            let key = git_target_key(&target);
+            key_by_session.insert(entry.summary.session_id.clone(), key.clone());
+            targets
+                .entry(key)
+                .or_insert_with(|| (target, entry.summary.cwd.display().to_string()));
         }
 
         let now = Instant::now();
-        let mut totals_by_path = HashMap::new();
-        let mut missing_paths = Vec::new();
+        let mut totals_by_key: HashMap<GitTargetKey, view::WorkspaceDiffTotals> = HashMap::new();
+        let mut pending = Vec::new();
         {
             let cache = self.inner.workspace_diff_cache.read().await;
-            for path in workspace_displays.keys() {
-                if let Some(entry) = cache.get(path) {
-                    if now.duration_since(entry.updated_at) < WORKSPACE_DIFF_CACHE_TTL {
-                        totals_by_path.insert(path.clone(), entry.totals.clone());
-                        continue;
+            for key in targets.keys() {
+                match cache.get(key) {
+                    Some(entry) if entry.is_fresh(now) => {
+                        totals_by_key.insert(key.clone(), entry.totals.clone());
                     }
+                    _ => pending.push(key.clone()),
                 }
-                missing_paths.push(path.clone());
             }
         }
 
         let mut tasks = Vec::new();
-        for path in missing_paths {
-            let display = workspace_displays
-                .get(&path)
-                .cloned()
-                .unwrap_or_else(|| path.display().to_string());
-            let task_path = path.clone();
+        for key in pending {
+            let Some((target, display)) = targets.get(&key).cloned() else {
+                continue;
+            };
+            // A host already known to be unreachable is not dialled again just
+            // to fill in a column.
+            if let Some(failure) = self.cached_git_failure(&key).await {
+                totals_by_key.insert(
+                    key.clone(),
+                    view::WorkspaceDiffTotals {
+                        total_additions: 0,
+                        total_deletions: 0,
+                        error: Some(failure),
+                    },
+                );
+                continue;
+            }
             tasks.push((
-                path,
+                key,
                 tokio::task::spawn_blocking(move || {
-                    view::workspace_diff_totals(&display, Some(&task_path))
+                    view::workspace_diff_totals(&display, Some(&target))
                 }),
             ));
         }
 
         let mut cache_updates = Vec::new();
-        for (path, task) in tasks {
-            let totals = task.await.context("workspace diff task failed")?;
-            totals_by_path.insert(path.clone(), totals.clone());
-            cache_updates.push((path, totals));
+        let deadline = tokio::time::Instant::now() + WORKSPACE_DIFF_MEASURE_BUDGET;
+        for (key, task) in tasks {
+            match tokio::time::timeout_at(deadline, task).await {
+                Ok(joined) => {
+                    let totals = joined.context("workspace diff task failed")?;
+                    totals_by_key.insert(key.clone(), totals.clone());
+                    cache_updates.push((key, totals));
+                }
+                Err(_) => {
+                    totals_by_key.insert(
+                        key,
+                        view::WorkspaceDiffTotals {
+                            total_additions: 0,
+                            total_deletions: 0,
+                            error: Some("workspace diff is still being measured".to_string()),
+                        },
+                    );
+                }
+            }
         }
 
         if !cache_updates.is_empty() {
             let updated_at = Instant::now();
             let mut cache = self.inner.workspace_diff_cache.write().await;
-            for (path, totals) in cache_updates {
-                cache.insert(path, WorkspaceDiffCacheEntry { updated_at, totals });
+            for (key, totals) in cache_updates {
+                cache.insert(key, WorkspaceDiffCacheEntry { updated_at, totals });
             }
         }
 
         for entry in sessions.iter_mut() {
-            entry.workspace_diff = match entry.summary.workspace_host_path.as_ref() {
-                Some(path) => totals_by_path.get(path).cloned(),
+            entry.workspace_diff = match key_by_session.get(&entry.summary.session_id) {
+                Some(key) => totals_by_key.get(key).cloned(),
                 None => Some(view::workspace_diff_totals(
                     &entry.summary.cwd.display().to_string(),
                     None,
@@ -815,6 +909,78 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    /// Where git runs for a session's checkout.
+    ///
+    /// An ssh session's files are on the machine it works on, so git runs there
+    /// too, over the connection the session already keeps open. What is left
+    /// without a target is a sandbox with no mounted working directory: those
+    /// files exist only inside a container that is removed with the session, so
+    /// there is nothing durable to inspect, commit or restore.
+    fn git_target(&self, summary: &SessionSummarySnapshot) -> Result<GitTarget> {
+        if let Some(host) = summary.ssh_host.as_deref() {
+            return Ok(GitTarget::ssh(
+                host.to_string(),
+                summary.cwd.clone(),
+                &self.inner.root_cwd,
+            ));
+        }
+        summary
+            .workspace_host_path
+            .clone()
+            .map(GitTarget::local)
+            .ok_or_else(|| {
+                anyhow!(
+                    "workspace '{}' lives only inside the sandbox; mount a working directory to inspect it",
+                    summary.cwd.display()
+                )
+            })
+    }
+
+    /// The recorded reason a target could not be used, while it is still recent
+    /// enough to trust.
+    async fn cached_git_failure(&self, key: &GitTargetKey) -> Option<String> {
+        let now = Instant::now();
+        let cache = self.inner.git_probe_cache.read().await;
+        cache
+            .get(key)
+            .filter(|entry| entry.is_fresh(now))
+            .and_then(|entry| entry.failure.clone())
+    }
+
+    /// Establish that git can actually be run against this checkout, so the
+    /// caller gets one clear reason — host unreachable, no git over there, not a
+    /// repository — instead of the same failure repeated by every git command
+    /// the request would have made.
+    async fn ensure_git_ready(&self, target: &GitTarget) -> Result<()> {
+        let key = git_target_key(target);
+        let now = Instant::now();
+        {
+            let cache = self.inner.git_probe_cache.read().await;
+            if let Some(entry) = cache.get(&key).filter(|entry| entry.is_fresh(now)) {
+                return match &entry.failure {
+                    Some(failure) => Err(anyhow!("{failure}")),
+                    None => Ok(()),
+                };
+            }
+        }
+
+        let probed = {
+            let target = target.clone();
+            tokio::task::spawn_blocking(move || target.probe())
+                .await
+                .context("workspace probe task failed")?
+        };
+        let failure = probed.as_ref().err().map(|error| format!("{error:#}"));
+        self.inner.git_probe_cache.write().await.insert(
+            key,
+            GitProbeCacheEntry {
+                checked_at: Instant::now(),
+                failure,
+            },
+        );
+        probed
     }
 
     pub async fn create_session(
@@ -1024,48 +1190,42 @@ impl SessionManager {
         let stage = view::WorkspaceDiffStage::parse(query.stage.as_deref().unwrap_or("all"))?;
         let context = query.context.unwrap_or(3).min(100);
         let path = query.path;
-        let summary = self
-            .list_sessions(false)
-            .await?
-            .into_iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let host_root = summary.workspace_host_path.ok_or_else(|| {
-            anyhow!("workspace diff is not supported for remote/sandbox-only sessions")
-        })?;
+        let target = self.workspace_root(session_id).await?;
 
         let revision = self.resolve_revision(session_id, query.revision)?;
         tokio::task::spawn_blocking(move || match revision {
             Some(revision) => view::revision_file_diff(
-                &host_root,
+                &target,
                 revision.base_sha.as_deref(),
                 &revision.commit_sha,
                 &path,
                 context,
             ),
-            None => view::workspace_file_diff(&host_root, &path, stage, context),
+            None => view::workspace_file_diff(&target, &path, stage, context),
         })
         .await
         .context("workspace diff task failed")?
     }
 
-    /// Host checkout of a session, refusing when an agent could be working in
-    /// it. Several sessions may share one directory, so every one of them has
-    /// to be quiet, not just this one.
-    async fn idle_workspace_root(&self, session_id: &str) -> Result<PathBuf> {
+    /// The checkout of a session, refusing when an agent could be working in
+    /// it. Several sessions may share one checkout, so every one of them has to
+    /// be quiet, not just this one — and "the same checkout" means the same
+    /// directory *on the same machine*, which is what keeps two sessions on one
+    /// remote path from moving each other's branch.
+    async fn idle_workspace_root(&self, session_id: &str) -> Result<GitTarget> {
         let sessions = self.list_sessions(false).await?;
         let summary = sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let root = summary.summary.workspace_host_path.clone().ok_or_else(|| {
-            anyhow!("writing to the checkout is not supported for remote/sandbox-only sessions")
-        })?;
+        let target = self.git_target(&summary.summary)?;
+        let key = git_target_key(&target);
 
         if let Some(busy) = sessions.iter().find(|entry| {
             entry.active_run.is_some()
-                && entry.summary.workspace_host_path.as_deref() == Some(root.as_path())
+                && self
+                    .git_target(&entry.summary)
+                    .is_ok_and(|other| git_target_key(&other) == key)
         }) {
             return Err(anyhow!(
                 "workspace is busy: session '{}' has a run in flight",
@@ -1073,21 +1233,22 @@ impl SessionManager {
             ));
         }
 
-        Ok(root)
+        self.ensure_git_ready(&target).await?;
+        Ok(target)
     }
 
-    /// Host checkout of a session, for read-only inspection.
-    async fn workspace_root(&self, session_id: &str) -> Result<PathBuf> {
-        self.list_sessions(false)
+    /// The checkout of a session, for read-only inspection.
+    async fn workspace_root(&self, session_id: &str) -> Result<GitTarget> {
+        let summary = self
+            .list_sessions(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?
-            .workspace_host_path
-            .ok_or_else(|| {
-                anyhow!("workspace inspection is not supported for remote/sandbox-only sessions")
-            })
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let target = self.git_target(&summary)?;
+        self.ensure_git_ready(&target).await?;
+        Ok(target)
     }
 
     pub async fn workspace_files(
@@ -1095,11 +1256,11 @@ impl SessionManager {
         session_id: &str,
         revision: Option<i64>,
     ) -> Result<view::WorkspaceFileList> {
-        let root = self.workspace_root(session_id).await?;
+        let target = self.workspace_root(session_id).await?;
         let revision = self.resolve_revision(session_id, revision)?;
         tokio::task::spawn_blocking(move || match revision {
-            Some(revision) => view::list_revision_files(&root, &revision.commit_sha),
-            None => view::list_files(&root),
+            Some(revision) => view::list_revision_files(&target, &revision.commit_sha),
+            None => view::list_files(&target),
         })
         .await
         .context("workspace file listing task failed")?
@@ -1111,11 +1272,11 @@ impl SessionManager {
         path: String,
         revision: Option<i64>,
     ) -> Result<view::WorkspaceFileContent> {
-        let root = self.workspace_root(session_id).await?;
+        let target = self.workspace_root(session_id).await?;
         let revision = self.resolve_revision(session_id, revision)?;
         tokio::task::spawn_blocking(move || match revision {
-            Some(revision) => view::read_revision_file(&root, &revision.commit_sha, &path),
-            None => view::read_file(&root, &path),
+            Some(revision) => view::read_revision_file(&target, &revision.commit_sha, &path),
+            None => view::read_file(&target, &path),
         })
         .await
         .context("workspace file read task failed")?
@@ -1135,13 +1296,13 @@ impl SessionManager {
         session_id: &str,
         revision_id: i64,
     ) -> Result<view::WorkspaceRevisionChanges> {
-        let root = self.workspace_root(session_id).await?;
+        let target = self.workspace_root(session_id).await?;
         let revision = self
             .resolve_revision(session_id, Some(revision_id))?
             .ok_or_else(|| anyhow!("revision '{}' was not found", revision_id))?;
 
         tokio::task::spawn_blocking(move || {
-            view::revision_changes(&root, revision.base_sha.as_deref(), &revision.commit_sha)
+            view::revision_changes(&target, revision.base_sha.as_deref(), &revision.commit_sha)
         })
         .await
         .context("workspace revision task failed")
@@ -1163,8 +1324,8 @@ impl SessionManager {
     }
 
     pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
-        let root = self.workspace_root(session_id).await?;
-        tokio::task::spawn_blocking(move || workspace::list_branches(&root))
+        let target = self.workspace_root(session_id).await?;
+        tokio::task::spawn_blocking(move || workspace::list_branches(&target))
             .await
             .context("branch listing task failed")?
     }
@@ -1174,20 +1335,20 @@ impl SessionManager {
         session_id: &str,
         request: SwitchBranchRequest,
     ) -> Result<workspace::BranchList> {
-        let root = self.idle_workspace_root(session_id).await?;
+        let target = self.idle_workspace_root(session_id).await?;
 
         tokio::task::spawn_blocking(move || {
             if request.create {
                 // A new branch takes the uncommitted work with it, which is
                 // usually the point of making one, so a dirty tree is fine.
-                return workspace::create_branch(&root, &request.name);
+                return workspace::create_branch(&target, &request.name);
             }
-            if workspace::list_branches(&root)?.dirty {
+            if workspace::list_branches(&target)?.dirty {
                 return Err(anyhow!(
                     "workspace has uncommitted changes; commit or stash them before switching"
                 ));
             }
-            workspace::switch_branch(&root, &request.name)
+            workspace::switch_branch(&target, &request.name)
         })
         .await
         .context("branch switch task failed")?
@@ -1201,9 +1362,9 @@ impl SessionManager {
         session_id: &str,
         request: CommitWorkspaceRequest,
     ) -> Result<workspace::CommitOutcome> {
-        let root = self.idle_workspace_root(session_id).await?;
+        let target = self.idle_workspace_root(session_id).await?;
 
-        tokio::task::spawn_blocking(move || workspace::commit_all(&root, &request.message))
+        tokio::task::spawn_blocking(move || workspace::commit_all(&target, &request.message))
             .await
             .context("commit task failed")?
     }
@@ -1371,8 +1532,8 @@ impl SessionManager {
 
         // The revision rows cascade with the session, but the git objects they
         // pinned only become collectable once the ref is gone.
-        if let Ok(root) = self.workspace_root(session_id).await {
-            if let Err(error) = workspace::forget(&root, session_id) {
+        if let Ok(target) = self.workspace_root(session_id).await {
+            if let Err(error) = workspace::forget(&target, session_id) {
                 eprintln!("nac: failed to drop workspace revisions: {error:#}");
             }
         }
@@ -6836,5 +6997,163 @@ api_key_env = "OPENAI_API_KEY"
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));
+    }
+
+    async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    /// One-shot stand-in for a provider's model index, answering the first
+    /// request with `body` and reporting the `Authorization` header it saw — so
+    /// a test can tell which credential actually went out on the wire.
+    fn scripted_model_index(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind model index");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept model index request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let authorization = String::from_utf8_lossy(&request)
+                .lines()
+                .find(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+                .map(|line| line[line.find(':').unwrap() + 1..].trim().to_string())
+                .unwrap_or_default();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+            let _ = socket.flush();
+            let _ = sender.send(authorization);
+        });
+        (base_url, receiver)
+    }
+
+    /// A key the UI supplies is filed away under a name the server picks, and
+    /// from then on that name stands in for the secret: the value never comes
+    /// back out, and the caller reaches the provider by naming it instead.
+    #[tokio::test]
+    async fn a_supplied_key_is_filed_under_a_generated_name_and_answers_by_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("generated_credential");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let stored = post_json(
+            app.clone(),
+            "/credentials",
+            serde_json::json!({ "value": "sk-server-test-key" }),
+        )
+        .await;
+        assert_eq!(stored.status(), StatusCode::OK);
+        let name = response_json(stored).await["name"]
+            .as_str()
+            .expect("generated credential name")
+            .to_string();
+        assert!(name.starts_with(GENERATED_CREDENTIAL_PREFIX));
+
+        let listed = get_response(app.clone(), "/credentials", None).await;
+        let listed = String::from_utf8(response_body(listed).await.to_vec()).unwrap();
+        assert!(listed.contains(&name));
+        assert!(
+            !listed.contains("sk-server-test-key"),
+            "a stored key must never be readable back: {listed}"
+        );
+
+        let (base_url, authorization) = scripted_model_index(r#"{"data":[{"id":"model-a"}]}"#);
+        let models = post_json(
+            app,
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key_env": name,
+                "base_url": base_url,
+            }),
+        )
+        .await;
+        assert_eq!(models.status(), StatusCode::OK);
+        let models = response_json(models).await;
+        assert_eq!(models["models"][0]["id"], "model-a");
+        assert_eq!(
+            authorization
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the model index was asked"),
+            "Bearer sk-server-test-key"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Naming a credential is not a way to probe for one: a name with nothing
+    /// behind it is refused before any request goes out, and a provider that
+    /// signs in through the browser takes no name at all.
+    #[tokio::test]
+    async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("model_index_by_name");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let unresolvable = post_json(
+            app.clone(),
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key_env": "NAC_CONFIG_absent",
+            }),
+        )
+        .await;
+        assert_eq!(unresolvable.status(), StatusCode::BAD_REQUEST);
+        let message = response_json(unresolvable).await["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("NAC_CONFIG_absent"),
+            "the refusal names what could not be resolved: {message}"
+        );
+
+        let managed = post_json(
+            app,
+            "/providers/models",
+            serde_json::json!({
+                "backend": "chatgpt-codex-responses",
+                "api_key_env": "NAC_CONFIG_absent",
+            }),
+        )
+        .await;
+        assert_eq!(managed.status(), StatusCode::BAD_REQUEST);
+        let message = response_json(managed).await["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("stored login"),
+            "a login backend explains that it takes no key: {message}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

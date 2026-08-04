@@ -15,13 +15,7 @@ import type {
 } from "@/app/types/api";
 
 export type RuntimeEventKind =
-  | "run"
-  | "tool"
-  | "thread"
-  | "assistant"
-  | "steering"
-  | "compaction"
-  | "error";
+  "run" | "tool" | "thread" | "assistant" | "steering" | "compaction" | "error";
 
 export interface RuntimeEvent {
   seq: number | null;
@@ -78,19 +72,22 @@ interface RuntimeState {
   streamSettled: boolean;
 }
 
-export const runtimeStore = createStore<RuntimeState>({
-  sessionId: null,
-  running: false,
-  activity: "",
-  error: null,
-  modelError: null,
-  streamStatus: "idle",
-  events: [],
-  threads: {},
-  streamText: "",
-  streamReasoning: "",
-  streamSettled: false,
-});
+export const runtimeStore = createStore<RuntimeState>(
+  {
+    sessionId: null,
+    running: false,
+    activity: "",
+    error: null,
+    modelError: null,
+    streamStatus: "idle",
+    events: [],
+    threads: {},
+    streamText: "",
+    streamReasoning: "",
+    streamSettled: false,
+  },
+  "runtime",
+);
 
 const { setState, getState, useStore } = runtimeStore;
 
@@ -121,7 +118,10 @@ export function applyAssistantDelta(delta: AssistantStreamDelta): void {
   setState((state) => {
     const base = state.streamSettled
       ? { streamText: "", streamReasoning: "" }
-      : { streamText: state.streamText, streamReasoning: state.streamReasoning };
+      : {
+          streamText: state.streamText,
+          streamReasoning: state.streamReasoning,
+        };
     return {
       streamSettled: false,
       streamText: base.streamText + (delta.text ?? ""),
@@ -157,7 +157,9 @@ export function pushLocalEvent(
   pushEvent({ seq: null, kind, text, isError, local: true });
 }
 
-function pushEvent(event: Omit<RuntimeEvent, "ts" | "local"> & { local?: boolean }) {
+function pushEvent(
+  event: Omit<RuntimeEvent, "ts" | "local"> & { local?: boolean },
+) {
   setState((state) => {
     const events =
       state.events.length >= MAX_EVENTS

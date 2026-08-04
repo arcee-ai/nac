@@ -26,6 +26,8 @@ import {
   formatStoreTime,
 } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
+import { PerfProfiler } from "@/app/lib/PerfProfiler";
+import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
 import { buildTranscript, type TranscriptTurn } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useRegenerateRun, useSubmitRun } from "@/app/services/queries";
@@ -106,14 +108,22 @@ export function Transcript({
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
     useStickToBottom();
 
+  perfRender("Transcript");
+
   const turns = useMemo(
     () =>
-      buildTranscript(snapshot, liveThreads, {
-        text: streamText,
-        reasoning: streamReasoning,
-      }),
+      perfTime("buildTranscript", () =>
+        buildTranscript(snapshot, liveThreads, {
+          text: streamText,
+          reasoning: streamReasoning,
+        }),
+      ),
     [snapshot, liveThreads, streamText, streamReasoning],
   );
+  perfMark("transcript:turns", {
+    fields: { turns: turns.length, streamChars: streamText.length },
+    throttleMs: 1000,
+  });
 
   const refreshIndex = useMemo(() => lastAnsweredUserIndex(turns), [turns]);
   const actionsBusy = running || submitRun.isPending || regenerateRun.isPending;
@@ -208,40 +218,46 @@ export function Transcript({
             </div>
           ) : null}
 
-          {turns.map((turn, index) =>
-            turn.kind === "user" ? (
-              <UserMessage
-                key={turn.key}
-                text={turn.text}
-                timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
-                actionsDisabled={actionsBusy}
-                onRefresh={
-                  refreshIndex === index
-                    ? () => void resend(turn.messageIndex)
-                    : null
-                }
-                onRevert={() =>
-                  setRevertTarget({
-                    messageIdx: turn.messageIndex,
-                    prompt: turn.text,
-                  })
-                }
-              />
-            ) : (
-              <ModelMessage
-                key={turn.key}
-                turn={turn}
-                model={model}
-                active={running && index === turns.length - 1}
-                isLast={index === turns.length - 1}
-                activity={activity}
-                selectedThread={panel === "threads" ? selectedThread : null}
-                selectedWorkset={panel === "worksets" ? selectedWorkset : null}
-                onSelectThread={focusThread}
-                onSelectWorkset={focusWorkset}
-              />
-            ),
-          )}
+          <PerfProfiler id="turns">
+            {turns.map((turn, index) =>
+              turn.kind === "user" ? (
+                <UserMessage
+                  key={turn.key}
+                  text={turn.text}
+                  timestamp={
+                    turn.createdAt ? formatStoreTime(turn.createdAt) : null
+                  }
+                  actionsDisabled={actionsBusy}
+                  onRefresh={
+                    refreshIndex === index
+                      ? () => void resend(turn.messageIndex)
+                      : null
+                  }
+                  onRevert={() =>
+                    setRevertTarget({
+                      messageIdx: turn.messageIndex,
+                      prompt: turn.text,
+                    })
+                  }
+                />
+              ) : (
+                <ModelMessage
+                  key={turn.key}
+                  turn={turn}
+                  model={model}
+                  active={running && index === turns.length - 1}
+                  isLast={index === turns.length - 1}
+                  activity={activity}
+                  selectedThread={panel === "threads" ? selectedThread : null}
+                  selectedWorkset={
+                    panel === "worksets" ? selectedWorkset : null
+                  }
+                  onSelectThread={focusThread}
+                  onSelectWorkset={focusWorkset}
+                />
+              ),
+            )}
+          </PerfProfiler>
 
           {showPending ? <UserMessage text={pendingText} pending /> : null}
 

@@ -10,6 +10,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
+import { perfRender } from "@/app/lib/perfDebug";
 
 interface UserMessageProps {
   text: string;
@@ -37,6 +38,7 @@ export function UserMessage({
   onRevert = null,
   actionsDisabled = false,
 }: UserMessageProps) {
+  perfRender("UserMessage");
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
