@@ -34,6 +34,7 @@ const state = {
   attentionSessions: new Set(),
   sessionRunActivity: new Map(),
   pendingEchoes: new Map(),
+  nowViewports: new Map(),
   runtimeTimer: null,
   launchMode: "local",
   launchCwdDrafts: { localSandbox: null, ssh: null },
@@ -51,6 +52,11 @@ const state = {
 };
 
 const ACTION_LEDGER_LIMIT = 10;
+const NOW_EVENT_LIMIT = 24;
+const THREAD_MODEL_ROLLUP_END_EVENTS = new Set([
+  "token_usage_updated", "tool_call_started", "tool_call_finished", "assistant_message",
+  "error", "run_finished", "thread_finished", "thread_started",
+]);
 const ORCHESTRATOR_MESSAGE_PAGE_LIMIT = 24;
 const THREAD_EVENT_PAGE_LIMIT = 50;
 const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
@@ -86,7 +92,7 @@ function bindElements() {
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
     "metricChanges", "sessionNavStatus", "stopRun", "viewToggle",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
-    "orchestratorChatContent",
+    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
     "promptInput", "sendPrompt", "commandMenu", "launchDialog", "launchForm",
@@ -118,6 +124,7 @@ function bindEvents() {
   el.stopRun.addEventListener("click", stopActiveRun);
   el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
   el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
+  el.orchestratorNowContent.addEventListener("scroll", handleNowPanelScroll, true);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
   el.focusContent.addEventListener("click", handleFocusClick);
   el.focusContent.addEventListener("scroll", handleFocusScroll, true);
@@ -1279,6 +1286,7 @@ function responseDurationAssignments(snapshot, messages = snapshot?.messages || 
 
 function handleFocusScroll(event) {
   const scroller = event.target;
+  if (scroller?.classList?.contains("now-panel-content")) recordNowPanelViewport(scroller);
   if (state.focusView?.type === "thread" && scroller?.classList?.contains("focus-activity")) {
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48) {
       loadOlderThreadEvents(state.focusView.name, scroller);
@@ -1776,6 +1784,7 @@ function focusScrollTargets() {
   if (el.focusContent) targets.push(["focus-content", el.focusContent]);
   const selectors = [
     ["thread-activity", ".focus-activity"],
+    ["thread-now", ".thread-now-panel .now-panel-content"],
     ["thread-episodes", ".focus-episodes"],
     ["worksets", ".focus-worksets-scroll"],
     ["workspace-files", ".focus-files"],
@@ -1894,6 +1903,7 @@ function renderWorkspace() {
   el.stopRun.disabled = !active;
   el.stopRun.hidden = false;
   renderOrchestratorChatRail(snapshot);
+  renderOrchestratorNow(snapshot);
   requestAnimationFrame(() => ensureOrchestratorScrollableHistory(state.focusRenderId));
   renderThreads(snapshot);
   renderComposerTarget();
@@ -2519,6 +2529,14 @@ function renderFocusView(snapshot) {
     el.focusContent.innerHTML = renderFocusSettings();
   }
   restoreFocusViewState(restoration, { renderId, prependAnchor });
+  if (view.type === "thread") {
+    const nowKey = threadNowKey(view.name);
+    requestAnimationFrame(() => {
+      if (renderId !== state.focusRenderId || focusViewIdentity() !== nextIdentity) return;
+      const scroller = el.focusContent.querySelector?.(".thread-now-panel .now-panel-content");
+      if (scroller?.dataset?.nowKey === nowKey) restoreNowPanelViewport(scroller);
+    });
+  }
 }
 
 function settingsContextIsCurrent(requestGeneration, sessionId) {
@@ -2784,6 +2802,292 @@ function renderOrchestratorGuidance(record) {
     ? `<span class="focus-guidance-status">queued…</span>`
     : "";
   return `<article class="focus-message is-guidance" data-role="user" data-guidance-status="${escapeAttr(status)}"><div class="focus-message-body"><div class="focus-message-copy">${renderFocusMarkdown(instruction)}</div></div>${statusBadge}</article>`;
+}
+
+function orchestratorNowKey(sessionId = state.currentId) {
+  return `orchestrator:${sessionId || ""}`;
+}
+
+function threadNowKey(name, sessionId = state.currentId) {
+  return `thread:${sessionId || ""}:${name || ""}`;
+}
+
+function recordNowPanelViewport(scroller) {
+  const key = String(scroller?.dataset?.nowKey || "");
+  if (!key) return null;
+  const viewport = {
+    scrollTop: Number(scroller.scrollTop || 0),
+    pinnedToBottom: Number(scroller.scrollHeight || 0) - Number(scroller.scrollTop || 0) - Number(scroller.clientHeight || 0) < 28,
+  };
+  state.nowViewports.set(key, viewport);
+  return viewport;
+}
+
+function handleNowPanelScroll(event) {
+  recordNowPanelViewport(event.target);
+}
+
+function restoreNowPanelViewport(scroller) {
+  const key = String(scroller?.dataset?.nowKey || "");
+  if (!key) return;
+  const viewport = state.nowViewports.get(key);
+  scroller.scrollTop = !viewport || viewport.pinnedToBottom
+    ? Number(scroller.scrollHeight || 0)
+    : viewport.scrollTop;
+}
+
+function latestOrchestratorActivityEnvelopes(snapshot, sessionId = state.currentId) {
+  const envelopes = state.events.get(sessionId) || [];
+  if (!envelopes.length) return [];
+  const activeRunId = snapshot?.active_run?.run_id == null ? "" : String(snapshot.active_run.run_id);
+  if (activeRunId) {
+    const matching = envelopes.filter((envelope) => String(envelope?.run_id || "") === activeRunId);
+    if (matching.length) return matching;
+  }
+  let startIndex = -1;
+  for (let index = 0; index < envelopes.length; index += 1) {
+    const sessionEvent = envelopes[index]?.event;
+    const agent = agentEvent(envelopes[index]);
+    if (sessionEvent?.type === "run_started"
+        || (agent?.type === COMPACTION_STARTED_EVENT_TYPE && !eventThreadName(agent))) startIndex = index;
+  }
+  return startIndex >= 0 ? envelopes.slice(startIndex) : envelopes.slice(-NOW_EVENT_LIMIT);
+}
+
+function orchestratorNowEntries(snapshot, sessionId = state.currentId) {
+  const entries = [];
+  const activeThreadModelCalls = new Set();
+  const finishThreadModelCall = (threadName, sequenceId) => {
+    if (!threadName || !activeThreadModelCalls.has(threadName)) return;
+    entries.push({
+      event: { type: "thread_model_call_finished", thread_name: threadName },
+      sequenceId,
+    });
+    activeThreadModelCalls.delete(threadName);
+  };
+  for (const envelope of latestOrchestratorActivityEnvelopes(snapshot, sessionId)) {
+    const sessionEvent = envelope?.event;
+    if (sessionEvent?.type === "agent") {
+      const event = sessionEvent.event;
+      const sequenceId = envelope.sequence_id ?? null;
+      const threadName = eventThreadName(event);
+      if (event && !threadName) entries.push({ event, sequenceId });
+      else if (event?.type === "model_call_started" && threadName) {
+        finishThreadModelCall(threadName, sequenceId);
+        entries.push({
+          event: {
+            type: "thread_model_call_started",
+            thread_name: threadName,
+            iteration: event.iteration,
+          },
+          sequenceId,
+        });
+        activeThreadModelCalls.add(threadName);
+      } else if (event && threadName && THREAD_MODEL_ROLLUP_END_EVENTS.has(event.type)) {
+        finishThreadModelCall(threadName, sequenceId);
+      }
+      continue;
+    }
+    if (["run_started", "run_completed", "run_failed"].includes(sessionEvent?.type)) {
+      entries.push({ event: { ...sessionEvent, type: `session_${sessionEvent.type}` }, sequenceId: envelope.sequence_id ?? null });
+    }
+  }
+  // Assistant text that accompanies a tool-call turn is canonical public
+  // output, but the transcript intentionally renders that turn as tool blocks.
+  // Associate the text with any call from the same turn so the Now panel can
+  // place the update immediately before the first observed tool starts. Raw
+  // reasoning fields and tool-result messages never enter this path.
+  const updatesByCallId = new Map();
+  for (const [messageIndex, message] of (snapshot?.messages || []).entries()) {
+    if (message?.role !== "assistant" || !message.content || !message.tool_calls?.length) continue;
+    const update = { id: `message-${messageIndex}`, content: String(message.content) };
+    for (const call of message.tool_calls) if (call?.id) updatesByCallId.set(String(call.id), update);
+  }
+  const insertedUpdates = new Set();
+  const expanded = [];
+  for (const entry of entries) {
+    const callId = entry.event?.type === "tool_call_started" && entry.event.call_id
+      ? String(entry.event.call_id)
+      : "";
+    const update = callId ? updatesByCallId.get(callId) : null;
+    if (update && !insertedUpdates.has(update.id)) {
+      insertedUpdates.add(update.id);
+      expanded.push({ event: { type: "assistant_update", content: update.content }, sequenceId: entry.sequenceId });
+    }
+    expanded.push(entry);
+  }
+  return expanded;
+}
+
+function latestThreadActivityEntries(entries) {
+  let startIndex = -1;
+  for (let index = 0; index < (entries || []).length; index += 1) {
+    if (entries[index]?.event?.type === "thread_started") startIndex = index;
+  }
+  if (startIndex < 0) {
+    for (let index = 0; index < (entries || []).length; index += 1) {
+      if (entries[index]?.event?.type === "run_started") startIndex = index;
+    }
+  }
+  return startIndex >= 0 ? entries.slice(startIndex) : (entries || []).slice(-NOW_EVENT_LIMIT);
+}
+
+function projectNowActivity(entries) {
+  const actions = [];
+  const calls = new Map();
+  const threadThinking = new Map();
+  let thinking = null;
+  const add = (label, result, detail, actionState, icon) => {
+    const action = { label, result, detail: compactActionDetail(detail, 320), state: actionState, icon };
+    actions.push(action);
+    return action;
+  };
+  const finishThinking = () => {
+    if (!thinking || thinking.state !== "live") return;
+    thinking.state = "done";
+    thinking.result = "Complete";
+    thinking = null;
+  };
+  const finishThreadThinking = (threadName) => {
+    const active = threadThinking.get(String(threadName || ""));
+    if (!active || active.state !== "live") return;
+    active.state = "done";
+    active.result = "Complete";
+    threadThinking.delete(String(threadName || ""));
+  };
+  const settleLive = (actionState = "done") => {
+    finishThinking();
+    threadThinking.clear();
+    for (const action of actions) {
+      if (action.state !== "live") continue;
+      action.state = actionState;
+      if (action.result === "Active" || action.result === "Running") action.result = actionState === "error" ? "Failed" : "Done";
+    }
+  };
+
+  for (const entry of entries || []) {
+    const event = entry?.event;
+    if (!event) continue;
+    if (event.type === "session_run_started") {
+      add("Run started", "Active", event.prompt_preview, "live", "●");
+    } else if (event.type === "model_call_started") {
+      finishThinking();
+      const pass = Number(event.iteration || 0);
+      thinking = add("Thinking", "Active", pass > 1 ? `Pass ${pass}` : "Preparing the next step", "live", "…");
+    } else if (event.type === "thread_model_call_started") {
+      const threadName = String(event.thread_name || "thread");
+      finishThreadThinking(threadName);
+      const pass = Math.max(1, Number(event.iteration || 1));
+      threadThinking.set(threadName, add("Thinking", "Active", `${threadName} · Pass ${pass}`, "live", "…"));
+    } else if (event.type === "thread_model_call_finished") {
+      finishThreadThinking(event.thread_name);
+    } else if (event.type === "tool_call_started") {
+      finishThinking();
+      const toolAction = {
+        name: event.name || "tool",
+        keyArgPreview: event.key_arg_preview || null,
+        argumentsDetail: formatToolArguments(event.args_preview),
+        detail: formatToolArguments(event.args_preview),
+      };
+      const action = add(toolDisplayName(event.name), "Running", formatActionArgs(toolAction), "live", actionIcon(toolAction));
+      if (event.call_id) calls.set(String(event.call_id), action);
+    } else if (event.type === "tool_call_finished") {
+      finishThinking();
+      const existing = event.call_id ? calls.get(String(event.call_id)) : null;
+      if (existing) {
+        existing.result = event.is_error ? "Failed" : "Done";
+        existing.state = event.is_error ? "error" : "done";
+      } else {
+        const fallback = { name: event.name || "tool" };
+        add(toolDisplayName(event.name), event.is_error ? "Failed" : "Done", "", event.is_error ? "error" : "done", actionIcon(fallback));
+      }
+    } else if (event.type === "thread_started") {
+      add("Assigned", "Running", event.action, "live", "→");
+    } else if (event.type === "assistant_update") {
+      finishThinking();
+      add("Update", "Shared", event.content, "done", "›");
+    } else if (event.type === "assistant_message") {
+      finishThinking();
+      add("Response ready", "Done", event.content, "done", "✓");
+    } else if (event.type === "error") {
+      settleLive("error");
+      add("Error", "Failed", event.message, "error", "✕");
+    } else if (event.type === "thread_finished") {
+      const succeeded = Number(event.exit_code) === 0 && !event.timed_out;
+      settleLive(succeeded ? "done" : "error");
+      const result = event.timed_out ? "Timed out" : succeeded ? "Done" : "Failed";
+      add("Thread finished", result, threadFinishDetail(event), succeeded ? "done" : "error", succeeded ? "✓" : "✕");
+    } else if (event.type === "session_run_completed") {
+      settleLive("done");
+      const duration = event.duration_ms == null ? "" : `Completed in ${formatDuration(Number(event.duration_ms))}`;
+      add("Run finished", "Done", duration, "done", "✓");
+    } else if (event.type === "session_run_failed") {
+      settleLive("error");
+      add("Run failed", "Failed", event.message, "error", "✕");
+    } else if (event.type === COMPACTION_STARTED_EVENT_TYPE) {
+      add("Compacting context", "Running", compactionReasonLabel(event.reason), "live", "↻");
+    } else if (COMPACTION_TERMINAL_EVENT_TYPES.has(event.type)) {
+      const existing = [...actions].reverse().find((action) => action.label === "Compacting context" && action.state === "live");
+      const presentation = compactionTerminalPresentation(event);
+      if (existing) {
+        existing.result = presentation.result === "failed" ? "Failed" : presentation.result === "completed" ? "Done" : "Unchanged";
+        existing.state = presentation.state;
+        existing.detail = presentation.detail;
+      } else add("Compacting context", presentation.result, presentation.detail, presentation.state, presentation.state === "error" ? "✕" : "↻");
+    } else if (event.type === "orchestrator_steering_queued" || event.type === "thread_steering_queued") {
+      add("Guidance", "Queued", event.instruction_preview, "live", "❯");
+    } else if (event.type === "orchestrator_steering_delivered" || event.type === "thread_steering_delivered") {
+      add("Guidance", "Delivered", event.instruction_preview, "done", "❯");
+    }
+  }
+  return actions.slice(-NOW_EVENT_LIMIT);
+}
+
+function nowPanelRows(actions) {
+  if (!actions.length) return `<div class="now-panel-empty">No activity yet.</div>`;
+  return `<ol class="now-event-list">${actions.map((action) => {
+    const detail = action.detail ? `<p title="${escapeAttr(action.detail)}">${escapeHtml(action.detail)}</p>` : "";
+    return `<li class="now-event" data-state="${escapeAttr(action.state || "recorded")}"><span class="now-event-icon" aria-hidden="true">${escapeHtml(action.icon || "·")}</span><div class="now-event-body"><div><strong>${escapeHtml(action.label || "Activity")}</strong><span>${escapeHtml(action.result || "")}</span></div>${detail}</div></li>`;
+  }).join("")}</ol>`;
+}
+
+function orchestratorNowPresentation(snapshot, actions) {
+  const lifecycle = orchestratorLifecycle(snapshot);
+  if (snapshot?.active_run || snapshot?.active_compaction || lifecycle.state === "running" || actions.some((action) => action.state === "live")) {
+    return { label: "Working", state: "running" };
+  }
+  if (lifecycle.state === "failed" || actions.at(-1)?.state === "error") return { label: "Failed", state: "failed" };
+  if (lifecycle.state === "completed" || actions.length) return { label: "Done", state: "done" };
+  return { label: "Idle", state: "idle" };
+}
+
+function threadNowPresentation(model, actions) {
+  if (model?.state === "queued") return { label: "Queued", state: "queued" };
+  if (model?.state === "running" || actions.some((action) => action.state === "live")) return { label: "Working", state: "running" };
+  if (String(model?.outcome || "").startsWith("failed") || actions.at(-1)?.state === "error") return { label: "Failed", state: "failed" };
+  return actions.length ? { label: "Done", state: "done" } : { label: "Idle", state: "idle" };
+}
+
+function renderOrchestratorNow(snapshot) {
+  if (!el.orchestratorNow || !el.orchestratorNowState || !el.orchestratorNowContent) return;
+  const actions = projectNowActivity(orchestratorNowEntries(snapshot));
+  const presentation = orchestratorNowPresentation(snapshot, actions);
+  const key = orchestratorNowKey();
+  el.orchestratorNow.dataset.state = presentation.state;
+  el.orchestratorNowState.dataset.state = presentation.state;
+  el.orchestratorNowState.textContent = presentation.label;
+  el.orchestratorNowContent.dataset.nowKey = key;
+  el.orchestratorNowContent.innerHTML = nowPanelRows(actions);
+  requestAnimationFrame(() => {
+    if (el.orchestratorNowContent?.dataset?.nowKey === key) restoreNowPanelViewport(el.orchestratorNowContent);
+  });
+}
+
+function renderThreadNow(name, model, entries) {
+  const actions = projectNowActivity(latestThreadActivityEntries(entries));
+  const presentation = threadNowPresentation(model, actions);
+  const key = threadNowKey(name);
+  return `<section class="now-panel thread-now-panel" data-state="${escapeAttr(presentation.state)}" aria-label="${escapeAttr(name || "Thread")} current activity"><header class="now-panel-header"><h3>Now</h3><span data-state="${escapeAttr(presentation.state)}">${escapeHtml(presentation.label)}</span></header><div class="now-panel-content" data-now-key="${escapeAttr(key)}" role="log" aria-live="polite" aria-label="Live ${escapeAttr(name || "thread")} activity" tabindex="0">${nowPanelRows(actions)}</div></section>`;
 }
 
 function renderOrchestratorChatRail(snapshot) {
@@ -3480,7 +3784,7 @@ function renderThreadFocus(name, model, snapshot) {
   const episodes = snapshot?.thread_episodes?.[name] || [];
   const episodeHtml = renderThreadEpisodes(episodes);
   const visibleActionCount = actions.filter(isTileVisibleAction).length;
-  return `<div class="focus-thread-layout"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section><section class="focus-episodes">${renderThreadCurrentAction(name, model, snapshot)}<div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
+  return `<div class="focus-thread-layout"><div class="focus-activity-column"><section class="focus-activity"><div class="focus-thread-column-title"><h3>Recent activity</h3><span>${visibleActionCount}</span></div>${renderFocusActions(actions)}${historyLoader}</section>${renderThreadNow(name, model, entries)}</div><section class="focus-episodes">${renderThreadCurrentAction(name, model, snapshot)}<div class="focus-thread-column-title"><h3>Episodes</h3><span>${episodes.length}</span></div>${episodeHtml}${renderThreadEvidence(name, model, snapshot, entries)}</section></div>`;
 }
 
 function threadInflightDispatch(name, snapshot) {

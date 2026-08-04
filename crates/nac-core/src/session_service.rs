@@ -2960,7 +2960,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_raw_cursor() {
+    async fn malformed_and_future_thread_events_are_nonfatal_and_advance_raw_cursor() {
         let (parts, store_path) = test_active_service("tolerant_events", "events-session");
         let valid = serde_json::to_string(&AgentEvent::AssistantMessage {
             thread_name: Some("worker-a".to_string()),
@@ -2995,8 +2995,13 @@ pub(super) mod tests {
 
         let snapshot = parts.service.frontend_snapshot().await.unwrap();
         assert_eq!(snapshot.thread_events["worker-a"].len(), 1);
+        assert_eq!(snapshot.thread_events["worker-b"].len(), 1);
+        assert!(matches!(
+            &snapshot.thread_events["worker-b"][0],
+            AgentEvent::ModelCallStarted { iteration: 1, .. }
+        ));
         assert_eq!(snapshot.thread_events["worker-d"].len(), 1);
-        assert_eq!(snapshot.thread_event_diagnostics.len(), 3);
+        assert_eq!(snapshot.thread_event_diagnostics.len(), 2);
         assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
         let serialized = serde_json::to_string(&snapshot).unwrap();
         assert!(!serialized.contains("CANARY"));

@@ -596,6 +596,7 @@ impl SessionEventBus {
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
         AgentEvent::RunStarted { thread_name, .. }
+        | AgentEvent::ModelCallStarted { thread_name, .. }
         | AgentEvent::ToolCallStarted { thread_name, .. }
         | AgentEvent::ToolCallFinished { thread_name, .. }
         | AgentEvent::AssistantMessage { thread_name, .. }
@@ -609,8 +610,7 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         // Usage updates are deliberately live-only. Persisting them would
         // consume slots in the user-facing thread-event pages and make a DB
         // written by this version unreadable by older AgentEvent enums.
-        AgentEvent::ModelCallStarted { .. }
-        | AgentEvent::TokenUsageUpdated { .. }
+        AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::ThreadLog { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
@@ -624,7 +624,7 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
 
 pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEvent> {
     Some(match event {
-        AgentEvent::ModelCallStarted { .. } | AgentEvent::ThreadLog { .. } => return None,
+        AgentEvent::ThreadLog { .. } => return None,
         AgentEvent::RunStarted { thread_name, .. } => AgentEvent::RunStarted {
             thread_name,
             prompt_preview: "run started".to_string(),
@@ -735,7 +735,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             thread_name,
             message: "operation failed".to_string(),
         },
-        event @ (AgentEvent::TokenUsageUpdated { .. }
+        event @ (AgentEvent::ModelCallStarted { .. }
+        | AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
         | AgentEvent::RunFinished { .. }
         | AgentEvent::OrchestratorCompactionStarted { .. }
@@ -1077,14 +1078,6 @@ impl EventSink {
     }
 
     pub fn emit(&self, event: AgentEvent) {
-        if matches!(event, AgentEvent::ModelCallStarted { .. }) {
-            if self.stderr_prefixed {
-                if let Ok(encoded) = serde_json::to_string(&event) {
-                    eprintln!("{}{}", STDERR_EVENT_PREFIX, encoded);
-                }
-            }
-            return;
-        }
         let Some(event) = sanitize_external_agent_event(event) else {
             return;
         };
@@ -1800,29 +1793,56 @@ mod tests {
     }
 
     #[test]
-    fn model_start_and_thread_logs_are_never_forwarded() {
+    fn model_start_is_forwarded_and_persisted_while_thread_logs_remain_internal() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_model_start_events_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-model-start");
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let channel_sink = EventSink::channel(sender);
-        let bus = SessionEventBus::new(Some("session-internal".to_string()));
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-model-start".to_string()),
+            path.clone(),
+        );
         let mut bus_receiver = bus.subscribe();
         let bus_sink = EventSink::bus(bus.clone());
-        for event in [
-            AgentEvent::ModelCallStarted {
-                thread_name: Some("worker".to_string()),
-                iteration: 1,
-            },
-            AgentEvent::ThreadLog {
-                name: "worker".to_string(),
-                line: "CANARY_LOG".to_string(),
-            },
-        ] {
-            channel_sink.emit(event.clone());
-            bus_sink.emit(event);
-        }
+        let model_start = AgentEvent::ModelCallStarted {
+            thread_name: Some("worker".to_string()),
+            iteration: 1,
+        };
+        channel_sink.emit(model_start.clone());
+        bus_sink.emit(model_start.clone());
+
+        assert_eq!(receiver.try_recv().unwrap(), model_start);
+        let envelope = bus_receiver.try_recv().unwrap();
+        assert!(matches!(
+            &envelope.event,
+            SessionEvent::Agent {
+                event: AgentEvent::ModelCallStarted {
+                    thread_name,
+                    iteration,
+                }
+            } if thread_name.as_deref() == Some("worker") && *iteration == 1
+        ));
+        assert_eq!(bus.recent_events(None, 10), vec![envelope]);
+        let stored =
+            crate::store::load_all_thread_events(&path, "session-model-start", 10).unwrap();
+        let stored_event: AgentEvent =
+            serde_json::from_str(&stored["worker"][0].event_json).unwrap();
+        assert_eq!(stored_event, model_start);
+
+        let thread_log = AgentEvent::ThreadLog {
+            name: "worker".to_string(),
+            line: "CANARY_LOG".to_string(),
+        };
+        channel_sink.emit(thread_log.clone());
+        bus_sink.emit(thread_log);
 
         assert!(receiver.try_recv().is_err());
         assert!(bus_receiver.try_recv().is_err());
-        assert!(bus.recent_events(None, 10).is_empty());
+        assert_eq!(bus.recent_events(None, 10).len(), 1);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

@@ -416,17 +416,25 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
     assert_eq!(steering[2].2, "expired");
     assert_eq!(steering[2].5.as_deref(), Some("expired-11"));
 
-    let event: (i64, String, String) = migrated
-        .query_row(
-            "SELECT id, thread_name, event_json FROM thread_events",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
+    let mut event_statement = migrated
+        .prepare("SELECT id, thread_name, event_json FROM thread_events ORDER BY id")
         .unwrap();
-    assert_eq!(event.0, 20);
-    assert_eq!(event.1, "worker-without-thread-row");
-    assert!(!event.2.contains("CANARY_COMMAND"));
-    let migrated_event: crate::events::AgentEvent = serde_json::from_str(&event.2).unwrap();
+    let events = event_statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap();
+    let events = events.collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    drop(event_statement);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].0, 20);
+    assert_eq!(events[0].1, "worker-without-thread-row");
+    assert!(!events[0].2.contains("CANARY_COMMAND"));
+    let migrated_event: crate::events::AgentEvent = serde_json::from_str(&events[0].2).unwrap();
     assert!(matches!(
         migrated_event,
         crate::events::AgentEvent::ToolCallStarted {
@@ -440,10 +448,19 @@ fn v1_to_v3_preserves_owned_rows_drops_orphans_and_sequences() {
             && args_preview.contains("execute")
             && key_arg_preview.as_deref() == Some("echo safe_cmd")
     ));
+    assert_eq!(events[1].0, 21);
+    assert_eq!(events[1].1, "worker-without-thread-row");
+    assert!(matches!(
+        serde_json::from_str::<crate::events::AgentEvent>(&events[1].2).unwrap(),
+        crate::events::AgentEvent::ModelCallStarted {
+            ref thread_name,
+            iteration: 1,
+        } if thread_name.as_deref() == Some("worker-without-thread-row")
+    ));
     let migrated_event_count: i64 = migrated
         .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(migrated_event_count, 1);
+    assert_eq!(migrated_event_count, 2);
 
     migrated
         .execute(

@@ -46,6 +46,9 @@ function loadApp(overrides = {}) {
       orchestratorLifecycle, buildOrchestratorActions, renderActionRows, selectTileActions,
       renderThreadEpisodes, renderThreadTile, renderFocusMessage, renderOrchestratorChatRail,
       renderThreadFocus, renderThreadCurrentAction, threadInflightDispatch,
+      orchestratorNowEntries, latestThreadActivityEntries, projectNowActivity,
+      orchestratorNowPresentation, threadNowPresentation, renderOrchestratorNow, renderThreadNow,
+      recordNowPanelViewport, restoreNowPanelViewport,
       renderFocusActions, formatActionArgs, isToolAction, isTileVisibleAction,
       formatToolCall, guidanceInstructionsFromRecords, dedupGuidanceActions, isThreadToolName,
       orchestratorGuidanceEntries, renderOrchestratorGuidance,
@@ -273,7 +276,7 @@ function installWorkspaceElements(uiInstance) {
   for (const name of [
     "sessionPicker", "sessionWorkspace", "sessionTitle", "renameSession", "sessionLocation",
     "metricModel", "metricContext", "metricTokens", "metricRun", "metricChanges", "stopRun", "viewToggle",
-    "orchestratorChatContent",
+    "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent",
     "threadGrid", "composerTarget", "composerTargetName",
     "sendPrompt", "promptInput", "commandMenu", "focusContent", "sessionLayout", "focusPanel", "focusState",
     "pickerSessionTotal", "sessionGrid", "pickerNavStatus", "sessionNavStatus",
@@ -294,12 +297,14 @@ function installComposerElements(uiInstance, sessionId, draft = "") {
 }
 
 test("production shell preserves privacy and mobile chat-only access", () => {
-  for (const id of ["sessionPicker", "sessionWorkspace", "focusPanel", "promptInput"]) {
+  for (const id of ["sessionPicker", "sessionWorkspace", "focusPanel", "promptInput",
+    "orchestratorNow", "orchestratorNowState", "orchestratorNowContent"]) {
     assert.match(indexSource, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(indexSource, /Session Events/i);
   assert.match(redesignSource, /\.session-layout \{[^}]*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\)/s);
   assert.match(redesignSource, /\.orchestrator-chat-content \{/);
+  assert.match(redesignSource, /\.now-panel-content \{[^}]*overflow: auto;/s);
 });
 
 test("session opening renders the workspace and starts snapshot and SSE without removed-surface references", () => {
@@ -676,6 +681,131 @@ scenario("Semantic orchestrator transcript", "tool turns are compact, grouped, a
   assert.match(html, /RAW_THREAD_ACTION/);
   assert.doesNotMatch(html, /data-role="tool"|Tool result|RAW_WORKSET_RESULT|RAW_THREAD_RESULT/);
   assert.doesNotMatch(html, /private intermediate narration|private reasoning|RAW_WORKSET_GOAL/);
+});
+
+test("orchestrator Now follows only the current run and projects live model and tool activity", () => {
+  const sessionId = "now-orchestrator";
+  ui.state.currentId = sessionId;
+  const sessionEvent = (sequenceId, runId, event) => ({
+    epoch_id: "now-epoch", sequence_id: sequenceId, run_id: runId, event,
+  });
+  const agent = (sequenceId, runId, event) => sessionEvent(sequenceId, runId, { type: "agent", event });
+  ui.state.events.set(sessionId, [
+    sessionEvent(1, "run-old", { type: "run_started", prompt_preview: "OLD PROMPT", started_at_epoch_ms: 1 }),
+    agent(2, "run-old", { type: "model_call_started", thread_name: null, iteration: 1 }),
+    sessionEvent(3, "run-old", { type: "run_completed", response: "OLD RESPONSE", duration_ms: 10 }),
+    sessionEvent(4, "run-new", { type: "run_started", prompt_preview: "build the panel", started_at_epoch_ms: 2 }),
+    agent(5, "run-new", { type: "model_call_started", thread_name: null, iteration: 1 }),
+    agent(6, "run-new", { type: "tool_call_started", thread_name: null, call_id: "call-1",
+      name: "read", args_preview: '{"path":"src/app.js"}', key_arg_preview: "src/app.js" }),
+    agent(7, "run-new", { type: "tool_call_finished", thread_name: null, call_id: "call-1",
+      name: "read", content_preview: "SECRET RAW RESULT", is_error: false }),
+    agent(8, "run-new", { type: "model_call_started", thread_name: null, iteration: 2 }),
+  ]);
+  const snapshot = sessionSnapshot(sessionId, {
+    active_run: { run_id: "run-new", started_at_epoch_ms: 2 },
+    messages: [{ role: "user", content: "build the panel" }, {
+      role: "assistant", content: "Checking the relevant UI files.", reasoning_text: "PRIVATE REASONING",
+      tool_calls: [{ id: "call-1", function: { name: "read", arguments: '{"path":"src/app.js"}' } }],
+    }],
+  });
+  const entries = ui.orchestratorNowEntries(snapshot);
+  const actions = plain(ui.projectNowActivity(entries));
+
+  assert.deepEqual(actions.map(({ label, result, state }) => ({ label, result, state })), [
+    { label: "Run started", result: "Active", state: "live" },
+    { label: "Thinking", result: "Complete", state: "done" },
+    { label: "Update", result: "Shared", state: "done" },
+    { label: "Read", result: "Done", state: "done" },
+    { label: "Thinking", result: "Active", state: "live" },
+  ]);
+  assert.equal(actions[2].detail, "Checking the relevant UI files.");
+  assert.equal(actions[3].detail, "src/app.js");
+  assert.equal(actions[4].detail, "Pass 2");
+  assert.doesNotMatch(JSON.stringify(actions), /OLD PROMPT|OLD RESPONSE|SECRET RAW RESULT|PRIVATE REASONING/,
+    "the panel resets per run and keeps raw tool results and reasoning private");
+  assert.deepEqual(plain(ui.orchestratorNowPresentation(snapshot, actions)), { label: "Working", state: "running" });
+
+  ui.state.events.get(sessionId).push(sessionEvent(9, "run-new", {
+    type: "run_completed", response: "finished", duration_ms: 1200,
+  }));
+  const finishedSnapshot = sessionSnapshot(sessionId);
+  const finishedActions = ui.projectNowActivity(ui.orchestratorNowEntries(finishedSnapshot));
+  assert.deepEqual(plain(ui.orchestratorNowPresentation(finishedSnapshot, finishedActions)), { label: "Done", state: "done" });
+  assert.equal(finishedActions.at(-1).label, "Run finished");
+});
+
+test("orchestrator Now rolls active thread model calls up as safe thinking updates", () => {
+  const sessionId = "now-thread-rollup";
+  const runId = "run-thread-rollup";
+  ui.state.currentId = sessionId;
+  const sessionEvent = (sequenceId, event) => ({
+    epoch_id: "rollup-epoch", sequence_id: sequenceId, run_id: runId, event,
+  });
+  const agent = (sequenceId, event) => sessionEvent(sequenceId, { type: "agent", event });
+  ui.state.events.set(sessionId, [
+    sessionEvent(1, { type: "run_started", prompt_preview: "implement it", started_at_epoch_ms: 1 }),
+    agent(2, { type: "model_call_started", thread_name: null, iteration: 1 }),
+    agent(3, { type: "tool_call_started", thread_name: null, call_id: "dispatch-1", name: "thread",
+      args_preview: '{"name":"impl/feature-layout","action":"implement layout"}', key_arg_preview: "impl/feature-layout" }),
+    agent(4, { type: "thread_started", name: "impl/feature-layout", action: "thread dispatched", source_threads: [] }),
+    agent(5, { type: "run_started", thread_name: "impl/feature-layout", prompt_preview: "run started" }),
+    agent(6, { type: "model_call_started", thread_name: "impl/feature-layout", iteration: 1 }),
+    agent(7, { type: "token_usage_updated", thread_name: "impl/feature-layout", usage: { input_tokens: 1 } }),
+    agent(8, { type: "tool_call_started", thread_name: "impl/feature-layout", call_id: "worker-tool",
+      name: "exec_command", args_preview: '{"operation":"execute"}' }),
+    agent(9, { type: "model_call_started", thread_name: "impl/feature-layout", iteration: 2 }),
+  ]);
+  const snapshot = sessionSnapshot(sessionId, { active_run: { run_id: runId, started_at_epoch_ms: 1 } });
+  const entries = plain(ui.orchestratorNowEntries(snapshot));
+  const actions = plain(ui.projectNowActivity(entries));
+
+  assert.deepEqual(actions.map(({ label, result, state }) => ({ label, result, state })), [
+    { label: "Run started", result: "Active", state: "live" },
+    { label: "Thinking", result: "Complete", state: "done" },
+    { label: "Thread", result: "Running", state: "live" },
+    { label: "Thinking", result: "Complete", state: "done" },
+    { label: "Thinking", result: "Active", state: "live" },
+  ]);
+  assert.equal(actions[3].detail, "impl/feature-layout · Pass 1");
+  assert.equal(actions[4].detail, "impl/feature-layout · Pass 2");
+  assert.doesNotMatch(JSON.stringify(entries), /worker-tool|exec_command|input_tokens/,
+    "the orchestrator roll-up includes only derived model-call state, not thread telemetry");
+});
+
+test("Now panel scroll state is independent and follows latest only while pinned", () => {
+  const scroller = { dataset: { nowKey: "orchestrator:scroll" }, scrollTop: 35, scrollHeight: 500, clientHeight: 100 };
+  const viewport = ui.recordNowPanelViewport(scroller);
+  assert.deepEqual(plain(viewport), { scrollTop: 35, pinnedToBottom: false });
+  scroller.scrollTop = 0;
+  ui.restoreNowPanelViewport(scroller);
+  assert.equal(scroller.scrollTop, 35, "a reader inspecting older Now entries is not pulled to the bottom");
+
+  scroller.scrollTop = 405;
+  ui.recordNowPanelViewport(scroller);
+  scroller.scrollHeight = 620;
+  scroller.scrollTop = 0;
+  ui.restoreNowPanelViewport(scroller);
+  assert.equal(scroller.scrollTop, 620, "a pinned panel follows newly appended activity");
+});
+
+test("rendering Orchestrator Now never changes transcript scroll position", () => {
+  const sessionId = "now-scroll-isolation";
+  ui.state.currentId = sessionId;
+  ui.el.orchestratorNow = fakeElement();
+  ui.el.orchestratorNowState = fakeElement();
+  ui.el.orchestratorNowContent = { ...fakeElement(), innerHTML: "", scrollTop: 0, scrollHeight: 420, clientHeight: 100 };
+  ui.el.orchestratorChatContent = { scrollTop: 187, scrollHeight: 900, clientHeight: 300 };
+  ui.state.nowViewports.set(`orchestrator:${sessionId}`, { scrollTop: 41, pinnedToBottom: false });
+  ui.state.events.set(sessionId, [{ epoch_id: "now", sequence_id: 1, run_id: "run", event: {
+    type: "run_started", prompt_preview: "do work", started_at_epoch_ms: 1,
+  } }]);
+
+  ui.renderOrchestratorNow(sessionSnapshot(sessionId, { active_run: { run_id: "run" } }));
+  assert.equal(ui.el.orchestratorChatContent.scrollTop, 187);
+  assert.equal(ui.el.orchestratorNowContent.scrollTop, 41);
+  assert.match(ui.el.orchestratorNowContent.innerHTML, /Run started/);
+  assert.equal(ui.el.orchestratorNowState.textContent, "Working");
 });
 
 test("compaction activity correlates lifecycle IDs and safely renders every terminal state", () => {
@@ -2058,6 +2188,39 @@ function renderWorkerFocus(snapshot, name = "worker") {
   const model = ui.buildThreadModels(snapshot).find((thread) => thread.name === name);
   return ui.renderThreadFocus(name, model, snapshot);
 }
+
+test("thread focus docks a Now panel that resets to the latest dispatch", () => {
+  const snapshot = sessionSnapshot("thread-now", {
+    threads: [{ name: "worker" }],
+    active_threads: ["worker"],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "OLD THREAD ACTION", source_threads: [] },
+      { type: "model_call_started", thread_name: "worker", iteration: 1 },
+      { type: "assistant_message", thread_name: "worker", content: "OLD THREAD RESPONSE" },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+      { type: "thread_started", name: "worker", action: "implement the Now panel", source_threads: [] },
+      { type: "model_call_started", thread_name: "worker", iteration: 1 },
+      { type: "tool_call_started", thread_name: "worker", call_id: "thread-call", name: "exec_command",
+        args_preview: '{"cmd":"node --test"}', key_arg_preview: "node --test" },
+      { type: "tool_call_finished", thread_name: "worker", call_id: "thread-call", name: "exec_command",
+        content_preview: "PRIVATE TEST OUTPUT", is_error: false },
+      { type: "model_call_started", thread_name: "worker", iteration: 2 },
+    ] },
+  });
+  const html = renderWorkerFocus(snapshot);
+  const now = html.match(/<section class="now-panel thread-now-panel".*?<\/section>/s)?.[0] || "";
+
+  assert.match(html, /class="focus-activity-column"/);
+  assert.match(now, /class="now-panel thread-now-panel" data-state="running"/);
+  assert.match(now, /<h3>Now<\/h3><span data-state="running">Working<\/span>/);
+  assert.match(now, /implement the Now panel/);
+  assert.match(now, /Command/);
+  assert.match(now, /node --test/);
+  assert.match(now, /Pass 2/);
+  assert.doesNotMatch(now, /OLD THREAD ACTION|OLD THREAD RESPONSE|PRIVATE TEST OUTPUT/);
+  assert.ok(html.indexOf("Recent activity") < html.indexOf("thread-now-panel"),
+    "thread history remains above the independently scrolling Now panel");
+});
 
 test("thread focus shows the in-flight dispatch instruction in a Current action section above Episodes", () => {
   const snapshot = sessionSnapshot("inflight-show", {
