@@ -1,8 +1,19 @@
-.PHONY: all build release install test test-rust test-assets check fmt clippy clean help
+.PHONY: all build dev release install test test-rust test-assets check fmt clippy clean help
 
 CARGO ?= cargo
 PKG := nac-server
 BIN := nac-web
+
+DEV_BIND ?= 127.0.0.1:3210
+DEV_URL ?= http://$(DEV_BIND)/
+
+ifeq ($(shell uname -s),Darwin)
+BROWSER_OPEN ?= open
+else
+BROWSER_OPEN ?= xdg-open
+endif
+
+export DEV_BIND DEV_URL BROWSER_OPEN
 
 # The workspace is not clippy-clean yet, so lints are advisory by default.
 # Run `make clippy CLIPPY_ARGS='-D warnings'` to fail on them.
@@ -17,6 +28,34 @@ all: build
 ## Build the nac-web binary (debug)
 build:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
+
+## Build and run nac-web, then open it in the default browser
+dev:
+	@command -v curl >/dev/null 2>&1 || { \
+			printf '%s\n' 'error: make dev requires curl'; \
+			exit 1; \
+		}; \
+		command -v "$$BROWSER_OPEN" >/dev/null 2>&1 || { \
+			printf 'error: make dev requires %s\n' "$$BROWSER_OPEN"; \
+			exit 1; \
+		}; \
+		if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$${DEV_URL}health" >/dev/null 2>&1; then \
+			printf 'error: NAC is already responding at %s\n' "$$DEV_URL"; \
+			exit 1; \
+		fi; \
+		$(CARGO) run --locked -p $(PKG) --bin $(BIN) -- --bind "$$DEV_BIND" & \
+		server_pid=$$!; \
+		trap 'kill "$$server_pid" 2>/dev/null || true' EXIT; \
+		trap 'exit 130' INT TERM; \
+		until curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$${DEV_URL}health" >/dev/null 2>&1; do \
+			if ! kill -0 "$$server_pid" 2>/dev/null; then \
+				wait "$$server_pid"; \
+				exit $$?; \
+			fi; \
+			sleep 0.1; \
+		done; \
+		"$$BROWSER_OPEN" "$$DEV_URL" || exit $$?; \
+		wait "$$server_pid"
 
 ## Build the nac-web binary (release)
 release:
@@ -59,6 +98,7 @@ help:
 		'' \
 		'Targets:' \
 		'  build        Build nac-web (debug) [default]' \
+		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  test         Run Rust tests and web asset checks' \
