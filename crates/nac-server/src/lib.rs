@@ -545,7 +545,10 @@ impl SessionManager {
             return Ok(Vec::new());
         }
 
-        let summaries = view::list_sessions(&self.inner.store_path)?;
+        let store_path = self.inner.store_path.clone();
+        let summaries = tokio::task::spawn_blocking(move || view::list_sessions(&store_path))
+            .await
+            .context("session list task failed")??;
         let mut sessions = {
             let active = self.inner.active_sessions.read().await;
             summaries
