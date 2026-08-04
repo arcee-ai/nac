@@ -447,6 +447,36 @@ body.session-reordering { cursor: grabbing; user-select: none; }
 .orchestrator-chat-content .focus-message {
   padding: var(--sp-2) 0;
 }
+.fork-boundary {
+  display: grid;
+  grid-template-columns: minmax(12px, 1fr) auto minmax(12px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  margin: 1px 0;
+}
+.fork-boundary::before,
+.fork-boundary::after { content: ""; height: 1px; background: var(--line); }
+.fork-boundary-action {
+  min-width: 34px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-faint);
+  font: var(--fw-medium) var(--fs-xs)/var(--lh-none) var(--mono);
+  letter-spacing: var(--ls-wide);
+  cursor: pointer;
+}
+.fork-boundary-action:hover { border-color: #3b3b3b; background: var(--surface-hover); color: var(--ink); }
+.fork-boundary-action:focus-visible {
+  border-color: var(--paper);
+  outline: 2px solid var(--paper);
+  outline-offset: 2px;
+  background: var(--surface-hover);
+  color: var(--paper);
+}
 
 .now-panel { min-width: 0; min-height: 0; flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: #101010; }
 .now-panel-header { min-height: 32px; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 14px; border-bottom: 1px solid #242424; }

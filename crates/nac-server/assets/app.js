@@ -127,6 +127,7 @@ function bindEvents() {
   el.stopRun.addEventListener("click", stopActiveRun);
   el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
   el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
+  el.orchestratorChatContent.addEventListener("click", handleForkBoundaryClick);
   el.orchestratorNowContent.addEventListener("scroll", handleNowPanelScroll, true);
   el.liveThreadUpdates.addEventListener("change", updateLiveThreadUpdates);
   el.closeFocusPanel.addEventListener("click", closeFocusView);
@@ -1020,6 +1021,53 @@ function syncRouteFromHash() {
   if (sessionEntry(sessionId) && state.currentId !== sessionId) openSession(sessionId, false);
 }
 
+function forkWarning() {
+  return "Fork this conversation? The selected conversation history and execution configuration are copied, including sensitive persisted settings. Filesystem and Git working-tree state are shared with the source session.";
+}
+
+async function forkSessionSnapshot(sourceSessionId, { title = null, throughMessageIndex = null, confirmSharedState = true } = {}) {
+  const sourceId = String(sourceSessionId || "");
+  if (!sourceId || !sessionEntry(sourceId)) return null;
+  const boundary = throughMessageIndex === null || throughMessageIndex === undefined || throughMessageIndex === ""
+    ? Number.NaN
+    : Number(throughMessageIndex);
+  if (!Number.isSafeInteger(boundary) || boundary < 0) {
+    if (state.currentId === sourceId) showToast("Fork boundary is unavailable", true);
+    return null;
+  }
+  if (confirmSharedState && typeof window.confirm === "function" && !window.confirm(forkWarning())) return null;
+
+  const body = { through_message_index: boundary };
+  const normalizedTitle = title == null ? "" : String(title).trim();
+  if (normalizedTitle) body.title = normalizedTitle;
+
+  try {
+    const snapshot = await apiPost(`/sessions/${encodeURIComponent(sourceId)}/fork`, body);
+    const childId = String(snapshot?.metadata?.session_id || "");
+    if (!childId || childId === sourceId) throw new Error("Fork response did not contain a valid child session");
+    upsertCreatedSession(snapshot);
+    acceptSnapshot(childId, snapshot);
+    openSession(childId, true, { fetchSnapshot: false });
+    // Invalidate an in-flight list response and retain the child until a later
+    // authoritative list includes it. This is list reconciliation, not a
+    // redundant child snapshot GET.
+    void loadSessions({ workspaceStats: false, preserveSessionId: childId });
+    showToast("Fork created. Filesystem and Git state remain shared.");
+    return snapshot;
+  } catch (error) {
+    // No client state changes occur before a successful, identity-checked
+    // response, so the selected source and its snapshot survive every failure.
+    if (state.currentId === sourceId) showToast(error.message, true);
+    return null;
+  }
+}
+
+function handleForkBoundaryClick(event) {
+  const action = event.target.closest?.("[data-fork-boundary-index]");
+  if (!action) return;
+  forkSessionSnapshot(state.currentId, { throughMessageIndex: action.dataset.forkBoundaryIndex });
+}
+
 function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}) {
   if (!sessionEntry(sessionId)) return;
   const previousSessionId = state.currentId;
@@ -1153,11 +1201,15 @@ function mergeSnapshotMessageWindow(sessionId, snapshot) {
   const previous = state.messageWindows.get(sessionId);
   let start = Number(page.start || 0);
   let messages = incoming;
+  let canonicalIndices = Array.isArray(page.canonical_indices) ? page.canonical_indices.slice() : [];
   if (previous && previous.start <= start && previous.total <= Number(page.total || 0)) {
     const prefixLength = start - previous.start;
     if (prefixLength <= previous.messages.length) {
       start = previous.start;
       messages = [...previous.messages.slice(0, prefixLength), ...incoming];
+      canonicalIndices = canonicalIndices.length === incoming.length
+        ? [...(previous.canonicalIndices || []).slice(0, prefixLength), ...canonicalIndices]
+        : [];
     }
   }
   const windowState = {
@@ -1167,11 +1219,13 @@ function mergeSnapshotMessageWindow(sessionId, snapshot) {
     hasOlder: start > 0,
     loading: false,
     messages,
+    canonicalIndices: canonicalIndices.length === messages.length ? canonicalIndices : [],
   };
   state.messageWindows.set(sessionId, windowState);
   snapshot.messages = messages;
   snapshot.message_page = {
     ...page,
+    canonical_indices: windowState.canonicalIndices,
     start,
     has_older: windowState.hasOlder,
   };
@@ -1182,7 +1236,13 @@ function prependMessageWindow(sessionId, snapshot, response) {
   const current = state.messageWindows.get(sessionId);
   const page = response?.page;
   if (!current || !page || Number(page.end) !== current.start) return false;
-  const messages = [...(response.messages || []), ...current.messages];
+  const incoming = response.messages || [];
+  const incomingCanonical = Array.isArray(page.canonical_indices) ? page.canonical_indices : [];
+  const messages = [...incoming, ...current.messages];
+  const canonicalIndices = incomingCanonical.length === incoming.length
+      && (current.canonicalIndices || []).length === current.messages.length
+    ? [...incomingCanonical, ...current.canonicalIndices]
+    : [];
   const windowState = {
     start: Number(page.start || 0),
     end: current.end,
@@ -1190,11 +1250,13 @@ function prependMessageWindow(sessionId, snapshot, response) {
     hasOlder: Boolean(page.has_older),
     loading: false,
     messages,
+    canonicalIndices,
   };
   state.messageWindows.set(sessionId, windowState);
   snapshot.messages = messages;
   snapshot.message_page = {
     ...(snapshot.message_page || {}),
+    canonical_indices: canonicalIndices,
     start: windowState.start,
     end: windowState.end,
     total: windowState.total,
@@ -3140,15 +3202,26 @@ function renderOrchestratorChatRail(snapshot) {
   const pending = effectivePendingMessages(state.currentId, snapshot);
   const guidance = orchestratorGuidanceEntries(snapshot);
   const dispatchContext = threadDispatchContext(snapshot);
-  const transcriptEntries = [
-    ...messages.map((message) => ({ message })),
-    ...guidance.map((record) => ({ guidance: record })),
-    ...pending.map((message) => ({ message })),
-  ];
-  const transcript = transcriptEntries
-    .filter((entry) => entry.guidance || (entry.message?.role !== "system" && entry.message?.role !== "tool"))
-    .map((entry) => entry.guidance ? renderOrchestratorGuidance(entry.guidance) : renderFocusMessage(entry.message, dispatchContext))
-    .join("");
+  const canonicalIndices = state.messageWindows.get(state.currentId)?.canonicalIndices
+    || snapshot?.message_page?.canonical_indices || [];
+  const transcriptEntries = messages.map((message, index) => ({
+    message,
+    canonicalIndex: canonicalIndices[index],
+    previousMessage: index > 0 ? messages[index - 1] : null,
+    previousCanonicalIndex: index > 0 ? canonicalIndices[index - 1] : null,
+  }));
+  const transcript = [
+    ...transcriptEntries.map((entry) => {
+      if (entry.message?.role === "system" || entry.message?.role === "tool") return "";
+      const renderedMessage = renderFocusMessage(entry.message, dispatchContext);
+      if (!renderedMessage) return "";
+      return `${forkBoundaryControl(
+        entry.previousMessage, entry.message, entry.previousCanonicalIndex, entry.canonicalIndex,
+      )}${renderedMessage}`;
+    }),
+    ...guidance.map((record) => renderOrchestratorGuidance(record)),
+    ...pending.map((message) => renderFocusMessage(message, dispatchContext)),
+  ].join("");
   const messageWindow = state.messageWindows.get(state.currentId);
   const historyLoader = messageWindow?.hasOlder
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
@@ -3617,6 +3690,16 @@ function threadDispatchStatus(call, context) {
   // active-thread snapshot has already dropped it.
   if (model?.start) return { state: "running", label: "Running" };
   return { state: "queued", label: "Queued" };
+}
+
+function forkBoundaryControl(previousMessage, message, previousCanonicalIndex, canonicalIndex) {
+  if (previousMessage?.role !== "assistant" || previousMessage?.pending
+      || message?.role !== "user" || message?.pending) return "";
+  const previousIndex = previousCanonicalIndex;
+  const currentIndex = canonicalIndex;
+  if (!Number.isSafeInteger(previousIndex) || previousIndex < 0
+      || !Number.isSafeInteger(currentIndex) || currentIndex !== previousIndex + 1) return "";
+  return `<div class="fork-boundary" role="separator"><button class="fork-boundary-action" type="button" data-fork-boundary-index="${previousIndex}" aria-label="Fork before this user message" title="Fork before this user message; filesystem and Git state remain shared">fork</button></div>`;
 }
 
 function renderOrchestratorToolTurn(message, dispatchContext = null) {

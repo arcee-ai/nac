@@ -60,6 +60,7 @@ function loadApp(overrides = {}) {
       commitSessionReorder, mergeSnapshotMessageWindow, prependMessageWindow,
       workspaceSummaryPresentation, applyWorkspaceSummaryMetric, renderPicker, loadStoreInfo,
       renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot, loadOlderOrchestratorMessages,
+      forkSessionSnapshot, forkBoundaryControl, handleForkBoundaryClick,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
       notePendingEcho, displayPromptFromMessage, pendingEchoCoveredByCanonical,
       reconcilePendingEcho, effectivePendingMessages,
@@ -4559,3 +4560,148 @@ for (const [group, rows] of scenarioGroups) {
     if (failures.length) throw new AggregateError(failures, `${group} scenarios failed`);
   });
 }
+
+
+test("dashboard fork uses the returned snapshot, selects the child, and preserves it across stale list refreshes", async () => {
+  const { FakeEventSource, instances } = eventSourceHarness();
+  const staleList = deferred();
+  const freshList = deferred();
+  const requests = [];
+  let listCount = 0;
+  const child = sessionSnapshot("fork-child", {
+    metadata: { session_id: "fork-child", cwd: "/shared", model: "test-model", backend: "test" },
+    sessions: [sessionListEntry("fork-child", { summary: { title: "Child" } }).summary],
+    messages: [{ role: "assistant", content: "copied" }],
+    message_page: { start: 0, end: 1, total: 1, has_older: false, canonical_indices: [3] },
+    fork: { source_session_id: "source", copied_message_count: 4, source_message_count: 8, created_at: "now" },
+  });
+  const isolated = loadApp({ EventSource: FakeEventSource, fetch(path, options = {}) {
+    const method = options.method || "GET";
+    requests.push({ path, method, body: options.body || null });
+    if (method === "POST") return jsonResponse(child);
+    if (path.startsWith("/sessions")) {
+      listCount += 1;
+      return listCount === 1 ? staleList.promise : freshList.promise;
+    }
+    throw new Error(`unexpected request ${method} ${path}`);
+  } });
+  installWorkspaceElements(isolated);
+  isolated.state.sessions = [sessionListEntry("source")];
+  isolated.state.currentId = "source";
+  isolated.state.snapshots.set("source", sessionSnapshot("source"));
+
+  const activeRefresh = isolated.loadSessions();
+  const result = await isolated.forkSessionSnapshot("source", {
+    title: "Child", throughMessageIndex: 3, confirmSharedState: false,
+  });
+  assert.equal(result.metadata.session_id, "fork-child");
+  assert.equal(isolated.state.currentId, "fork-child");
+  assert.equal(isolated.state.snapshots.get("fork-child"), result);
+  assert.deepEqual(JSON.parse(requests.find((request) => request.method === "POST").body), {
+    title: "Child", through_message_index: 3,
+  });
+  assert.equal(requests.some((request) => request.path.startsWith("/sessions/fork-child?")), false,
+    "the immediately usable response avoids a redundant child GET");
+  assert.equal(instances.at(-1).url, "/sessions/fork-child/events/stream?limit=512");
+
+  staleList.resolve(jsonResponse([sessionListEntry("source")]));
+  await flushPromises();
+  await flushPromises();
+  freshList.resolve(jsonResponse([sessionListEntry("source")]));
+  await activeRefresh;
+  assert.ok(isolated.state.sessions.some((entry) => entry.summary.session_id === "fork-child"),
+    "the fork remains retained until an authoritative list observes it");
+});
+
+test("fork failures and cancelled shared-state warnings leave the source selected and unchanged", async () => {
+  let posts = 0;
+  let confirmation = "";
+  const isolated = loadApp({
+    window: { confirm: (message) => { confirmation = message; return false; } },
+    fetch: async () => { posts += 1; return errorResponse(409, { error: "source is busy" }); },
+  });
+  installWorkspaceElements(isolated);
+  const source = sessionSnapshot("source", { messages: [{ role: "assistant", content: "safe" }] });
+  isolated.state.sessions = [sessionListEntry("source")];
+  isolated.state.currentId = "source";
+  isolated.state.snapshots.set("source", source);
+  assert.equal(await isolated.forkSessionSnapshot("source"), null, "a boundary is required");
+  assert.equal(posts, 0);
+  assert.equal(await isolated.forkSessionSnapshot("source", { throughMessageIndex: 3 }), null);
+  assert.match(confirmation, /Filesystem and Git working-tree state are shared/);
+  assert.equal(posts, 0);
+  assert.equal(await isolated.forkSessionSnapshot("source", { throughMessageIndex: 3, confirmSharedState: false }), null);
+  assert.equal(isolated.state.currentId, "source");
+  assert.equal(isolated.state.snapshots.get("source"), source);
+  assert.equal(isolated.state.sessions.length, 1);
+});
+
+test("fork interstitial appears immediately before an adjacent persisted user and uses raw canonical indices", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "source";
+  isolated.state.messageWindows.set("source", {
+    start: 4, end: 6, total: 9, hasOlder: true, loading: false,
+    messages: [{ role: "assistant", content: "answer" }, { role: "user", content: "follow-up" }],
+    canonicalIndices: [5, 6],
+  });
+  isolated.renderOrchestratorChatRail({ messages: [
+    { role: "assistant", content: "answer" }, { role: "user", content: "follow-up" },
+  ] });
+  const html = isolated.el.orchestratorChatContent.innerHTML;
+  assert.match(html, /data-fork-boundary-index="5"/);
+  assert.ok(html.indexOf("fork-boundary") < html.indexOf('data-role="user"'),
+    "the boundary control precedes the eligible user message");
+  assert.match(html, /aria-label="Fork before this user message"/);
+  assert.match(html, /filesystem and Git state remain shared/i);
+  assert.doesNotMatch(html, /Fork from here|data-fork-message-index/);
+});
+
+test("fork interstitial rejects noncanonical, nonadjacent, hidden, pending, and synthetic boundaries", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "source";
+
+  const render = (messages, canonicalIndices) => {
+    isolated.state.messageWindows.set("source", {
+      start: 0, end: messages.length, total: messages.length, hasOlder: false, loading: false,
+      messages, canonicalIndices,
+    });
+    isolated.renderOrchestratorChatRail({ messages });
+    return isolated.el.orchestratorChatContent.innerHTML;
+  };
+
+  const ineligible = [
+    [[{ role: "user", content: "first" }], [0]],
+    [[{ role: "user", content: "one" }, { role: "user", content: "two" }], [0, 1]],
+    [[{ role: "assistant", content: "last" }], [2]],
+    [[{ role: "assistant", content: "a" }, { role: "user", content: "u" }], [4, 8]],
+    [[{ role: "assistant", content: "a" }, { role: "user", content: "u" }], []],
+    [[{ role: "assistant", content: "a" }, { role: "system", content: "hidden" }, { role: "user", content: "u" }], [4, 5, 6]],
+    [[{ role: "assistant", content: "a" }, { role: "tool", content: "hidden" }, { role: "user", content: "u" }], [4, 5, 6]],
+    [[{ role: "assistant", content: "a" }, { role: "user", content: "pending", pending: true }], [4, 5]],
+  ];
+  for (const [messages, indices] of ineligible) {
+    assert.doesNotMatch(render(messages, indices), /data-fork-boundary-index/);
+  }
+
+  assert.equal(isolated.forkBoundaryControl(
+    { role: "assistant", content: "a" }, { role: "user", content: "guidance", pending: true }, 4, 5,
+  ), "", "synthetic pending rows cannot create boundaries");
+  assert.doesNotMatch(isolated.renderOrchestratorGuidance({
+    instruction: "guide the active run", status: "queued",
+  }), /data-fork-boundary-index/, "guidance rows never contain fork controls");
+});
+
+test("fork controls are absent from the header, assistant bodies, and command UI", () => {
+  const isolated = loadApp();
+  assert.doesNotMatch(indexSource, /id="forkSession"/);
+  assert.doesNotMatch(isolated.renderFocusMessage({ role: "assistant", content: "answer" }, null, 7), /fork/i);
+  assert.doesNotMatch(isolated.renderCommandReference(), /\/fork\b/);
+  isolated.el.promptInput = { value: "/fork", style: {}, scrollHeight: 40, setAttribute() {}, removeAttribute() {} };
+  isolated.el.commandMenu = { hidden: true, innerHTML: "" };
+  isolated.renderCommandMenu();
+  assert.doesNotMatch(isolated.el.commandMenu.innerHTML, /fork/);
+  assert.match(redesignSource, /\.fork-boundary-action:focus-visible/);
+  assert.match(redesignSource, /outline:\s*2px solid/);
+});
