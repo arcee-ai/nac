@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
+import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
 import { perfRender } from "@/app/lib/perfDebug";
 
 import bash from "highlight.js/lib/languages/bash";
@@ -136,9 +137,52 @@ function buildComponents(streaming: boolean) {
   };
 }
 
+// Built once per mode rather than per render: react-markdown passes these
+// straight through as element types, so a fresh object would give every
+// paragraph, heading and list item a new type on each delta and React would
+// remount the whole message instead of updating its text.
+const streamingComponents = buildComponents(true);
+const staticComponents = buildComponents(false);
+
+function Parsed({
+  source,
+  streaming,
+}: {
+  source: string;
+  streaming: boolean;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
+      rehypePlugins={rehypePlugins as any}
+      components={streaming ? streamingComponents : staticComponents}
+    >
+      {source}
+    </ReactMarkdown>
+  );
+}
+
+/**
+ * A block of a message that is still streaming. Memoized because a stream only
+ * appends: once a later block exists this text is settled, and re-parsing it is
+ * pure waste that grows with every delta.
+ */
+const StreamedBlock = memo(function StreamedBlock({
+  source,
+}: {
+  source: string;
+}) {
+  return <Parsed source={source} streaming />;
+});
+
 /**
  * Heavy half of the markdown support: the parser plus the syntax highlighter.
  * Always reach it through `lib/markdown`, which loads this chunk on demand.
+ *
+ * A live message is parsed block by block so a delta only costs the block it
+ * landed in; a finished one is parsed as a single document, which is both the
+ * canonical reading of the text and cheap now that it is parsed once.
  */
 const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
@@ -147,14 +191,14 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   perfRender("Markdown");
   return (
     <PerfProfiler id="markdown">
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
-        rehypePlugins={rehypePlugins as any}
-        components={buildComponents(streaming)}
-      >
-        {children}
-      </ReactMarkdown>
+      {streaming ? (
+        splitMarkdownBlocks(children).map((source, index) => (
+          // Blocks are append-only, so their position is their identity.
+          <StreamedBlock key={index} source={source} />
+        ))
+      ) : (
+        <Parsed source={children} streaming={false} />
+      )}
     </PerfProfiler>
   );
 });

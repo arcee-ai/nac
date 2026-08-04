@@ -28,7 +28,11 @@ import {
 import type { SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
-import { buildTranscript, type TranscriptTurn } from "@/app/lib/transcript";
+import {
+  buildTranscript,
+  withStreamedOutput,
+  type TranscriptTurn,
+} from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useRegenerateRun, useSubmitRun } from "@/app/services/queries";
 import {
@@ -110,15 +114,21 @@ export function Transcript({
 
   perfRender("Transcript");
 
+  // Split so a delta rebuilds only the turn it lands in: the snapshot half is
+  // untouched between refetches, and the stream half hands its earlier turns
+  // straight back, which is what keeps the memoized rows from re-rendering.
+  const snapshotTurns = useMemo(
+    () =>
+      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads)),
+    [snapshot, liveThreads],
+  );
   const turns = useMemo(
     () =>
-      perfTime("buildTranscript", () =>
-        buildTranscript(snapshot, liveThreads, {
-          text: streamText,
-          reasoning: streamReasoning,
-        }),
-      ),
-    [snapshot, liveThreads, streamText, streamReasoning],
+      withStreamedOutput(snapshotTurns, {
+        text: streamText,
+        reasoning: streamReasoning,
+      }),
+    [snapshotTurns, streamText, streamReasoning],
   );
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
@@ -138,26 +148,36 @@ export function Transcript({
    * starts the new run under one lease — the prompt itself comes from the
    * transcript, so nothing here has to reconstruct it.
    */
+  // The mutation object is rebuilt on every render, but its `mutateAsync` is
+  // not — depending on the object would hand the bubble a new handler per delta
+  // and undo its memoization.
+  const regenerate = regenerateRun.mutateAsync;
   const resend = useCallback(
-    async (messageIdx: number) => {
+    (messageIdx: number) => {
       if (actionsBusy) return;
-      try {
-        const response = await regenerateRun.mutateAsync({
-          id: sessionId,
-          messageIdx,
-        });
-        pushLocalEvent(
-          "run",
-          `▶ resent: ${response.display_prompt.slice(0, 80)}`,
-        );
-      } catch (err) {
-        const message = errorMessage(err);
-        pushLocalEvent("error", `resend failed: ${message}`, true);
-        toast.error(`Failed to resend: ${message}`);
-      }
+      void (async () => {
+        try {
+          const response = await regenerate({
+            id: sessionId,
+            messageIdx,
+          });
+          pushLocalEvent(
+            "run",
+            `▶ resent: ${response.display_prompt.slice(0, 80)}`,
+          );
+        } catch (err) {
+          const message = errorMessage(err);
+          pushLocalEvent("error", `resend failed: ${message}`, true);
+          toast.error(`Failed to resend: ${message}`);
+        }
+      })();
     },
-    [actionsBusy, regenerateRun, sessionId, toast],
+    [actionsBusy, regenerate, sessionId, toast],
   );
+
+  const openRevert = useCallback((messageIdx: number, prompt: string) => {
+    setRevertTarget({ messageIdx, prompt });
+  }, []);
 
   const model = snapshot?.metadata.model ?? "";
   const workspace = snapshot?.workspace ?? null;
@@ -185,14 +205,20 @@ export function Transcript({
   // row below would be a second pill for the same run.
   const liveTurn = running && turns[turns.length - 1]?.kind === "model";
 
-  const focusThread = (name: string) => {
-    selectThread(name);
-    onFocusPanel("threads");
-  };
-  const focusWorkset = (id: string) => {
-    selectWorkset(id);
-    onFocusPanel("worksets");
-  };
+  const focusThread = useCallback(
+    (name: string) => {
+      selectThread(name);
+      onFocusPanel("threads");
+    },
+    [onFocusPanel],
+  );
+  const focusWorkset = useCallback(
+    (id: string) => {
+      selectWorkset(id);
+      onFocusPanel("worksets");
+    },
+    [onFocusPanel],
+  );
 
   const runError = error && !running ? error : null;
   // Prefer the session notice when both fire; a broken config already explains
@@ -227,18 +253,10 @@ export function Transcript({
                   timestamp={
                     turn.createdAt ? formatStoreTime(turn.createdAt) : null
                   }
+                  messageIndex={turn.messageIndex}
                   actionsDisabled={actionsBusy}
-                  onRefresh={
-                    refreshIndex === index
-                      ? () => void resend(turn.messageIndex)
-                      : null
-                  }
-                  onRevert={() =>
-                    setRevertTarget({
-                      messageIdx: turn.messageIndex,
-                      prompt: turn.text,
-                    })
-                  }
+                  onRefresh={refreshIndex === index ? resend : null}
+                  onRevert={openRevert}
                 />
               ) : (
                 <ModelMessage
@@ -247,7 +265,9 @@ export function Transcript({
                   model={model}
                   active={running && index === turns.length - 1}
                   isLast={index === turns.length - 1}
-                  activity={activity}
+                  activity={
+                    running && index === turns.length - 1 ? activity : undefined
+                  }
                   selectedThread={panel === "threads" ? selectedThread : null}
                   selectedWorkset={
                     panel === "worksets" ? selectedWorkset : null

@@ -163,30 +163,34 @@ function nextOrdinal(
  * The buffers outlive the message being committed, so the text does not blink
  * out while the snapshot is refetched; what keeps it from being shown twice is
  * the check against what the snapshot already carries.
+ *
+ * Only the turn the output belongs to is rebuilt: earlier turns are handed back
+ * by reference, and the array itself is returned unchanged when the stream adds
+ * nothing. That is what lets a memoized row skip a delta that never moved it.
  */
-function appendStreamedOutput(
+export function withStreamedOutput(
   turns: TranscriptTurn[],
   stream: StreamedOutput,
-): void {
+): TranscriptTurn[] {
   const reasoning = stream.reasoning.trim();
   const text = stream.text.trim();
-  if (!reasoning && !text) return;
+  if (!reasoning && !text) return turns;
 
-  let turn = turns[turns.length - 1];
-  if (turn?.kind !== "model") {
-    // The run answers with output before its first message is persisted, so the
-    // turn it belongs to may not exist yet. It is keyed as the model turn it is
-    // about to become, so committing the message does not remount it.
-    const ordinal = turns.filter((entry) => entry.kind === "model").length;
-    turn = {
-      kind: "model",
-      key: `model-${ordinal}`,
-      blocks: [],
-      durationMs: null,
-    };
-    turns.push(turn);
-  }
+  const last = turns[turns.length - 1];
+  const live = last?.kind === "model";
+  // The run answers with output before its first message is persisted, so the
+  // turn it belongs to may not exist yet. It is keyed as the model turn it is
+  // about to become, so committing the message does not remount it.
+  const turn: ModelTurn = live
+    ? { ...last, blocks: last.blocks.slice() }
+    : {
+        kind: "model",
+        key: `model-${turns.filter((entry) => entry.kind === "model").length}`,
+        blocks: [],
+        durationMs: null,
+      };
 
+  let appended = false;
   if (reasoning && !lastBlockText(turn.blocks, "thoughts")?.includes(reasoning)) {
     turn.blocks.push({
       kind: "thoughts",
@@ -197,6 +201,7 @@ function appendStreamedOutput(
       // answering, even though this reasoning is not committed yet.
       streaming: !text,
     });
+    appended = true;
   }
   if (text && !lastBlockText(turn.blocks, "text")?.includes(text)) {
     turn.blocks.push({
@@ -204,7 +209,12 @@ function appendStreamedOutput(
       key: `text-${nextOrdinal(turn.blocks, "text")}`,
       text,
     });
+    appended = true;
   }
+  if (!appended) return turns;
+
+  const next = live ? [...turns.slice(0, -1), turn] : [...turns, turn];
+  return next.length > MAX_TURNS ? next.slice(-MAX_TURNS) : next;
 }
 
 /**
@@ -214,7 +224,6 @@ function appendStreamedOutput(
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
-  stream?: StreamedOutput,
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
@@ -304,8 +313,6 @@ export function buildTranscript(
     });
     if (wave.length) blocks.push({ kind: "wave", key: `wave-${index}`, threads: wave });
   });
-
-  if (stream) appendStreamedOutput(turns, stream);
 
   return turns.length > MAX_TURNS ? turns.slice(-MAX_TURNS) : turns;
 }

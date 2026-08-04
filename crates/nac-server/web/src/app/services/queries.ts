@@ -1,6 +1,7 @@
 // TanStack Query bindings for the nac API. Server state lives here; only
 // client state (selection, filters, live run status) goes into the stores.
 
+import { useCallback } from "react";
 import {
   useMutation,
   useQuery,
@@ -304,6 +305,34 @@ export function useSessions(workspaceStats = true) {
     queryFn: ({ signal }) => api.listSessions(workspaceStats, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
+  });
+}
+
+/**
+ * The single summary a session screen needs, picked out of the polled list.
+ *
+ * Subscribing to the whole list would re-render the chat every five seconds
+ * over changes to unrelated sessions; the selected entry keeps its identity
+ * across a refetch that did not touch it, so the transcript stays put.
+ */
+export function useSessionSummary(id: string | null) {
+  const select = useCallback(
+    (sessions: ManagedSessionSummary[]) =>
+      sessions.find((item) => item.summary.session_id === id) ?? null,
+    [id],
+  );
+  return useQuery<
+    ManagedSessionSummary[],
+    Error,
+    ManagedSessionSummary | null
+  >({
+    queryKey: queryKeys.sessions(true),
+    queryFn: ({ signal }) => api.listSessions(true, signal),
+    refetchInterval: SESSIONS_POLL_MS,
+    staleTime: 0,
+    select,
+    // Nothing here reads the fetch flags, and they flip twice per poll.
+    notifyOnChangeProps: ["data"],
   });
 }
 

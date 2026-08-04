@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import {
   Button,
   ButtonContent,
@@ -18,27 +20,39 @@ interface UserMessageProps {
   /** Shown on hover when the message has a known time. */
   timestamp?: string | null;
   /**
+   * Raw snapshot index the actions address. Absent while the message is still
+   * only in flight, which is what disables the revert affordance.
+   */
+  messageIndex?: number;
+  /**
    * Answer this prompt again, discarding the reply it already produced. Only
    * for the user turn that produced the latest model reply — older turns keep
    * revert + copy only.
+   *
+   * The handlers take the message they act on rather than closing over it, so
+   * the transcript can pass the same function to every bubble and let the
+   * memoized rows skip a render.
    */
-  onRefresh?: (() => void) | null;
+  onRefresh?: ((messageIndex: number) => void) | null;
   /** Restore the session to the snapshot at this prompt. */
-  onRevert?: (() => void) | null;
+  onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
 }
 
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export function UserMessage({
+export const UserMessage = memo(function UserMessage({
   text,
   pending = false,
   timestamp = null,
+  messageIndex,
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
+  const canRefresh = onRefresh != null && messageIndex != null;
+  const canRevert = onRevert != null && messageIndex != null;
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
@@ -67,7 +81,7 @@ export function UserMessage({
             </span>
           ) : null}
 
-          {onRefresh ? (
+          {canRefresh ? (
             <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
               <Button
                 size={ButtonSize.Small}
@@ -75,7 +89,7 @@ export function UserMessage({
                 content={ButtonContent.Icon}
                 aria-label="Resend"
                 disabled={actionsDisabled}
-                onClick={onRefresh}
+                onClick={() => onRefresh(messageIndex)}
                 className="!h-4 !min-h-4 !p-0"
               >
                 <Icon iconName={IconName.Refresh} size={16} />
@@ -83,7 +97,7 @@ export function UserMessage({
             </Tooltip>
           ) : null}
 
-          {onRevert ? (
+          {canRevert ? (
             <Tooltip
               title="Revert to this snapshot"
               position={TooltipPosition.TopCenter}
@@ -94,7 +108,7 @@ export function UserMessage({
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
                 disabled={actionsDisabled}
-                onClick={onRevert}
+                onClick={() => onRevert(messageIndex, text)}
                 className="!h-4 !min-h-4 !p-0"
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
@@ -132,4 +146,4 @@ export function UserMessage({
       ) : null}
     </div>
   );
-}
+});

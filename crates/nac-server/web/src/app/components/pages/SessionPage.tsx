@@ -29,7 +29,7 @@ import {
   routes,
   type SessionPanel,
 } from "@/app/lib/routes";
-import { useSessions, useSessionSnapshot } from "@/app/services/queries";
+import { useSessionSnapshot, useSessionSummary } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
   resetSessionSelection,
@@ -52,7 +52,7 @@ export default function SessionPage() {
   perfRender("SessionPage");
 
   const { data: snapshot = null, error } = useSessionSnapshot(id);
-  const { data: sessions = [] } = useSessions();
+  const { data: entry = null } = useSessionSummary(id);
   const actions = useSessionActions();
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -69,7 +69,6 @@ export default function SessionPage() {
     return <Navigate to={routes.session(id, DEFAULT_SESSION_PANEL)} replace />;
   }
 
-  const entry = sessions.find((item) => item.summary.session_id === id) ?? null;
   const configError = entry?.summary.model_config_error;
   // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.

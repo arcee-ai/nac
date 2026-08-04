@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import {
   MessageBox,
   MessageBoxSize,
@@ -34,7 +36,10 @@ interface ModelMessageProps {
   model: string;
   /** Draws the spinner ring while this turn is the one still producing output. */
   active: boolean;
-  /** What the run is doing right now, named only while this turn is active. */
+  /**
+   * What the run is doing right now. Only the active turn is given it, so the
+   * finished ones are not re-rendered every time the line changes.
+   */
   activity?: string;
   /** Stretches the last bubble so stick-to-bottom lands below the fold. */
   isLast?: boolean;
@@ -48,7 +53,7 @@ interface ModelMessageProps {
  * Everything the orchestrator did for one prompt, in the order it happened:
  * reasoning, prose, the worksets it defined and the waves of threads it ran.
  */
-export function ModelMessage({
+export const ModelMessage = memo(function ModelMessage({
   turn,
   model,
   active,
@@ -159,4 +164,4 @@ export function ModelMessage({
       </div>
     </div>
   );
-}
+});
