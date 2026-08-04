@@ -2,6 +2,11 @@ use super::*;
 
 const STORE_SCHEMA_VERSION: i64 = 4;
 
+#[cfg(test)]
+static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 /// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
     crate::paths::nac_home_dir()
@@ -22,6 +27,15 @@ fn connect(path: &Path) -> Result<Connection> {
 
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
+    #[cfg(test)]
+    {
+        let mut tracked = TRACKED_CONNECTION_OPENS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(count) = tracked.get_mut(path) {
+            *count += 1;
+        }
+    }
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
 }
@@ -29,12 +43,36 @@ fn connect(path: &Path) -> Result<Connection> {
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        // journal_mode is database-wide and persistent. Normal runtime opens
+        // only verify the initialized mode; recovery from external changes
+        // performs the transition once.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+    }
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version != STORE_SCHEMA_VERSION {
         drop(conn);
         return open_connection(path);
     }
     Ok(conn)
+}
+
+#[cfg(test)]
+pub(crate) fn track_connection_opens(path: &Path) {
+    TRACKED_CONNECTION_OPENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), 0);
+}
+
+#[cfg(test)]
+pub(crate) fn tracked_connection_opens(path: &Path) -> usize {
+    TRACKED_CONNECTION_OPENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(path)
+        .unwrap_or(0)
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
