@@ -78,6 +78,7 @@ fn stdin_json_mode_preserves_machine_readable_streams() {
         r#"{"run_id":"integration-run","client_id":null,"display_prompt":"hello from stdin\n"}"#,
     );
     let (endpoint, requests, server) = spawn_server(vec![create, run]);
+    let endpoint = format!("{endpoint}/proxy");
 
     let mut child = nac_command()
         .args(["--stdin", "--json", "--nac-endpoint", &endpoint])
@@ -113,8 +114,8 @@ fn stdin_json_mode_preserves_machine_readable_streams() {
 
     let create_request = requests.recv().unwrap();
     let run_request = requests.recv().unwrap();
-    assert!(create_request.starts_with("POST /sessions HTTP/1.1"));
-    assert!(run_request.starts_with("POST /sessions/integration-session/runs HTTP/1.1"));
+    assert!(create_request.starts_with("POST /proxy/sessions HTTP/1.1"));
+    assert!(run_request.starts_with("POST /proxy/sessions/integration-session/runs HTTP/1.1"));
     assert!(run_request.contains(r#""prompt":"hello from stdin\n""#));
 }
 

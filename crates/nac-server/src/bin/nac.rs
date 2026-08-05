@@ -507,7 +507,7 @@ async fn create_session(
     create_body: &JsonValue,
 ) -> Result<String, NacError> {
     let sessions_url = endpoint
-        .join("/sessions")
+        .join("sessions")
         .map_err(|_| NacError::InvalidUrl)?;
 
     let response = match client
@@ -567,7 +567,7 @@ async fn submit_prompt(
     prompt: &str,
 ) -> Result<WireRunResponse, NacError> {
     let url = endpoint
-        .join(&format!("/sessions/{session_id}/runs"))
+        .join(&format!("sessions/{session_id}/runs"))
         .map_err(|_| NacError::InvalidUrl)?;
 
     let body = serde_json::json!({ "prompt": prompt });
@@ -672,17 +672,21 @@ async fn run_create_and_prompt(
 // ---------------------------------------------------------------------------
 
 fn validate_endpoint(raw: &str) -> Result<Url, NacError> {
-    let url = Url::parse(raw).map_err(|_| NacError::InvalidUrl)?;
+    let mut url = Url::parse(raw).map_err(|_| NacError::InvalidUrl)?;
     let valid = matches!(url.scheme(), "http" | "https")
         && url.username().is_empty()
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none();
-    if valid {
-        Ok(url)
-    } else {
-        Err(NacError::InvalidUrl)
+    if !valid {
+        return Err(NacError::InvalidUrl);
     }
+    if !url.path().ends_with('/') {
+        url.path_segments_mut()
+            .map_err(|_| NacError::InvalidUrl)?
+            .push("");
+    }
+    Ok(url)
 }
 
 /// Resolve the effective prompt from the CLI, enforcing the positional-XOR-
@@ -876,6 +880,16 @@ mod tests {
     fn validate_endpoint_accepts_http_and_https() {
         assert!(validate_endpoint("http://127.0.0.1:3210").is_ok());
         assert!(validate_endpoint("https://example.com").is_ok());
+    }
+
+    #[test]
+    fn validate_endpoint_preserves_path_prefix() {
+        let endpoint = validate_endpoint("https://example.com/nac").unwrap();
+        assert_eq!(endpoint.as_str(), "https://example.com/nac/");
+        assert_eq!(
+            endpoint.join("sessions").unwrap().as_str(),
+            "https://example.com/nac/sessions"
+        );
     }
 
     #[test]
