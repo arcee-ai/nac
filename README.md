@@ -11,9 +11,10 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.s
 
 Pinned version installs are not supported yet.
 
-The installer places one binary in `$HOME/.local/bin` by default:
+The installer places two binaries in `$HOME/.local/bin` by default:
 
 - `nac-web`: the web dashboard for managing multiple sessions, plus utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
+- `nac`: the scriptable client for creating or reusing a session and posting one prompt.
 
 ### Choose auth
 
@@ -37,7 +38,7 @@ Upgrade to the latest `edge` build:
 nac-web upgrade
 ```
 
-`nac-web upgrade` reinstalls `nac-web`.
+`nac-web upgrade` reinstalls both `nac-web` and `nac`.
 
 Run the web dashboard from the project you want to work in:
 

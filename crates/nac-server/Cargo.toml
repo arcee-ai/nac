@@ -10,10 +10,6 @@ name = "nac_server"
 name = "nac-web"
 path = "src/main.rs"
 
-[[bin]]
-name = "nac"
-path = "src/bin/nac.rs"
-
 [dependencies]
 nac-core = { path = "../nac-core" }
 anyhow = "1"

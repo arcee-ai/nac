@@ -67,15 +67,17 @@ download "$url" "$archive"
 mkdir -p "$INSTALL_DIR"
 tar -xzf "$archive" -C "$tmpdir"
 install -m 755 "$tmpdir/nac-web" "$INSTALL_DIR/nac-web"
+install -m 755 "$tmpdir/nac" "$INSTALL_DIR/nac"
 
 echo "downloaded $asset from $CHANNEL"
 echo "installed nac-web to $INSTALL_DIR/nac-web"
+echo "installed nac to $INSTALL_DIR/nac"
 
 case ":$PATH:" in
   *":$INSTALL_DIR:"*)
     ;;
   *)
-    echo "add $INSTALL_DIR to your PATH to run nac-web directly"
+    echo "add $INSTALL_DIR to your PATH to run nac-web and nac directly"
     ;;
 esac
 

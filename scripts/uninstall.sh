@@ -3,7 +3,7 @@ set -eu
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
-for bin in nac-web; do
+for bin in nac-web nac; do
   bin_path="$INSTALL_DIR/$bin"
   if [ -f "$bin_path" ]; then
     rm -f "$bin_path"

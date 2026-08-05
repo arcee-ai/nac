@@ -2,7 +2,9 @@
 
 CARGO ?= cargo
 PKG := nac-server
-BIN := nac-web
+WEB_BIN := nac-web
+BINS := $(WEB_BIN) nac
+BIN_ARGS := $(foreach bin,$(BINS),--bin $(bin))
 WEB_DIR := crates/$(PKG)/web
 
 DEV_BIND ?= 127.0.0.1:3210
@@ -26,9 +28,9 @@ INSTALL_ROOT ?= $(HOME)/.local
 # Default target
 all: build
 
-## Build the nac-web binary (debug)
+## Build the release binaries (debug)
 build:
-	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
+	$(CARGO) build --locked -p $(PKG) $(BIN_ARGS)
 
 ## Build and run nac-web, then open it in the default browser
 dev:
@@ -44,7 +46,7 @@ dev:
 			printf 'error: NAC is already responding at %s\n' "$$DEV_URL"; \
 			exit 1; \
 		fi; \
-		$(CARGO) run --locked -p $(PKG) --bin $(BIN) -- --bind "$$DEV_BIND" & \
+		$(CARGO) run --locked -p $(PKG) --bin $(WEB_BIN) -- --bind "$$DEV_BIND" & \
 		server_pid=$$!; \
 		trap 'kill "$$server_pid" 2>/dev/null || true' EXIT; \
 		trap 'exit 130' INT TERM; \
@@ -58,13 +60,13 @@ dev:
 		"$$BROWSER_OPEN" "$$DEV_URL" || exit $$?; \
 		wait "$$server_pid"
 
-## Build the nac-web binary (release)
+## Build the release binaries
 release:
-	$(CARGO) build --release --locked -p $(PKG) --bin $(BIN)
+	$(CARGO) build --release --locked -p $(PKG) $(BIN_ARGS)
 
-## Install nac-web into $(INSTALL_ROOT)/bin
+## Install the release binaries into $(INSTALL_ROOT)/bin
 install:
-	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
+	$(CARGO) install --path crates/$(PKG) $(BIN_ARGS) --locked --force --root $(INSTALL_ROOT)
 
 ## Run workspace Rust tests and web asset checks
 test: test-rust test-assets
@@ -106,10 +108,10 @@ help:
 		'Usage: make [target]' \
 		'' \
 		'Targets:' \
-		'  build        Build nac-web (debug) [default]' \
+		'  build        Build nac-web and nac (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
-		'  release      Build nac-web (release)' \
-		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
+		'  release      Build nac-web and nac (release)' \
+		'  install      Install nac-web and nac into $$INSTALL_ROOT/bin (~/.local)' \
 		'  test         Run Rust tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
