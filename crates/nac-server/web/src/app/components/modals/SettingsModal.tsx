@@ -586,10 +586,14 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
   const logout = useManagedLogout();
+  // A credential on file is not the same as a working one, so the row leans on
+  // the request that actually spends it rather than on the file being there.
+  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
 
   if (!provider) return null;
 
   const failed = state.status === "failed";
+  const expired = signedIn && reach.isError;
   const control =
     state.status === "waiting" ? (
       <div className="flex items-center gap-2">
@@ -617,13 +621,26 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
       </div>
     ) : signedIn ? (
       <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
-          <Icon
-            iconName={IconName.CheckCircle}
-            className="text-success-primary"
-          />
-          <span className="label-small text-success-primary">Logged in</span>
-        </div>
+        {expired ? (
+          <Button
+            variant={ButtonVariant.Primary}
+            size={ButtonSize.Medium}
+            content={ButtonContent.IconRight}
+            loading={state.status === "starting"}
+            onClick={() => void start(provider)}
+          >
+            <span>Login again</span>
+            <Icon iconName={IconName.External} />
+          </Button>
+        ) : (
+          <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+            <Icon
+              iconName={IconName.CheckCircle}
+              className="text-success-primary"
+            />
+            <span className="label-small text-success-primary">Logged in</span>
+          </div>
+        )}
         <Button
           variant={ButtonVariant.Ghost}
           size={ButtonSize.Medium}
@@ -650,8 +667,10 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
   return (
     <InputWrapper
       label="Authentication"
-      validation={failed}
-      validationText={failed ? state.message : undefined}
+      validation={failed || expired}
+      validationText={
+        failed ? state.message : expired ? errorMessage(reach.error) : undefined
+      }
       hintText={
         signedIn
           ? "Signed in through the browser; every session on this provider shares the login."

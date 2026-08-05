@@ -3,9 +3,6 @@ import { useState } from "react";
 import {
   Icon,
   IconName,
-  Loader,
-  LoaderSize,
-  LoaderVariant,
   SessionAvatar,
   Tooltip,
   TooltipPosition,
@@ -20,7 +17,10 @@ import {
 import { providerLabel } from "@/app/lib/providers";
 import { useNow } from "@/app/hooks/useNow";
 import { SessionCardActions } from "@/app/components/sessions/SessionCardActions";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
+import type {
+  ManagedSessionSummary,
+  SessionSummarySnapshot,
+} from "@/app/types/api";
 
 // Figma ChatSessionCard has a full-bleed "Surface" layer below the content that
 // carries the interaction state. Tokens are applied as CSS variables because the
@@ -64,12 +64,14 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
   const provider = providerLabel(summary.backend);
   return (
     <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
+      {provider ? (
+        <span className="text-micro text-basic-muted truncate max-w-[128px]">
+          {provider}
+        </span>
+      ) : null}
       <span className="label-micro text-basic-tertiary">
         {sessionEnvLabel(summary)}
       </span>
-      {provider ? (
-        <span className="text-micro text-basic-muted truncate">{provider}</span>
-      ) : null}
     </div>
   );
 }
@@ -102,7 +104,11 @@ export function SessionCard({
 
   const now = useNow(1000, running);
   const clock = running
-    ? formatClock(activeRun?.started_at_epoch_ms ? now - activeRun.started_at_epoch_ms : 0)
+    ? formatClock(
+        activeRun?.started_at_epoch_ms
+          ? now - activeRun.started_at_epoch_ms
+          : 0,
+      )
     : null;
 
   const [hover, setHover] = useState(false);
@@ -119,7 +125,8 @@ export function SessionCard({
     <div
       className={cn(
         "group fade-up relative flex flex-col gap-4 px-6 pt-5 pb-3 rounded-[8px] overflow-hidden cursor-default",
-        "bg-elevation-level-1 shadow-convex",
+        "shadow-convex",
+        running ? "bg-elevation-level-3" : "bg-elevation-level-1",
       )}
       role="button"
       tabIndex={0}
@@ -165,7 +172,7 @@ export function SessionCard({
       ) : null}
 
       <div className="relative flex items-center gap-4 w-full">
-        <SessionAvatar id={id} size={40} />
+        <SessionAvatar id={id} size={40} isRunning={running} />
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <div className="flex items-center gap-1.5 w-full">
             {summary.pinned ? (
@@ -183,7 +190,12 @@ export function SessionCard({
                 <span className="block w-2 h-2 rounded-full bg-accent-primary shrink-0" />
               </Tooltip>
             ) : null}
-            <div className="header-md text-basic-primary flex-1 min-w-0 truncate">
+            <div
+              className={cn(
+                "header-md flex-1 min-w-0 truncate",
+                running ? "text-shimmer-basic" : "text-basic-primary",
+              )}
+            >
               {displaySessionTitle(summary)}
             </div>
             {summary.model_config_error ? (
@@ -199,11 +211,10 @@ export function SessionCard({
               </Tooltip>
             ) : null}
             {running ? (
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-1 shrink-0 w-[48px] justify-center">
                 <span className="text-basic-primary text-sm leading-5">
                   {clock}
                 </span>
-                <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
               </div>
             ) : null}
           </div>

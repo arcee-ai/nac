@@ -95,6 +95,16 @@ export function useDeviceLogin(onSuccess?: () => void) {
           void client.invalidateQueries({
             queryKey: queryKeys.managedProviderModelsAll,
           });
+          // A resolved configuration carries the same index, read on the server
+          // with the login that has just been replaced. Without this it keeps
+          // answering with whatever the broken login managed to return, which is
+          // what makes a form look stuck until it is reopened.
+          void client.invalidateQueries({
+            queryKey: queryKeys.resolvedModelConfigsAll,
+          });
+          void client.invalidateQueries({
+            queryKey: queryKeys.resolvedConfigFilesAll,
+          });
           onSuccessRef.current?.();
           return;
         }

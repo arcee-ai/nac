@@ -15,7 +15,7 @@ import {
   Tooltip,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
-import { displaySessionTitle } from "@/app/lib/format";
+import { displaySessionTitle, isActiveRun } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useSessions } from "@/app/services/queries";
@@ -27,9 +27,11 @@ export function Breadcrumbs() {
   const { data: sessions = [] } = useSessions();
   const [open, setOpen] = useState(false);
 
-  const current = sessionId
-    ? sessions.find((entry) => entry.summary.session_id === sessionId)?.summary
+  const currentEntry = sessionId
+    ? sessions.find((entry) => entry.summary.session_id === sessionId)
     : undefined;
+  const current = currentEntry?.summary;
+  const currentRunning = isActiveRun(currentEntry?.active_run);
 
   return (
     <nav className="flex items-center min-w-0 gap-1" aria-label="Breadcrumb">
@@ -62,30 +64,40 @@ export function Breadcrumbs() {
                   No sessions
                 </div>
               ) : (
-                sessions.map(({ summary }) => (
-                  <button
-                    key={summary.session_id}
-                    type="button"
-                    className={cn(
-                      "flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
-                      summary.session_id === sessionId &&
-                        "bg-btn-ghost-highlighted",
-                    )}
-                    onClick={() => {
-                      setOpen(false);
-                      navigate(routes.session(summary.session_id));
-                    }}
-                  >
-                    <SessionAvatar
-                      id={summary.session_id}
-                      size={20}
-                      className="rounded-[2px]"
-                    />
-                    <span className="label-small text-basic-primary truncate">
-                      {displaySessionTitle(summary)}
-                    </span>
-                  </button>
-                ))
+                sessions.map(({ summary, active_run }) => {
+                  const running = isActiveRun(active_run);
+                  return (
+                    <button
+                      key={summary.session_id}
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
+                        summary.session_id === sessionId &&
+                          "bg-btn-ghost-highlighted",
+                      )}
+                      onClick={() => {
+                        setOpen(false);
+                        navigate(routes.session(summary.session_id));
+                      }}
+                    >
+                      <SessionAvatar
+                        id={summary.session_id}
+                        size={20}
+                        isRunning={running}
+                      />
+                      <span
+                        className={cn(
+                          "label-small truncate",
+                          running
+                            ? "text-shimmer-basic"
+                            : "text-basic-primary",
+                        )}
+                      >
+                        {displaySessionTitle(summary)}
+                      </span>
+                    </button>
+                  );
+                })
               )
             }
           >
@@ -101,9 +113,15 @@ export function Breadcrumbs() {
               <SessionAvatar
                 id={sessionId}
                 size={20}
+                isRunning={currentRunning}
                 className="rounded-[2px]"
               />
-              <span className="truncate max-w-[120px]">
+              <span
+                className={cn(
+                  "truncate max-w-[120px]",
+                  currentRunning && "text-shimmer-basic",
+                )}
+              >
                 {displaySessionTitle(current) || sessionId}
               </span>
               <Icon

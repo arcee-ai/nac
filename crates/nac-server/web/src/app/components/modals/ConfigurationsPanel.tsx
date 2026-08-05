@@ -102,10 +102,15 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
   const logout = useManagedLogout();
+  // Being signed in only says the credential is on file. Whether it still works
+  // is answered by the one request that spends it, so the row asks for the model
+  // index rather than reporting success on the strength of a file existing.
+  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
 
   if (!provider) return null;
 
   const failed = state.status === "failed";
+  const expired = signedIn && reach.isError;
 
   const control =
     state.status === "waiting" ? (
@@ -143,13 +148,26 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
         >
           Logout
         </Button>
-        <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
-          <Icon
-            iconName={IconName.CheckCircle}
-            className="text-success-primary"
-          />
-          <span className="label-small text-success-primary">Success</span>
-        </div>
+        {expired ? (
+          <Button
+            variant={ButtonVariant.Primary}
+            size={ButtonSize.Medium}
+            content={ButtonContent.IconRight}
+            loading={state.status === "starting"}
+            onClick={() => void start(provider)}
+          >
+            <span>Login again</span>
+            <Icon iconName={IconName.External} />
+          </Button>
+        ) : (
+          <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+            <Icon
+              iconName={IconName.CheckCircle}
+              className="text-success-primary"
+            />
+            <span className="label-small text-success-primary">Success</span>
+          </div>
+        )}
       </div>
     ) : (
       <Button
@@ -167,14 +185,14 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
   return (
     <ConfigRow
       label="Authentication"
-      invalid={failed}
+      invalid={failed || expired}
       hint="Signs in through the browser; every session on this provider shares the login."
       control={
         <div className="flex flex-col items-end gap-1">
           {control}
-          {failed ? (
+          {failed || expired ? (
             <p className="label-micro text-error-primary max-w-[280px] text-right">
-              {state.message}
+              {failed ? state.message : errorMessage(reach.error)}
             </p>
           ) : null}
         </div>
@@ -451,16 +469,20 @@ export function ConfigurationsPanel({
   // provider with nothing to offer, so saying which one it is has to be explicit.
   const modelListError = loginQuery.isError
     ? errorMessage(loginQuery.error)
-    : "";
+    : (resolved?.models_error ?? "");
   const boxInvalid =
     invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
   const message =
     errorText ?? (keyInvalid ? validation.message : resolveError || modelListError);
+  // Whichever request came back empty is the one worth asking again: the login's
+  // own index for a fresh setup, the whole resolve for a saved one.
   const retry = resolveError
     ? configQuery.refetch
-    : modelListError
+    : loginQuery.isError
       ? loginQuery.refetch
-      : null;
+      : modelListError
+        ? configQuery.refetch
+        : null;
 
   const sourceLabel =
     source.kind === "new"
@@ -793,6 +815,15 @@ function ResolvedRows({
   // A setup the server could list models for is driven by its provider; one it
   // could not is a hand-written endpoint, so it spells out model and URL.
   const listed = resolved.models.length > 0;
+  // A login that stopped answering leaves the list just as empty as a provider
+  // with no index, so without the reason the rows would turn a broken sign-in
+  // into a hand-written endpoint and quietly ask the user to type a model.
+  const failedListing = Boolean(resolved.models_error);
+  const modelChoices = listed
+    ? modelItems(resolved.models)
+    : model
+      ? [{ id: model, label: model }]
+      : [];
 
   return (
     <>
@@ -834,15 +865,17 @@ function ResolvedRows({
         </>
       )}
       <Separator />
-      {listed ? (
+      {listed || failedListing ? (
         <ConfigRow
           label="Default Model"
+          invalid={failedListing}
           hint="Model the session starts with; the key reaches all of these."
           control={
             <SmallSelect
-              items={modelItems(resolved.models)}
+              items={modelChoices}
               value={model}
               onValueChange={onModel}
+              placeholder="The model list could not be read"
             />
           }
         />

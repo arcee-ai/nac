@@ -113,6 +113,8 @@ function strokeWidth(size: number): number {
 interface SessionAvatarProps extends React.SVGProps<SVGSVGElement> {
   id: string | undefined;
   size?: number;
+  /** Pulses the avatar while the session has a run going. */
+  isRunning?: boolean;
 }
 
 /**
@@ -124,6 +126,7 @@ interface SessionAvatarProps extends React.SVGProps<SVGSVGElement> {
 const SessionAvatar: React.FC<SessionAvatarProps> = ({
   id,
   size = 40,
+  isRunning = false,
   className = "",
   ...props
 }) => {
@@ -134,7 +137,7 @@ const SessionAvatar: React.FC<SessionAvatarProps> = ({
 
   return (
     <svg
-      className={cn("block shrink-0", className)}
+      className={cn("block shrink-0", isRunning && "pulse-dim", className)}
       width={size}
       height={size}
       viewBox={`${-half} ${-half} ${GRID + stroke} ${GRID + stroke}`}

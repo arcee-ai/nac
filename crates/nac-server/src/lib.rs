@@ -404,6 +404,9 @@ pub struct ResolvedModelConfiguration {
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub models: Vec<ProviderModel>,
+    /// Why the list is empty, when a stored login could not be asked. An empty
+    /// list without this is a provider that simply offers no index.
+    pub models_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2447,13 +2450,20 @@ async fn resolve_configuration(
         &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
     )?;
 
+    let mut models_error = None;
     let models = match ManagedAuthProvider::for_backend(backend) {
         // A stored login has no key to check, but it does reach a model index,
         // so a saved setup offers the same choice a fresh one does. Being
         // signed out is not fatal here: the configuration still names a model.
-        Some(provider) => list_managed_provider_models(provider)
-            .await
-            .unwrap_or_default(),
+        // The reason for an empty list travels with it, so the caller can tell a
+        // provider with nothing to offer from a login that stopped working.
+        Some(provider) => match list_managed_provider_models(provider).await {
+            Ok(models) => models,
+            Err(error) => {
+                models_error = Some(error.to_string());
+                Vec::new()
+            }
+        },
         None => {
             let api_key =
                 resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| {
@@ -2478,6 +2488,7 @@ async fn resolve_configuration(
         api_key_env,
         reasoning_effort,
         models,
+        models_error,
     }))
 }
 

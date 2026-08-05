@@ -108,7 +108,7 @@ function Chips<T extends string>({
               content={ButtonContent.Text}
               variant={
                 selected.includes(option)
-                  ? ButtonVariant.SecondaryAccentHighlighted
+                  ? ButtonVariant.Primary
                   : ButtonVariant.Secondary
               }
               onClick={() => onToggle(option)}

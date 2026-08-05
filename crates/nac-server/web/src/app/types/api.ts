@@ -784,6 +784,8 @@ export interface ResolvedModelConfiguration {
   api_key_env: string | null;
   reasoning_effort: string | null;
   models: ProviderModel[];
+  /** Set when a stored login could not be asked, so an empty list has a reason. */
+  models_error: string | null;
 }
 
 /**

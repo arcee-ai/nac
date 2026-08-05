@@ -57,7 +57,9 @@ export const queryKeys = {
   managedProviderModelsAll: ["managed-provider-models"] as const,
   resolvedModelConfig: (configId: string) =>
     ["model-config-resolved", configId] as const,
+  resolvedModelConfigsAll: ["model-config-resolved"] as const,
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
+  resolvedConfigFilesAll: ["config-file-resolved"] as const,
   sessions: (workspaceStats: boolean) => ["sessions", { workspaceStats }] as const,
   sessionsAll: ["sessions"] as const,
   session: (id: string) => ["session", id] as const,
@@ -157,8 +159,15 @@ export function useManagedLogout() {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: queryKeys.managedAuth });
       // The model index was only readable through the login that just went
-      // away, so what is cached from it is no longer true.
+      // away, so what is cached from it is no longer true — including the copy a
+      // resolved configuration carries.
       client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
+      await client.invalidateQueries({
+        queryKey: queryKeys.resolvedModelConfigsAll,
+      });
+      await client.invalidateQueries({
+        queryKey: queryKeys.resolvedConfigFilesAll,
+      });
     },
   });
 }
