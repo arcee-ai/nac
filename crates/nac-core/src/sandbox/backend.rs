@@ -10,7 +10,7 @@ use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use super::SandboxSession;
+use super::{HostMountPath, SandboxSession};
 use crate::paths::PathContext;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +81,17 @@ impl ExecutionBackend {
         }
     }
 
+    /// Returns the host-visible identity for a sandbox path backed by a mount.
+    ///
+    /// File mutation tools use this to coordinate locks on the host rather than
+    /// relying on advisory-lock propagation through a VM or container mount.
+    pub(crate) fn host_path_for_remote_file(&self, resolved_path: &Path) -> Option<HostMountPath> {
+        match self {
+            Self::Sandbox(session) => session.host_path_for_guest(resolved_path),
+            Self::Local { .. } | Self::Ssh(_) => None,
+        }
+    }
+
     pub fn resolve_terminal_cwd(&self, requested: Option<&str>) -> Result<Option<PathBuf>> {
         match self {
             Self::Local { workspace_cwd } => match requested {
@@ -98,7 +109,7 @@ impl ExecutionBackend {
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         match self {
             Self::Local { workspace_cwd } => {
@@ -110,6 +121,7 @@ impl ExecutionBackend {
                     command.stdin(Stdio::null());
                 }
                 command.stdout(Stdio::piped()).stderr(Stdio::piped());
+                command.kill_on_drop(true);
 
                 let mut child = command
                     .spawn()
@@ -117,7 +129,7 @@ impl ExecutionBackend {
 
                 if let Some(input) = stdin {
                     if let Some(mut stdin_pipe) = child.stdin.take() {
-                        stdin_pipe.write_all(&input).await?;
+                        stdin_pipe.write_all(input).await?;
                     }
                 }
 
@@ -455,7 +467,7 @@ mod tests {
         };
         let args = vec!["-c".to_string(), "cat".to_string()];
         let output = backend
-            .exec("sh", &args, Some(b"hello-backend".to_vec()))
+            .exec("sh", &args, Some(b"hello-backend"))
             .await
             .unwrap();
         assert!(output.status.success());

@@ -629,7 +629,10 @@ impl SessionManager {
             return Ok(Vec::new());
         }
 
-        let summaries = view::list_sessions(&self.inner.store_path)?;
+        let store_path = self.inner.store_path.clone();
+        let summaries = tokio::task::spawn_blocking(move || view::list_sessions(&store_path))
+            .await
+            .context("session list task failed")??;
         let mut sessions = {
             let active = self.inner.active_sessions.read().await;
             summaries
@@ -3466,7 +3469,10 @@ mod tests {
 
     #[tokio::test]
     async fn server_create_rejects_removed_backend_names_as_bad_requests() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("removed_backend_create");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
 
         for backend in ["arcee", "auto"] {

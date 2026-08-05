@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn visible_message_count(messages: &[Message]) -> usize {
+pub(crate) fn visible_message_count(messages: &[Message]) -> usize {
     messages
         .iter()
         .filter(|message| match message {
@@ -15,7 +15,7 @@ pub(super) fn visible_message_count(messages: &[Message]) -> usize {
         .count()
 }
 
-pub(super) fn last_user_prompt(messages: &[Message]) -> Option<String> {
+pub(crate) fn last_user_prompt(messages: &[Message]) -> Option<String> {
     messages.iter().rev().find_map(|message| match message {
         Message::User { content } => Some(content.clone()),
         _ => None,

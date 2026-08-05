@@ -235,6 +235,13 @@ fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
 
 pub fn list_thread_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
     let conn = open_runtime_connection(path)?;
+    list_thread_steering_with_connection(&conn, session_id)
+}
+
+pub(crate) fn list_thread_steering_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<ThreadSteeringRecord>> {
     let mut statement = conn.prepare(&format!(
         "SELECT {RECORD_COLUMNS} FROM (
              SELECT {RECORD_COLUMNS} FROM thread_steering

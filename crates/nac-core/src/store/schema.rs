@@ -2,6 +2,11 @@ use super::*;
 
 const STORE_SCHEMA_VERSION: i64 = 4;
 
+#[cfg(test)]
+static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 /// Default SQLite store path under the nac home, or `.nac/store.db` as fallback.
 pub fn default_store_path() -> PathBuf {
     crate::paths::nac_home_dir()
@@ -22,6 +27,15 @@ fn connect(path: &Path) -> Result<Connection> {
 
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
+    #[cfg(test)]
+    {
+        let mut tracked = TRACKED_CONNECTION_OPENS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(count) = tracked.get_mut(path) {
+            *count += 1;
+        }
+    }
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
 }
@@ -29,12 +43,36 @@ fn connect(path: &Path) -> Result<Connection> {
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        // journal_mode is database-wide and persistent. Normal runtime opens
+        // only verify the initialized mode; recovery from external changes
+        // performs the transition once.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+    }
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version != STORE_SCHEMA_VERSION {
         drop(conn);
         return open_connection(path);
     }
     Ok(conn)
+}
+
+#[cfg(test)]
+pub(crate) fn track_connection_opens(path: &Path) {
+    TRACKED_CONNECTION_OPENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), 0);
+}
+
+#[cfg(test)]
+pub(crate) fn tracked_connection_opens(path: &Path) -> usize {
+    TRACKED_CONNECTION_OPENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(path)
+        .unwrap_or(0)
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
@@ -57,6 +95,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let needs_session_summary_backfill = schema_version < STORE_SCHEMA_VERSION;
     match schema_version {
         0 | 1 => {
             create_base_schema(&transaction)?;
@@ -116,6 +155,16 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             crate::MAX_SUPPORTED_TOKEN_COUNT
         ),
     )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "visible_message_count",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (visible_message_count >= 0)",
+    )?;
+    ensure_column(&transaction, "sessions", "last_user_prompt", "TEXT")?;
+    if needs_session_summary_backfill {
+        backfill_session_summaries(&transaction)?;
+    }
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
     create_session_forks_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
@@ -182,6 +231,9 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              reasoning_effort TEXT,
              sandbox_json TEXT,
              messages_json TEXT NOT NULL,
+             visible_message_count INTEGER NOT NULL DEFAULT 0
+                 CHECK (visible_message_count >= 0),
+             last_user_prompt TEXT,
              last_response_duration_ms INTEGER,
              previous_response_duration_ms INTEGER,
              response_durations_ms_json TEXT,
@@ -612,6 +664,45 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
     }
     let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
     conn.execute(&alter, [])?;
+    Ok(())
+}
+
+fn backfill_session_summaries(conn: &Connection) -> Result<()> {
+    let rows = {
+        let mut statement = conn.prepare("SELECT session_id, messages_json FROM sessions")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    for (session_id, messages_json) in rows {
+        let messages: Vec<crate::types::Message> = serde_json::from_str(&messages_json)
+            .with_context(|| {
+                format!("failed to parse stored messages for session '{session_id}'")
+            })?;
+        let blob_visible = crate::sessions::visible_message_count(&messages);
+        let log_from_idx =
+            u64::try_from(messages.len()).context("session transcript length overflowed")?;
+        let log_visible =
+            crate::store::count_visible_transcript_log_messages(conn, &session_id, log_from_idx)?;
+        let visible_count = i64::try_from(
+            blob_visible
+                .checked_add(log_visible)
+                .context("session visible message count overflowed")?,
+        )
+        .context("session visible message count overflowed")?;
+        let last_user_prompt =
+            crate::store::last_transcript_log_user_prompt(conn, &session_id, log_from_idx)?
+                .or_else(|| crate::sessions::last_user_prompt(&messages));
+        conn.execute(
+            "UPDATE sessions
+             SET visible_message_count = ?1, last_user_prompt = ?2
+             WHERE session_id = ?3",
+            params![visible_count, last_user_prompt, session_id],
+        )?;
+    }
     Ok(())
 }
 
