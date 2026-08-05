@@ -217,7 +217,7 @@ export const ModelMessage = memo(function ModelMessage({
         {!active ? (
           <div
             className={cn(
-              "flex items-center justify-start gap-3 pt-1 pl-3",
+              "flex items-center justify-start gap-3 pt-4 pl-3",
               "opacity-0 pointer-events-none transition-opacity duration-150",
               "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
               "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",

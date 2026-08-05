@@ -430,7 +430,7 @@ function DiffPane({
   revision,
 }: {
   sessionId: string;
-  file: ChangedFileStat;
+  file: FileNode;
   revision: number | null;
 }) {
   const {
@@ -439,15 +439,33 @@ function DiffPane({
     error,
   } = useWorkspaceDiff(sessionId, file.path, "all", 3, revision);
 
+  // `git diff --numstat` covers only tracked files, so an untracked one arrives
+  // without counts and the diff itself is the only place they exist.
+  const counts = useMemo(() => {
+    if (file.additions != null || file.deletions != null) {
+      return { additions: file.additions ?? 0, deletions: file.deletions ?? 0 };
+    }
+    if (!diff) return null;
+    return diff.sections.reduce(
+      (total, section) => ({
+        additions: total.additions + section.additions,
+        deletions: total.deletions + section.deletions,
+      }),
+      { additions: 0, deletions: 0 },
+    );
+  }, [file, diff]);
+
   return (
     <>
       <PaneHeader
         path={file.path}
         trailing={
-          <>
-            <span className="text-success-primary">+{file.additions ?? 0}</span>
-            <span className="text-error-primary">-{file.deletions ?? 0}</span>
-          </>
+          counts ? (
+            <>
+              <span className="text-success-primary">+{counts.additions}</span>
+              <span className="text-error-primary">-{counts.deletions}</span>
+            </>
+          ) : null
         }
       />
       <Scroller>
@@ -647,12 +665,15 @@ export function FilesView({
     return result;
   }, [tree, toggled]);
 
+  // Keyed by the merged nodes, not by `changed`: git reports an untracked
+  // directory as one entry, so its files are only ever known per file here, and
+  // looking them up in `changed` would show them as unchanged contents.
   const changedByPath = useMemo(
-    () => new Map(changed.map((file) => [file.path, file])),
-    [changed],
+    () => new Map(changedNodes.map((node) => [node.path, node])),
+    [changedNodes],
   );
   // Landing on the first change keeps the panel useful the moment it opens.
-  const current = selected ?? changed[0]?.path ?? null;
+  const current = selected ?? changedNodes[0]?.path ?? null;
   const currentChange = current ? changedByPath.get(current) : undefined;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
