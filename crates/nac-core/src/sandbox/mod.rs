@@ -61,6 +61,13 @@ pub struct MountSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostMountPath {
+    pub root: PathBuf,
+    pub relative: PathBuf,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxSpec {
     pub backend: SandboxBackendType,
     pub image: String,
@@ -171,11 +178,35 @@ impl SandboxSession {
         Ok(requested)
     }
 
+    pub(crate) fn host_path_for_guest(&self, guest_path: &Path) -> Option<HostMountPath> {
+        let guest_path = normalize_guest_path(guest_path)?;
+        let (mount, mount_guest) = self
+            .spec()
+            .mounts
+            .iter()
+            .filter_map(|mount| {
+                let normalized = normalize_guest_path(&mount.guest)?;
+                guest_path
+                    .starts_with(&normalized)
+                    .then_some((mount, normalized))
+            })
+            .max_by_key(|(_, guest)| guest.components().count())?;
+        let relative = guest_path.strip_prefix(&mount_guest).ok()?.to_path_buf();
+        if host_path_contains_symlink(&mount.host, &relative) {
+            return None;
+        }
+        Some(HostMountPath {
+            root: mount.host.clone(),
+            relative,
+            read_only: mount.read_only,
+        })
+    }
+
     pub async fn exec(
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         match self {
             Self::Podman(inner) => inner.exec(program, args, stdin).await,
@@ -345,6 +376,25 @@ fn join_host_path(base: &Path, suffix: &Path) -> PathBuf {
     join_path(base, suffix)
 }
 
+fn normalize_guest_path(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized)
+}
+
 fn join_path(base: &Path, suffix: &Path) -> PathBuf {
     if suffix.as_os_str().is_empty() {
         return base.to_path_buf();
@@ -356,6 +406,23 @@ fn join_path(base: &Path, suffix: &Path) -> PathBuf {
         }
     }
     out
+}
+
+fn host_path_contains_symlink(root: &Path, relative: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(part) = component else {
+            return true;
+        };
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+            Err(_) => return true,
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -402,5 +469,98 @@ mod tests {
                 .unwrap(),
             PathBuf::from("/workspace/Cargo.toml")
         );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/src/lib.rs")),
+            Some(HostMountPath {
+                root: cwd.clone(),
+                relative: PathBuf::from("src/lib.rs"),
+                read_only: false,
+            })
+        );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/tmp/unmounted")),
+            None
+        );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/../workspace/src/lib.rs")),
+            Some(HostMountPath {
+                root: cwd,
+                relative: PathBuf::from("src/lib.rs"),
+                read_only: false,
+            })
+        );
+    }
+
+    #[test]
+    fn host_mapping_prefers_the_most_specific_mount_and_preserves_read_only() {
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![
+                MountSpec {
+                    host: PathBuf::from("/host/workspace"),
+                    guest: PathBuf::from("/workspace"),
+                    read_only: false,
+                },
+                MountSpec {
+                    host: PathBuf::from("/host/vendor"),
+                    guest: PathBuf::from("/workspace/vendor"),
+                    read_only: true,
+                },
+            ],
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/vendor/lib.rs")),
+            Some(HostMountPath {
+                root: PathBuf::from("/host/vendor"),
+                relative: PathBuf::from("lib.rs"),
+                read_only: true,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_mapping_falls_back_for_symlinked_mount_paths() {
+        use std::os::unix::fs::symlink;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "nac_sandbox_symlink_mapping_{}_{unique}",
+            std::process::id()
+        ));
+        let mount_root = root.join("mount");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&mount_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, mount_root.join("escape")).unwrap();
+
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![MountSpec {
+                host: mount_root,
+                guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            }],
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        let mapped = session.host_path_for_guest(Path::new("/workspace/escape/file.txt"));
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(mapped, None);
     }
 }

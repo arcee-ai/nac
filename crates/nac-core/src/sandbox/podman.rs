@@ -151,7 +151,7 @@ impl PodmanSession {
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         let mut command = Command::new("podman");
         command.args(self.exec_args(program, args, true, false, None, &[]));
@@ -162,6 +162,7 @@ impl PodmanSession {
             command.stdin(Stdio::null());
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.kill_on_drop(true);
 
         let mut child = command
             .spawn()
@@ -169,7 +170,7 @@ impl PodmanSession {
 
         if let Some(input) = stdin {
             if let Some(mut stdin_pipe) = child.stdin.take() {
-                stdin_pipe.write_all(&input).await?;
+                stdin_pipe.write_all(input).await?;
             }
         }
 
