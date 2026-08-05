@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  test-server:
     runs-on: ubuntu-latest
 
     steps:
@@ -52,6 +52,20 @@ jobs:
 
       - name: Run nac-core tests
         run: cargo test -p nac-core --locked
+
+  test:
+    if: ${{ always() }}
+    needs: [test-server, test-core]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require all test suites
+        env:
+          SERVER_RESULT: ${{ needs.test-server.result }}
+          CORE_RESULT: ${{ needs.test-core.result }}
+        run: |
+          test "$SERVER_RESULT" = success
+          test "$CORE_RESULT" = success
 
   build:
     strategy:
@@ -106,7 +120,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, test-core, build]
+    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
