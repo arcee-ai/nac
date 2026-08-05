@@ -128,7 +128,7 @@ export function ModelPicker({
       panelClassName="max-h-[280px] overflow-auto"
       content={
         <>
-          <div className="px-2 py-1 label-micro text-basic-muted truncate">
+          <div className="px-1 py-1 code code-micro text-basic-tertiary truncate">
             {providerLabel(backend) || "Model"}
           </div>
           {rows}
