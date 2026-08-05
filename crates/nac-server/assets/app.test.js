@@ -2691,8 +2691,11 @@ test("the Sending… badge and its CSS are gone with the baseline pending machin
     "the pulse keyframes stay: the guidance status marker still reuses them");
 });
 
-test("user messages carry modest vertical breathing room and the blue guidance box is gone", () => {
-  assert.match(redesignSource, /\.focus-message\[data-role="user"\] \{ margin-block: var\(--sp-2\); \}/);
+test("user messages use a restrained transcript band and the blue guidance box is gone", () => {
+  assert.match(redesignSource, /\.focus-message\[data-role="user"\] \{[^}]*margin-block: var\(--sp-2\);[^}]*padding: var\(--sp-2\) var\(--sp-3\);[^}]*border-inline-start: 2px solid var\(--ink-faint\);[^}]*background: linear-gradient\(90deg, var\(--surface-user\), transparent\);[^}]*color: var\(--ink\);/s);
+  assert.doesNotMatch(redesignSource, /\.focus-message\[data-role="user"\] \{[^}]*border-radius/s,
+    "the user turn remains a transcript band rather than a rounded chat bubble");
+  assert.match(redesignSource, /\.focus-message\[data-role="user"\] \.focus-message-copy \{ color: var\(--ink\); \}/);
   assert.doesNotMatch(redesignSource, /data-role="guidance"/, "no guidance-role CSS remains");
   assert.doesNotMatch(redesignSource, /focus-guidance-label/, "the attention-blue guidance label is gone");
   assert.match(redesignSource, /\.focus-guidance-status \{[^}]*color: var\(--ink-muted\);[^}]*font: var\(--fs-xs\)\/var\(--lh-none\) var\(--mono\);[^}]*text-transform: uppercase;/s,

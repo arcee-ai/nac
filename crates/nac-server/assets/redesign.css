@@ -66,6 +66,7 @@
   /* Additional colors */
   --ink-faint: #6a6a6a;
   --surface-hover: #151515;
+  --surface-user: #121212;
   --danger-border: #4a2828;
 
   --event-font: var(--fs-md)/var(--lh-none) var(--mono);
@@ -814,8 +815,13 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   flex: none;
 }
 .focus-message { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; }
-.focus-message[data-role="user"] { margin-block: var(--sp-2); }
-.focus-message[data-role="user"] { background: #1a1a1a; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); color: var(--ink); }
+.focus-message[data-role="user"] {
+  margin-block: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-inline-start: 2px solid var(--ink-faint);
+  background: linear-gradient(90deg, var(--surface-user), transparent);
+  color: var(--ink);
+}
 .focus-message[data-role="user"] .focus-message-copy { color: var(--ink); }
 .focus-guidance-status { align-self: flex-end; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); letter-spacing: var(--ls-wider); text-transform: uppercase; animation: pending-badge-pulse 2.6s ease-in-out infinite; }
 @keyframes pending-badge-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
