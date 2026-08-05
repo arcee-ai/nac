@@ -135,9 +135,15 @@ pub fn managed_backend_base_url(backend: BackendKind) -> Option<&'static str> {
 
 /// Materialize and validate the base URL after the effective backend has been
 /// selected. A caller-supplied value is always authoritative (and is never
-/// replaced when invalid); only genuine absence receives a managed default.
+/// replaced when invalid); genuine absence falls to the provider's catalog
+/// endpoint default (the five models.dev providers and arcee-api), then the
+/// managed canonical URL. Every current backend carries a default, so the
+/// missing-setting error is unreachable in practice (kept for future
+/// providers).
 pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) -> Result<String> {
-    let base_url = base_url.or_else(|| managed_backend_base_url(backend).map(str::to_string));
+    let base_url = base_url
+        .or_else(|| catalog::default_base_url(backend))
+        .or_else(|| managed_backend_base_url(backend).map(str::to_string));
     let base_url = required_nonblank_setting(base_url, "base_url")?;
     let parsed = Url::parse(&base_url).map_err(|error| {
         model_configuration_error(format!(
@@ -165,11 +171,17 @@ impl EffectiveModelSettings {
     ) -> Result<Self> {
         let backend = backend.ok_or_else(|| {
             model_configuration_error(
-                "invalid model configuration: required setting 'backend' is missing; set it in config.toml or the session settings",
+                "invalid model configuration: required setting 'backend' is missing; select a backend in the session settings or configure a model id the catalog knows",
             )
         })?;
         let model = required_nonblank_setting(model, "model")?;
         let base_url = resolve_model_base_url(backend, base_url)?;
+        // Conventional-var auto-selection: an API-key backend with no
+        // explicit selector adopts the provider's conventional credential
+        // variable when it exists in the environment (the value is read at
+        // client construction; the selected NAME is persisted into the
+        // session). Managed backends never auto-select.
+        let api_key_env = api_key_env.or_else(|| backend::auto_select_api_key_env(backend));
         let resolved = catalog::resolve(backend, &model);
         super::backend::validate_model_reasoning_effort_with_map(
             backend,

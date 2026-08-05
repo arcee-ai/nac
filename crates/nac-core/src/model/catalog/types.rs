@@ -252,6 +252,11 @@ pub struct ProviderListing {
     /// known.
     pub auth_hint: Option<String>,
     pub managed_base_url: Option<String>,
+    /// The provider's catalog endpoint default (models.dev `api` or the
+    /// curated SDK-default URL; hand-seeded for arcee-api); `None` for the
+    /// managed providers. An absent request `base_url` materializes to it
+    /// at settings resolution.
+    pub default_base_url: Option<String>,
     pub default_limits: DefaultLimits,
     pub models: Vec<ModelEntry>,
 }

@@ -494,7 +494,7 @@ fn generated_entries_satisfy_catalog_invariants() {
     }
     // Snapshot pin: 80 agent-compatible generated models plus 11 hand-seeded entries. Drift fails loudly here at regen/seed-edit time,
     // forcing a deliberate review.
-    assert_eq!(entry_count, 91, "catalog model count drifted");
+    assert_eq!(entry_count, 92, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -675,7 +675,7 @@ fn sparse_metadata_carries_the_documented_fallbacks() {
 fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
     // Provider set, auth requirements and managed base URLs derive from the
     // backend kind, not from catalog data — this test needs no env lock.
-    let listing = api_listing(None);
+    let listing = api_listing();
     let providers = listing
         .providers
         .iter()
@@ -715,11 +715,94 @@ fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
 }
 
 #[test]
+fn api_listing_serves_catalog_default_base_urls() {
+    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
+    // refresh tests transiently reload the global with Overlay entries.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let listing = api_listing();
+    let default_base_url = |provider: BackendKind| {
+        listing
+            .providers
+            .iter()
+            .find(|entry| entry.id == provider)
+            .unwrap()
+            .default_base_url
+            .as_deref()
+    };
+    // The five models.dev providers come from models.dev `api` or the
+    // curated overrides; the anthropic default is the API ROOT (the adapter
+    // appends "/v1/messages" itself); arcee-api is hand-seeded (not a
+    // models.dev provider); managed providers keep code-side canonicals.
+    assert_eq!(
+        default_base_url(BackendKind::DeepSeekChat),
+        Some("https://api.deepseek.com")
+    );
+    assert_eq!(
+        default_base_url(BackendKind::FireworksChat),
+        Some("https://api.fireworks.ai/inference/v1")
+    );
+    assert_eq!(
+        default_base_url(BackendKind::TogetherChat),
+        Some("https://api.together.xyz/v1")
+    );
+    assert_eq!(
+        default_base_url(BackendKind::OpenAiResponses),
+        Some("https://api.openai.com/v1")
+    );
+    assert_eq!(
+        default_base_url(BackendKind::AnthropicMessages),
+        Some("https://api.anthropic.com")
+    );
+    assert_eq!(
+        default_base_url(BackendKind::ArceeApi),
+        Some("https://api.arcee.ai/api/v1")
+    );
+    assert_eq!(default_base_url(BackendKind::ArceeAuth), None);
+    assert_eq!(default_base_url(BackendKind::ChatGptCodexResponses), None);
+}
+
+#[test]
+fn provider_for_model_resolves_unique_collision_and_unknown_ids() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    // Unique exact matches win (one entry per provider class).
+    assert_eq!(
+        provider_for_model("claude-opus-4-6"),
+        Some(BackendKind::AnthropicMessages)
+    );
+    assert_eq!(
+        provider_for_model("deepseek-v4-pro"),
+        Some(BackendKind::DeepSeekChat)
+    );
+
+    // Collisions prefer the non-managed provider: the Trinity ids exist on
+    // both arcee backends, and every codex seed id overlaps an openai
+    // baseline entry — so managed providers are only reachable through an
+    // explicit backend selection, never through model-id resolution.
+    assert_eq!(
+        provider_for_model("trinity-large-thinking"),
+        Some(BackendKind::ArceeApi)
+    );
+    assert_eq!(
+        provider_for_model("gpt-5.6-sol"),
+        Some(BackendKind::OpenAiResponses)
+    );
+    assert_eq!(
+        provider_for_model("gpt-5.3-codex-spark"),
+        Some(BackendKind::OpenAiResponses)
+    );
+
+    // Unknown ids (including dated-snapshot shapes — the lookup is exact
+    // only) stay unresolved.
+    assert_eq!(provider_for_model("never-seen-model"), None);
+    assert_eq!(provider_for_model("claude-opus-4-6-20260301"), None);
+}
+
+#[test]
 fn api_listing_serializes_the_designed_field_names() {
     // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
     // refresh tests transiently reload the global with Overlay entries.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = serde_json::to_value(api_listing(None)).expect("listing serializes");
+    let listing = serde_json::to_value(api_listing()).expect("listing serializes");
     let keys = |value: &serde_json::Value| {
         value
             .as_object()
@@ -744,6 +827,7 @@ fn api_listing_serializes_the_designed_field_names() {
             "auth",
             "auth_hint",
             "auth_status",
+            "default_base_url",
             "default_limits",
             "id",
             "managed_base_url",
@@ -827,7 +911,7 @@ fn api_listing_supported_efforts_come_from_some_wired_map_keys() {
     // Wire values stay internal: claude-opus-4-6's xhigh maps to the wire
     // tier "max", but the listing reports the effort level.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = api_listing(None);
+    let listing = api_listing();
     let anthropic = listing
         .providers
         .iter()
@@ -855,7 +939,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
     // Holds TEST_ENV_LOCK for the same reason as the other global-catalog
     // assertions (transient Overlay entries from the refresh tests).
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let listing = api_listing(None);
+    let listing = api_listing();
     assert_eq!(listing.providers.len(), 8);
     let mut total = 0;
     for provider in &listing.providers {
@@ -882,7 +966,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 91, "catalog model count drifted");
+    assert_eq!(total, 92, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -932,8 +1016,8 @@ fn catalog_version_bumps_on_reload() {
     // Serializes with the S2 refresh tests: they reload the process-global
     // catalog (bumping the version) via EnvGuard::drop.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let before = api_listing(None).catalog_version;
+    let before = api_listing().catalog_version;
     reset_for_test();
-    let after = api_listing(None).catalog_version;
+    let after = api_listing().catalog_version;
     assert_eq!(after, before + 1);
 }

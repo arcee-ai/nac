@@ -18,6 +18,29 @@ pub(crate) fn api_key_backend(backend: BackendKind) -> bool {
     )
 }
 
+/// Whether `name` exists in the process environment with a usable value.
+/// Empty or whitespace-only values do not count, matching the
+/// `api_key_for_backend` launch-time semantics.
+pub(crate) fn env_var_is_set(name: &str) -> bool {
+    std::env::var_os(name)
+        .and_then(|value| value.into_string().ok())
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// Conventional-var auto-selection: an API-key backend with no explicit
+/// `api_key_env` selector adopts the provider's conventional credential
+/// variable (catalog `credential_env_var`) when it exists in the
+/// environment with a usable value. Managed backends and providers with an
+/// unset conventional variable return `None` — validation then fails with
+/// the guided missing-credential error.
+pub(crate) fn auto_select_api_key_env(backend: BackendKind) -> Option<String> {
+    if !api_key_backend(backend) {
+        return None;
+    }
+    let name = catalog::credential_env_var(backend)?;
+    env_var_is_set(&name).then_some(name)
+}
+
 /// Human-readable supported-effort list for validation errors, derived from
 /// the model's catalog thinking map ("none, high, or xhigh"; "none only";
 /// "no explicit effort levels" for an empty map).
@@ -86,10 +109,19 @@ pub(crate) fn validate_model_reasoning_effort_with_map(
 pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&str>) -> Result<()> {
     if api_key_backend(backend) {
         let Some(name) = api_key_env else {
-            return Err(model_configuration_error(format!(
-                "invalid model configuration: backend '{}' requires a nonblank api_key_env naming the environment variable containing its API key",
-                backend
-            )));
+            // Guided error: name the provider's conventional credential
+            // variable (auto-selection would have adopted it had it been
+            // set) so the fix is one env var away.
+            return Err(model_configuration_error(
+                match catalog::credential_env_var(backend) {
+                    Some(var) => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; set the {var} environment variable or provide an API key variable in overrides"
+                    ),
+                    None => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; provide an API key variable in overrides for backend '{backend}'"
+                    ),
+                },
+            ));
         };
         if name.trim().is_empty() {
             return Err(model_configuration_error(format!(

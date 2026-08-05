@@ -1,12 +1,14 @@
 //! Per-request auth-status computation for `GET /models`.
 //!
-//! The badge is a HINT only — it never changes how auth works. API-key
-//! providers still read only the exact `api_key_env` selector at session
-//! launch; managed providers still read only their stored credential file.
-//! Status is computed from the process environment and the credential files
-//! at request time (both change outside the catalog), never baked into
-//! catalog data: the catalog carries only the static conventional variable
-//! name per provider.
+//! The badge is a HINT only — it never changes how auth works. An API-key
+//! provider reads ready when its conventional credential variable is set
+//! in the process environment — the same variable session resolution
+//! auto-selects when no explicit `api_key_env` selector is supplied;
+//! managed providers read ready when their stored credential file exists
+//! and parses. Status is computed from the process environment and the
+//! credential files at request time (both change outside the catalog),
+//! never baked into catalog data: the catalog carries only the static
+//! conventional variable name per provider.
 
 use super::AuthStatus;
 use crate::model::{arcee, backend, chatgpt_codex, BackendKind};
@@ -33,37 +35,21 @@ fn managed_credential_present(provider: BackendKind) -> bool {
     }
 }
 
-/// Whether `name` exists in the process environment with a usable value.
-/// Empty or whitespace-only values do not count, matching the
-/// `api_key_for_backend` launch-time semantics.
-fn env_var_is_set(name: &str) -> bool {
-    std::env::var_os(name)
-        .and_then(|value| value.into_string().ok())
-        .is_some_and(|value| !value.trim().is_empty())
-}
-
 /// Compute one provider's `(auth_status, auth_hint)` pair.
 ///
-/// API-key providers are ready when EITHER the provider's conventional env
-/// var (catalog `credential_env_var`) OR that same provider's root-configured
-/// selector (`configured_api_key_env`, config.toml `[model].api_key_env`)
-/// names a set variable. A selector configured for another provider is not
-/// usable by this provider and therefore does not affect its global hint.
-/// Otherwise returns `no_credential` with the conventional var name as the
-/// hint (`None` when no conventional name is known). Managed
-/// providers are ready when their stored credential exists and parses;
-/// otherwise `no_credential` with the login command as the hint.
+/// API-key providers are ready when the provider's conventional env var
+/// (catalog `credential_env_var`) names a set variable — the same variable
+/// session resolution auto-selects. Otherwise returns `no_credential` with
+/// the conventional var name as the hint (`None` when no conventional name
+/// is known). Managed providers are ready when their stored credential
+/// exists and parses; otherwise `no_credential` with the login command as
+/// the hint.
 pub(super) fn provider_auth_status(
     provider: BackendKind,
     credential_env_var: Option<&str>,
-    configured_api_key_env: Option<(BackendKind, &str)>,
 ) -> (AuthStatus, Option<String>) {
     if backend::api_key_backend(provider) {
-        let ready = credential_env_var.is_some_and(env_var_is_set)
-            || configured_api_key_env
-                .filter(|(configured_provider, _)| *configured_provider == provider)
-                .is_some_and(|(_, selector)| env_var_is_set(selector));
-        if ready {
+        if credential_env_var.is_some_and(backend::env_var_is_set) {
             return (AuthStatus::Ready, None);
         }
         return (

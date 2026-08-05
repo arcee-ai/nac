@@ -5,40 +5,76 @@ use super::*;
 use crate::TEST_ENV_LOCK;
 
 #[test]
-fn api_key_backends_require_explicit_valid_selectors_and_ignore_canonical_vars() {
+fn api_key_backends_validate_selectors_and_auto_select_the_conventional_var() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let names = [
         "OPENAI_API_KEY",
         "TOGETHER_API_KEY",
         "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "FIREWORKS_API_KEY",
+        "ARCEE_API_KEY",
         "NAC_EXPLICIT_TEST_KEY",
     ];
     let original = names.map(|name| (name, std::env::var_os(name)));
+    set_env("DEEPSEEK_API_KEY", None);
+    set_env("FIREWORKS_API_KEY", None);
+    set_env("ARCEE_API_KEY", None);
     set_env("OPENAI_API_KEY", Some("openai-selected"));
     set_env("TOGETHER_API_KEY", Some("together-selected"));
     set_env("ANTHROPIC_API_KEY", Some("anthropic-selected"));
     set_env("NAC_EXPLICIT_TEST_KEY", Some("selected-secret"));
 
     let backends = [
-        BackendKind::OpenAiResponses,
-        BackendKind::TogetherChat,
-        BackendKind::AnthropicMessages,
-        BackendKind::DeepSeekChat,
-        BackendKind::FireworksChat,
-        BackendKind::ArceeApi,
+        (BackendKind::OpenAiResponses, "OPENAI_API_KEY"),
+        (BackendKind::TogetherChat, "TOGETHER_API_KEY"),
+        (BackendKind::AnthropicMessages, "ANTHROPIC_API_KEY"),
+        (BackendKind::DeepSeekChat, "DEEPSEEK_API_KEY"),
+        (BackendKind::FireworksChat, "FIREWORKS_API_KEY"),
+        (BackendKind::ArceeApi, "ARCEE_API_KEY"),
     ];
-    for backend in backends {
+    for (backend, conventional) in backends {
+        // The guided missing-credential error names the provider's
+        // conventional variable (auto-selection would have adopted it had
+        // it been set).
         let missing = api_key_for_backend(backend, None)
-            .expect_err("canonical variables must not act as implicit selectors");
+            .expect_err("a missing selector must fail with the guided error");
         assert!(missing.downcast_ref::<ModelConfigurationError>().is_some());
-        assert!(missing
-            .to_string()
-            .contains("requires a nonblank api_key_env"));
+        assert!(
+            missing.to_string().contains(&format!(
+                "set the {conventional} environment variable or provide an API key variable in overrides"
+            )),
+            "{missing:#}"
+        );
 
         let selected = api_key_for_backend(backend, Some("NAC_EXPLICIT_TEST_KEY"))
             .expect("explicit selector should be authoritative");
         assert_eq!(selected, "selected-secret");
     }
+
+    // Auto-selection adopts the conventional variable when it is set;
+    // managed backends never auto-select.
+    assert_eq!(
+        backend::auto_select_api_key_env(BackendKind::OpenAiResponses).as_deref(),
+        Some("OPENAI_API_KEY")
+    );
+    assert_eq!(
+        backend::auto_select_api_key_env(BackendKind::TogetherChat).as_deref(),
+        Some("TOGETHER_API_KEY")
+    );
+    assert_eq!(
+        backend::auto_select_api_key_env(BackendKind::DeepSeekChat),
+        None,
+        "DEEPSEEK_API_KEY is not set in this test's environment"
+    );
+    assert_eq!(
+        backend::auto_select_api_key_env(BackendKind::ArceeAuth),
+        None
+    );
+    assert_eq!(
+        backend::auto_select_api_key_env(BackendKind::ChatGptCodexResponses),
+        None
+    );
 
     for (selector, expected) in [
         ("OPENAI_API_KEY", "openai-selected"),
@@ -68,7 +104,15 @@ fn api_key_selector_validation_and_values_are_typed_configuration_errors() {
     set_env("NAC_EMPTY_TEST_KEY", Some(""));
     set_env("NAC_SPACE_TEST_KEY", Some("  \t "));
 
-    for selector in [None, Some(""), Some("   ")] {
+    let missing = api_key_for_backend(BackendKind::OpenAiResponses, None).unwrap_err();
+    assert!(missing.downcast_ref::<ModelConfigurationError>().is_some());
+    assert!(
+        missing
+            .to_string()
+            .contains("set the OPENAI_API_KEY environment variable"),
+        "{missing:#}"
+    );
+    for selector in [Some(""), Some("   ")] {
         let error = api_key_for_backend(BackendKind::OpenAiResponses, selector).unwrap_err();
         assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
         assert!(error.to_string().contains("nonblank api_key_env"));
@@ -174,12 +218,7 @@ fn effective_settings_require_explicit_valid_model_tuple() {
             "model",
         ),
         (
-            Some(BackendKind::OpenAiResponses),
-            Some("model".to_string()),
-            None,
-            "base_url",
-        ),
-        (
+            // A present invalid base URL is never replaced by a default.
             Some(BackendKind::OpenAiResponses),
             Some("model".to_string()),
             Some("not a url".to_string()),
@@ -243,16 +282,44 @@ fn managed_backends_materialize_only_absent_base_urls() {
         assert!(error.to_string().contains("must not be blank"), "{error:#}");
     }
 
-    let error = EffectiveModelSettings::from_optional(
-        Some(BackendKind::OpenAiResponses),
-        Some("model".to_string()),
-        None,
-        None,
-        None,
-        std::collections::BTreeMap::new(),
-    )
-    .expect_err("API-key backends must not acquire a base URL default");
-    assert!(error.to_string().contains("base_url"), "{error:#}");
+    // Every API-key backend materializes its catalog endpoint default:
+    // the five models.dev providers from models.dev `api`/curated
+    // overrides (the anthropic default is the API ROOT — the adapter
+    // appends "/v1/messages" itself), arcee-api from the hand-seed.
+    for (backend, expected) in [
+        (BackendKind::DeepSeekChat, "https://api.deepseek.com"),
+        (
+            BackendKind::FireworksChat,
+            "https://api.fireworks.ai/inference/v1",
+        ),
+        (BackendKind::TogetherChat, "https://api.together.xyz/v1"),
+        (BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
+        (BackendKind::AnthropicMessages, "https://api.anthropic.com"),
+        (BackendKind::ArceeApi, "https://api.arcee.ai/api/v1"),
+    ] {
+        let materialized = EffectiveModelSettings::from_optional(
+            Some(backend),
+            Some("model".to_string()),
+            None,
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .expect("the catalog default fills an absent base URL");
+        assert_eq!(materialized.base_url, expected, "{backend}");
+
+        // A caller-supplied value stays authoritative over the default.
+        let explicit = EffectiveModelSettings::from_optional(
+            Some(backend),
+            Some("model".to_string()),
+            Some("https://explicit.example/v1".to_string()),
+            None,
+            None,
+            std::collections::BTreeMap::new(),
+        )
+        .expect("an explicit base URL remains accepted");
+        assert_eq!(explicit.base_url, "https://explicit.example/v1", "{backend}");
+    }
 }
 
 #[test]

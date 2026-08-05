@@ -54,7 +54,7 @@ fn golden_output_covers_the_five_models_dev_providers() {
         .map(|provider| provider.models.len())
         .sum();
     assert_eq!(
-        total, 80,
+        total, 81,
         "models.dev snapshot agent-compatible model count drifted"
     );
 }

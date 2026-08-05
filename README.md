@@ -15,7 +15,7 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 - `nac-web`: the web dashboard for managing multiple sessions, plus utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 
-Before launching a new session, configure an explicit `backend` and `model`. Most backends also require `base_url`; the managed `chatgpt-codex-responses` and `arcee-auth` backends materialize their fixed canonical URL when it is omitted. API-key backends also require `api_key_env`, the exact name of the one environment variable NAC may read for that session. The full contract and examples are under [Model configuration](#model-configuration).
+Before launching a new session, configure a `model` (or pick one in the dashboard's model picker). The backend resolves from the model id through the embedded model catalog, the base URL materializes from the catalog's provider endpoint default, and an API-key credential auto-selects the provider's conventional environment variable when it is set — so a bare `model` is usually the whole configuration. Explicit `backend`, `base_url`, and `api_key_env` overrides remain available per session. The full contract and examples are under [Model configuration](#model-configuration).
 
 To use ChatGPT Codex OAuth instead of an API key, run `nac-web codex-auth login` and complete the device-code flow in a browser, then select `chatgpt-codex-responses` with its required model. An omitted base URL resolves to `https://chatgpt.com/backend-api`.
 
@@ -92,12 +92,11 @@ podman machine start
 
 ## Model configuration
 
-Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` and `[compaction]` in that file. The resulting `backend` and `model` must be present and nonblank before the session is created. `base_url` is also required except that an absent value is materialized as `https://chatgpt.com/backend-api` for `chatgpt-codex-responses` and `https://api.arcee.ai/api/v1` for `arcee-auth`. No other backend receives an endpoint default, and a present value is validated rather than replaced.
+Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` and `[compaction]` in that file. `[model]` keeps only `model`, `reasoning_effort`, and `extra_headers`; the removed `backend`, `base_url`, and `api_key_env` keys in an older config are ignored with a one-time warning. The resulting `backend` and `model` must be present and nonblank before the session is created: the backend is explicit or resolved from the model id through the catalog (a unique exact match wins; a collision prefers the non-managed provider with a warning; an unknown id stays unresolved). An absent `base_url` materializes from the catalog's provider endpoint default — the five models.dev providers and `arcee-api` carry one, and the managed `chatgpt-codex-responses` and `arcee-auth` backends use their fixed canonical URLs. A present value is validated rather than replaced.
 
 Model selection is config-first, not environment-driven:
 
 - NAC never reads `OPENAI_MODEL` or `OPENAI_BASE_URL` and does not infer a backend, model, or endpoint from provider conventions.
-- NAC does not search provider API-key variables. An API key is read only through the exact `api_key_env` selector described below.
 - A created session persists its complete effective model settings. Resume, server attachment, and managed workers use that stored snapshot rather than re-resolving the model tuple or credential selector from ambient config. Non-model runtime settings can still come from the current config.
 
 Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
@@ -112,10 +111,11 @@ Before each ordinary model call, a session-backed orchestrator automatically com
 
 ### API-key selection
 
-The API-key backends are `openai-responses`, `together-chat`, `anthropic-messages`, `deepseek-chat`, `fireworks-chat`, and `arcee-api`. Every one requires `api_key_env`:
+The API-key backends are `openai-responses`, `together-chat`, `anthropic-messages`, `deepseek-chat`, `fireworks-chat`, and `arcee-api`. Each resolves its credential selector (`api_key_env`, the NAME of the one environment variable NAC may read) as follows:
 
-- The selector must match `[A-Za-z_][A-Za-z0-9_]*` exactly. NAC does not trim or rewrite it.
-- NAC reads only the environment variable whose name is stored in `api_key_env`; there is no fallback to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `ARCEE_API_KEY`, or any other provider-named variable.
+- An explicit per-session `api_key_env` override always wins. The selector must match `[A-Za-z_][A-Za-z0-9_]*` exactly. NAC does not trim or rewrite it.
+- With no explicit selector, NAC auto-selects the provider's conventional variable (`OPENAI_API_KEY`, `TOGETHER_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `FIREWORKS_API_KEY`, or `ARCEE_API_KEY`) when it exists in the environment, and persists the selected name into the session.
+- With no explicit selector and no conventional variable set, validation fails with a guided error naming the provider's conventional variable.
 - The selected variable must exist, contain Unicode, and have a nonempty, non-whitespace value when settings are validated for use.
 
 `arcee-auth` and `chatgpt-codex-responses` instead use managed credentials and reject `api_key_env`, including an inherited selector. Clear it when switching a configured API-key session to either managed backend.
@@ -143,11 +143,8 @@ max_bytes = 4194304
 store_path = ".nac/store.db"
 
 [model]
-backend = "openai-responses"
 model = "gpt-5.5"
-base_url = "https://api.openai.com/v1"
 reasoning_effort = "xhigh"
-api_key_env = "OPENAI_API_KEY"
 
 [compaction]
 threshold_tokens = 64000
@@ -178,7 +175,7 @@ Supported MCP transports right now are `stdio` and `streamable_http`. Stdio serv
 
 ## Model catalog, overrides, and cost
 
-NAC ships an embedded model catalog generated from [models.dev](https://models.dev): per-model context windows, maximum output tokens, pricing per 1M tokens, and supported reasoning effort levels for the `deepseek-chat`, `fireworks-chat`, `together-chat`, `openai-responses`, and `anthropic-messages` backends (`arcee-auth`/`arcee-api` and `chatgpt-codex-responses` entries are maintained by hand). Effort validation, Anthropic `max_tokens`, and per-response cost all read this catalog. A model the catalog does not know resolves from its provider's default entry with conservative fallbacks (128k context, 16k max output, zero cost), so unknown models keep working.
+NAC ships an embedded model catalog generated from [models.dev](https://models.dev): per-model context windows, maximum output tokens, pricing per 1M tokens, and supported reasoning effort levels for the `deepseek-chat`, `fireworks-chat`, `together-chat`, `openai-responses`, and `anthropic-messages` backends (`arcee-auth`/`arcee-api` and `chatgpt-codex-responses` entries are maintained by hand). Effort validation, Anthropic `max_tokens`, and per-response cost all read this catalog. Each provider also carries a conventional credential variable name and an endpoint default base URL, which drive credential auto-selection and absent-`base_url` materialization; a configured model id resolves its provider through the catalog (unique exact match; collisions prefer the non-managed provider with a warning). A model the catalog does not know resolves from its provider's default entry with conservative fallbacks (128k context, 16k max output, zero cost), so unknown models keep working.
 
 At startup, `nac-web` spawns a fire-and-forget background refresh that revalidates the catalog against models.dev with the stored ETag, at most once every 4 hours. A changed payload is mapped into `$NAC_HOME/model-catalog/overlay.json` (atomic write) and loaded over the embedded baseline; a `304` defers the next check, and any failure leaves the cached overlay and baseline untouched and retries on the next start. The refresh never blocks model calls, and resolution, picker, resume, and validation paths never perform network I/O — offline operation always works from the cached overlay and the embedded baseline. A corrupt overlay, or one older than the embedded baseline, is ignored with a warning. `MODELS_DEV_URL` can point the refresh at a mirror.
 
@@ -212,7 +209,7 @@ Every model response carries a dollar cost in its token usage, computed from cat
 
 The launch dialog and the session settings panel pick models from a searchable combobox: entries grouped by provider, each row showing the display name, model id, context window, and per-1M pricing (`pricing unknown` when the catalog has no rates). The reasoning dropdown is constrained to the selected model's supported effort levels and hidden when the model accepts none; an unrecognized model assumes its provider's default effort list, flagged as assumed and validated by the backend on submit. A persistent "Custom model…" option enters an arbitrary model id on a chosen provider for endpoints the catalog does not know. Selections the catalog does not recognize carry an `unrecognized model — conservative defaults` badge; models patched by `$NAC_HOME/models.json` carry a `customized` badge. If the catalog cannot be loaded, both surfaces fall back to manual backend and model entry with a notice.
 
-`GET /models` serves the listing as `{ catalog_version, providers }`. Each provider carries its auth requirement (`api_key_env`, `managed_arcee`, or `codex_oauth`), a per-request `auth_status` (`ready` or `no_credential`) with an `auth_hint` (the conventional credential env var name or the login command), any managed base URL, the provider default limits (context window, max output, default effort list), and its model entries with per-model limits, pricing, and supported efforts. `catalog_version` is a monotonic counter bumped on every catalog reload.
+`GET /models` serves the listing as `{ catalog_version, providers }`. Each provider carries its auth requirement (`api_key_env`, `managed_arcee`, or `codex_oauth`), a per-request `auth_status` (`ready` or `no_credential`) with an `auth_hint` (the conventional credential env var name or the login command), any managed base URL, the catalog endpoint default base URL, the provider default limits (context window, max output, default effort list), and its model entries with per-model limits, pricing, and supported efforts. `catalog_version` is a monotonic counter bumped on every catalog reload.
 
 A provider with no usable credential gets a `no credential detected` badge in the picker, with the fix path in the tooltip (set the named environment variable or choose a custom selector; run the login command for managed providers). The status is computed per request from the server process environment and the managed credential files; it is informational only — it never blocks selection and never changes how auth works.
 
@@ -231,7 +228,7 @@ Run `nac-web codex-auth login`, `nac-web codex-auth status`, or `nac-web codex-a
 Arcee credential mode is explicit:
 
 - `arcee-auth` reads the API key and inference origin saved by `nac-web arcee-auth login` in `arcee_auth.json`. It rejects `api_key_env`. When `base_url` is absent NAC materializes `https://api.arcee.ai/api/v1`; a configured value must have the same origin as the stored credential.
-- `arcee-api` never reads `arcee_auth.json`. It requires `api_key_env` and uses only that selected environment variable.
+- `arcee-api` never reads `arcee_auth.json`. Its endpoint default is `https://api.arcee.ai/api/v1`; its credential auto-selects `ARCEE_API_KEY` when set, and an explicit `api_key_env` selector names another variable.
 
 Manage the stored Arcee login with:
 
@@ -245,28 +242,16 @@ The login control plane is fixed at `https://api.arcee.ai`, using `/app/v1/devic
 
 Both Arcee backends accept only `https` origins on `arcee.ai` or its subdomains with effective port 443. Accepted inference paths are `/`, `/api`, `/api/v1`, and `/api/v1/chat/completions`; all resolve to `/api/v1/chat/completions`. Other hosts and path forms are rejected.
 
-A managed login needs a model and may omit the fixed production base URL:
+A managed login is selected explicitly in the dashboard's model picker (or with a per-session `backend = "arcee-auth"` override): the Trinity model ids collide with `arcee-api` in the catalog, and a collision resolves to the non-managed provider. The managed session's base URL defaults to `https://api.arcee.ai/api/v1`.
+
+An Arcee API-key session resolves from the model id alone when `ARCEE_API_KEY` is exported:
 
 ```toml
 [model]
-backend = "arcee-auth"
 model = "trinity-large-thinking"
-# base_url defaults to "https://api.arcee.ai/api/v1"
 ```
 
-An Arcee API-key session instead selects its key variable explicitly:
-
-```sh
-export MY_ARCEE_KEY="..."
-```
-
-```toml
-[model]
-backend = "arcee-api"
-model = "trinity-large-thinking"
-base_url = "https://api.arcee.ai/api/v1"
-api_key_env = "MY_ARCEE_KEY"
-```
+To use a different key variable, set a per-session `api_key_env = "MY_ARCEE_KEY"` override.
 
 ### Credential files
 

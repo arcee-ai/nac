@@ -149,6 +149,10 @@ async fn main() -> Result<()> {
             "  {provider}: {} models (thinking-level seeds replaced by curated matrix overrides: {replaced})",
             doc.models.len()
         );
+        match &doc.default_base_url {
+            Some(url) => println!("    default_base_url: {url}"),
+            None => println!("    default_base_url: (none)"),
+        }
     }
     for note in &generation.notes {
         println!("note: {note}");

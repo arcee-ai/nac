@@ -112,19 +112,13 @@ pub struct LaunchModelDefaultsRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchModelDefaults {
-    pub configured_model_backend: Option<BackendKind>,
-    /// Effective configured base URL after applying the managed-backend-only
-    /// fixed URL invariant. Other incomplete backends remain `None`.
-    pub configured_model_base_url: Option<String>,
     /// Configured model id; lets the launch dialog render the inherited
-    /// "from config" selection resolved against the model catalog.
+    /// "from config" selection resolved against the model catalog (the
+    /// frontend resolves the provider from the model id, exactly like
+    /// session creation does).
     pub configured_model: Option<String>,
     /// Configured reasoning effort, if any.
     pub configured_reasoning_effort: Option<ReasoningEffort>,
-    /// Configured credential selector NAME (never the value): lets the
-    /// launch dialog render which environment variable the inherited
-    /// selection reads.
-    pub configured_api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -528,36 +522,15 @@ impl SessionManager {
         })
     }
 
-    /// The configured backend and credential selector NAME (config.toml
-    /// `[model].backend` and `[model].api_key_env`, never the value) for the
-    /// `/models` auth-status hint. Root-config scope; a load failure or an
-    /// incomplete pair degrades to `None` (conventional-var-only status) so
-    /// the listing never fails.
-    fn configured_model_auth_selector(&self) -> Option<(BackendKind, String)> {
-        NacConfig::load_from_cwd(&self.inner.root_cwd)
-            .ok()
-            .and_then(|config| config.model.backend.zip(config.model.api_key_env))
-    }
-
     pub fn launch_model_defaults(
         &self,
         request: LaunchModelDefaultsRequest,
     ) -> Result<LaunchModelDefaults> {
         let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
-        let configured_model_backend = config.model.backend;
-        let configured_model_base_url = match configured_model_backend {
-            Some(backend) if managed_backend_base_url(backend).is_some() => Some(
-                resolve_model_base_url(backend, config.model.base_url.clone())?,
-            ),
-            _ => config.model.base_url.clone(),
-        };
         Ok(LaunchModelDefaults {
-            configured_model_backend,
-            configured_model_base_url,
             configured_model: config.model.model.clone(),
             configured_reasoning_effort: config.model.reasoning_effort,
-            configured_api_key_env: config.model.api_key_env.clone(),
         })
     }
 
@@ -1383,20 +1356,13 @@ async fn launch_model_defaults_handler(
 }
 
 /// The model catalog listing for the frontend picker: every provider with
-/// auth requirements, managed base URL, `_default` limits and real entries.
-/// Reads the process-global catalog; synchronous, local-only, never fails.
-/// `auth_status`/`auth_hint` are computed per request from the process
-/// environment and the managed credential files; the configured backend
-/// and selector NAME (never the value) come from the root config. A config
-/// load failure or incomplete pair degrades to conventional-var-only status
-/// rather than failing the listing.
-async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
-    let configured_selector = manager.configured_model_auth_selector();
-    Json(nac_core::model::api_listing(
-        configured_selector
-            .as_ref()
-            .map(|(provider, selector)| (*provider, selector.as_str())),
-    ))
+/// auth requirements, managed base URL, catalog endpoint default,
+/// `_default` limits and real entries. Reads the process-global catalog;
+/// synchronous, local-only, never fails. `auth_status`/`auth_hint` are
+/// computed per request from the process environment and the managed
+/// credential files.
+async fn models_handler() -> Json<ModelListing> {
+    Json(nac_core::model::api_listing())
 }
 
 async fn list_sessions(
@@ -2217,14 +2183,6 @@ mod tests {
 
     #[test]
     fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() {
-        let mut config = NacConfig::default();
-        config.model.reasoning_effort = Some(ReasoningEffort::Medium);
-        config.model.api_key_env = Some("CONFIG_KEY".to_string());
-        config
-            .model
-            .extra_headers
-            .insert("X-Config".to_string(), "yes".to_string());
-
         let inherited = model_options(
             RequestField::Omitted,
             RequestField::Omitted,
@@ -2237,7 +2195,6 @@ mod tests {
         assert_eq!(inherited.reasoning_effort, OptionalModelOption::Inherit);
         assert_eq!(inherited.api_key_env, OptionalModelOption::Inherit);
         assert_eq!(inherited.extra_headers, None);
-        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
         let explicit = model_options(
             RequestField::Value(" model-a ".to_string()),
@@ -2260,7 +2217,6 @@ mod tests {
         );
         assert_eq!(explicit.api_key_env, OptionalModelOption::Clear);
         assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
-        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
         let raw_selector = " SELECTED_KEY ";
         let selected = model_options(
@@ -2525,6 +2481,10 @@ mod tests {
                 "HOME",
                 "OPENAI_API_KEY",
                 "ANTHROPIC_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "FIREWORKS_API_KEY",
+                "TOGETHER_API_KEY",
+                "ARCEE_API_KEY",
                 "OPENAI_BASE_URL",
                 "SECOND_API_KEY",
             ];
@@ -2548,6 +2508,13 @@ mod tests {
                     None => std::env::remove_var("OPENAI_API_KEY"),
                 }
                 std::env::remove_var("ANTHROPIC_API_KEY");
+                // The remaining conventional credential vars stay cleared so
+                // conventional-var auto-selection never leaks machine state
+                // into a test.
+                std::env::remove_var("DEEPSEEK_API_KEY");
+                std::env::remove_var("FIREWORKS_API_KEY");
+                std::env::remove_var("TOGETHER_API_KEY");
+                std::env::remove_var("ARCEE_API_KEY");
                 std::env::remove_var("OPENAI_BASE_URL");
                 std::env::remove_var("SECOND_API_KEY");
             }
@@ -2675,46 +2642,33 @@ mod tests {
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"arcee-auth\"\n",
+            "[model]\nmodel = \"trinity-large-thinking\"\n",
         )
         .unwrap();
         let arcee_defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(
-            arcee_defaults.configured_model_backend,
-            Some(BackendKind::ArceeAuth)
-        );
-        assert_eq!(
-            arcee_defaults.configured_model_base_url.as_deref(),
-            Some(nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL)
+            arcee_defaults.configured_model.as_deref(),
+            Some("trinity-large-thinking")
         );
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"chatgpt-codex-responses\"\n",
+            "[model]\nmodel = \"gpt-5.6-sol\"\nreasoning_effort = \"high\"\n",
         )
         .unwrap();
         let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(
-            defaults.configured_model_backend,
-            Some(BackendKind::ChatGptCodexResponses)
-        );
-        assert_eq!(
-            defaults.configured_model_base_url.as_deref(),
-            Some(nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL)
+            defaults.configured_reasoning_effort,
+            Some(ReasoningEffort::High)
         );
         let serialized_defaults = serde_json::to_value(defaults).unwrap();
-        assert_eq!(
-            serialized_defaults["configured_model_backend"],
-            "chatgpt-codex-responses"
-        );
-        assert_eq!(
-            serialized_defaults["configured_model_base_url"],
-            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
-        );
+        assert_eq!(serialized_defaults["configured_model"], "gpt-5.6-sol");
+        assert_eq!(serialized_defaults["configured_reasoning_effort"], "high");
         assert!(
             serde_json::to_value(manager.store_info())
                 .unwrap()
-                .get("configured_model_backend")
+                .get("configured_model")
                 .is_none(),
             "root-only launch metadata must not remain on /store"
         );
@@ -2748,16 +2702,16 @@ mod tests {
                 "HOME" => cwd.join(relative_home).join(".config").join("nac"),
                 _ => unreachable!(),
             };
-            for (cwd, backend) in [
-                (&root, "openai-responses"),
-                (&workspace_a, "arcee-auth"),
-                (&workspace_b, "chatgpt-codex-responses"),
+            for (cwd, model) in [
+                (&root, "gpt-5.2"),
+                (&workspace_a, "trinity-large-thinking"),
+                (&workspace_b, "gpt-5.6-sol"),
             ] {
                 let dir = config_dir(cwd);
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     dir.join("config.toml"),
-                    format!("[model]\nbackend = \"{backend}\"\n"),
+                    format!("[model]\nmodel = \"{model}\"\n"),
                 )
                 .unwrap();
             }
@@ -2770,8 +2724,9 @@ mod tests {
                         ssh_host: None,
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::ArceeAuth),
+                    .configured_model
+                    .as_deref(),
+                Some("trinity-large-thinking"),
                 "{config_home_kind} local workspace A"
             );
             assert_eq!(
@@ -2781,8 +2736,9 @@ mod tests {
                         ssh_host: None,
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::ChatGptCodexResponses),
+                    .configured_model
+                    .as_deref(),
+                Some("gpt-5.6-sol"),
                 "{config_home_kind} local workspace B"
             );
             assert_eq!(
@@ -2792,8 +2748,9 @@ mod tests {
                         ssh_host: Some(" build-box ".to_string()),
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::OpenAiResponses),
+                    .configured_model
+                    .as_deref(),
+                Some("gpt-5.2"),
                 "{config_home_kind} SSH must use the server root"
             );
 
@@ -2816,7 +2773,7 @@ mod tests {
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\napi_key_env = \"MY_OPENAI_KEY\"\n",
+            "[model]\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\n",
         )
         .unwrap();
         let defaults = manager.launch_model_defaults(request()).unwrap();
@@ -2825,31 +2782,19 @@ mod tests {
             defaults.configured_reasoning_effort,
             Some(ReasoningEffort::High)
         );
-        // The selector NAME is served (never the variable's value).
-        assert_eq!(
-            defaults.configured_api_key_env.as_deref(),
-            Some("MY_OPENAI_KEY")
-        );
         let serialized = serde_json::to_value(defaults).unwrap();
         assert_eq!(serialized["configured_model"], "gpt-5.2");
         assert_eq!(serialized["configured_reasoning_effort"], "high");
-        assert_eq!(serialized["configured_api_key_env"], "MY_OPENAI_KEY");
 
-        // Without a configured model/effort the additive fields serialize as
-        // null (older frontends ignore them either way).
-        std::fs::write(
-            nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\n",
-        )
-        .unwrap();
+        // Without a configured model/effort the fields serialize as null
+        // (older frontends ignore them either way).
+        std::fs::write(nac_home.join("config.toml"), "[model]\n").unwrap();
         let defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(defaults.configured_model, None);
         assert_eq!(defaults.configured_reasoning_effort, None);
-        assert_eq!(defaults.configured_api_key_env, None);
         let serialized = serde_json::to_value(defaults).unwrap();
         assert!(serialized["configured_model"].is_null());
         assert!(serialized["configured_reasoning_effort"].is_null());
-        assert!(serialized["configured_api_key_env"].is_null());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2877,6 +2822,30 @@ mod tests {
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
+
+        // Catalog endpoint defaults: present for the five models.dev
+        // providers and the hand-seeded arcee-api (exact values are pinned
+        // hermetically in nac-core; a machine overlay could carry a
+        // refreshed models.dev `api`), absent for the managed providers.
+        for id in [
+            "anthropic-messages",
+            "deepseek-chat",
+            "fireworks-chat",
+            "openai-responses",
+            "together-chat",
+            "arcee-api",
+        ] {
+            assert!(
+                by_id(id)["default_base_url"].is_string(),
+                "{id} must serve a catalog default_base_url"
+            );
+        }
+        for id in ["arcee-auth", "chatgpt-codex-responses"] {
+            assert!(
+                by_id(id)["default_base_url"].is_null(),
+                "{id} must not serve a catalog default_base_url"
+            );
+        }
         assert_eq!(
             by_id("chatgpt-codex-responses")["managed_base_url"],
             nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
@@ -2991,15 +2960,10 @@ mod tests {
             "nac-web codex-auth login"
         );
 
-        // A configured selector naming a set variable reads ready only for
-        // its root-configured provider. Unrelated providers still report
-        // only their conventional global credential hint.
-        std::fs::write(
-            nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\napi_key_env = \"SECOND_API_KEY\"\n",
-        )
-        .unwrap();
-        unsafe { std::env::set_var("SECOND_API_KEY", "server-test-key") };
+        // The conventional variable naming a set value reads ready — the
+        // same variable session resolution auto-selects. Unrelated
+        // providers still report only their conventional credential hint.
+        unsafe { std::env::set_var("OPENAI_API_KEY", "server-test-key") };
         let body = response_json(get_response(app.clone(), "/models", None).await).await;
         let providers = body["providers"].as_array().unwrap();
         let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
@@ -3488,6 +3452,15 @@ thread_timeout_secs = 7200
 
         seed_editable_session(&root, "complete");
         seed_session(&root, "missing-selector", "2026-01-02 00:00:00.000000000");
+        // A missing selector stays incomplete only when conventional-var
+        // auto-selection cannot repair it: deepseek's conventional variable
+        // is cleared in this environment (openai's is set and would
+        // auto-select).
+        let mut missing_selector =
+            sessions::load_session(&store_path, "missing-selector").unwrap();
+        missing_selector.backend = BackendKind::DeepSeekChat;
+        missing_selector.base_url = "https://api.deepseek.com".to_string();
+        sessions::update_session_config(&store_path, &missing_selector).unwrap();
         seed_session(
             &root,
             "missing-environment-value",
@@ -3541,10 +3514,7 @@ thread_timeout_secs = 7200
         }
 
         let missing_selector = manager.session_config("missing-selector").unwrap();
-        assert_eq!(
-            missing_selector.backend.as_deref(),
-            Some("openai-responses")
-        );
+        assert_eq!(missing_selector.backend.as_deref(), Some("deepseek-chat"));
         assert_eq!(missing_selector.api_key_env, None);
         let missing_environment = manager.session_config("missing-environment-value").unwrap();
         assert_eq!(
@@ -4321,11 +4291,8 @@ thread_timeout_secs = 7200
         std::fs::write(
             nac_home.join("config.toml"),
             r#"[model]
-backend = "openai-responses"
-model = "config-model"
-base_url = "https://api.openai.com/v1"
+model = "gpt-5.2"
 reasoning_effort = "medium"
-api_key_env = "OPENAI_API_KEY"
 extra_headers = { X-Config = "yes" }
 
 [compaction]
@@ -4345,7 +4312,8 @@ threshold_tokens = 64000
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
-        assert_eq!(stored.model, "config-model");
+        assert_eq!(stored.model, "gpt-5.2");
+        assert_eq!(stored.base_url, "https://api.openai.com/v1");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
@@ -4424,7 +4392,7 @@ threshold_tokens = 64000
         std::fs::create_dir_all(&nac_home).unwrap();
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\nmodel = \"openai-model\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+            "[model]\nmodel = \"gpt-5.2\"\n",
         )
         .unwrap();
         write_arcee_auth(&nac_home, "https://api.arcee.ai");
@@ -4482,10 +4450,7 @@ threshold_tokens = 64000
         std::fs::write(
             nac_home.join("config.toml"),
             r#"[model]
-backend = "openai-responses"
-model = "openai-model"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
+model = "gpt-5.2"
 "#,
         )
         .unwrap();
@@ -4500,7 +4465,7 @@ api_key_env = "OPENAI_API_KEY"
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect("managed launch must not inherit the OpenAI URL or selector");
+            .expect("an explicit managed launch materializes its canonical tuple");
         assert_eq!(
             created.metadata.base_url,
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
@@ -4531,53 +4496,74 @@ api_key_env = "OPENAI_API_KEY"
         let manager = test_manager(&root);
         let store_path = root.join("store.db");
 
-        for (backend, expected_base) in [
+        // The full auto-resolution chain end-to-end: a bare configured
+        // model resolves its provider through the catalog (gpt-5.2 is
+        // unique to openai-responses), the base URL materializes from the
+        // catalog endpoint default, and the credential auto-selects the
+        // conventional env var — persisted into the session.
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nmodel = \"gpt-5.2\"\n",
+        )
+        .unwrap();
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("a configured catalog-known model auto-resolves the full tuple");
+        assert_eq!(created.metadata.backend, "openai-responses");
+        assert_eq!(created.metadata.base_url, "https://api.openai.com/v1");
+        assert_eq!(
+            created.metadata.api_key_env.as_deref(),
+            Some("OPENAI_API_KEY")
+        );
+        let session_id = created.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+
+        // Force a real persisted-snapshot attach instead of returning the
+        // service left in memory by create.
+        manager
+            .inner
+            .active_sessions
+            .write()
+            .await
+            .remove(&session_id);
+        let resumed = manager.snapshot(&session_id).await.unwrap();
+        assert_eq!(resumed.metadata.base_url, "https://api.openai.com/v1");
+
+        // Managed backends are only reachable through an explicit request
+        // backend: every managed model id collides with a non-managed
+        // provider's entry (the Trinity ids with arcee-api, the codex seed
+        // ids with the openai baseline) and the collision rule prefers the
+        // non-managed provider.
+        for (backend, model, expected_base) in [
+            (
+                "arcee-auth",
+                "trinity-large-thinking",
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
             (
                 "chatgpt-codex-responses",
+                "gpt-5.3-codex-spark",
                 nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
             ),
-            ("arcee-auth", nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL),
         ] {
-            let model = if backend == "arcee-auth" {
-                "trinity-large-thinking"
-            } else {
-                "managed-model"
-            };
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
-                ),
-            )
-            .unwrap();
-
-            let defaults = manager
-                .launch_model_defaults(LaunchModelDefaultsRequest {
-                    cwd: Some(root.clone()),
-                    ssh_host: None,
-                })
-                .unwrap();
-            assert_eq!(
-                defaults.configured_model_base_url.as_deref(),
-                Some(expected_base),
-                "launch metadata must expose the same materialized URL"
-            );
-
-            // This is the inherited shape emitted by the launch UI: the locked
-            // backend/base remain omitted, while null clears a stale configured selector.
-            let inherited: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
-                "ssh_host": null,
+                "backend": backend,
+                "model": model,
                 "api_key_env": null
             }))
             .unwrap();
-            assert!(matches!(inherited.backend, RequestField::Omitted));
-            assert!(matches!(inherited.base_url, RequestField::Omitted));
-            assert_eq!(inherited.api_key_env, RequestField::Null);
             let created = manager
-                .create_session(inherited)
+                .create_session(explicit)
                 .await
-                .unwrap_or_else(|error| panic!("inherited {backend} launch failed: {error:#}"));
+                .unwrap_or_else(|error| panic!("explicit {backend} launch failed: {error:#}"));
             assert_eq!(created.metadata.base_url, expected_base);
             assert_eq!(created.metadata.api_key_env, None);
             let session_id = created.metadata.session_id.unwrap();
@@ -4585,34 +4571,8 @@ api_key_env = "OPENAI_API_KEY"
             assert_eq!(stored.base_url, expected_base);
             assert_eq!(stored.api_key_env, None);
 
-            // Force a real persisted-snapshot attach instead of returning the
-            // service left in memory by create.
-            manager
-                .inner
-                .active_sessions
-                .write()
-                .await
-                .remove(&session_id);
-            let resumed = manager.snapshot(&session_id).await.unwrap();
-            assert_eq!(resumed.metadata.base_url, expected_base);
-
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\nbase_url = \"{expected_base}\"\n"
-                ),
-            )
-            .unwrap();
-            let configured = manager
-                .create_session(CreateSessionRequest {
-                    cwd: Some(root.clone()),
-                    ..CreateSessionRequest::default()
-                })
-                .await
-                .expect("an explicitly configured canonical base URL must remain accepted");
-            assert_eq!(configured.metadata.base_url, expected_base);
-
-            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+            // An explicit canonical managed base URL remains accepted.
+            let canonical: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
                 "backend": backend,
                 "model": model,
@@ -4620,11 +4580,11 @@ api_key_env = "OPENAI_API_KEY"
                 "api_key_env": null
             }))
             .unwrap();
-            let explicit = manager
-                .create_session(explicit)
+            let created = manager
+                .create_session(canonical)
                 .await
                 .expect("an explicit canonical managed base URL must remain accepted");
-            assert_eq!(explicit.metadata.base_url, expected_base);
+            assert_eq!(created.metadata.base_url, expected_base);
         }
 
         let before_controls = sessions::list_sessions(&store_path).unwrap().len();
@@ -4643,28 +4603,28 @@ api_key_env = "OPENAI_API_KEY"
             let model = if backend == "arcee-auth" {
                 "trinity-large-thinking"
             } else {
-                "managed-model"
+                "gpt-5.3-codex-spark"
             };
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\nbase_url = \"{invalid_base}\"\n"
-                ),
-            )
+            let invalid: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "backend": backend,
+                "model": model,
+                "base_url": invalid_base
+            }))
             .unwrap();
             let error = manager
-                .create_session(CreateSessionRequest {
-                    cwd: Some(root.clone()),
-                    ..CreateSessionRequest::default()
-                })
+                .create_session(invalid)
                 .await
                 .expect_err("a present non-managed origin must not be overwritten by the default");
             assert!(error.to_string().contains(expected_error), "{error:#}");
         }
 
+        // An unknown configured model resolves no provider: the guided
+        // missing-backend error surfaces (the frontend renders the
+        // from-config selection as unrecognized).
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\nmodel = \"api-model\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+            "[model]\nmodel = \"api-model\"\n",
         )
         .unwrap();
         let error = manager
@@ -4673,12 +4633,12 @@ api_key_env = "OPENAI_API_KEY"
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect_err("non-managed backends must still require base_url");
-        assert!(error.to_string().contains("base_url"), "{error:#}");
+            .expect_err("an unknown configured model must not resolve a backend");
+        assert!(error.to_string().contains("backend"), "{error:#}");
         assert_eq!(
             sessions::list_sessions(&store_path).unwrap().len(),
             before_controls,
-            "mismatch and non-managed failures must not persist sessions"
+            "mismatch and unresolved failures must not persist sessions"
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -5328,6 +5288,12 @@ api_key_env = "OPENAI_API_KEY"
                 ..UpdateConfigRequest::default()
             },
             UpdateConfigRequest {
+                // Clearing the selector fails only when conventional-var
+                // auto-selection cannot repair it: deepseek's conventional
+                // variable is cleared in this environment (the session's
+                // own openai conventional variable is set and would
+                // auto-select, so clearing stays valid there).
+                backend: RequestField::Value("deepseek-chat".to_string()),
                 api_key_env: RequestField::Null,
                 ..UpdateConfigRequest::default()
             },
@@ -5516,9 +5482,15 @@ api_key_env = "OPENAI_API_KEY"
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
         };
-        assert!(attach_error
-            .to_string()
-            .contains("requires a nonblank api_key_env"));
+        // The guided error names the provider's conventional variable
+        // (ScopedModelEnv keeps ARCEE_API_KEY cleared, so auto-selection
+        // cannot adopt it).
+        assert!(
+            attach_error
+                .to_string()
+                .contains("set the ARCEE_API_KEY environment variable"),
+            "{attach_error:#}"
+        );
         assert!(attach_error
             .downcast_ref::<ModelConfigurationError>()
             .is_some());

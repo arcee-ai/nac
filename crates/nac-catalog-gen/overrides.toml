@@ -28,6 +28,15 @@
 #
 # Keys are nac BackendKind ids; effort keys are ReasoningEffort lowercase
 # serde names; values are provider wire values.
+#
+# Endpoint defaults: models.dev carries a provider `api` only for deepseek
+# and fireworks-ai, so their `default_base_url` comes from the snapshot.
+# The three SDK-default providers are hand-seeded below (a value here would
+# also win over models.dev `api` — the curated table stays authoritative).
+# nac's adapters append their own paths: the anthropic adapter appends
+# "/v1/messages", so its default is the API ROOT (no /v1 suffix); the
+# responses/completions adapters append "/responses" and "/chat/completions"
+# to the values below as-is.
 
 # deepseek: none/high/xhigh for every model; xhigh is the wire tier "max".
 [providers."deepseek-chat"]
@@ -37,14 +46,18 @@ default_thinking_levels = { none = "none", high = "high", xhigh = "max" }
 [providers."fireworks-chat"]
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
 
-# together: none through high, sent verbatim.
+# together: none through high, sent verbatim. Endpoint default hand-seeded
+# (models.dev carries no `api`): the adapter appends "/chat/completions".
 [providers."together-chat"]
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+default_base_url = "https://api.together.xyz/v1"
 
 # openai-responses: every level, sent verbatim (the pre-S4 matrix accepted
-# all six for any model).
+# all six for any model). Endpoint default hand-seeded (models.dev carries
+# no `api`): the adapter appends "/responses".
 [providers."openai-responses"]
 default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
+default_base_url = "https://api.openai.com/v1"
 
 # anthropic: conservative none-only for every model (including families
 # newer than the matrix — opus-4-7/4-8, sonnet-5, fable-5 — whose thinking
@@ -53,6 +66,10 @@ default_thinking_levels = { none = "none", minimal = "minimal", low = "low", med
 # family, including always-thinking models.
 [providers."anthropic-messages"]
 default_thinking_levels = { none = "none" }
+# Endpoint default hand-seeded (models.dev carries no `api`): the API ROOT,
+# because nac's anthropic adapter appends "/v1/messages" itself — a "/v1"
+# suffix here would produce "/v1/v1/messages" on the wire.
+default_base_url = "https://api.anthropic.com"
 
 # claude-opus-4-6 family (incl. dated snapshots): adaptive with the
 # wire-level "max" tier (the pre-S4 matrix's AdaptiveWithMax family).

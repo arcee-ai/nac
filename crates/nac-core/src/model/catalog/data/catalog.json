@@ -2,6 +2,7 @@
   "providers": {
     "anthropic-messages": {
       "credential_env_var": "ANTHROPIC_API_KEY",
+      "default_base_url": "https://api.anthropic.com",
       "models": {
         "claude-fable-5": {
           "display_name": "Claude Fable 5",
@@ -209,6 +210,7 @@
     },
     "deepseek-chat": {
       "credential_env_var": "DEEPSEEK_API_KEY",
+      "default_base_url": "https://api.deepseek.com",
       "models": {
         "deepseek-chat": {
           "display_name": "DeepSeek Chat",
@@ -282,6 +284,7 @@
     },
     "fireworks-chat": {
       "credential_env_var": "FIREWORKS_API_KEY",
+      "default_base_url": "https://api.fireworks.ai/inference/v1",
       "models": {
         "accounts/fireworks/models/deepseek-v4-flash": {
           "display_name": "DeepSeek V4 Flash",
@@ -593,6 +596,7 @@
     },
     "openai-responses": {
       "credential_env_var": "OPENAI_API_KEY",
+      "default_base_url": "https://api.openai.com/v1",
       "models": {
         "gpt-4.1": {
           "display_name": "GPT-4.1",
@@ -1178,6 +1182,7 @@
     },
     "together-chat": {
       "credential_env_var": "TOGETHER_API_KEY",
+      "default_base_url": "https://api.together.xyz/v1",
       "models": {
         "MiniMaxAI/MiniMax-M2.7": {
           "display_name": "MiniMax-M2.7",
@@ -1280,6 +1285,24 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "none": "none"
+          }
+        },
+        "deepseek-ai/DeepSeek-V4-Flash-0731": {
+          "display_name": "DeepSeek V4 Flash 0731",
+          "context_window": 1000000,
+          "max_tokens": 384000,
+          "cost": {
+            "input": 0.14,
+            "output": 0.28,
+            "cache_read": 0.03,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",

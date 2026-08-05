@@ -144,12 +144,20 @@ impl std::fmt::Display for CatalogWarning {
 struct ProviderCatalog {
     default: ModelMetadata,
     models: BTreeMap<String, ModelMetadata>,
-    /// The provider's conventional credential env var name (status-only
-    /// metadata for the `/models` auth hint): the generated baseline owns
-    /// the five models.dev providers' names, the seed hand-maintains
-    /// arcee-api's, and a present overlay value upgrades. Managed providers
-    /// carry `None` (their hint is the login command).
+    /// The provider's conventional credential env var name: the generated
+    /// baseline owns the five models.dev providers' names, the seed
+    /// hand-maintains arcee-api's, and a present overlay value upgrades.
+    /// Managed providers carry `None` (their hint is the login command).
+    /// Powers the `/models` auth-status hint and the conventional-var
+    /// auto-selection in `EffectiveModelSettings`.
     credential_env_var: Option<String>,
+    /// The provider's endpoint default: the generated baseline/overlay
+    /// layers carry the five models.dev providers' URLs (models.dev `api`
+    /// or the curated SDK-default URL) and the seed hand-maintains
+    /// arcee-api's. Managed providers carry `None` (their canonical URLs
+    /// stay code-side, `managed_backend_base_url`). Fills a genuinely
+    /// absent request `base_url` in `resolve_model_base_url`.
+    default_base_url: Option<String>,
 }
 
 impl ProviderCatalog {
@@ -220,6 +228,55 @@ impl ModelCatalog {
         (catalog, warnings)
     }
 
+    /// The provider's catalog endpoint default, when any applied layer
+    /// carries one (the five models.dev providers and arcee-api; managed
+    /// providers have none).
+    pub fn default_base_url(&self, provider: BackendKind) -> Option<String> {
+        self.providers.get(&provider)?.default_base_url.clone()
+    }
+
+    /// The provider's conventional credential env var name, when any
+    /// applied layer carries one (the six API-key providers; managed
+    /// providers have none).
+    pub fn credential_env_var(&self, provider: BackendKind) -> Option<String> {
+        self.providers.get(&provider)?.credential_env_var.clone()
+    }
+
+    /// Resolve a model id to its provider by exact catalog entry match:
+    /// the unique provider carrying a real entry (Baseline/Overlay/
+    /// UserOverride) with that id wins. A collision (the same id on
+    /// several providers — the hand-seeded arcee pair shares the Trinity
+    /// ids, and the codex seed overlaps the openai baseline) prefers the
+    /// first non-managed provider with a warning. Unknown ids resolve to
+    /// `None` (the caller renders them unrecognized).
+    pub fn provider_for_model(&self, model: &str) -> Option<BackendKind> {
+        let matches: Vec<BackendKind> = self
+            .providers
+            .iter()
+            .filter(|(_, provider)| provider.models.contains_key(model))
+            .map(|(provider, _)| *provider)
+            .collect();
+        match matches.as_slice() {
+            [] => None,
+            [only] => Some(*only),
+            [first, ..] => {
+                let chosen = matches
+                    .iter()
+                    .find(|provider| managed_backend_base_url(**provider).is_none())
+                    .unwrap_or(first);
+                eprintln!(
+                    "nac: model catalog: model id '{model}' exists on multiple providers ({}); resolving to '{chosen}'",
+                    matches
+                        .iter()
+                        .map(|provider| provider.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                Some(*chosen)
+            }
+        }
+    }
+
     /// Resolve metadata for `model` on `provider` through
     /// [`ProviderCatalog::resolve_entry`]; never fails for unknown models.
     pub fn resolve(&self, provider: BackendKind, model: &str) -> ModelMetadata {
@@ -262,6 +319,37 @@ pub(crate) fn resolve(provider: BackendKind, model: &str) -> ModelMetadata {
     current().resolve(provider, model)
 }
 
+/// The provider's catalog endpoint default via the process-global catalog.
+/// Read by `resolve_model_base_url` after the request merge, so an
+/// explicit `base_url` always beats the generated default.
+pub(crate) fn default_base_url(provider: BackendKind) -> Option<String> {
+    current().default_base_url(provider)
+}
+
+/// The provider's conventional credential env var name via the
+/// process-global catalog. Read by the conventional-var auto-selection
+/// and the guided missing-credential error.
+pub(crate) fn credential_env_var(provider: BackendKind) -> Option<String> {
+    current().credential_env_var(provider)
+}
+
+/// Resolve a model id to its provider via the process-global catalog
+/// (exact match; collisions prefer the non-managed provider with a
+/// warning; unknown ids resolve to `None`).
+pub(crate) fn provider_for_model(model: &str) -> Option<BackendKind> {
+    current().provider_for_model(model)
+}
+
+/// The seed + generated-baseline catalog without any machine-state layer:
+/// the overlay refresh's mapping reference (thinking maps and provider
+/// endpoint defaults derive from it, reproducing the generator's
+/// `overrides.toml` application).
+pub(super) fn baseline_catalog() -> ModelCatalog {
+    let mut catalog = seed::seed_catalog();
+    data::merge_generated_baseline(&mut catalog);
+    catalog
+}
+
 /// Monotonic version of the process-global catalog; `reload` bumps it after
 /// every swap, so an overlay-refresh reload is observable to `/models`
 /// clients. The initial load is version 1.
@@ -285,18 +373,18 @@ fn provider_auth(provider: BackendKind) -> ProviderAuth {
 }
 
 /// Build the `GET /models` listing from the process-global catalog: every
-/// provider with its auth requirements, managed base URL, `_default` limits
-/// and real entries. Synthesis products (ProviderDefault/Fallback) never
-/// enter the `models` map by construction; the source filter pins that
-/// contract at the boundary. Synchronous and local-only, like resolution.
+/// provider with its auth requirements, managed base URL, catalog endpoint
+/// default, `_default` limits and real entries. Synthesis products
+/// (ProviderDefault/Fallback) never enter the `models` map by construction;
+/// the source filter pins that contract at the boundary. Synchronous and
+/// local-only, like resolution.
 ///
 /// `auth_status`/`auth_hint` are computed per call from the process
 /// environment and the managed credential files (never baked into the
-/// catalog). `configured_api_key_env` carries the backend and credential
-/// selector NAME from the server's root config (never the value); only that
-/// backend reads as ready when the selector names a set variable. Other
-/// API-key providers use only their conventional environment variables.
-pub fn api_listing(configured_api_key_env: Option<(BackendKind, &str)>) -> ModelListing {
+/// catalog): an API-key provider reads ready when its conventional
+/// credential variable is set — the same variable session resolution
+/// auto-selects.
+pub fn api_listing() -> ModelListing {
     let catalog = current();
     let providers = catalog
         .providers
@@ -305,7 +393,6 @@ pub fn api_listing(configured_api_key_env: Option<(BackendKind, &str)>) -> Model
             let (auth_status, auth_hint) = auth_status::provider_auth_status(
                 *provider,
                 provider_catalog.credential_env_var.as_deref(),
-                configured_api_key_env,
             );
             ProviderListing {
                 id: *provider,
@@ -313,6 +400,7 @@ pub fn api_listing(configured_api_key_env: Option<(BackendKind, &str)>) -> Model
                 auth_status,
                 auth_hint,
                 managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
+                default_base_url: provider_catalog.default_base_url.clone(),
                 default_limits: DefaultLimits {
                     context_window: provider_catalog.default.context_window,
                     max_tokens: provider_catalog.default.max_tokens,

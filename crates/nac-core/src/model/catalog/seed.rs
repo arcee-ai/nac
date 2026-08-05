@@ -261,7 +261,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
     let mut providers: BTreeMap<BackendKind, ProviderCatalog> = BTreeMap::new();
     let mut register = |default: ModelMetadata,
                         known: &[ModelMetadata],
-                        credential_env_var: Option<&str>| {
+                        credential_env_var: Option<&str>,
+                        default_base_url: Option<&str>| {
         let models = known
             .iter()
             .map(|metadata| (metadata.id.clone(), metadata.clone()))
@@ -272,6 +273,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
                 default,
                 models,
                 credential_env_var: credential_env_var.map(str::to_string),
+                default_base_url: default_base_url.map(str::to_string),
             },
         );
     };
@@ -292,6 +294,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
         &[],
         // Conventional credential var owned by the generated baseline.
         None,
+        // Endpoint default owned by the generated baseline.
+        None,
     );
     register(
         entry(
@@ -306,6 +310,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             ),
         ),
         &[],
+        None,
+        // Endpoint default owned by the generated baseline.
         None,
     );
     register(
@@ -323,6 +329,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
         ),
         &[],
         None,
+        // Endpoint default owned by the generated baseline.
+        None,
     );
     register(
         entry(
@@ -333,6 +341,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             Compat::default(),
         ),
         &[],
+        None,
+        // Endpoint default owned by the generated baseline.
         None,
     );
     register(
@@ -346,6 +356,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
         &codex_seed_models(),
         // Managed provider: no conventional env var; the auth hint is the
         // login command.
+        None,
+        // Managed provider: the canonical URL stays code-side.
         None,
     );
     register(
@@ -375,6 +387,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             ),
         ],
         None,
+        // Endpoint default owned by the generated baseline.
+        None,
     );
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         register(
@@ -391,6 +405,10 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             // arcee-api's conventional variable (the README's provider-named
             // list); arcee-auth is managed and carries no name.
             (backend == BackendKind::ArceeApi).then_some("ARCEE_API_KEY"),
+            // arcee-api's documented endpoint (docs.arcee.ai; not a
+            // models.dev provider, so the seed hand-maintains it). arcee-auth
+            // keeps its code-side canonical URL.
+            (backend == BackendKind::ArceeApi).then_some("https://api.arcee.ai/api/v1"),
         );
     }
 

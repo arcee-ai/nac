@@ -102,6 +102,17 @@ pub fn validate_model_configuration(
     api_key_env: Option<&str>,
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
+    // Mirror `EffectiveModelSettings::from_optional`: an absent selector
+    // auto-selects the provider's conventional credential variable when
+    // set, so validation matches what session resolution will do.
+    let auto_selected;
+    let api_key_env = match api_key_env {
+        Some(selector) => Some(selector),
+        None => {
+            auto_selected = backend::auto_select_api_key_env(backend);
+            auto_selected.as_deref()
+        }
+    };
     validate_extra_headers(extra_headers)?;
     validate_model_reasoning_effort(backend, model, reasoning_effort)?;
     validate_backend_api_key_env(backend, api_key_env)?;

@@ -12,7 +12,8 @@
 //! Record shape per model (the generator's `ModelDoc` contract):
 //! `display_name`, `context_window`, `max_tokens`, `cost` rates,
 //! `reasoning`, `thinking_level_map`; provider-level `credential_env_var`
-//! (status-only metadata for the `/models` auth hint). `provider`/`api`
+//! (the conventional credential variable name) and `default_base_url` (the
+//! provider endpoint default). `provider`/`api`
 //! are hydrated from the provider key and `compat` is inherited from the
 //! provider's seed default, so known and unknown models of a provider stay
 //! identical at adapter-consolidation time (S6). `cache_write_1h` is not
@@ -47,6 +48,13 @@ pub(super) struct GeneratedProvider {
     /// baseline's at merge time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) credential_env_var: Option<String>,
+    /// Provider endpoint default (models.dev `api`, or the curated
+    /// SDK-default URLs at gen time; the overlay carries the same mapping
+    /// forward). Absent in older overlays — an absent value never erases
+    /// the baseline's at merge time. Managed providers never carry one
+    /// (their canonical URLs stay code-side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) default_base_url: Option<String>,
     pub(super) models: BTreeMap<String, GeneratedModel>,
 }
 
@@ -126,6 +134,9 @@ pub(super) fn merge_entries(
     };
     if let Some(credential_env_var) = generated.credential_env_var {
         provider_catalog.credential_env_var = Some(credential_env_var);
+    }
+    if generated.default_base_url.is_some() {
+        provider_catalog.default_base_url = generated.default_base_url;
     }
     let compat = provider_catalog.default.compat.clone();
     if source == ModelSource::Overlay {

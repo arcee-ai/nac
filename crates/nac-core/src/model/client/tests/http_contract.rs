@@ -537,3 +537,30 @@ async fn anthropic_max_tokens_come_from_the_resolved_catalog_metadata() {
         assert_eq!(body["max_tokens"], json!(expected), "{model}");
     }
 }
+
+#[tokio::test]
+async fn anthropic_root_shaped_base_url_appends_v1_messages_exactly_once() {
+    // The catalog endpoint default for anthropic-messages is the API ROOT
+    // (https://api.anthropic.com, no /v1) because the adapter appends
+    // "/v1/messages" itself — a /v1-suffixed default would produce
+    // /v1/v1/messages on the wire. Pin the join against a root-shaped
+    // base; the catalog value is pinned in settings_validation.
+    let server = ScriptedServer::start(vec![s5_anthropic_response()]);
+    let client = test_model_client(
+        BackendKind::AnthropicMessages,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "hi".to_string(),
+            }],
+            vec![],
+        )
+        .await
+        .expect("scripted response should parse");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/v1/messages");
+}

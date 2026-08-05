@@ -559,7 +559,6 @@ thread_timeout_secs = 7200
             Some(std::path::Path::new("worker-store.db"))
         );
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        assert!(config.model.backend.is_none());
         assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
 
         unsafe {
