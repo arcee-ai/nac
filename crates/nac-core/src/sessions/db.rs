@@ -339,7 +339,13 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
     let conn = crate::store::open_runtime_connection(path)?;
-    query_session_summaries(&conn, None)
+    list_sessions_with_connection(&conn)
+}
+
+pub(crate) fn list_sessions_with_connection(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<SessionSummary>> {
+    query_session_summaries(conn, None)
 }
 
 pub fn update_session_presentation(

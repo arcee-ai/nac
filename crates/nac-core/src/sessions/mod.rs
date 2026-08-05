@@ -16,6 +16,7 @@ mod operation_lease;
 mod snapshot;
 mod summary;
 
+pub(crate) use db::list_sessions_with_connection;
 pub use db::{
     create_session, delete_session, list_sessions, load_last_session, load_session,
     load_session_config, reorder_sessions, save_session, save_session_run_state, session_exists,

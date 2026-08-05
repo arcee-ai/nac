@@ -56,6 +56,25 @@ fn insert_legacy_session(conn: &Connection, session_id: &str) {
     .unwrap();
 }
 
+#[test]
+fn runtime_connections_restore_wal_mode() {
+    let path = temp_store_path("runtime_wal");
+    initialize(&path).unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "journal_mode", "DELETE").unwrap();
+    drop(conn);
+
+    let runtime = open_runtime_connection(&path).unwrap();
+    let journal_mode: String = runtime
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+
+    drop(runtime);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_raw_checkpoint(
     conn: &Connection,

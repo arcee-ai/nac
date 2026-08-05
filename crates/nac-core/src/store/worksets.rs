@@ -77,6 +77,14 @@ pub fn define_workset(path: &Path, session_id: &str, workset: &WorksetDefinition
 
 pub fn read_workset(path: &Path, session_id: &str, id: &str) -> Result<Option<WorksetRecord>> {
     let conn = open_runtime_connection(path)?;
+    read_workset_with_connection(&conn, session_id, id)
+}
+
+pub(crate) fn read_workset_with_connection(
+    conn: &Connection,
+    session_id: &str,
+    id: &str,
+) -> Result<Option<WorksetRecord>> {
     let Some(mut workset) = conn
         .query_row(
             "SELECT id, session_id, instruction, status, summary, verification_recipe, created_at, updated_at
@@ -89,12 +97,19 @@ pub fn read_workset(path: &Path, session_id: &str, id: &str) -> Result<Option<Wo
     else {
         return Ok(None);
     };
-    workset.items = load_workset_items(&conn, session_id, id)?;
+    workset.items = load_workset_items(conn, session_id, id)?;
     Ok(Some(workset))
 }
 
 pub fn list_worksets(path: &Path, session_id: &str) -> Result<Vec<WorksetSummary>> {
     let conn = open_runtime_connection(path)?;
+    list_worksets_with_connection(&conn, session_id)
+}
+
+pub(crate) fn list_worksets_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<WorksetSummary>> {
     let sql = "SELECT w.id, w.status, w.summary,
                (SELECT COUNT(*) FROM workset_items i
                 WHERE i.workset_id = w.id AND i.session_id = w.session_id) AS item_count,
