@@ -438,6 +438,24 @@ impl SessionClientHandle {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct FrontendSnapshotAfterWorkspaceGate {
+    reached: std::sync::atomic::AtomicBool,
+    resume: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl FrontendSnapshotAfterWorkspaceGate {
+    fn pause(&self) {
+        self.reached
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        while !self.resume.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
@@ -456,6 +474,8 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    #[cfg(test)]
+    frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
 
 enum ActiveSessionOperation {
@@ -629,6 +649,8 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            #[cfg(test)]
+            frontend_snapshot_after_workspace_gate: None,
         };
         let init = SessionServiceInit {
             metadata,
@@ -890,6 +912,15 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<FrontendSnapshotBlockingLoad> {
+        let workspace = view::workspace_snapshot(
+            &self.metadata.cwd,
+            self.metadata.workspace_host_path.as_deref(),
+        );
+        #[cfg(test)]
+        if let Some(gate) = &self.frontend_snapshot_after_workspace_gate {
+            gate.pause();
+        }
+
         let (
             sessions,
             threads,
@@ -901,34 +932,38 @@ impl SessionService {
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
             let session_id = self.metadata.session_id.as_deref();
+            let sessions = if options.include_sessions {
+                view::list_sessions_with_connection(&conn)?
+            } else {
+                Vec::new()
+            };
+            let threads = view::list_threads_with_connection(&conn, session_id)?;
+            let thread_episodes =
+                view::load_all_thread_episodes_with_connection(&conn, session_id)?;
+            let (thread_event_boundary, thread_events) =
+                self.event_bus.thread_event_boundary(|| {
+                    self.load_all_thread_events_with_connection(&conn, options.thread_event_limit)
+                })?;
+            let worksets = view::worksets_snapshot_with_connection(&conn, session_id);
+            // Keep this final storage read adjacent to the transcript scan so
+            // a delivery committed during slower workspace inspection has the
+            // current status needed to cover its canonical message.
             let thread_steering = session_id
                 .map(|session_id| {
                     crate::store::list_thread_steering_with_connection(&conn, session_id)
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let (thread_event_boundary, thread_events) =
-                self.event_bus.thread_event_boundary(|| {
-                    self.load_all_thread_events_with_connection(&conn, options.thread_event_limit)
-                })?;
             (
-                if options.include_sessions {
-                    view::list_sessions_with_connection(&conn)?
-                } else {
-                    Vec::new()
-                },
-                view::list_threads_with_connection(&conn, session_id)?,
-                view::load_all_thread_episodes_with_connection(&conn, session_id)?,
+                sessions,
+                threads,
+                thread_episodes,
                 thread_events,
                 thread_event_boundary,
                 thread_steering,
-                view::worksets_snapshot_with_connection(&conn, session_id),
+                worksets,
             )
         };
-        let workspace = view::workspace_snapshot(
-            &self.metadata.cwd,
-            self.metadata.workspace_host_path.as_deref(),
-        );
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
             threads,
@@ -3572,6 +3607,81 @@ pub(super) mod tests {
                 "incremental coverage must match the reference pairing"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_reconciles_steering_delivered_during_workspace_load() {
+        let (mut parts, store_path) =
+            test_active_service("steering_workspace_race", "session-steering-workspace-race");
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-1",
+            "change direction",
+        )
+        .unwrap();
+        crate::store::claim_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+
+        let gate = Arc::new(FrontendSnapshotAfterWorkspaceGate::default());
+        parts.service.frontend_snapshot_after_workspace_gate = Some(Arc::clone(&gate));
+        let snapshot_service = parts.service.clone();
+        let snapshot_task =
+            tokio::spawn(async move { snapshot_service.frontend_snapshot().await.unwrap() });
+        let reached = tokio::time::timeout(Duration::from_secs(5), async {
+            while !gate.reached.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        if reached.is_err() {
+            gate.resume
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = snapshot_task.await;
+            panic!("snapshot did not finish workspace inspection");
+        }
+
+        crate::store::acknowledge_thread_steering_batch(
+            &store_path,
+            &[queued.id],
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+        seed_log_tail(
+            &parts,
+            vec![Message::User {
+                content: "change direction".to_string(),
+            }],
+        )
+        .await;
+        gate.resume
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let snapshot = snapshot_task.await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+        assert_eq!(
+            snapshot
+                .thread_steering
+                .iter()
+                .find(|record| record.id == queued.id)
+                .map(|record| record.status.as_str()),
+            Some("delivered")
+        );
+        assert!(
+            matches!(
+                snapshot.messages.last(),
+                Some(Message::User { content }) if content == "change direction"
+            ),
+            "the canonical message must cover steering delivered during workspace inspection"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[tokio::test]

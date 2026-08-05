@@ -370,14 +370,8 @@ pub(crate) fn worksets_snapshot_with_connection(
 }
 
 fn load_workset_records(store_path: &Path, session_id: &str) -> Result<Vec<WorksetSnapshot>> {
-    let summaries = store::list_worksets(store_path, session_id)?;
-    let mut worksets = Vec::with_capacity(summaries.len());
-    for summary in summaries {
-        if let Some(workset) = store::read_workset(store_path, session_id, &summary.id)? {
-            worksets.push(workset.into());
-        }
-    }
-    Ok(worksets)
+    let conn = store::open_runtime_connection(store_path)?;
+    load_workset_records_with_connection(&conn, session_id)
 }
 
 fn load_workset_records_with_connection(
