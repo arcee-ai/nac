@@ -1,6 +1,6 @@
 use super::*;
 
-const STORE_SCHEMA_VERSION: i64 = 4;
+const STORE_SCHEMA_VERSION: i64 = 5;
 
 #[cfg(test)]
 static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
@@ -40,6 +40,29 @@ fn connect(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+fn schema_shape_is_current(conn: &Connection) -> Result<bool> {
+    let feature_count: i64 = conn.query_row(
+        "SELECT
+             (SELECT COUNT(*)
+              FROM pragma_table_info('sessions')
+              WHERE name IN (
+                  'orchestrator_compaction_threshold',
+                  'visible_message_count',
+                  'last_user_prompt'
+              ))
+           + (SELECT COUNT(*)
+              FROM sqlite_master
+              WHERE type = 'table'
+                AND name IN (
+                    'orchestrator_compaction_checkpoints',
+                    'session_forks'
+                ))",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(feature_count == 5)
+}
+
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -51,7 +74,7 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
     }
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if schema_version != STORE_SCHEMA_VERSION {
+    if schema_version != STORE_SCHEMA_VERSION || !schema_shape_is_current(&conn)? {
         drop(conn);
         return open_connection(path);
     }
@@ -79,7 +102,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let store_existed = path.is_file();
     let mut conn = connect(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if store_existed && schema_version != STORE_SCHEMA_VERSION {
+    let schema_is_current =
+        schema_version == STORE_SCHEMA_VERSION && schema_shape_is_current(&conn)?;
+    if store_existed && !schema_is_current {
         super::backup::ensure_pre_branching_snapshot(&conn, path).with_context(|| {
             format!(
                 "refusing to migrate store {} without a valid pre-branching snapshot",
@@ -95,7 +120,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let needs_session_summary_backfill = schema_version < STORE_SCHEMA_VERSION;
+    let had_visible_message_count =
+        column_exists(&transaction, "sessions", "visible_message_count")?;
+    let had_last_user_prompt = column_exists(&transaction, "sessions", "last_user_prompt")?;
+    let needs_session_summary_backfill = schema_version < STORE_SCHEMA_VERSION
+        || !had_visible_message_count
+        || !had_last_user_prompt;
     match schema_version {
         0 | 1 => {
             create_base_schema(&transaction)?;
@@ -138,7 +168,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -636,6 +666,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "thread_steering",
         "thread_events",
         "orchestrator_compaction_checkpoints",
+        "session_forks",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

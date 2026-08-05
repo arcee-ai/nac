@@ -56,6 +56,44 @@ fn insert_legacy_session(conn: &Connection, session_id: &str) {
     .unwrap();
 }
 
+fn insert_summary_session(conn: &Connection, session_id: &str, prompt: &str) {
+    let messages = serde_json::to_string(&vec![
+        crate::types::Message::System {
+            content: "system".to_string(),
+        },
+        crate::types::Message::User {
+            content: prompt.to_string(),
+        },
+        crate::types::Message::Assistant {
+            content: Some("answer".to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+        },
+    ])
+    .unwrap();
+    conn.execute(
+        "INSERT INTO sessions
+             (session_id, cwd, store_path, model, base_url, messages_json,
+              created_at, updated_at)
+         VALUES (?1, '/tmp/project', '/tmp/store.db', 'legacy-model',
+                 'https://example.invalid', ?2,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        params![session_id, messages],
+    )
+    .unwrap();
+}
+
+fn stored_summary(conn: &Connection, session_id: &str) -> (i64, Option<String>) {
+    conn.query_row(
+        "SELECT visible_message_count, last_user_prompt
+         FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .unwrap()
+}
+
 #[test]
 fn runtime_connections_restore_wal_mode() {
     let path = temp_store_path("runtime_wal");
@@ -275,7 +313,7 @@ fn assert_current_schema(conn: &Connection) {
 }
 
 #[test]
-fn main_v0_store_migrates_directly_to_v4() {
+fn main_v0_store_migrates_directly_to_v5() {
     let path = temp_store_path("main_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -353,7 +391,7 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 }
 
 #[test]
-fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
+fn v1_to_v5_preserves_owned_rows_drops_orphans_and_sequences() {
     let path = temp_store_path("v1");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -527,7 +565,7 @@ fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
 fn transcript_log_rows_survive_thread_events_rebuild_migration() {
     // Pins the invariant that the thread_events sanitize-drop rebuild (and any
     // future rebuild-migration) carries transcript log rows through verbatim.
-    // Current v4 DBs never re-run this migration, but the assertion keeps the
+    // Current v5 DBs never re-run this migration, but the assertion keeps the
     // pattern honest for future rebuilds.
     let path = temp_store_path("transcript_survival");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -620,7 +658,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
 }
 
 #[test]
-fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
+fn v2_to_v5_adds_threshold_and_empty_checkpoint_storage() {
     let path = temp_store_path("v2");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
@@ -700,7 +738,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
 }
 
 #[test]
-fn v3_to_v4_backfills_materialized_session_summaries() {
+fn v3_to_v5_backfills_materialized_session_summaries() {
     let path = temp_store_path("v3_blob_summary");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
@@ -780,6 +818,130 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     assert_eq!(summary, (4, Some("log prompt".to_string())));
 
     drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn fork_side_v4_to_v5_adds_and_backfills_summary_columns_without_losing_lineage() {
+    let path = temp_store_path("fork_v4");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    insert_summary_session(&conn, "fork-child", "fork prompt");
+    conn.execute(
+        "INSERT INTO session_forks
+             (session_id, source_session_id, copied_message_count,
+              source_message_count, created_at)
+         VALUES ('fork-child', 'source-history', 2, 4, 'forked')",
+        [],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE sessions DROP COLUMN last_user_prompt;
+         ALTER TABLE sessions DROP COLUMN visible_message_count;
+         PRAGMA user_version = 4;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    assert_eq!(
+        stored_summary(&migrated, "fork-child"),
+        (2, Some("fork prompt".to_string()))
+    );
+    let lineage_count: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM session_forks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(lineage_count, 1);
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn upstream_side_v4_to_v5_adds_fork_storage_and_reconciles_summaries() {
+    let path = temp_store_path("upstream_v4");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    insert_summary_session(&conn, "upstream", "upstream prompt");
+    conn.execute(
+        "UPDATE sessions
+         SET visible_message_count = 99, last_user_prompt = 'stale'
+         WHERE session_id = 'upstream'",
+        [],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "DROP TABLE session_forks;
+         PRAGMA user_version = 4;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    assert_eq!(
+        stored_summary(&migrated, "upstream"),
+        (2, Some("upstream prompt".to_string()))
+    );
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn merged_partial_v4_to_v5_recomputes_defaulted_summaries() {
+    let path = temp_store_path("merged_partial_v4");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    insert_summary_session(&conn, "partial", "partial prompt");
+    conn.execute(
+        "INSERT INTO session_forks
+             (session_id, source_session_id, copied_message_count,
+              source_message_count, created_at)
+         VALUES ('partial', 'source-history', 2, 4, 'forked')",
+        [],
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 4).unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+
+    let migrated = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&migrated);
+    assert_eq!(
+        stored_summary(&migrated, "partial"),
+        (2, Some("partial prompt".to_string()))
+    );
+    let lineage_count: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM session_forks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(lineage_count, 1);
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn runtime_connection_repairs_a_same_version_incomplete_schema() {
+    let path = temp_store_path("same_version_incomplete");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    insert_summary_session(&conn, "owned", "repair prompt");
+    conn.execute_batch("ALTER TABLE sessions DROP COLUMN last_user_prompt;")
+        .unwrap();
+    drop(conn);
+
+    let repaired = open_runtime_connection(&path).unwrap();
+
+    assert_current_schema(&repaired);
+    assert_eq!(
+        stored_summary(&repaired, "owned"),
+        (2, Some("repair prompt".to_string()))
+    );
+    drop(repaired);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -886,26 +1048,26 @@ fn future_schema_version_is_rejected_without_changes() {
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future = Connection::open(&path).unwrap();
-    future.pragma_update(None, "user_version", 5).unwrap();
+    future.pragma_update(None, "user_version", 6).unwrap();
     drop(future);
 
     let error = initialize(&path).unwrap_err();
     assert!(error
         .to_string()
-        .contains("unsupported store schema version 5"));
+        .contains("unsupported store schema version 6"));
     let unchanged = Connection::open(&path).unwrap();
     let version: i64 = unchanged
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
     drop(unchanged);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn v3_migration_creates_pinned_snapshot_before_schema_v4() {
-    let path = temp_store_path("v3_to_v4");
+fn v3_migration_creates_pinned_snapshot_before_schema_v5() {
+    let path = temp_store_path("v3_to_v5");
     initialize(&path).unwrap();
     let old = Connection::open(&path).unwrap();
     old.execute_batch(
@@ -946,7 +1108,7 @@ fn v3_migration_creates_pinned_snapshot_before_schema_v4() {
 }
 
 #[test]
-fn opening_v4_store_is_idempotent() {
+fn opening_v5_store_is_idempotent() {
     let path = temp_store_path("idempotent");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();

@@ -62,7 +62,7 @@ Snapshot messages can be bounded with `message_limit`; only then does snapshot `
 
 ### Store schema, pinned snapshot, and rollback
 
-The store schema is version 4. This release can migrate schema versions 0 through 3 forward, but schema compatibility is one-way: a v4 store must not be opened with an older binary or downgraded, and mixed-version writers against one store are unsupported. Parent binaries and custom worker executables must use matching releases because the required `--dispatch-id` worker protocol is also version-coupled.
+The store schema is version 5. This release can migrate schema versions 0 through 4 forward, but schema compatibility is one-way: a v5 store must not be opened with an older binary or downgraded, and mixed-version writers against one store are unsupported. Parent binaries and custom worker executables must use matching releases because the required `--dispatch-id` worker protocol is also version-coupled.
 
 Before mutating the schema of an existing store whose version differs from the current version, NAC uses SQLite's online backup API to capture committed database and WAL contents at:
 

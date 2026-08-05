@@ -1175,6 +1175,7 @@ dependencies = [
  "flate2",
  "futures-core",
  "nac-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",

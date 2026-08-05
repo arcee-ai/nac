@@ -22,6 +22,8 @@ pub mod upgrade;
 pub mod view;
 mod worker;
 
+pub use store::initialize as initialize_store;
+
 /// Largest token count that can be persisted exactly and transported through
 /// JavaScript-backed public settings without precision loss.
 pub const MAX_SUPPORTED_TOKEN_COUNT: u64 = 9_007_199_254_740_991;

@@ -44,7 +44,7 @@ use nac_core::{
         SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
         SessionSubmitError, ThreadEventPage,
     },
-    sessions,
+    initialize_store, sessions,
     types::Message,
     view::{self, SessionSummarySnapshot},
 };
@@ -540,6 +540,14 @@ impl SessionManager {
             },
             &config,
         );
+        if store_path.exists() {
+            initialize_store(&store_path).with_context(|| {
+                format!(
+                    "failed to initialize session store {}",
+                    store_path.display()
+                )
+            })?;
+        }
         let worker_executable = options
             .worker_executable
             .map(canonicalize_file)
@@ -3867,6 +3875,69 @@ thread_timeout_secs = 7200
         );
         assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn manager_reconciles_fork_side_v4_before_listing_sessions() {
+        let root = temp_root("manager_fork_v4_migration");
+        let store_path = root.join("store.db");
+        seed_session_with_messages(
+            &root,
+            "fork-child",
+            "2026-01-01 00:00:00.000000000",
+            vec![
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "restored prompt".to_string(),
+                },
+                Message::Assistant {
+                    content: Some("answer".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                },
+            ],
+        );
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "INSERT INTO session_forks
+                 (session_id, source_session_id, copied_message_count,
+                  source_message_count, created_at)
+             VALUES ('fork-child', 'source-history', 2, 4, 'forked')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE sessions DROP COLUMN last_user_prompt;
+             ALTER TABLE sessions DROP COLUMN visible_message_count;
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let manager = test_manager(&root);
+        let listed = manager.list_sessions(false).await.unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].summary.session_id, "fork-child");
+        assert_eq!(listed[0].summary.visible_message_count, 2);
+        assert_eq!(
+            listed[0].summary.last_user_prompt.as_deref(),
+            Some("restored prompt")
+        );
+        let migrated = rusqlite::Connection::open(&store_path).unwrap();
+        let version: i64 = migrated
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        let lineage_count: i64 = migrated
+            .query_row("SELECT COUNT(*) FROM session_forks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(lineage_count, 1);
+        drop(migrated);
         let _ = std::fs::remove_dir_all(root);
     }
 
