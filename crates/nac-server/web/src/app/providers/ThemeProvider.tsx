@@ -12,6 +12,10 @@ export type ResolvedTheme = "light" | "dark";
 const THEMES: Theme[] = ["light", "dark", "system"];
 const STORAGE_KEY = "nac-theme";
 
+// The product ships dark-only for now. Theme plumbing (tokens, types, storage)
+// stays so light / system can come back without a redesign.
+const FORCED_THEME: ResolvedTheme = "dark";
+
 interface ThemeContextValue {
   theme: Theme;
   resolved: ResolvedTheme;
@@ -24,17 +28,16 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const prefersDark = () =>
   window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-function resolve(theme: Theme): ResolvedTheme {
-  if (theme === "system") return prefersDark() ? "dark" : "light";
-  return theme;
+function resolve(_theme: Theme): ResolvedTheme {
+  return FORCED_THEME;
 }
 
-function applyToDOM(theme: Theme): void {
-  const actual = resolve(theme);
+function applyToDOM(): void {
   const root = document.documentElement;
-  root.setAttribute("data-theme", actual);
+  root.setAttribute("data-theme", FORCED_THEME);
   root.classList.remove("light", "dark");
-  root.classList.add(actual);
+  root.classList.add(FORCED_THEME);
+  root.style.colorScheme = FORCED_THEME;
 }
 
 function initialTheme(): Theme {
@@ -52,7 +55,7 @@ export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
     if (!THEMES.includes(next)) return;
     setThemeState(next);
     localStorage.setItem(STORAGE_KEY, next);
-    applyToDOM(next);
+    applyToDOM();
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -60,23 +63,13 @@ export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
       const next: Theme =
         prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
       localStorage.setItem(STORAGE_KEY, next);
-      applyToDOM(next);
+      applyToDOM();
       return next;
     });
   }, []);
 
-  // Apply on mount and react to system changes while in "system" mode.
   useEffect(() => {
-    applyToDOM(theme);
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      if ((localStorage.getItem(STORAGE_KEY) ?? "system") === "system") {
-        applyToDOM("system");
-      }
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    applyToDOM();
   }, []);
 
   return (

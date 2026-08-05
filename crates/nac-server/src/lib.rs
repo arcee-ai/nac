@@ -33,7 +33,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use include_dir::{include_dir, Dir};
@@ -348,6 +348,39 @@ pub struct CreateModelConfigurationRequest {
     pub api_key: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub extra_headers: Option<BTreeMap<String, String>>,
+    /// Compaction budget sessions started from this setup inherit; absent or
+    /// zero leaves them on `[compaction].threshold_tokens`.
+    pub orchestrator_compaction_threshold: Option<u64>,
+    /// Message the launch modal pre-fills when this setup is chosen.
+    pub initial_prompt: Option<String>,
+}
+
+/// Edits a saved setup in place. Every field is tri-state: omit it to keep what
+/// is stored, send null to clear it, send a value to replace it.
+///
+/// `api_key` is the exception that cannot be read back — the secret lives in
+/// the credential store — so omitting it keeps the credential the row already
+/// points at, and sending one files a fresh credential in its place.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateModelConfigurationRequest {
+    #[serde(default)]
+    pub name: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<BackendKind>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub api_key: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<ReasoningEffort>,
+    #[serde(default)]
+    pub extra_headers: RequestField<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
+    #[serde(default)]
+    pub initial_prompt: RequestField<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1808,7 +1841,7 @@ fn api_router(manager: SessionManager) -> Router {
         )
         .route(
             "/model-configs/{config_id}",
-            delete(delete_model_config_handler),
+            patch(update_model_config_handler).delete(delete_model_config_handler),
         )
         .route(
             "/model-configs/{config_id}/models",
@@ -2095,23 +2128,7 @@ async fn create_model_config_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     let backend = request.backend;
 
-    let base_url = request
-        .base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    let base_url = resolve_model_base_url(backend, Some(base_url))?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
+    let base_url = settle_configuration_base_url(&manager, backend, request.base_url.as_deref())?;
 
     let api_key = request
         .api_key
@@ -2151,6 +2168,8 @@ async fn create_model_config_handler(
             .reasoning_effort
             .map(|effort| effort.as_str().to_string()),
         extra_headers: request.extra_headers.unwrap_or_default(),
+        orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
+        initial_prompt: request.initial_prompt,
     };
     let record = model_configurations::insert_model_configuration(
         &manager.inner.store_path,
@@ -2168,6 +2187,165 @@ async fn create_model_config_handler(
             }
             Err(error.into())
         }
+    }
+}
+
+/// Settles where a configuration sends its requests: the caller's URL when
+/// there is one, the provider's canonical URL otherwise, checked against the
+/// credential destination policy either way.
+fn settle_configuration_base_url(
+    manager: &SessionManager,
+    backend: BackendKind,
+    requested: Option<&str>,
+) -> std::result::Result<String, ApiError> {
+    let base_url = requested
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    let base_url = resolve_model_base_url(backend, Some(base_url))?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+    Ok(base_url)
+}
+
+/// Edit a saved provider setup, keeping whatever the request leaves out.
+///
+/// A new key is filed under a fresh generated name and the row is pointed at
+/// it; the credential it replaces is dropped only once the row has actually
+/// moved, so a failed edit never leaves the configuration pointing at a secret
+/// that is gone.
+async fn update_model_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateModelConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<Json<ModelConfigurationRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let existing =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    let stored_backend: BackendKind =
+        existing
+            .backend
+            .parse()
+            .map_err(|message: String| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message,
+            })?;
+
+    let backend = match request.backend {
+        RequestField::Value(kind) => kind,
+        RequestField::Omitted | RequestField::Null => stored_backend,
+    };
+    // Switching provider retires a URL that was only the old provider's
+    // default, so an unmentioned URL follows the new backend instead.
+    let requested_base_url = match request.base_url {
+        RequestField::Value(url) => Some(url),
+        RequestField::Null => None,
+        RequestField::Omitted => (backend == stored_backend).then(|| existing.base_url.clone()),
+    };
+    let base_url = settle_configuration_base_url(&manager, backend, requested_base_url.as_deref())?;
+
+    let expects_key = provider_uses_api_key(backend);
+    let supplied_key = match &request.api_key {
+        RequestField::Value(key) => Some(key.trim().to_string()),
+        _ => None,
+    };
+    if !expects_key && supplied_key.as_deref().is_some_and(|key| !key.is_empty()) {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "backend '{backend}' authenticates with a stored login and accepts no API key"
+            ),
+        });
+    }
+
+    // The credential the row ends up pointing at, and the one it is leaving
+    // behind — exactly one of the two survives this request.
+    let (api_key_env, superseded) = if !expects_key {
+        (None, existing.api_key_env.clone())
+    } else if let Some(key) = supplied_key.filter(|key| !key.is_empty()) {
+        let name = format!(
+            "{GENERATED_CREDENTIAL_PREFIX}{}",
+            uuid::Uuid::new_v4().simple()
+        );
+        store_api_key(&name, &key)?;
+        (Some(name), existing.api_key_env.clone())
+    } else if matches!(request.api_key, RequestField::Null) || existing.api_key_env.is_none() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires an API key"),
+        });
+    } else {
+        (existing.api_key_env.clone(), None)
+    };
+
+    let configuration = model_configurations::NewModelConfiguration {
+        name: replaceable_text(request.name, &existing.name),
+        backend: backend.to_string(),
+        model: replaceable_text(request.model, &existing.model),
+        base_url,
+        api_key_env: api_key_env.clone(),
+        reasoning_effort: match request.reasoning_effort {
+            RequestField::Value(effort) => Some(effort.as_str().to_string()),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.reasoning_effort.clone(),
+        },
+        extra_headers: match request.extra_headers {
+            RequestField::Value(headers) => headers,
+            RequestField::Null => BTreeMap::new(),
+            RequestField::Omitted => existing.extra_headers.clone(),
+        },
+        orchestrator_compaction_threshold: match request.orchestrator_compaction_threshold {
+            RequestField::Value(threshold) => (threshold != 0).then_some(threshold),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.orchestrator_compaction_threshold,
+        },
+        initial_prompt: match request.initial_prompt {
+            RequestField::Value(prompt) => Some(prompt),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.initial_prompt.clone(),
+        },
+    };
+
+    match model_configurations::update_model_configuration(
+        &manager.inner.store_path,
+        &config_id,
+        configuration,
+    ) {
+        Ok(record) => {
+            if let Some(name) = superseded
+                .as_deref()
+                .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
+            {
+                let _ = remove_api_key(name);
+            }
+            Ok(Json(record))
+        }
+        Err(error) => {
+            if api_key_env != existing.api_key_env {
+                if let Some(name) = api_key_env.as_deref() {
+                    let _ = remove_api_key(name);
+                }
+            }
+            Err(error.into())
+        }
+    }
+}
+
+/// A tri-state text field applied to what is stored: null blanks the value so
+/// the store rejects it by name, rather than silently keeping the old one.
+fn replaceable_text(field: RequestField<String>, current: &str) -> String {
+    match field {
+        RequestField::Value(value) => value,
+        RequestField::Null => String::new(),
+        RequestField::Omitted => current.to_string(),
     }
 }
 

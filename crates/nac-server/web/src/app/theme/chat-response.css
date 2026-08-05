@@ -225,6 +225,10 @@
   font-size: 12px;
   line-height: 20px;
 }
+.chat-response .thinking-content code {
+  font-size: 12px;
+  line-height: 20px;
+}
 
 .chat-response a {
   color: var(--color-text-accent-primary);

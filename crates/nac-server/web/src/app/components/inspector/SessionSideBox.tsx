@@ -37,7 +37,7 @@ import type {
 // The `files` panel is called Changes in the design; its route keeps the older
 // name so links that are already out there still land on it.
 const PANEL_LABEL: Record<SessionPanel, string> = {
-  files: "Changes",
+  files: "Files",
   worksets: "Worksets",
   threads: "Threads",
 };

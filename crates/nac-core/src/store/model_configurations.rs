@@ -17,6 +17,11 @@ pub struct ModelConfigurationRecord {
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
     pub extra_headers: BTreeMap<String, String>,
+    /// Compaction budget a session started from this setup inherits; `None`
+    /// falls back to `[compaction].threshold_tokens`.
+    pub orchestrator_compaction_threshold: Option<u64>,
+    /// Message the launch modal pre-fills when this setup is chosen.
+    pub initial_prompt: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -30,6 +35,8 @@ pub struct NewModelConfiguration {
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
     pub extra_headers: BTreeMap<String, String>,
+    pub orchestrator_compaction_threshold: Option<u64>,
+    pub initial_prompt: Option<String>,
 }
 
 #[derive(Debug)]
@@ -117,13 +124,16 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfiguration
         api_key_env: row.get(5)?,
         reasoning_effort: row.get(6)?,
         extra_headers: decode_headers(&extra_headers),
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        orchestrator_compaction_threshold: row.get(8)?,
+        initial_prompt: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "config_id, name, backend, model, base_url, api_key_env,
-     reasoning_effort, extra_headers_json, created_at, updated_at";
+     reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
+     initial_prompt, created_at, updated_at";
 
 pub fn list_model_configurations(
     path: &Path,
@@ -156,12 +166,14 @@ pub fn load_model_configuration(
     .ok_or_else(|| ModelConfigurationStoreError::NotFound(config_id.to_string()))
 }
 
-pub fn insert_model_configuration(
-    path: &Path,
+/// Checks the fields a row must carry and settles the optional ones, so insert
+/// and update reject the same input for the same reason.
+fn validated_record(
     config_id: &str,
     configuration: NewModelConfiguration,
+    created_at: String,
 ) -> ConfigurationResult<ModelConfigurationRecord> {
-    let record = ModelConfigurationRecord {
+    Ok(ModelConfigurationRecord {
         config_id: nonblank(config_id, "configuration id")?,
         name: validate_name(&configuration.name)?,
         backend: nonblank(&configuration.backend, "backend")?,
@@ -170,16 +182,45 @@ pub fn insert_model_configuration(
         api_key_env: configuration.api_key_env,
         reasoning_effort: configuration.reasoning_effort,
         extra_headers: configuration.extra_headers,
-        created_at: now_utc(),
+        orchestrator_compaction_threshold: validate_threshold(
+            configuration.orchestrator_compaction_threshold,
+        )?,
+        initial_prompt: configuration
+            .initial_prompt
+            .map(|prompt| prompt.trim().to_string())
+            .filter(|prompt| !prompt.is_empty()),
+        created_at,
         updated_at: now_utc(),
-    };
+    })
+}
+
+/// Zero is how the API says "no compaction", which the column stores as NULL
+/// rather than as a value its CHECK would reject.
+fn validate_threshold(threshold: Option<u64>) -> ConfigurationResult<Option<u64>> {
+    match threshold {
+        None | Some(0) => Ok(None),
+        Some(value) if value <= crate::MAX_SUPPORTED_TOKEN_COUNT => Ok(Some(value)),
+        Some(value) => Err(ModelConfigurationStoreError::InvalidInput(format!(
+            "orchestrator compaction threshold {value} exceeds the supported maximum of {}",
+            crate::MAX_SUPPORTED_TOKEN_COUNT
+        ))),
+    }
+}
+
+pub fn insert_model_configuration(
+    path: &Path,
+    config_id: &str,
+    configuration: NewModelConfiguration,
+) -> ConfigurationResult<ModelConfigurationRecord> {
+    let record = validated_record(config_id, configuration, now_utc())?;
 
     let conn = open_runtime_connection(path)?;
     conn.execute(
         "INSERT INTO model_configurations
          (config_id, name, backend, model, base_url, api_key_env,
-          reasoning_effort, extra_headers_json, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
+          initial_prompt, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             record.config_id,
             record.name,
@@ -189,6 +230,8 @@ pub fn insert_model_configuration(
             record.api_key_env,
             record.reasoning_effort,
             encode_headers(&record.extra_headers)?,
+            record.orchestrator_compaction_threshold,
+            record.initial_prompt,
             record.created_at,
             record.updated_at,
         ],
@@ -200,6 +243,59 @@ pub fn insert_model_configuration(
             ModelConfigurationStoreError::Store(error.into())
         }
     })?;
+
+    Ok(record)
+}
+
+/// Replaces every stored field of an existing configuration.
+///
+/// The caller passes a whole configuration rather than a patch: it has already
+/// read the row to decide what a partial request leaves alone, and rewriting
+/// the lot keeps the row consistent with the credential it points at.
+/// `created_at` survives, because the identity of the setup does not change.
+pub fn update_model_configuration(
+    path: &Path,
+    config_id: &str,
+    configuration: NewModelConfiguration,
+) -> ConfigurationResult<ModelConfigurationRecord> {
+    let existing = load_model_configuration(path, config_id)?;
+    let record = validated_record(config_id, configuration, existing.created_at)?;
+
+    let conn = open_runtime_connection(path)?;
+    let updated = conn
+        .execute(
+            "UPDATE model_configurations
+             SET name = ?2, backend = ?3, model = ?4, base_url = ?5, api_key_env = ?6,
+                 reasoning_effort = ?7, extra_headers_json = ?8,
+                 orchestrator_compaction_threshold = ?9, initial_prompt = ?10,
+                 updated_at = ?11
+             WHERE config_id = ?1",
+            params![
+                record.config_id,
+                record.name,
+                record.backend,
+                record.model,
+                record.base_url,
+                record.api_key_env,
+                record.reasoning_effort,
+                encode_headers(&record.extra_headers)?,
+                record.orchestrator_compaction_threshold,
+                record.initial_prompt,
+                record.updated_at,
+            ],
+        )
+        .map_err(|error| {
+            if is_unique_violation(&error) {
+                ModelConfigurationStoreError::DuplicateName(record.name.clone())
+            } else {
+                ModelConfigurationStoreError::Store(error.into())
+            }
+        })?;
+    if updated == 0 {
+        return Err(ModelConfigurationStoreError::NotFound(
+            config_id.to_string(),
+        ));
+    }
 
     Ok(record)
 }
@@ -247,6 +343,8 @@ mod tests {
             api_key_env: Some("NAC_GENERATED_KEY".to_string()),
             reasoning_effort: Some("high".to_string()),
             extra_headers: BTreeMap::from([("X-Trace".to_string(), "on".to_string())]),
+            orchestrator_compaction_threshold: Some(64_000),
+            initial_prompt: Some("Review the diff".to_string()),
         }
     }
 

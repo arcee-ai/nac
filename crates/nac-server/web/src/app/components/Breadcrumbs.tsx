@@ -12,15 +12,18 @@ import {
   PopoverPlacement,
   PopoverSize,
   SessionAvatar,
+  Tooltip,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { displaySessionTitle } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useSessions } from "@/app/services/queries";
 
 export function Breadcrumbs() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const actions = useSessionActions();
   const { data: sessions = [] } = useSessions();
   const [open, setOpen] = useState(false);
 
@@ -29,7 +32,7 @@ export function Breadcrumbs() {
     : undefined;
 
   return (
-    <nav className="flex items-center min-w-0" aria-label="Breadcrumb">
+    <nav className="flex items-center min-w-0 gap-1" aria-label="Breadcrumb">
       <Button
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
@@ -100,7 +103,7 @@ export function Breadcrumbs() {
                 size={20}
                 className="rounded-[2px]"
               />
-              <span className="truncate">
+              <span className="truncate max-w-[120px]">
                 {displaySessionTitle(current) || sessionId}
               </span>
               <Icon
@@ -112,6 +115,17 @@ export function Breadcrumbs() {
               />
             </Button>
           </Popover>
+          <Tooltip title="New session" position={Tooltip.Position.BottomCenter}>
+            <Button
+              variant={ButtonVariant.Primary}
+              size={ButtonSize.Small}
+              content={ButtonContent.Icon}
+              aria-label="New session"
+              onClick={actions.launch}
+            >
+              <Icon iconName={IconName.Add} />
+            </Button>
+          </Tooltip>
         </>
       ) : null}
     </nav>

@@ -1,6 +1,6 @@
 use super::*;
 
-const STORE_SCHEMA_VERSION: i64 = 6;
+const STORE_SCHEMA_VERSION: i64 = 7;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -93,10 +93,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -515,7 +515,7 @@ fn create_workspace_revisions_table(conn: &Connection) -> Result<()> {
 /// `config.toml` uses, so resolving a key at run time needs no special case.
 /// The table is global rather than per-session, hence no foreign key.
 fn create_model_configurations_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS model_configurations (
              config_id TEXT PRIMARY KEY,
              name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
@@ -524,14 +524,37 @@ fn create_model_configurations_table(conn: &Connection) -> Result<()> {
              base_url TEXT NOT NULL CHECK (length(trim(base_url)) > 0),
              api_key_env TEXT,
              reasoning_effort TEXT,
-             extra_headers_json TEXT NOT NULL DEFAULT '{}',
+             extra_headers_json TEXT NOT NULL DEFAULT '{{}}',
+             orchestrator_compaction_threshold INTEGER
+                 CHECK ({THRESHOLD_CHECK}),
+             initial_prompt TEXT,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_model_configurations_name
              ON model_configurations(name);",
+        THRESHOLD_CHECK = model_configuration_threshold_check(),
+    ))?;
+    ensure_column(
+        conn,
+        "model_configurations",
+        "orchestrator_compaction_threshold",
+        &format!("INTEGER CHECK ({})", model_configuration_threshold_check()),
     )?;
+    ensure_column(conn, "model_configurations", "initial_prompt", "TEXT")?;
     Ok(())
+}
+
+/// Same bound the per-session column enforces, so a saved default can never
+/// describe a session the sessions table would refuse.
+fn model_configuration_threshold_check() -> String {
+    format!(
+        "orchestrator_compaction_threshold IS NULL OR \
+         (typeof(orchestrator_compaction_threshold) = 'integer' \
+          AND orchestrator_compaction_threshold > 0 \
+          AND orchestrator_compaction_threshold <= {})",
+        crate::MAX_SUPPORTED_TOKEN_COUNT
+    )
 }
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {

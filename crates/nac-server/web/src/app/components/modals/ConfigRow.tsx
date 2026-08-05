@@ -44,6 +44,7 @@ export function ConfigRow({
   invalid = false,
   secondary = false,
   muted = false,
+  labelClassName = "",
   control,
 }: {
   label: string;
@@ -54,11 +55,18 @@ export function ConfigRow({
   secondary?: boolean;
   /** Dims the label while the row is waiting on something else. */
   muted?: boolean;
+  /** Widens the label past the cap a narrow box needs, e.g. `max-w-none`. */
+  labelClassName?: string;
   control: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between w-full min-h-5">
-      <div className="flex items-center gap-1 flex-1 min-w-0 max-w-[220px]">
+      <div
+        className={cn(
+          "flex items-center gap-1 flex-1 min-w-0 max-w-[220px]",
+          labelClassName,
+        )}
+      >
         <div
           className={cn(
             "truncate",

@@ -1,3 +1,4 @@
+use super::pseudo_tool_calls::strip_native_tool_format_tags;
 use super::*;
 
 pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
@@ -37,6 +38,52 @@ pub(super) fn fireworks_message_to_value(message: &Message) -> Value {
             "tool_call_id": tool_call_id,
             "content": content,
         }),
+    }
+}
+
+/// Arcee/Trinity wire shape: strip leaked Hermes tool XML from history and
+/// always send `reasoning_content` on tool-call turns (even empty).
+///
+/// Kept off the generic OpenAI-compatible path so Fireworks / Together /
+/// DeepSeek keep a plain client. The empty-field inject is specifically for
+/// vLLM's deepseek_r1 template used in front of Trinity — omitting it is what
+/// routes the next tool call into reasoning as raw XML.
+pub(super) fn arcee_message_to_value(message: &Message) -> Value {
+    match message {
+        Message::Assistant {
+            content,
+            reasoning_text,
+            tool_calls,
+            ..
+        } => {
+            let content = content
+                .as_ref()
+                .map(|text| strip_native_tool_format_tags(text));
+            let reasoning = reasoning_text
+                .as_deref()
+                .map(strip_native_tool_format_tags)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty());
+            let has_tool_calls = tool_calls
+                .as_ref()
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
+
+            let mut value = json!({
+                "role": "assistant",
+                "content": content,
+            });
+            if has_tool_calls {
+                value["reasoning_content"] = Value::String(reasoning.unwrap_or_default());
+            } else if let Some(reasoning) = reasoning {
+                value["reasoning_content"] = Value::String(reasoning);
+            }
+            if let Some(tool_calls) = tool_calls {
+                value["tool_calls"] =
+                    serde_json::to_value(tool_calls).unwrap_or_else(|_| Value::Array(Vec::new()));
+            }
+            value
+        }
+        other => fireworks_message_to_value(other),
     }
 }
 

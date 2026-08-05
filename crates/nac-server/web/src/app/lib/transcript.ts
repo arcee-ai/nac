@@ -6,6 +6,7 @@
 // in parallel, so each such assistant message becomes one wave.
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
+import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
 import {
   mergeThreadLog,
   persistedThreadLog,
@@ -24,7 +25,13 @@ const MAX_TURNS = 40;
 export type ThreadState = "running" | "done" | "error";
 
 export interface TranscriptThread {
-  callId: string;
+  /**
+   * Identifies the dispatch behind the card rather than the thread behind it.
+   * One name can be dispatched again — each dispatch is an episode of its own,
+   * with its own log and its own result — so keying by name would tie every
+   * card of that name together.
+   */
+  key: string;
   name: string;
   /** What the orchestrator asked the thread to do. */
   action: string;
@@ -91,17 +98,114 @@ function text(value: unknown): string {
 }
 
 interface BuildContext {
-  results: Map<string, string>;
   liveThreads: Record<string, RuntimeThread>;
-  threadEvents: Record<string, AgentEvent[]>;
+  /** Each thread's persisted events, split into the episodes that produced them. */
+  threadEpisodes: Record<string, AgentEvent[][]>;
+  /** How often each name is dispatched across the whole transcript. */
+  dispatchCounts: Record<string, number>;
 }
 
-function describeThread(call: ToolCall, ctx: BuildContext): TranscriptThread {
-  const args = parseArguments(call);
-  const name = text(args.name) || "thread";
-  const action = text(args.action);
-  const live = ctx.liveThreads[name];
-  const result = ctx.results.get(call.id) ?? null;
+/**
+ * One thread's persisted events cut into episodes, oldest first.
+ *
+ * The backend writes them as one stream per name, so a re-dispatched thread
+ * arrives as several runs end to end, each opened by its `thread_started`.
+ */
+function splitEpisodes(events: AgentEvent[]): AgentEvent[][] {
+  const episodes: AgentEvent[][] = [];
+  events.forEach((event) => {
+    if (event.type === "thread_started" || !episodes.length) episodes.push([]);
+    episodes[episodes.length - 1].push(event);
+  });
+  return episodes;
+}
+
+function threadEpisodes(
+  events: Record<string, AgentEvent[]>,
+): Record<string, AgentEvent[][]> {
+  const episodes: Record<string, AgentEvent[][]> = {};
+  Object.entries(events).forEach(([name, list]) => {
+    episodes[name] = splitEpisodes(list);
+  });
+  return episodes;
+}
+
+function countThreadDispatches(
+  messages: SessionSnapshotResponse["messages"],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  messages.forEach((message) => {
+    if (message.role !== "assistant") return;
+    (message.tool_calls ?? []).forEach((call) => {
+      if (call.function?.name !== "thread") return;
+      const name = threadName(call);
+      counts[name] = (counts[name] ?? 0) + 1;
+    });
+  });
+  return counts;
+}
+
+function threadName(call: ToolCall): string {
+  return text(parseArguments(call).name) || "thread";
+}
+
+/**
+ * The events of one dispatch.
+ *
+ * The snapshot carries only a bounded window of each thread's events while the
+ * transcript keeps every dispatch, so the episodes are lined up with the newest
+ * dispatch; the oldest cards fall off the front and show their action instead.
+ */
+function eventsForEpisode(
+  ctx: BuildContext,
+  name: string,
+  episode: number,
+): AgentEvent[] | undefined {
+  const episodes = ctx.threadEpisodes[name] ?? [];
+  const dropped = (ctx.dispatchCounts[name] ?? episodes.length) - episodes.length;
+  return episodes[episode - dropped];
+}
+
+/**
+ * Tool results that belong to one assistant message: the run of `tool` rows
+ * that follow it, stopping at the next user/assistant turn.
+ *
+ * Scoped per turn so a reused `tool_call_id` (historically `recovered_1` from
+ * reasoning salvage) cannot steal an earlier episode onto a later thread card.
+ */
+function toolResultsForAssistant(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): Map<string, string> {
+  const results = new Map<string, string>();
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "tool") {
+      results.set(message.tool_call_id, message.content);
+      continue;
+    }
+    if (message.role === "assistant" || message.role === "user") break;
+  }
+  return results;
+}
+
+/** @param episode Which dispatch of this name the card stands for, from 0. */
+function describeThread(
+  call: ToolCall,
+  episode: number,
+  ctx: BuildContext,
+  results: Map<string, string>,
+): TranscriptThread {
+  const name = threadName(call);
+  const action = text(parseArguments(call).action);
+  const result = results.get(call.id) ?? null;
+  // The stream is keyed by name and only ever describes the dispatch running
+  // now, which is the newest one. Handing it to the earlier cards of that name
+  // would replay this episode's commands on them and mark them failed with it.
+  const live =
+    episode === (ctx.dispatchCounts[name] ?? 1) - 1
+      ? ctx.liveThreads[name]
+      : undefined;
 
   const state: ThreadState = live?.isError
     ? "error"
@@ -110,14 +214,14 @@ function describeThread(call: ToolCall, ctx: BuildContext): TranscriptThread {
       : "running";
 
   return {
-    callId: call.id,
+    key: `${name}#${episode}`,
     name,
     action,
     summary: result || action,
     // The persisted events are what a reload falls back on, and the stream is
     // what carries the commands issued since the last snapshot.
     log: mergeThreadLog(
-      persistedThreadLog(ctx.threadEvents[name]),
+      persistedThreadLog(eventsForEpisode(ctx, name, episode)),
       live?.log ?? [],
     ),
     state,
@@ -172,8 +276,8 @@ export function withStreamedOutput(
   turns: TranscriptTurn[],
   stream: StreamedOutput,
 ): TranscriptTurn[] {
-  const reasoning = stream.reasoning.trim();
-  const text = stream.text.trim();
+  const reasoning = stripNativeToolMarkup(stream.reasoning).trim();
+  const text = stripNativeToolMarkup(stream.text).trim();
   if (!reasoning && !text) return turns;
 
   const last = turns[turns.length - 1];
@@ -229,15 +333,13 @@ export function buildTranscript(
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
   const createdAt = snapshot?.message_created_at ?? [];
 
-  const results = new Map<string, string>();
-  for (const message of messages) {
-    if (message.role === "tool") results.set(message.tool_call_id, message.content);
-  }
   const ctx: BuildContext = {
-    results,
     liveThreads,
-    threadEvents: snapshot?.thread_events ?? {},
+    threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
+    dispatchCounts: countThreadDispatches(messages),
   };
+  /** Dispatches of a name walked past, which is what numbers each card's episode. */
+  const dispatchesSeen: Record<string, number> = {};
 
   const turns: TranscriptTurn[] = [];
   let current: ModelTurn | null = null;
@@ -272,7 +374,7 @@ export function buildTranscript(
     }
     const blocks = current.blocks;
 
-    const reasoning = message.reasoning_text?.trim();
+    const reasoning = stripNativeToolMarkup(message.reasoning_text ?? "").trim();
     if (reasoning) {
       blocks.push({
         kind: "thoughts",
@@ -285,7 +387,7 @@ export function buildTranscript(
       });
     }
 
-    const content = (message.content ?? "").trim();
+    const content = stripNativeToolMarkup(message.content ?? "").trim();
     if (content) {
       blocks.push({
         kind: "text",
@@ -294,12 +396,16 @@ export function buildTranscript(
       });
     }
 
+    const results = toolResultsForAssistant(messages, index);
     const wave: TranscriptThread[] = [];
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
       const key = `${name}-${index}-${callIndex}`;
       if (name === "thread") {
-        wave.push(describeThread(call, ctx));
+        const dispatched = threadName(call);
+        const episode = dispatchesSeen[dispatched] ?? 0;
+        dispatchesSeen[dispatched] = episode + 1;
+        wave.push(describeThread(call, episode, ctx, results));
       } else if (name === "workset_define") {
         blocks.push({
           kind: "workset",

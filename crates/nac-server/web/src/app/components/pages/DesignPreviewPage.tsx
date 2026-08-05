@@ -7,7 +7,6 @@ import {
   BoxSurface,
   Button,
   ButtonContent,
-  ButtonSize,
   ButtonVariant,
   ChatLoader,
   Checkbox,
@@ -47,7 +46,6 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { useTheme } from "@/app/providers/ThemeProvider";
 
 const SAMPLE_IDS = [
   "9f2c1ab4",
@@ -79,7 +77,6 @@ const SAMPLE_CODE = `pub enum AgentEvent {
  * lands as a fast way to eyeball the token port.
  */
 export default function DesignPreviewPage() {
-  const { theme, resolved, toggleTheme } = useTheme();
   const [model, setModel] = useState("sonnet");
   const [enabled, setEnabled] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -102,22 +99,6 @@ export default function DesignPreviewPage() {
       <header className="flex items-center gap-4 h-14 px-6 border-b border-secondary">
         <Logo height={18} />
         <span className="text-basic-muted label-small">design system</span>
-        <div className="flex-1" />
-        <span className="text-micro text-basic-muted">
-          {theme} / {resolved}
-        </span>
-        <Button
-          size={ButtonSize.Small}
-          variant={ButtonVariant.Tertiary}
-          content={ButtonContent.Icon}
-          onClick={toggleTheme}
-        >
-          <Icon
-            iconName={
-              resolved === "dark" ? IconName.Moon : IconName.Sun
-            }
-          />
-        </Button>
       </header>
 
       <main className="p-6 flex flex-col gap-6 max-w-[1100px]">

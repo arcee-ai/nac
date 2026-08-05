@@ -6,7 +6,7 @@ import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
 interface ThreadBoxProps {
   thread: TranscriptThread;
   selected: boolean;
-  onSelect: (name: string) => void;
+  onSelect: (name: string, episodeKey: string) => void;
 }
 
 const STATE_ORDER: Record<ThreadState, number> = {
@@ -45,7 +45,14 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   // showing what the thread was asked to do.
   const tail = thread.log.length
     ? thread.log
-    : [{ key: "action", text: thread.action, isError: false }];
+    : [
+        {
+          key: "action",
+          text: thread.action,
+          bare: thread.action,
+          isError: false,
+        },
+      ];
 
   return (
     // The ghost button paints its own transparent background, so the elevation
@@ -63,7 +70,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           selected ? "btn-ghost-highlighted" : "btn-ghost",
         )}
         aria-pressed={selected}
-        onClick={() => onSelect(thread.name)}
+        onClick={() => onSelect(thread.name, thread.key)}
       >
         <div className="flex items-center gap-2 shrink-0 p-2 w-full">
           <StateIcon state={thread.state} />
@@ -101,8 +108,9 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
 
 interface ThreadWaveProps {
   threads: TranscriptThread[];
+  /** Episode key of the card the panels are pointing at, if it is one of these. */
   selected: string | null;
-  onSelect: (name: string) => void;
+  onSelect: (name: string, episodeKey: string) => void;
 }
 
 /**
@@ -133,9 +141,9 @@ export function ThreadWave({ threads, selected, onSelect }: ThreadWaveProps) {
       <div className="flex items-start gap-1 pr-12 w-fit">
         {threads.map((thread) => (
           <ThreadBox
-            key={thread.callId}
+            key={thread.key}
             thread={thread}
-            selected={selected === thread.name}
+            selected={selected === thread.key}
             onSelect={onSelect}
           />
         ))}

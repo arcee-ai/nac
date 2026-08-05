@@ -1,6 +1,6 @@
 use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
-use super::pseudo_tool_calls::recover_reasoning_tool_calls;
+use super::pseudo_tool_calls::finalize_chat_tool_recovery;
 use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response, StreamFold};
 use super::*;
@@ -370,7 +370,7 @@ impl ModelClient {
             "model": self.model,
             "messages": messages
                 .iter()
-                .map(fireworks_message_to_value)
+                .map(arcee_message_to_value)
                 .collect::<Vec<_>>(),
             "temperature": 0.0,
         });
@@ -405,7 +405,7 @@ impl ModelClient {
             }
         };
         let mut response = parse_chat_completions_response(&value, url.as_str())?;
-        recover_reasoning_tool_calls(&mut response, &tools);
+        finalize_chat_tool_recovery(&mut response, &tools);
         Ok(response)
     }
 

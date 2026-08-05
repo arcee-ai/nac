@@ -5,13 +5,11 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  ChatLoader,
   Icon,
   IconName,
   MessageBox,
   MessageBoxSize,
   MessageBoxVariant,
-  ModelPill,
 } from "@/app/atoms";
 import {
   ChatBadge,
@@ -38,7 +36,7 @@ import { useRegenerateRun, useSubmitRun } from "@/app/services/queries";
 import {
   selectThread,
   selectWorkset,
-  useSelectedThread,
+  useSelectedThreadEpisode,
   useSelectedWorkset,
 } from "@/app/store/sessionLayoutStore";
 import {
@@ -104,13 +102,13 @@ export function Transcript({
   const liveThreads = useLiveThreads();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
-  const selectedThread = useSelectedThread();
+  const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const toast = useToast();
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
-    useStickToBottom();
+    useStickToBottom({ resetKey: sessionId });
 
   perfRender("Transcript");
 
@@ -206,8 +204,8 @@ export function Transcript({
   const liveTurn = running && turns[turns.length - 1]?.kind === "model";
 
   const focusThread = useCallback(
-    (name: string) => {
-      selectThread(name);
+    (name: string, episodeKey: string) => {
+      selectThread(name, episodeKey);
       onFocusPanel("threads");
     },
     [onFocusPanel],
@@ -245,20 +243,40 @@ export function Transcript({
           ) : null}
 
           <PerfProfiler id="turns">
-            {turns.map((turn, index) =>
-              turn.kind === "user" ? (
-                <UserMessage
-                  key={turn.key}
-                  text={turn.text}
-                  timestamp={
-                    turn.createdAt ? formatStoreTime(turn.createdAt) : null
-                  }
-                  messageIndex={turn.messageIndex}
-                  actionsDisabled={actionsBusy}
-                  onRefresh={refreshIndex === index ? resend : null}
-                  onRevert={openRevert}
-                />
-              ) : (
+            {turns.map((turn, index) => {
+              if (turn.kind === "user") {
+                return (
+                  <UserMessage
+                    key={turn.key}
+                    text={turn.text}
+                    timestamp={
+                      turn.createdAt ? formatStoreTime(turn.createdAt) : null
+                    }
+                    messageIndex={turn.messageIndex}
+                    actionsDisabled={actionsBusy}
+                    onRefresh={refreshIndex === index ? resend : null}
+                    onRevert={openRevert}
+                  />
+                );
+              }
+
+              // Resend / revert on a model turn address the user prompt it
+              // answered — same messageIdx as the bubble above.
+              let precedingUserIndex: number | null = null;
+              let precedingUser: Extract<
+                TranscriptTurn,
+                { kind: "user" }
+              > | null = null;
+              for (let prior = index - 1; prior >= 0; prior -= 1) {
+                const candidate = turns[prior];
+                if (candidate?.kind === "user") {
+                  precedingUserIndex = prior;
+                  precedingUser = candidate;
+                  break;
+                }
+              }
+
+              return (
                 <ModelMessage
                   key={turn.key}
                   turn={turn}
@@ -268,32 +286,52 @@ export function Transcript({
                   activity={
                     running && index === turns.length - 1 ? activity : undefined
                   }
-                  selectedThread={panel === "threads" ? selectedThread : null}
+                  selectedThreadEpisode={
+                    panel === "threads" ? selectedThreadEpisode : null
+                  }
                   selectedWorkset={
                     panel === "worksets" ? selectedWorkset : null
                   }
                   onSelectThread={focusThread}
                   onSelectWorkset={focusWorkset}
+                  userMessageIndex={precedingUser?.messageIndex}
+                  userText={precedingUser?.text}
+                  actionsDisabled={actionsBusy}
+                  onRefresh={
+                    precedingUserIndex != null &&
+                    refreshIndex === precedingUserIndex
+                      ? resend
+                      : null
+                  }
+                  onRevert={openRevert}
                 />
-              ),
-            )}
+              );
+            })}
           </PerfProfiler>
 
           {showPending ? <UserMessage text={pendingText} pending /> : null}
 
+          {/* Before the first assistant message or stream delta lands, keep the
+              same chrome as a live ModelMessage — pill + model name — rather
+              than a separate "Run started…" / loader row. */}
           {running && !liveTurn ? (
-            <div className="flex items-center gap-3">
-              <ModelPill active />
-              {activity ? (
-                <span className="paragraph-medium text-shimmer-basic">
-                  {activity}
-                </span>
-              ) : (
-                // Before the first tool or message there is nothing to name,
-                // and the dots read better than a placeholder verb.
-                <ChatLoader />
-              )}
-            </div>
+            <ModelMessage
+              turn={{
+                kind: "model",
+                key: "model-pending",
+                blocks: [],
+                durationMs: null,
+              }}
+              model={model}
+              active
+              isLast
+              selectedThreadEpisode={
+                panel === "threads" ? selectedThreadEpisode : null
+              }
+              selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+              onSelectThread={focusThread}
+              onSelectWorkset={focusWorkset}
+            />
           ) : null}
 
           {/* The backend keeps one running diff for the workspace rather than a

@@ -220,7 +220,9 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
     case "run_started":
       setState({
         running: true,
-        activity: "Run started…",
+        // Keep the chat chrome as a plain live ModelMessage (pill + model);
+        // tool/thread events fill activity once there is something to name.
+        activity: "",
         error: null,
         modelError: null,
         streamText: "",

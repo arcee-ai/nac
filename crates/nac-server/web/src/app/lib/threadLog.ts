@@ -14,6 +14,11 @@ export interface ThreadLogLine {
    */
   key: string;
   text: string;
+  /**
+   * The same line without the tool's name. The card tail has room for one
+   * truncated line, where the name costs more than the command it hides.
+   */
+  bare: string;
   isError: boolean;
 }
 
@@ -31,22 +36,33 @@ export function threadLogLine(
   seq: number,
 ): ThreadLogLine | null {
   switch (event.type) {
-    case "tool_call_started":
+    case "tool_call_started": {
       // The server reduces the arguments to the one worth reading; the full
       // preview is JSON, which a single truncated line cannot carry anyway.
+      const command = event.key_arg_preview || event.args_preview;
       return {
         key: `call-${event.call_id}`,
-        text: `▸ ${event.name}: ${event.key_arg_preview || event.args_preview}`,
+        text: `▸ ${event.name}: ${command}`,
+        bare: `▸ ${command}`,
         isError: false,
       };
-    case "tool_call_finished":
+    }
+    case "tool_call_finished": {
+      const mark = event.is_error ? "✕" : "✓";
       return {
         key: `result-${event.call_id}`,
-        text: `${event.is_error ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
+        text: `${mark} ${event.name}: ${event.content_preview}`,
+        bare: `${mark} ${event.content_preview}`,
         isError: event.is_error,
       };
+    }
     case "thread_log":
-      return { key: `log-${seq}`, text: event.line, isError: false };
+      return {
+        key: `log-${seq}`,
+        text: event.line,
+        bare: event.line,
+        isError: false,
+      };
     default:
       return null;
   }

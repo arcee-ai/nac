@@ -98,7 +98,7 @@ const PATH_DEBOUNCE_MS = 400;
  * file in NAC home backs every session using that backend — which is why the
  * row reports being signed in even when the sign-in happened elsewhere.
  */
-function AuthenticationRow({ backend }: { backend: BackendKind }) {
+export function AuthenticationRow({ backend }: { backend: BackendKind }) {
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
   const logout = useManagedLogout();

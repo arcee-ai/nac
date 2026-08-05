@@ -13,8 +13,8 @@ pub mod model;
 pub mod model_configurations {
     pub use crate::store::{
         delete_model_configuration, insert_model_configuration, list_model_configurations,
-        load_model_configuration, ModelConfigurationRecord, ModelConfigurationStoreError,
-        NewModelConfiguration,
+        load_model_configuration, update_model_configuration, ModelConfigurationRecord,
+        ModelConfigurationStoreError, NewModelConfiguration,
     };
 }
 

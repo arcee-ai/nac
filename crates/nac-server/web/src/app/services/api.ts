@@ -41,6 +41,7 @@ import type {
   ThreadEventPage,
   ThreadSteeringResponse,
   UpdateConfigRequest,
+  UpdateModelConfigurationRequest,
   UpdateSessionPresentationRequest,
   WorkspaceDiffStage,
   WorkspaceFileContent,
@@ -223,6 +224,16 @@ export const api = {
 
   createModelConfig: (payload: CreateModelConfigurationRequest) =>
     request<ModelConfigurationRecord>("POST", "/model-configs", { body: payload }),
+
+  updateModelConfig: (
+    configId: string,
+    payload: UpdateModelConfigurationRequest,
+  ) =>
+    request<ModelConfigurationRecord>(
+      "PATCH",
+      `/model-configs/${encodeURIComponent(configId)}`,
+      { body: payload },
+    ),
 
   deleteModelConfig: (configId: string) =>
     request<void>("DELETE", `/model-configs/${encodeURIComponent(configId)}`),

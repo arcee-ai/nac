@@ -225,18 +225,20 @@ function ListToolbar({
 }) {
   return (
     <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      <ListingButton
-        iconName={IconName.Folders}
-        label="Show every file"
-        active={listing === "tree"}
-        onClick={() => selectFileListing("tree")}
-      />
-      <ListingButton
-        iconName={IconName.Scheme}
-        label="Show changed files only"
-        active={listing === "changed"}
-        onClick={() => selectFileListing("changed")}
-      />
+      <div className="flex items-center gap-2 flex-1">
+        <ListingButton
+          iconName={IconName.Folders}
+          label="Show every file"
+          active={listing === "tree"}
+          onClick={() => selectFileListing("tree")}
+        />
+        <ListingButton
+          iconName={IconName.Scheme}
+          label="Show changed files only"
+          active={listing === "changed"}
+          onClick={() => selectFileListing("changed")}
+        />
+      </div>
       <CommitPopover
         sessionId={sessionId}
         changed={changed}

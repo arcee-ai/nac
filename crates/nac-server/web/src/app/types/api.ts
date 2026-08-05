@@ -735,6 +735,8 @@ export interface ModelConfigurationRecord {
   api_key_env: string | null;
   reasoning_effort: string | null;
   extra_headers: Record<string, string>;
+  orchestrator_compaction_threshold: number | null;
+  initial_prompt: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -751,6 +753,25 @@ export interface CreateModelConfigurationRequest {
   api_key?: string | null;
   reasoning_effort?: string | null;
   extra_headers?: Record<string, string>;
+  orchestrator_compaction_threshold?: number | null;
+  initial_prompt?: string | null;
+}
+
+/**
+ * Every field is tri-state: omit it to keep what is stored, send null to clear
+ * it, send a value to replace it. `api_key` cannot be read back, so omitting it
+ * keeps the credential the configuration already points at.
+ */
+export interface UpdateModelConfigurationRequest {
+  name?: RequestField<string>;
+  backend?: RequestField<BackendKind>;
+  model?: RequestField<string>;
+  base_url?: RequestField<string>;
+  api_key?: RequestField<string>;
+  reasoning_effort?: RequestField<string>;
+  extra_headers?: RequestField<Record<string, string>>;
+  orchestrator_compaction_threshold?: RequestField<number>;
+  initial_prompt?: RequestField<string>;
 }
 
 /** A configuration the server checked end to end, with the models it allows. */

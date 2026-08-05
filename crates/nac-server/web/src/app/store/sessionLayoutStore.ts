@@ -11,6 +11,12 @@ interface SessionLayoutState {
   expanded: boolean;
   /** Thread the chat last pointed the Threads panel at. */
   selectedThread: string | null;
+  /**
+   * Which of that thread's chat cards did the pointing, or null when the pick
+   * came from the panel's own list. A re-dispatched thread has one card per
+   * episode, and only the card clicked belongs highlighted.
+   */
+  selectedThreadEpisode: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -32,6 +38,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   collapsed: false,
   expanded: false,
   selectedThread: null,
+  selectedThreadEpisode: null,
   selectedWorkset: null,
   selectedRevision: null,
   selectedFile: null,
@@ -56,8 +63,11 @@ export function revealSidePanel(): void {
   if (getState().collapsed) setState({ collapsed: false });
 }
 
-export function selectThread(selectedThread: string | null): void {
-  setState({ selectedThread });
+export function selectThread(
+  selectedThread: string | null,
+  selectedThreadEpisode: string | null = null,
+): void {
+  setState({ selectedThread, selectedThreadEpisode });
 }
 
 export function selectWorkset(selectedWorkset: string | null): void {
@@ -101,6 +111,8 @@ export function resetSessionSelection(): void {
 export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
+export const useSelectedThreadEpisode = () =>
+  useStore((s) => s.selectedThreadEpisode);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

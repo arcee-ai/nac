@@ -6,7 +6,7 @@ import type { ThreadLogLine } from "@/app/lib/threadLog";
 /** Height of one log row, which is also how far a new line travels. */
 const ROW_HEIGHT = 16;
 
-/** How long a new line takes to rise into place. */
+/** How long a new line takes to rise into place. `duration-300` mirrors it. */
 const SLIDE_MS = 300;
 
 /**
@@ -22,7 +22,7 @@ function lineOpacity(distanceFromNewest: number): string {
     case 0:
       return "";
     case 1:
-      return "opacity-30";
+      return "opacity-50";
     case 2:
       return "opacity-10";
     default:
@@ -82,16 +82,19 @@ export function ThreadLogTail({
     <div className={cn("flex flex-col justify-end overflow-hidden", className)}>
       <div ref={columnRef} className="flex flex-col">
         {visible.map((line, index) => (
-          <p
+          <span
             key={line.key}
             className={cn(
-              "w-full truncate code text-[12px] leading-[16px]",
-              line.isError ? "text-error-primary" : "text-basic-muted",
+              "w-full truncate code code-micro !text-[11px] !leading-[16px] !m-0 block",
+              // Aging is a fade rather than a step, so a line dims over the same
+              // beat as the slide that pushed it up.
+              "transition-opacity duration-300 ease-out",
+              line.isError ? "text-error-primary" : "text-basic-tertiary",
               lineOpacity(visible.length - 1 - index),
             )}
           >
-            {line.text}
-          </p>
+            {line.bare}
+          </span>
         ))}
       </div>
     </div>

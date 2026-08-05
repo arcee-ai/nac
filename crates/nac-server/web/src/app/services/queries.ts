@@ -30,6 +30,7 @@ import type {
   StoreInfo,
   SwitchBranchRequest,
   UpdateConfigRequest,
+  UpdateModelConfigurationRequest,
   WorkspaceDiffStage,
   WorkspaceFileContent,
   WorkspaceFileDiff,
@@ -283,6 +284,24 @@ export function useCreateModelConfig() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
       // The server files the key under a generated credential name.
+      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+    },
+  });
+}
+
+export function useUpdateModelConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      configId,
+      payload,
+    }: {
+      configId: string;
+      payload: UpdateModelConfigurationRequest;
+    }) => api.updateModelConfig(configId, payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
+      // A replaced key is filed under a new generated name and the old one goes.
       void client.invalidateQueries({ queryKey: queryKeys.credentials });
     },
   });

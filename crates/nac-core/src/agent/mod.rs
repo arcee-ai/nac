@@ -41,6 +41,16 @@ use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 
+/// What a turn that answered with neither prose nor a tool call is asked next.
+///
+/// Providers that split reasoning out of the response can swallow a whole turn
+/// into the reasoning channel, leaving nothing behind (see
+/// `model::pseudo_tool_calls`). One nudge is enough to tell that apart from a
+/// model that genuinely has nothing left to say: the retry either produces the
+/// answer or the turn fails loudly instead of reporting an empty success.
+const EMPTY_TURN_NUDGE: &str = "Your last turn arrived empty: no answer and no tool call. \
+Reply with your answer as ordinary text, or issue the tool call you meant to make.";
+
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -454,6 +464,7 @@ impl Agent {
         }
 
         let mut iteration = 0usize;
+        let mut empty_turn_nudged = false;
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_steering_checked().await?;
@@ -594,10 +605,42 @@ impl Agent {
                 if self.append_pending_steering_checked().await? > 0 {
                     continue;
                 }
-                let content = response
+                let answer = response
                     .assistant
                     .content
-                    .unwrap_or_else(|| "[No response]".to_string());
+                    .filter(|content| !content.trim().is_empty());
+                let Some(content) = answer else {
+                    if !empty_turn_nudged {
+                        empty_turn_nudged = true;
+                        if let Err(error) = self
+                            .push_and_log(Message::User {
+                                content: EMPTY_TURN_NUDGE.to_string(),
+                            })
+                            .await
+                        {
+                            self.last_usage = Some(accumulated_usage.clone());
+                            self.emit(AgentEvent::Error {
+                                thread_name: self.thread_name.clone(),
+                                message: error.to_string(),
+                            });
+                            self.tool_runtime.terminal_manager.remove_all().await;
+                            return Err(error);
+                        }
+                        continue;
+                    }
+                    // Reporting this as an answer is what let an empty run pass
+                    // for a finished one, and cost the caller a blind re-dispatch.
+                    let error = anyhow!(
+                        "The model answered twice with neither text nor a tool call, so this run has nothing to report. Retry with a more concrete action, or split the work across smaller threads."
+                    );
+                    self.last_usage = Some(accumulated_usage.clone());
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    self.tool_runtime.terminal_manager.remove_all().await;
+                    return Err(error);
+                };
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
@@ -610,6 +653,10 @@ impl Agent {
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Ok(content);
             }
+
+            // Only consecutive empty turns are a stuck model, so a turn that
+            // acted earns the next one a fresh nudge.
+            empty_turn_nudged = false;
 
             let tool_calls = response.assistant.tool_calls.unwrap_or_default();
             let results = execute_tools_parallel(

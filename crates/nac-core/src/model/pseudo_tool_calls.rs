@@ -1,10 +1,14 @@
 //! Recovery of tool calls that arrive as prose instead of as `tool_calls`.
 //!
-//! Arcee serves Trinity behind vLLM, whose reasoning parser splits the model's
-//! `<think>` block into `reasoning_content`. When the model writes its tool call
-//! inside that block, the whole call travels with the reasoning and the request
-//! comes back with no `tool_calls` and no content at all — the turn reads as an
-//! empty answer even though the model did decide to act.
+//! Applied on the Arcee chat path only. Arcee serves Trinity behind vLLM, whose
+//! reasoning parser splits the model's `<think>` block into `reasoning_content`.
+//! When the model writes its tool call inside that block, the whole call travels
+//! with the reasoning and the request comes back with no `tool_calls` and no
+//! content at all — the turn reads as an empty answer even though the model did
+//! decide to act.
+//!
+//! Other OpenAI-compatible backends keep a plain client and do not run this
+//! recovery or the companion wire-format inject in [`arcee_message_to_value`].
 //!
 //! The block that arrives looks like this, with the opening `<tool_call>` of the
 //! first call consumed upstream and later ones intact:
@@ -21,8 +25,27 @@
 //! Only a trailing run of such blocks is recovered, and only against the tools
 //! the request actually offered, so reasoning that merely talks about a tool is
 //! left alone.
+//!
+//! When recovery cannot run (native `tool_calls` already present, or the provider
+//! ate the openers and left only closers), [`sanitize_leaked_tool_markup`] still
+//! strips the Hermes/Llama XML family so it neither paints the Thoughts panel
+//! nor primes the next iteration to leak again.
 
 use super::*;
+
+/// Tag names from the Hermes / Llama native tool-call XML family that providers
+/// sometimes leave in `content` or `reasoning_content` instead of routing through
+/// structured `tool_calls`.
+const NATIVE_TOOL_TAGS: &[&str] = &[
+    "parameter",
+    "tool_use",
+    "tool_call",
+    "tool_name",
+    "invoke",
+    "arguments",
+    "parameters",
+    "function",
+];
 
 /// Rewrites a turn whose tool calls were left in the reasoning channel.
 ///
@@ -36,7 +59,13 @@ pub(super) fn recover_reasoning_tool_calls(
     response: &mut ModelTurnResponse,
     tools: &[ToolDefinition],
 ) {
-    if tools.is_empty() || response.assistant.tool_calls.is_some() {
+    if tools.is_empty()
+        || response
+            .assistant
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+    {
         return;
     }
     if response
@@ -69,6 +98,58 @@ pub(super) fn recover_reasoning_tool_calls(
     response.finish_reason = Some("tool_calls".to_string());
 }
 
+/// Drops leaked native tool-call XML from the assistant turn after recovery.
+///
+/// Covers the cases recovery cannot fix: structured `tool_calls` already present
+/// with a duplicate XML copy in reasoning, and orphan closers
+/// (`</parameter></function></tool_call>`) left after the provider ate the
+/// openers. Safe to run on every chat-completions response.
+pub(super) fn sanitize_leaked_tool_markup(response: &mut ModelTurnResponse) {
+    if let Some(reasoning) = response.assistant.reasoning_text.take() {
+        let cleaned = strip_native_tool_format_tags(&reasoning);
+        let trimmed = cleaned.trim();
+        response.assistant.reasoning_text = (!trimmed.is_empty()).then(|| trimmed.to_string());
+    }
+    if let Some(content) = response.assistant.content.as_mut() {
+        let cleaned = strip_native_tool_format_tags(content);
+        if cleaned != *content {
+            *content = cleaned;
+        }
+    }
+}
+
+/// Strips Hermes/Llama tool-call markup from text headed back to the model or UI.
+pub(super) fn strip_native_tool_format_tags(text: &str) -> String {
+    if !text.contains('<') {
+        return text.to_string();
+    }
+
+    let mut cleaned = text.to_string();
+    loop {
+        let before_len = cleaned.len();
+        for name in NATIVE_TOOL_TAGS {
+            cleaned = remove_paired_tag_blocks(&cleaned, name);
+        }
+        if cleaned.len() == before_len {
+            break;
+        }
+    }
+    for name in NATIVE_TOOL_TAGS {
+        cleaned = remove_stray_tags(&cleaned, name);
+    }
+    cleaned
+}
+
+/// Recovery plus markup sanitize — the post-parse step for chat-completions
+/// backends that can trap tool calls inside reasoning.
+pub(super) fn finalize_chat_tool_recovery(
+    response: &mut ModelTurnResponse,
+    tools: &[ToolDefinition],
+) {
+    recover_reasoning_tool_calls(response, tools);
+    sanitize_leaked_tool_markup(response);
+}
+
 struct Recovered {
     /// The reasoning with the recovered block removed, or `None` once nothing
     /// but the block was there.
@@ -86,11 +167,13 @@ fn recover_from_reasoning(reasoning: &str, tools: &[ToolDefinition]) -> Option<R
 
     Some(Recovered {
         reasoning: (!prose.is_empty()).then(|| prose.to_string()),
+        // Fresh ids every recovery — a stable `recovered_1` reused across turns
+        // collides in the transcript's tool-result map and paints the wrong
+        // episode onto a later thread card.
         tool_calls: calls
             .into_iter()
-            .enumerate()
-            .map(|(index, call)| ToolCall {
-                id: format!("recovered_{}", index + 1),
+            .map(|call| ToolCall {
+                id: format!("recovered_{}", uuid::Uuid::new_v4().simple()),
                 call_type: "function".to_string(),
                 function: call,
             })
@@ -184,6 +267,105 @@ fn coerce_argument(raw: &str, schema: Option<&Value>) -> Option<Value> {
             .ok()
             .filter(|value| value.is_array() || value.is_object()),
         _ => Some(Value::String(raw.to_string())),
+    }
+}
+
+fn remove_paired_tag_blocks(text: &str, name: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some((open_start, open_end)) = find_open_tag(&text[cursor..], name) {
+        let absolute_open = cursor + open_start;
+        let absolute_after_open = cursor + open_end;
+        out.push_str(&text[cursor..absolute_open]);
+        match find_close_tag(&text[absolute_after_open..], name) {
+            Some((_close_start, close_end)) => {
+                // Drop the whole paired block, including its inner payload —
+                // that payload is tool args, not prose the next turn should see.
+                cursor = absolute_after_open + close_end;
+            }
+            None => {
+                // Unclosed opener: leave it for the stray pass.
+                out.push_str(&text[absolute_open..absolute_after_open]);
+                cursor = absolute_after_open;
+            }
+        }
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+fn remove_stray_tags(text: &str, name: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some((start, end)) = find_any_tag(&text[cursor..], name) {
+        let absolute_start = cursor + start;
+        let absolute_end = cursor + end;
+        out.push_str(&text[cursor..absolute_start]);
+        cursor = absolute_end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+/// `<name…>` opener spanning `[start, end)` relative to `text`.
+fn find_open_tag(text: &str, name: &str) -> Option<(usize, usize)> {
+    find_tag(text, name, TagKind::Open)
+}
+
+/// `</name…>` closer spanning `[start, end)` relative to `text`.
+fn find_close_tag(text: &str, name: &str) -> Option<(usize, usize)> {
+    find_tag(text, name, TagKind::Close)
+}
+
+fn find_any_tag(text: &str, name: &str) -> Option<(usize, usize)> {
+    find_tag(text, name, TagKind::Either)
+}
+
+#[derive(Clone, Copy)]
+enum TagKind {
+    Open,
+    Close,
+    Either,
+}
+
+fn find_tag(text: &str, name: &str, kind: TagKind) -> Option<(usize, usize)> {
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find('<') {
+        let start = search_from + rel;
+        let mut after = start + 1;
+        let is_close = text[after..].starts_with('/');
+        if is_close {
+            after += 1;
+        }
+        let matches_kind = match kind {
+            TagKind::Open => !is_close,
+            TagKind::Close => is_close,
+            TagKind::Either => true,
+        };
+        let name_end = after + name.len();
+        if matches_kind
+            && name_end <= text.len()
+            && text[after..name_end].eq_ignore_ascii_case(name)
+            && tag_name_boundary(&text[name_end..])
+        {
+            if let Some(gt) = text[name_end..].find('>') {
+                return Some((start, name_end + gt + 1));
+            }
+        }
+        search_from = start + 1;
+    }
+    None
+}
+
+/// True when the character after a candidate tag name ends the name
+/// (`>`, `=`, whitespace, or attributes) rather than extending it
+/// (`<functional>` must not match `function`).
+fn tag_name_boundary(after_name: &str) -> bool {
+    match after_name.chars().next() {
+        None => false,
+        Some(c) => {
+            !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.' | ':')
+        }
     }
 }
 

@@ -28,17 +28,13 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   <div className={cn("flex text-left flex-col gap-1", className)}>
     {label ? (
       <div className="flex gap-2 items-center">
-        <Label
-          validation={validation}
-          hoverHint={hoverHint}
-          className="flex-1"
-        >
+        <Label validation={validation} hoverHint={hoverHint} className="flex-1">
           {label}
         </Label>
         {required ? (
           <div
             className={cn(
-              "shrink-0 text-micro",
+              "text-micro shrink-0",
               validation ? "text-error-secondary" : "text-basic-tertiary",
             )}
           >

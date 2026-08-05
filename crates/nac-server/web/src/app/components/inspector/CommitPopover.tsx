@@ -96,7 +96,6 @@ export function CommitPopover({
       sticky
       placement={PopoverPlacement.BottomRight}
       size={PopoverSize.Medium}
-      className="flex-1 min-w-0 w-auto"
       content={
         <>
           <TextArea
@@ -147,7 +146,7 @@ export function CommitPopover({
       }
     >
       <Button
-        className="w-full"
+        className="max-w-[120px] shrink-0"
         size={ButtonSize.Small}
         variant={ButtonVariant.Primary}
         disabled={Boolean(reason)}

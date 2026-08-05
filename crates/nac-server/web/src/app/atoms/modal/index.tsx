@@ -43,6 +43,8 @@ interface ModalProps {
   /** Glyph for the close button in the mobile header, where it leads the row. */
   mobileCloseIcon?: IconName;
   className?: string;
+  /** Overrides the body's own padding and scrolling, for full-bleed content. */
+  bodyClassName?: string;
   children?: React.ReactNode;
   footer?: React.ReactNode;
 }
@@ -63,6 +65,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   chromeless = false,
   mobileCloseIcon = IconName.Left,
   className = "",
+  bodyClassName = "",
   children,
   footer,
 }) => {
@@ -248,6 +251,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                     chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
                     fullScreen && "flex-1 min-h-0 w-full",
                   ),
+              bodyClassName,
             )}
           >
             {children}

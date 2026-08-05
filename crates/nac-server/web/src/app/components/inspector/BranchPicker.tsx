@@ -145,7 +145,7 @@ export function BranchPicker({
         <>
           <Input
             autoFocus
-            inputSize={InputSize.Medium}
+            inputSize={InputSize.Small}
             placeholder="Find or create a branch"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -178,12 +178,14 @@ export function BranchPicker({
                     key={item.name}
                     label={item.name}
                     icon={item.is_current ? IconName.Check : IconName.Scheme}
-                    // The branch you are on is marked by the highlight and
-                    // refused as a destination at the same time.
+                    // The branch you are on is where the highlight goes, not a
+                    // destination, so clicking it asks the server for nothing.
                     active={item.is_current}
-                    disabled={item.is_current || Boolean(reason)}
+                    disabled={Boolean(reason)}
                     title={reason ?? undefined}
-                    onClick={() => act(item.name, false)}
+                    onClick={
+                      item.is_current ? () => {} : () => act(item.name, false)
+                    }
                   />
                 );
               })}

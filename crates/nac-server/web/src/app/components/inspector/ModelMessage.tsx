@@ -1,10 +1,19 @@
 import { memo } from "react";
 
 import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  CopyButton,
+  Icon,
+  IconName,
   MessageBox,
   MessageBoxSize,
   MessageBoxVariant,
   ModelPill,
+  Tooltip,
+  TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
@@ -31,6 +40,15 @@ function thoughtsLabel(block: {
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
 }
 
+/** Visible prose from the turn — what Copy puts on the clipboard. */
+function modelCopyText(turn: ModelTurn): string {
+  return turn.blocks
+    .filter((block) => block.kind === "text")
+    .map((block) => block.text)
+    .join("\n\n")
+    .trim();
+}
+
 interface ModelMessageProps {
   turn: ModelTurn;
   model: string;
@@ -43,10 +61,27 @@ interface ModelMessageProps {
   activity?: string;
   /** Stretches the last bubble so stick-to-bottom lands below the fold. */
   isLast?: boolean;
-  selectedThread: string | null;
+  /** Episode key of the thread card the panels are pointing at, if any. */
+  selectedThreadEpisode: string | null;
   selectedWorkset: string | null;
-  onSelectThread: (name: string) => void;
+  onSelectThread: (name: string, episodeKey: string) => void;
   onSelectWorkset: (id: string) => void;
+  /**
+   * Snapshot index of the user prompt this model turn answers. Resend and
+   * revert address that prompt — same endpoints as the user bubble above.
+   */
+  userMessageIndex?: number;
+  /** Prompt text handed to revert so the confirm modal can quote it. */
+  userText?: string;
+  /**
+   * Answer the preceding prompt again. Only the model turn that answered the
+   * latest user message gets this — older turns keep revert + copy only.
+   */
+  onRefresh?: ((messageIndex: number) => void) | null;
+  /** Restore the session to the snapshot at the preceding prompt. */
+  onRevert?: ((messageIndex: number, text: string) => void) | null;
+  /** Disable destructive / network actions while a run is in flight. */
+  actionsDisabled?: boolean;
 }
 
 /**
@@ -59,16 +94,25 @@ export const ModelMessage = memo(function ModelMessage({
   active,
   activity,
   isLast = false,
-  selectedThread,
+  selectedThreadEpisode,
   selectedWorkset,
   onSelectThread,
   onSelectWorkset,
+  userMessageIndex,
+  userText = "",
+  onRefresh = null,
+  onRevert = null,
+  actionsDisabled = false,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
+  const canRefresh = onRefresh != null && userMessageIndex != null;
+  const canRevert = onRevert != null && userMessageIndex != null;
+  const copyText = modelCopyText(turn);
+
   return (
     <div
       className={cn(
-        "flex gap-1 items-start w-full max-w-full py-8 relative",
+        "group/model-msg flex gap-1 items-start w-full max-w-full py-8 relative",
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
@@ -81,9 +125,12 @@ export const ModelMessage = memo(function ModelMessage({
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
-            <span className="label-micro text-shimmer-basic min-w-0 truncate">
+            <>
+              {" "}
+              {/*<span className="label-micro text-shimmer-basic min-w-0 truncate max-w-[120px]">
               {activity}
-            </span>
+            </span>*/}
+            </>
           ) : turn.durationMs != null ? (
             <span className="label-micro text-basic-muted shrink-0 fade">
               {formatDurationShort(turn.durationMs)}
@@ -100,6 +147,9 @@ export const ModelMessage = memo(function ModelMessage({
           {turn.blocks.map((block) => {
             switch (block.kind) {
               case "thoughts":
+                // Empty reasoning (e.g. stripped tool-call markup, or a bare
+                // thinking signal with no text) should not leave a hollow badge.
+                if (!block.text.trim()) return null;
                 return (
                   <ChatBadge
                     key={block.key}
@@ -152,7 +202,7 @@ export const ModelMessage = memo(function ModelMessage({
                   <ThreadWave
                     key={block.key}
                     threads={block.threads}
-                    selected={selectedThread}
+                    selected={selectedThreadEpisode}
                     onSelect={onSelectThread}
                   />
                 );
@@ -161,6 +211,81 @@ export const ModelMessage = memo(function ModelMessage({
             }
           })}
         </div>
+
+        {/* Same resend / revert endpoints as the user bubble above — they always
+            address that prompt. Hidden while this turn is still streaming. */}
+        {!active ? (
+          <div
+            className={cn(
+              "flex items-center justify-start gap-3 pt-1 pl-3",
+              "opacity-0 pointer-events-none transition-opacity duration-150",
+              "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
+              "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
+            )}
+          >
+            {canRefresh ? (
+              <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
+                <Button
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Tertiary}
+                  content={ButtonContent.Icon}
+                  aria-label="Resend"
+                  disabled={actionsDisabled}
+                  onClick={() => onRefresh(userMessageIndex)}
+                  className="!h-4 !min-h-4 !p-0"
+                >
+                  <Icon iconName={IconName.Refresh} size={16} />
+                </Button>
+              </Tooltip>
+            ) : null}
+
+            {canRevert ? (
+              <Tooltip
+                title="Revert to this snapshot"
+                position={TooltipPosition.TopCenter}
+              >
+                <Button
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Tertiary}
+                  content={ButtonContent.Icon}
+                  aria-label="Revert to this snapshot"
+                  disabled={actionsDisabled}
+                  onClick={() => onRevert(userMessageIndex, userText)}
+                  className="!h-4 !min-h-4 !p-0"
+                >
+                  <Icon iconName={IconName.TurnLeft} size={16} />
+                </Button>
+              </Tooltip>
+            ) : (
+              <Tooltip
+                title="This message is not in the transcript yet"
+                position={TooltipPosition.TopCenter}
+              >
+                <span className="inline-flex">
+                  <Button
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Tertiary}
+                    content={ButtonContent.Icon}
+                    aria-label="Revert to this snapshot"
+                    disabled
+                    className="!h-4 !min-h-4 !p-0"
+                  >
+                    <Icon iconName={IconName.TurnLeft} size={16} />
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+
+            <CopyButton
+              value={copyText}
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Tertiary}
+              title="Copy message"
+              position={TooltipPosition.TopCenter}
+              className="!h-4 !min-h-4 !p-0"
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
