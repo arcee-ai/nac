@@ -18,6 +18,9 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-workspace-crates: true
+          key: workspace-v1
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -29,8 +32,26 @@ jobs:
           node --check crates/nac-server/assets/app.js
           node --test crates/nac-server/assets/app.test.js
 
-      - name: Run tests
-        run: cargo test --workspace --locked
+      - name: Run nac-server tests
+        run: cargo test -p nac-server --locked
+
+  test-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-workspace-crates: true
+          key: workspace-v1
+
+      - name: Run nac-core tests
+        run: cargo test -p nac-core --locked
 
   build:
     strategy:
@@ -60,6 +81,9 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-workspace-crates: true
+          key: workspace-v1
 
       - name: Build nac-web binary
         run: |
@@ -82,7 +106,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, build]
+    needs: [test, test-core, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
