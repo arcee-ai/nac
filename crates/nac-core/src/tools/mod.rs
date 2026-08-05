@@ -77,7 +77,7 @@ impl Default for ActiveThreadRegistry {
         Self {
             state: StdMutex::new(ActiveThreadState::default()),
             activity: Notify::new(),
-            live_thread_updates: AtomicBool::new(true),
+            live_thread_updates: AtomicBool::new(false),
         }
     }
 }
@@ -741,6 +741,16 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+    }
+}
+
+#[cfg(test)]
+mod live_thread_update_tests {
+    use super::ActiveThreadRegistry;
+
+    #[test]
+    fn new_registry_buffers_thread_updates_by_default() {
+        assert!(!ActiveThreadRegistry::default().live_thread_updates());
     }
 }
 

@@ -169,7 +169,7 @@ pub struct SessionFrontendSnapshot {
     pub active_threads: Vec<String>,
     /// Runtime presentation policy only; this intentionally is not persisted
     /// in the session database.
-    #[serde(default = "default_live_thread_updates")]
+    #[serde(default)]
     pub live_thread_updates: bool,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
@@ -188,10 +188,6 @@ pub struct SessionFrontendSnapshot {
     pub covered_orchestrator_steering_ids: Vec<i64>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
-}
-
-fn default_live_thread_updates() -> bool {
-    true
 }
 
 /// A visible-message cursor request. `before` is an index in the filtered
@@ -2432,6 +2428,19 @@ pub(super) mod tests {
     use crate::model::ModelClient;
     use crate::types::{FunctionCall, ToolCall};
     use std::collections::BTreeMap;
+
+    #[tokio::test]
+    async fn legacy_frontend_snapshot_defaults_live_thread_updates_off() {
+        let (parts, store_path) = test_active_service("legacy_live_thread_updates", "session");
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        let mut value = serde_json::to_value(snapshot).unwrap();
+        value.as_object_mut().unwrap().remove("live_thread_updates");
+
+        let decoded: SessionFrontendSnapshot = serde_json::from_value(value).unwrap();
+
+        assert!(!decoded.live_thread_updates);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
 
     fn thread_call(id: &str, arguments: &str) -> ToolCall {
         ToolCall {

@@ -2430,6 +2430,10 @@ mod tests {
         let buffered: SubmitPromptRequest =
             serde_json::from_str(r#"{"prompt":"work","live_thread_updates":false}"#).unwrap();
         assert_eq!(buffered.live_thread_updates, Some(false));
+
+        let live: SubmitPromptRequest =
+            serde_json::from_str(r#"{"prompt":"work","live_thread_updates":true}"#).unwrap();
+        assert_eq!(live.live_thread_updates, Some(true));
     }
 
     #[test]
@@ -4337,17 +4341,8 @@ thread_timeout_secs = 7200
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
         seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
         let manager = test_manager(&root);
-        let request = Request::builder()
-            .method("PUT")
-            .uri("/sessions/session/thread-updates")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"live":false}"#))
-            .unwrap();
-
-        let response = router(manager.clone()).oneshot(request).await.unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
         assert!(
             !manager
                 .snapshot("session")
@@ -4355,6 +4350,47 @@ thread_timeout_secs = 7200
                 .unwrap()
                 .live_thread_updates
         );
+        for live in [true, false] {
+            let request = Request::builder()
+                .method("PUT")
+                .uri("/sessions/session/thread-updates")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(r#"{{"live":{live}}}"#)))
+                .unwrap();
+
+            let response = router(manager.clone()).oneshot(request).await.unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                manager
+                    .snapshot("session")
+                    .await
+                    .unwrap()
+                    .live_thread_updates,
+                live
+            );
+            if live {
+                manager
+                    .submit_prompt(
+                        "session",
+                        SubmitPromptRequest {
+                            prompt: "preserve mode".to_string(),
+                            live_thread_updates: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert!(
+                    manager
+                        .snapshot("session")
+                        .await
+                        .unwrap()
+                        .live_thread_updates
+                );
+                manager.cancel_active_run("session").await.unwrap();
+            }
+        }
+        endpoint.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 

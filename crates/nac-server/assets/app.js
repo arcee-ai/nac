@@ -3325,7 +3325,7 @@ function renderOrchestratorNow(snapshot) {
   el.orchestratorNowState.dataset.state = presentation.state;
   el.orchestratorNowState.textContent = presentation.label;
   if (el.liveThreadUpdates) {
-    el.liveThreadUpdates.checked = snapshot?.live_thread_updates !== false;
+    el.liveThreadUpdates.checked = snapshot?.live_thread_updates === true;
     el.liveThreadUpdates.disabled = state.threadUpdateRequests.has(state.currentId);
   }
   el.orchestratorNowContent.dataset.nowKey = key;
@@ -3341,7 +3341,7 @@ async function updateLiveThreadUpdates(event) {
   const snapshot = sessionId ? state.snapshots.get(sessionId) : null;
   if (!sessionId || !control || state.threadUpdateRequests.has(sessionId)) return;
 
-  const previous = snapshot?.live_thread_updates !== false;
+  const previous = snapshot?.live_thread_updates === true;
   const live = Boolean(control.checked);
   if (snapshot) snapshot.live_thread_updates = live;
   state.threadUpdateRequests.add(sessionId);
@@ -5347,7 +5347,7 @@ async function submitComposer(event) {
 
   const target = state.targetedThread;
   const activeAtSubmission = !target && Boolean(state.snapshots.get(sessionId)?.active_run);
-  const liveThreadUpdates = state.snapshots.get(sessionId)?.live_thread_updates !== false;
+  const liveThreadUpdates = state.snapshots.get(sessionId)?.live_thread_updates === true;
   const submission = { sessionId, target, liveThreadUpdates };
   state.submittingSessions.add(sessionId);
   el.sendPrompt.disabled = true;

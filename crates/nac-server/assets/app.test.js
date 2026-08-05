@@ -934,12 +934,50 @@ test("orchestrator Now follows only the current run and projects live model and 
 test("orchestrator Now exposes a nearby live-response checkbox", () => {
   const start = indexSource.indexOf('<section id="orchestratorNow"');
   const panel = indexSource.slice(start, indexSource.indexOf("</section>", start));
-  assert.match(panel, /<input id="liveThreadUpdates" type="checkbox" checked>/);
+  assert.match(panel, /<input id="liveThreadUpdates" type="checkbox">/);
   assert.match(panel, /Respond live/);
   assert.match(panel, /In either mode, you can steer the orchestrator while threads are working\./);
   assert.ok(panel.indexOf('id="liveThreadUpdates"') < panel.indexOf('id="orchestratorNowState"'),
     "the control sits beside the Now state rather than in distant settings");
   assert.match(redesignSource, /\.thread-update-control \{[^}]*display: inline-flex;/s);
+});
+
+test("live-response checkbox treats missing state as off and preserves explicit on", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  isolated.state.currentId = "mode/session";
+  const snapshot = sessionSnapshot("mode/session");
+  delete snapshot.live_thread_updates;
+
+  isolated.renderOrchestratorNow(snapshot);
+  assert.equal(isolated.el.liveThreadUpdates.checked, false);
+
+  snapshot.live_thread_updates = true;
+  isolated.renderOrchestratorNow(snapshot);
+  assert.equal(isolated.el.liveThreadUpdates.checked, true);
+});
+
+test("composer submits missing live-response state as off and preserves explicit on", async () => {
+  async function submittedMode(mode) {
+    let body;
+    const isolated = loadApp({
+      fetch: async (_path, options) => {
+        body = JSON.parse(options.body);
+        return jsonResponse({ run_id: "run" });
+      },
+      window: { setTimeout: () => 17, clearTimeout() {} },
+    });
+    installComposerElements(isolated, `mode-${mode}`, "work");
+    const snapshot = isolated.state.snapshots.get(`mode-${mode}`);
+    if (mode === "missing") delete snapshot.live_thread_updates;
+    else snapshot.live_thread_updates = mode;
+
+    await isolated.submitComposer({ preventDefault() {} });
+    return body.live_thread_updates;
+  }
+
+  assert.equal(await submittedMode("missing"), false);
+  assert.equal(await submittedMode(true), true);
 });
 
 test("live-response checkbox changes the current session runtime policy", async () => {

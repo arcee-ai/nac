@@ -1013,7 +1013,7 @@ mod tests {
     #[tokio::test]
     async fn thread_wait_buffers_completions_until_all_threads_finish_when_live_updates_are_off() {
         let runtime = test_runtime_with_store("wait_for_all");
-        runtime.active_threads.set_live_thread_updates(false);
+        assert!(!runtime.active_threads.live_thread_updates());
         assert!(mark_thread_active(&runtime, "first", "dispatch-first"));
         assert!(mark_thread_active(&runtime, "second", "dispatch-second"));
 
