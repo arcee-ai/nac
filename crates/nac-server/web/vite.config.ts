@@ -108,6 +108,10 @@ export default defineConfig(({ command }) => ({
     // Keep Locator unbundled so `locatorCopyWithLine` can rewrite its
     // clipboard helper; esbuild prebundle would bake the upstream string in.
     exclude: ["@locator/runtime"],
+    // Excluding a package also skips its dependency graph, and Locator reaches
+    // a CJS semver through `@locator/shared`, which the browser then cannot
+    // import by name. Prebundling that one dependency restores the interop.
+    include: ["@locator/shared > semver"],
   },
   server: {
     port: 5173,
