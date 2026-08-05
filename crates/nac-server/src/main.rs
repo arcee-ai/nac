@@ -1,4 +1,4 @@
-// CI cache probe: source changes still rebuild workspace crates.
+// CI cache probe 2: source changes still rebuild workspace crates.
 
 use std::{
     ffi::{OsStr, OsString},
