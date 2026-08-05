@@ -42,8 +42,9 @@ impl SshConnection {
         }
     }
 
-    /// A connection from what the user typed, with `~` in the key path resolved
-    /// against the home directory nac itself is running under.
+    /// A connection from what the user typed, with the key path made absolute
+    /// against the local directory nac itself resolves paths against: `~` is
+    /// expanded there and anything else relative is joined to it.
     pub fn resolved(
         host: impl Into<String>,
         port: Option<u16>,
@@ -53,7 +54,7 @@ impl SshConnection {
         Self {
             host: host.into(),
             port,
-            identity_file: identity_file.map(|path| expand_local_home(path, paths)),
+            identity_file: identity_file.map(|path| absolute_local_path(path, paths)),
         }
     }
 
@@ -151,18 +152,28 @@ impl SshConnection {
     }
 }
 
-/// Expands a leading `~`, which arrives as text from the launch form and would
-/// otherwise reach `ssh` literally, since the command is spawned without a
-/// shell to expand it.
-fn expand_local_home(path: &Path, paths: &PathContext) -> PathBuf {
+/// The key path as an absolute local path.
+///
+/// A leading `~` is expanded because the value arrives as text from the launch
+/// form and would otherwise reach `ssh` literally, which is spawned without a
+/// shell to expand it. Anything else relative is resolved against nac's own
+/// local directory, so a value like `keys/ci` names the same file when it is
+/// validated, when the session runs, and after a restart from elsewhere —
+/// leaving it relative would let those three disagree.
+fn absolute_local_path(path: &Path, paths: &PathContext) -> PathBuf {
     let text = path.to_string_lossy();
-    let rest = if text == "~" {
-        ""
-    } else if let Some(rest) = text.strip_prefix("~/") {
-        rest
+    let tilde_rest = if text == "~" {
+        Some("")
     } else {
-        return path.to_path_buf();
+        text.strip_prefix("~/")
     };
+
+    let Some(rest) = tilde_rest else {
+        return paths.resolve(path);
+    };
+    // Without a home directory there is nothing to expand against. The literal
+    // value is kept, because a tilde joined to the local directory would name a
+    // file nobody meant and would report itself as that path when it is missing.
     match paths.home_dir() {
         Some(home) if rest.is_empty() => home,
         Some(home) => home.join(rest),
