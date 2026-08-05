@@ -82,6 +82,7 @@ function loadApp(overrides = {}) {
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
       loadModelCatalog, catalogProviders, findCatalogProvider, findCatalogModel,
+      catalogProviderForModel,
       resolveModelSelection, launchConfiguredResolution, selectionEffortLevels,
       modelDisplayName, formatModelContextWindow, formatModelCostHint, modelRowHint,
       modelSourceBadgeHtml, providerAuthBadgeHtml, modelPickerRows, modelPickerOptionCount, renderModelPickerHtml,
@@ -3454,20 +3455,126 @@ test("closed model picker renders display name, provider tag, and source badges"
 
 test("closed launch picker resolves from config through the launch defaults", () => {
   seedCatalog(ui);
+  // The configured model's provider comes from the catalog, not the preview.
   ui.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "anthropic-messages",
-      configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } };
+    data: { configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } };
   let html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
   assert.match(html, /from config: Claude Opus 4\.1 \(latest\)/);
   assert.match(html, /anthropic-messages · high/);
+  // An unknown configured id stays unresolved: unrecognized badge, no
+  // provider tag (there is no provider to name).
   ui.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "openai-responses", configured_model: "mystery" } };
+    data: { configured_model: "mystery" } };
   html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
   assert.match(html, /from config: mystery/);
   assert.match(html, /is-warning">unrecognized model/);
+  assert.doesNotMatch(html, /model-picker-toggle-provider/);
   ui.state.launchDefaultsPreview = { status: "idle", data: null, error: "", request: null };
   html = ui.renderModelPickerHtml("launch", { backend: "", model: "" });
   assert.match(html, /model-picker-toggle-label">from config</);
+});
+
+test("catalogProviderForModel resolves unique, colliding, and unknown model ids", () => {
+  seedCatalog(ui);
+  // Unique exact match wins.
+  const unique = ui.catalogProviderForModel("claude-opus-4-1");
+  assert.equal(unique.provider.id, "anthropic-messages");
+  assert.equal(unique.model.id, "claude-opus-4-1");
+  // Unknown and blank ids stay unresolved.
+  assert.equal(ui.catalogProviderForModel("mystery"), null);
+  assert.equal(ui.catalogProviderForModel(""), null);
+  assert.equal(ui.catalogProviderForModel("   "), null);
+  // A collision prefers the first non-managed provider in catalog order,
+  // regardless of which provider lists the id first — the backend's
+  // provider_for_model rule (the seeded arcee/codex ids overlap the
+  // generated baselines).
+  const colliding = { providers: [
+    { id: "arcee-auth", managed_base_url: "https://api.arcee.ai/api/v1",
+      models: [{ id: "trinity-large-thinking" }] },
+    { id: "arcee-api", managed_base_url: null,
+      models: [{ id: "trinity-large-thinking" }] },
+  ] };
+  assert.equal(ui.catalogProviderForModel("trinity-large-thinking", colliding).provider.id, "arcee-api");
+  const reversed = { providers: [colliding.providers[1], colliding.providers[0]] };
+  assert.equal(ui.catalogProviderForModel("trinity-large-thinking", reversed).provider.id, "arcee-api");
+  // An all-managed collision falls back to the first provider in order.
+  const allManaged = { providers: [
+    { id: "managed-a", managed_base_url: "https://a.example.test", models: [{ id: "shared" }] },
+    { id: "managed-b", managed_base_url: "https://b.example.test", models: [{ id: "shared" }] },
+  ] };
+  assert.equal(ui.catalogProviderForModel("shared", allManaged).provider.id, "managed-a");
+});
+
+test("launch from-config resolution derives the provider from the catalog", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // No preview data / no configured model → unresolved.
+  assert.equal(isolated.launchConfiguredResolution(), null);
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data: {} };
+  assert.equal(isolated.launchConfiguredResolution(), null);
+  // A known configured model resolves to its catalog provider.
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model: "claude-opus-4-1", configured_reasoning_effort: "high" } };
+  const known = isolated.launchConfiguredResolution();
+  assert.equal(known.kind, "known");
+  assert.equal(known.provider.id, "anthropic-messages");
+  assert.equal(known.model.id, "claude-opus-4-1");
+  // A colliding configured id prefers the non-managed provider (trinity is
+  // seeded on managed arcee-auth; arcee-api carries the same id).
+  const colliding = modelCatalogFixture();
+  colliding.providers.push({ id: "arcee-api", auth: "api_key_env", managed_base_url: null,
+    auth_status: "ready", auth_hint: null,
+    default_limits: { context_window: 128000, max_tokens: 16384, supported_efforts: [] },
+    models: [{ id: "trinity-large-thinking", display_name: "Trinity-Large-Thinking",
+      context_window: 128000, max_tokens: 80000,
+      cost: { input: 0.25, output: 0.8, cache_read: 0, cache_write: 0 },
+      reasoning: true, supported_efforts: [], source: "baseline" }] });
+  isolated.state.modelCatalog = { status: "ready", data: colliding, error: "" };
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model: "trinity-large-thinking" } };
+  const collided = isolated.launchConfiguredResolution();
+  assert.equal(collided.kind, "known");
+  assert.equal(collided.provider.id, "arcee-api");
+  // An unknown configured model stays unresolved…
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model: "mystery" } };
+  const unknown = isolated.launchConfiguredResolution();
+  assert.equal(unknown.kind, "unknown");
+  assert.equal(unknown.provider, null);
+  assert.equal(unknown.backend, "");
+  assert.equal(unknown.modelId, "mystery");
+  // …and the effort control hides: nothing can be said about effort for a
+  // model the catalog does not know (the backend rejects the launch with a
+  // guided error naming the missing backend).
+  isolated.el.launchBackend.value = "";
+  isolated.el.launchModel.value = "";
+  isolated.syncLaunchEffortControl();
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+  assert.equal(isolated.el.launchEffort.value, "inherit");
+});
+
+test("launch custom entry defaults the provider from the configured model's catalog resolution", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  // A known configured model seeds the custom state's provider select.
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model: "claude-opus-4-1" } };
+  isolated.state.launchPicker = { open: true, query: "my-fine-tune", activeIndex: 0, custom: false };
+  isolated.enterModelPickerCustom("launch");
+  assert.equal(isolated.state.launchPicker.custom, true);
+  assert.equal(isolated.el.launchBackend.value, "anthropic-messages");
+  assert.equal(isolated.el.launchModel.value, "my-fine-tune");
+  // An unknown configured model leaves the provider blank ("from config").
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
+    data: { configured_model: "mystery" } };
+  isolated.el.launchBackend.value = "";
+  isolated.el.launchModel.value = "";
+  isolated.state.launchPicker = { open: true, query: "other-custom", activeIndex: 0, custom: false };
+  isolated.enterModelPickerCustom("launch");
+  assert.equal(isolated.el.launchBackend.value, "");
+  assert.equal(isolated.el.launchModel.value, "other-custom");
 });
 
 test("open model picker renders grouped options and the custom escape row", () => {
@@ -3533,7 +3640,7 @@ test("picker badges mark no-credential providers on group headers and the closed
   isolated.el.launchBackend.value = "";
   isolated.el.launchModel.value = "";
   isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "openai-responses", configured_model: "gpt-5.1" } };
+    data: { configured_model: "gpt-5.1" } };
   const fromConfig = isolated.renderModelPickerHtml("launch", { backend: "", model: "" });
   assert.match(fromConfig, /from config: GPT-5\.1/);
   assert.match(fromConfig, /no credential detected/);
@@ -3609,6 +3716,9 @@ test("launch dialog groups endpoint and credential fields behind a collapsed ove
   assert.doesNotMatch(overrides, /api_key_mode/);
   assert.doesNotMatch(overrides, /<small/);
   assert.doesNotMatch(overrides, /<select/);
+  // The base url field carries no placeholder: blank applies the catalog
+  // default invisibly (there is no config tier left to name).
+  assert.doesNotMatch(overrides, /id="launchBaseUrl"[^>]*placeholder/);
   // The API key control is one free-text field, visible and enabled.
   assert.match(overrides, /<label id="launchApiKeyEnvField" class="field"><span>API key variable<\/span><input id="launchApiKeyEnv" name="api_key_env"/);
   assert.doesNotMatch(overrides, /id="launchApiKeyEnv"[^>]*\bdisabled\b/);
@@ -3749,7 +3859,7 @@ test("launch effort control assumes provider defaults for custom models and reso
   isolated.el.launchBackend.value = "";
   isolated.el.launchModel.value = "";
   isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "anthropic-messages", configured_model: "claude-opus-4-1" } };
+    data: { configured_model: "claude-opus-4-1" } };
   isolated.syncLaunchEffortControl();
   assert.match(isolated.el.launchEffort.innerHTML, /value="xhigh"/);
   assert.doesNotMatch(isolated.el.launchEffort.innerHTML, /value="minimal"/);
@@ -3760,7 +3870,7 @@ test("launch effort control assumes provider defaults for custom models and reso
   assert.match(isolated.el.launchEffort.innerHTML, /value="minimal">minimal/);
   // A configured non-reasoning model hides the control too.
   isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {},
-    data: { configured_model_backend: "openai-responses", configured_model: "gpt-5-mini" } };
+    data: { configured_model: "gpt-5-mini" } };
   isolated.syncLaunchEffortControl();
   assert.equal(isolated.el.launchEffortField.hidden, true);
   assert.equal(isolated.el.launchEffort.value, "inherit");
@@ -4742,19 +4852,17 @@ test("launch-default generation guards reject stale same-dialog responses", asyn
   assert.deepEqual(JSON.parse(requests[0].options.body), { cwd: "/old" });
   assert.deepEqual(JSON.parse(requests[1].options.body), { cwd: "~/new", ssh_host: "build-box" });
   requests[1].pending.resolve(jsonResponse({
-    configured_model_backend: "arcee-auth",
-    configured_model_base_url: "https://api.arcee.ai/api/v1",
+    configured_model: "trinity-large-thinking", configured_reasoning_effort: "high",
   }));
   await second;
   requests[0].pending.resolve(jsonResponse({
-    configured_model_backend: "openai-responses",
-    configured_model_base_url: "https://stale.example.test",
+    configured_model: "gpt-5-mini", configured_reasoning_effort: null,
   }));
   await first;
   assert.equal(isolated.state.launchDefaultsPreview.status, "ready");
-  assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_backend, "arcee-auth");
-  assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_base_url,
-    "https://api.arcee.ai/api/v1", "the stale first response must not overwrite the latest defaults");
+  assert.equal(isolated.state.launchDefaultsPreview.data.configured_model, "trinity-large-thinking");
+  assert.equal(isolated.state.launchDefaultsPreview.data.configured_reasoning_effort,
+    "high", "the stale first response must not overwrite the latest defaults");
 });
 
 test("launch-default loading, error, and waiting states clear stale inherited model UI", async () => {
@@ -4763,7 +4871,7 @@ test("launch-default loading, error, and waiting states clear stale inherited mo
   seedCatalog(isolated);
   launchPickerElements(isolated);
   isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data: {
-    configured_model_backend: "openai-responses", configured_model: "gpt-5-mini",
+    configured_model: "gpt-5-mini",
   } };
   isolated.syncLaunchModelControls();
   assert.match(isolated.el.launchModelPicker.innerHTML, /from config: GPT-5 mini/);
@@ -4780,7 +4888,7 @@ test("launch-default loading, error, and waiting states clear stale inherited mo
   assert.equal(isolated.el.launchEffortField.hidden, false);
 
   isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data: {
-    configured_model_backend: "openai-responses", configured_model: "gpt-5-mini",
+    configured_model: "gpt-5-mini",
   } };
   isolated.syncLaunchModelControls();
   await isolated.loadLaunchDefaultsPreview({ mode: "ssh", cwd: "~", sshHost: "" });
@@ -4797,6 +4905,15 @@ test("launch-default request failures land in the error state", async () => {
   await isolated.loadLaunchDefaultsPreview({ mode: "local", cwd: "/missing", sshHost: "" });
   assert.equal(isolated.state.launchDefaultsPreview.status, "error");
   assert.match(isolated.state.launchDefaultsPreview.error, /invalid local <cwd>/);
+});
+
+test("no reads of the removed launch-defaults fields remain", () => {
+  // The backend serves only {configured_model, configured_reasoning_effort};
+  // the configured backend/base_url/api_key_env fields are gone from the wire.
+  for (const field of ["configured_model_backend", "configured_model_base_url", "configured_api_key_env"]) {
+    assert.equal(appSource.includes(field), false, `app.js must not read ${field}`);
+    assert.equal(indexSource.includes(field), false, `index.html must not reference ${field}`);
+  }
 });
 
 test("session cards expose authoritative local, sandbox, and exact SSH topology", () => {

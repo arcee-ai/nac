@@ -5020,6 +5020,25 @@ function findCatalogModel(providerId, modelId, catalog = state.modelCatalog.data
   return provider && model ? { provider, model } : null;
 }
 
+// Resolve a model id to its catalog provider by exact entry match, mirroring
+// the backend's `provider_for_model`: the unique provider carrying the id
+// wins; a collision (the same id on several providers — the hand-seeded
+// arcee/codex ids overlap the generated baselines) prefers the first
+// non-managed provider in catalog order. Unknown ids return null — callers
+// render them unrecognized.
+function catalogProviderForModel(modelId, catalog = state.modelCatalog.data) {
+  const id = String(modelId || "").trim();
+  if (!id) return null;
+  const matches = [];
+  for (const provider of catalogProviders(catalog)) {
+    const model = (Array.isArray(provider?.models) ? provider.models : [])
+      .find((entry) => entry?.id === id);
+    if (model) matches.push({ provider, model });
+  }
+  if (matches.length <= 1) return matches[0] || null;
+  return matches.find((match) => !match.provider?.managed_base_url) || matches[0];
+}
+
 // Resolves a (backend, model) pair against the catalog:
 //   { kind: "inherit" }                          blank model (launch "from config")
 //   { kind: "known", provider, model }           a real catalog entry
@@ -5068,14 +5087,18 @@ function sessionModelPresentation(backend, model, catalog = state.modelCatalog.d
 }
 
 // The launch "from config" selection resolved through the launch-defaults
-// preview (configured_model_backend / configured_model), when available.
+// preview, when available. The configured model's provider comes from the
+// catalog — the same resolution the backend applies to the configured model
+// (unique exact match, collisions prefer the non-managed provider); an
+// unknown configured id stays unresolved and renders unrecognized.
 function launchConfiguredResolution() {
   const preview = state.launchDefaultsPreview;
   if (preview?.status !== "ready") return null;
-  const backend = preview.data?.configured_model_backend;
-  const model = preview.data?.configured_model;
-  if (!backend || !model) return null;
-  return resolveModelSelection(backend, model);
+  const model = String(preview.data?.configured_model || "").trim();
+  if (!model) return null;
+  const found = catalogProviderForModel(model);
+  if (found) return { kind: "known", ...found };
+  return { kind: "unknown", provider: null, backend: "", modelId: model };
 }
 
 // Effort levels a selection accepts. Unknown models fall back to the
@@ -5433,8 +5456,10 @@ function enterModelPickerCustom(scope) {
   picker.activeIndex = 0;
   const selection = modelPickerSelection(scope);
   let backend = selection.backend;
-  if (scope === "launch" && !backend && state.launchDefaultsPreview?.status === "ready") {
-    backend = String(state.launchDefaultsPreview.data?.configured_model_backend || "");
+  // Launch custom entry defaults the provider to the configured model's
+  // catalog-resolved provider; an unknown configured model leaves it blank.
+  if (scope === "launch" && !backend) {
+    backend = launchConfiguredResolution()?.provider?.id || "";
   }
   applyModelPickerSelection(scope, { backend, model: query || selection.model });
   syncModelPicker(scope, { focus: "custom" });
