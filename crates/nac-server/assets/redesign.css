@@ -432,6 +432,75 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   background: var(--surface);
 }
 
+.orchestrator-rail-toolbar {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: var(--sp-3);
+  flex: none;
+}
+.orchestrator-rail-toolbar .rail-heading { padding-right: 0; }
+.conversation-search-open,
+.conversation-search button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font: var(--fs-base)/var(--lh-none) var(--mono);
+  cursor: pointer;
+}
+.conversation-search-open svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.conversation-search-open:hover,
+.conversation-search button:hover { border-color: var(--line-strong); background: var(--surface-hover); color: var(--ink); }
+.conversation-search {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto 28px 28px 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--sp-3);
+  border-block: 1px solid var(--line);
+  background: #101010;
+  flex: none;
+}
+.conversation-search[hidden] { display: none; }
+.conversation-search input {
+  min-width: 0;
+  height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: var(--fs-sm)/var(--lh-none) var(--mono);
+}
+.conversation-search-status { min-width: 68px; color: var(--ink-muted); font: var(--fs-xs)/var(--lh-none) var(--mono); text-align: right; white-space: nowrap; }
+.conversation-search button:disabled { opacity: .35; cursor: default; }
+.conversation-search-open:focus-visible,
+.conversation-search input:focus-visible,
+.conversation-search button:focus-visible {
+  border-color: var(--paper);
+  outline: 2px solid var(--paper);
+  outline-offset: 2px;
+}
+.orchestrator-chat-content mark.conversation-search-match {
+  border-radius: 2px;
+  background: #806f24;
+  color: var(--paper);
+}
+.orchestrator-chat-content mark.conversation-search-match.is-current {
+  outline: 2px solid #fff1a8;
+  outline-offset: 1px;
+  background: #b18e16;
+  color: #fff;
+}
+
 .orchestrator-chat-content {
   flex: 1;
   min-height: 0;

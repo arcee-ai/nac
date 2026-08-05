@@ -69,7 +69,19 @@
               <p id="configRepairDetail"></p>
               <button id="configRepairAction" class="button" type="button">open settings</button>
             </section>
-            <h2 class="rail-heading">Orchestrator</h2>
+            <div class="orchestrator-rail-toolbar">
+              <h2 class="rail-heading">Orchestrator</h2>
+              <button id="conversationSearchOpen" class="conversation-search-open" type="button" aria-label="Search conversation" title="Search conversation (Ctrl/Command+F)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 4 4"></path></svg>
+              </button>
+            </div>
+            <section id="conversationSearch" class="conversation-search" role="search" aria-label="Search conversation" hidden>
+              <input id="conversationSearchInput" type="search" aria-label="Search conversation" autocomplete="off" spellcheck="false">
+              <span id="conversationSearchStatus" class="conversation-search-status" role="status" aria-live="polite" aria-atomic="true">0 matches</span>
+              <button id="conversationSearchPrevious" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)" disabled>↑</button>
+              <button id="conversationSearchNext" type="button" aria-label="Next match" title="Next match (Enter)" disabled>↓</button>
+              <button id="conversationSearchClose" type="button" aria-label="Close conversation search" title="Close conversation search (Escape)">×</button>
+            </section>
             <div id="orchestratorChatContent" class="orchestrator-chat-content"></div>
             <section id="orchestratorNow" class="now-panel orchestrator-now-panel" aria-label="Orchestrator current activity">
               <header class="now-panel-header">

@@ -54,6 +54,10 @@ const state = {
   focusOpener: null,
   workspaceView: "chat",
   workspaceViewScroll: { sessionId: null, chat: Number.NaN, threads: Number.NaN },
+  conversationSearch: {
+    open: false, query: "", results: [], current: -1, loading: false,
+    generation: 0, sessionId: null, opener: null, error: "",
+  },
 };
 
 const ACTION_LEDGER_LIMIT = 10;
@@ -63,6 +67,7 @@ const THREAD_MODEL_ROLLUP_END_EVENTS = new Set([
   "error", "run_finished", "thread_finished", "thread_started",
 ]);
 const ORCHESTRATOR_MESSAGE_PAGE_LIMIT = 24;
+const CONVERSATION_SEARCH_PAGE_LIMIT = 100;
 const THREAD_EVENT_PAGE_LIMIT = 50;
 const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const REORDER_DRAG_THRESHOLD_PX = 6;
@@ -97,6 +102,8 @@ function bindElements() {
     "sessionLocation", "renameSession", "sessionInfo", "metricModel", "metricContext", "metricTokens", "metricRun",
     "metricChanges", "sessionNavStatus", "stopRun", "viewToggle",
     "configRepairNotice", "configRepairDetail", "configRepairAction",
+    "conversationSearchOpen", "conversationSearch", "conversationSearchInput", "conversationSearchStatus",
+    "conversationSearchPrevious", "conversationSearchNext", "conversationSearchClose",
     "orchestratorChatContent", "orchestratorNow", "orchestratorNowState", "orchestratorNowContent", "liveThreadUpdates",
     "focusPanel", "focusTitle", "focusState", "focusContent", "closeFocusPanel",
     "threadGrid", "commandComposer", "composerTarget", "composerTargetName", "clearTarget",
@@ -128,6 +135,12 @@ function bindEvents() {
   el.configRepairAction.addEventListener("click", () => openFocusView("settings"));
   el.stopRun.addEventListener("click", stopActiveRun);
   el.viewToggle.addEventListener("click", () => setWorkspaceView(state.workspaceView === "threads" ? "chat" : "threads"));
+  el.conversationSearchOpen.addEventListener("click", (event) => openConversationSearch(event.currentTarget));
+  el.conversationSearchClose.addEventListener("click", () => closeConversationSearch({ restoreFocus: true }));
+  el.conversationSearchPrevious.addEventListener("click", () => navigateConversationSearch(-1));
+  el.conversationSearchNext.addEventListener("click", () => navigateConversationSearch(1));
+  el.conversationSearchInput.addEventListener("input", handleConversationSearchInput);
+  el.conversationSearchInput.addEventListener("keydown", handleConversationSearchKeydown);
   el.orchestratorChatContent.addEventListener("scroll", handleOrchestratorChatScroll, true);
   el.orchestratorChatContent.addEventListener("click", handleForkBoundaryClick);
   el.orchestratorNowContent.addEventListener("scroll", handleNowPanelScroll, true);
@@ -1079,6 +1092,7 @@ function openSession(sessionId, updateHash = true, { fetchSnapshot = true } = {}
   }
   transitionSessionCompaction(sessionId, { type: "navigation" });
   clearSessionAttention(sessionId);
+  resetConversationSearch();
   state.currentId = sessionId;
   state.targetedThread = null;
   state.focusView = null;
@@ -1099,6 +1113,7 @@ function showPicker(updateHash = true) {
   const returningSessionId = state.currentId;
   persistComposerDraft(returningSessionId);
   if (returningSessionId) transitionSessionCompaction(returningSessionId, { type: "navigation" });
+  resetConversationSearch();
   state.currentId = null;
   state.targetedThread = null;
   state.focusView = null;
@@ -2610,6 +2625,7 @@ function restoreWorkspaceViewScroll(view) {
 function setWorkspaceView(view, { preserveScroll = true } = {}) {
   const next = view === "threads" ? "threads" : "chat";
   const previous = state.workspaceView === "threads" ? "threads" : "chat";
+  if (next === "threads" && state.conversationSearch.open) closeConversationSearch();
   if (preserveScroll && previous !== next) captureWorkspaceViewScroll(previous);
   state.workspaceView = next;
   if (el.sessionLayout) el.sessionLayout.classList.toggle("is-threads-view", next === "threads");
@@ -3301,7 +3317,260 @@ function renderThreadNow(name, model, entries) {
   return `<section class="now-panel thread-now-panel" data-state="${escapeAttr(presentation.state)}" aria-label="${escapeAttr(name || "Thread")} current activity"><header class="now-panel-header"><h3>Now</h3><span data-state="${escapeAttr(presentation.state)}">${escapeHtml(presentation.label)}</span></header><div class="now-panel-content" data-now-key="${escapeAttr(key)}" role="log" aria-live="polite" aria-label="Live ${escapeAttr(name || "thread")} activity" tabindex="0">${nowPanelRows(actions)}</div></section>`;
 }
 
-function renderOrchestratorChatRail(snapshot) {
+function persistedMessageMarkup(markup, canonicalIndex) {
+  if (!markup || !Number.isSafeInteger(canonicalIndex) || canonicalIndex < 0) return markup;
+  return markup.replace("<article ", `<article data-message-index="${canonicalIndex}" `);
+}
+
+function conversationSearchText(message) {
+  if (!message || message.pending || !["user", "assistant"].includes(message.role)) return "";
+  const parts = [];
+  if (message.content !== null && message.content !== undefined) parts.push(String(message.content));
+  if (message.role === "assistant") {
+    for (const call of message.tool_calls || []) {
+      const { name, args, action } = formatToolCall(call);
+      parts.push(name);
+      if (args) parts.push(args);
+      if (name === "thread" && action) parts.push(compactActionDetail(action, 320));
+    }
+  }
+  return parts.join("\n");
+}
+
+function literalMatchOffsets(text, query) {
+  const source = String(text || "").toLocaleLowerCase();
+  const needle = String(query || "").toLocaleLowerCase();
+  if (!needle) return [];
+  const offsets = [];
+  for (let offset = 0; offset <= source.length - needle.length;) {
+    const found = source.indexOf(needle, offset);
+    if (found < 0) break;
+    offsets.push(found);
+    offset = found + Math.max(1, needle.length);
+  }
+  return offsets;
+}
+
+function resetConversationSearch() {
+  const search = state.conversationSearch;
+  search.generation += 1;
+  search.open = false;
+  search.query = "";
+  search.results = [];
+  search.current = -1;
+  search.loading = false;
+  search.sessionId = null;
+  search.opener = null;
+  search.error = "";
+  if (el.conversationSearch) el.conversationSearch.hidden = true;
+  if (el.conversationSearchInput) el.conversationSearchInput.value = "";
+  clearConversationSearchHighlights();
+  updateConversationSearchControls();
+}
+
+function openConversationSearch(opener = null) {
+  if (!state.currentId) return false;
+  if (state.workspaceView !== "chat") setWorkspaceView("chat");
+  const search = state.conversationSearch;
+  search.open = true;
+  search.sessionId = state.currentId;
+  search.opener = opener || el.conversationSearchOpen;
+  el.conversationSearch.hidden = false;
+  el.conversationSearchInput.value = search.query;
+  updateConversationSearchControls();
+  requestAnimationFrame(() => {
+    el.conversationSearchInput?.focus?.({ preventScroll: true });
+    el.conversationSearchInput?.select?.();
+  });
+  return true;
+}
+
+function closeConversationSearch({ restoreFocus = false } = {}) {
+  const search = state.conversationSearch;
+  if (!search.open) return false;
+  const opener = search.opener || el.conversationSearchOpen;
+  search.generation += 1;
+  search.open = false;
+  search.query = "";
+  search.results = [];
+  search.current = -1;
+  search.loading = false;
+  search.error = "";
+  if (el.conversationSearch) el.conversationSearch.hidden = true;
+  if (el.conversationSearchInput) el.conversationSearchInput.value = "";
+  clearConversationSearchHighlights();
+  updateConversationSearchControls();
+  if (restoreFocus) requestAnimationFrame(() => opener?.focus?.({ preventScroll: true }));
+  return true;
+}
+
+function updateConversationSearchControls() {
+  const search = state.conversationSearch;
+  const count = search.results.length;
+  let label = count ? `${search.current + 1} of ${count}` : "0 matches";
+  if (search.loading) label = count ? `${label} · Searching earlier messages…` : "Searching earlier messages…";
+  else if (search.error) label = count ? `${label} · Earlier messages unavailable` : "Earlier messages unavailable";
+  if (el.conversationSearchStatus) el.conversationSearchStatus.textContent = label;
+  if (el.conversationSearchPrevious) el.conversationSearchPrevious.disabled = count === 0;
+  if (el.conversationSearchNext) el.conversationSearchNext.disabled = count === 0;
+}
+
+function clearConversationSearchHighlights(root = el.orchestratorChatContent) {
+  if (!root?.querySelectorAll) return;
+  for (const mark of root.querySelectorAll("mark.conversation-search-match")) {
+    const parent = mark.parentNode;
+    mark.replaceWith(mark.ownerDocument.createTextNode(mark.textContent || ""));
+    parent?.normalize?.();
+  }
+}
+
+function applyConversationSearchHighlights() {
+  const root = el.orchestratorChatContent;
+  const search = state.conversationSearch;
+  const retained = search.results[search.current] || null;
+  clearConversationSearchHighlights(root);
+  search.results = [];
+  search.current = -1;
+  if (!search.open || !search.query || !root?.querySelectorAll) {
+    updateConversationSearchControls();
+    return [];
+  }
+  const ownerDocument = root.ownerDocument || document;
+  for (const article of root.querySelectorAll("article.focus-message[data-message-index]")) {
+    const canonicalIndex = Number(article.dataset.messageIndex);
+    if (!Number.isSafeInteger(canonicalIndex)) continue;
+    const walker = ownerDocument.createTreeWalker(article, 4);
+    const nodes = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement?.closest?.("button, mark, [aria-hidden='true']")) continue;
+      if (literalMatchOffsets(node.nodeValue, search.query).length) nodes.push(node);
+    }
+    let occurrence = 0;
+    for (const node of nodes) {
+      const offsets = literalMatchOffsets(node.nodeValue, search.query);
+      const fragment = ownerDocument.createDocumentFragment();
+      let cursor = 0;
+      for (const offset of offsets) {
+        if (offset > cursor) fragment.append(ownerDocument.createTextNode(node.nodeValue.slice(cursor, offset)));
+        const mark = ownerDocument.createElement("mark");
+        mark.className = "conversation-search-match";
+        mark.dataset.messageIndex = String(canonicalIndex);
+        mark.dataset.occurrence = String(occurrence);
+        mark.textContent = node.nodeValue.slice(offset, offset + search.query.length);
+        fragment.append(mark);
+        search.results.push({ canonicalIndex, occurrence });
+        occurrence += 1;
+        cursor = offset + search.query.length;
+      }
+      if (cursor < node.nodeValue.length) fragment.append(ownerDocument.createTextNode(node.nodeValue.slice(cursor)));
+      node.replaceWith(fragment);
+    }
+  }
+  search.current = search.results.findIndex((result) => retained
+    && result.canonicalIndex === retained.canonicalIndex && result.occurrence === retained.occurrence);
+  if (search.current < 0 && search.results.length) search.current = 0;
+  syncCurrentConversationSearchMark();
+  updateConversationSearchControls();
+  return search.results;
+}
+
+function syncCurrentConversationSearchMark({ scroll = false } = {}) {
+  const search = state.conversationSearch;
+  const marks = el.orchestratorChatContent?.querySelectorAll?.("mark.conversation-search-match") || [];
+  for (const mark of marks) mark.classList.toggle("is-current", false);
+  const result = search.results[search.current];
+  if (!result) return null;
+  const mark = [...marks].find((candidate) => Number(candidate.dataset.messageIndex) === result.canonicalIndex
+    && Number(candidate.dataset.occurrence) === result.occurrence);
+  mark?.classList?.add("is-current");
+  if (scroll) mark?.closest?.("article.focus-message")?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  return mark || null;
+}
+
+function navigateConversationSearch(direction) {
+  const search = state.conversationSearch;
+  if (!search.results.length) return null;
+  search.current = (search.current + (direction < 0 ? -1 : 1) + search.results.length) % search.results.length;
+  const mark = syncCurrentConversationSearchMark({ scroll: true });
+  updateConversationSearchControls();
+  return mark;
+}
+
+function handleConversationSearchKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeConversationSearch({ restoreFocus: true });
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    navigateConversationSearch(event.shiftKey ? -1 : 1);
+  }
+}
+
+function handleConversationSearchInput(event) {
+  const search = state.conversationSearch;
+  search.query = String(event?.currentTarget?.value ?? el.conversationSearchInput?.value ?? "");
+  search.generation += 1;
+  search.error = "";
+  search.current = -1;
+  applyConversationSearchHighlights();
+  if (!search.query) {
+    search.loading = false;
+    updateConversationSearchControls();
+    return;
+  }
+  void loadConversationSearchHistory(state.currentId, search.generation);
+}
+
+async function loadConversationSearchHistory(sessionId, generation) {
+  const search = state.conversationSearch;
+  if (!sessionId || !search.query || search.sessionId !== sessionId || generation !== search.generation) return false;
+  search.loading = true;
+  updateConversationSearchControls();
+  try {
+    while (true) {
+      const snapshot = state.snapshots.get(sessionId);
+      const messageWindow = state.messageWindows.get(sessionId);
+      if (!snapshot || !messageWindow?.hasOlder) break;
+      if (messageWindow.loading) {
+        await new Promise((resolve) => window.setTimeout(resolve, 20));
+        if (state.currentId !== sessionId || generation !== search.generation) return false;
+        continue;
+      }
+      messageWindow.loading = true;
+      const before = messageWindow.start;
+      const anchor = { scrollHeight: el.orchestratorChatContent?.scrollHeight || 0, scrollTop: el.orchestratorChatContent?.scrollTop || 0 };
+      let response;
+      try {
+        response = await apiGet(`/sessions/${encodeURIComponent(sessionId)}/messages?before=${before}&limit=${CONVERSATION_SEARCH_PAGE_LIMIT}`);
+      } finally {
+        messageWindow.loading = false;
+      }
+      if (state.currentId !== sessionId || search.sessionId !== sessionId || generation !== search.generation) return false;
+      if (!prependMessageWindow(sessionId, snapshot, response)) break;
+      renderOrchestratorChatRail(snapshot, { preserveViewport: true });
+      if (el.orchestratorChatContent) {
+        el.orchestratorChatContent.scrollTop = Math.max(0,
+          el.orchestratorChatContent.scrollHeight - anchor.scrollHeight + anchor.scrollTop);
+      }
+    }
+    return true;
+  } catch (error) {
+    if (state.currentId === sessionId && generation === search.generation) {
+      search.error = error.message;
+      showToast(error.message, true);
+    }
+    return false;
+  } finally {
+    if (state.currentId === sessionId && generation === search.generation) {
+      search.loading = false;
+      applyConversationSearchHighlights();
+      updateConversationSearchControls();
+    }
+  }
+}
+
+function renderOrchestratorChatRail(snapshot, { preserveViewport = false } = {}) {
   const messages = snapshot?.messages || [];
   const pending = effectivePendingMessages(state.currentId, snapshot);
   const guidance = orchestratorGuidanceEntries(snapshot);
@@ -3317,7 +3586,9 @@ function renderOrchestratorChatRail(snapshot) {
   const transcript = [
     ...transcriptEntries.map((entry) => {
       if (entry.message?.role === "system" || entry.message?.role === "tool") return "";
-      const renderedMessage = renderFocusMessage(entry.message, dispatchContext);
+      const renderedMessage = persistedMessageMarkup(
+        renderFocusMessage(entry.message, dispatchContext), entry.canonicalIndex,
+      );
       if (!renderedMessage) return "";
       return `${forkBoundaryControl(
         entry.previousMessage, entry.message, entry.previousCanonicalIndex, entry.canonicalIndex,
@@ -3331,8 +3602,9 @@ function renderOrchestratorChatRail(snapshot) {
     ? `<div class="focus-history-loader ${messageWindow.loading ? "is-loading" : ""}" data-history-loader role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"></path></svg><span>${messageWindow.loading ? "Loading earlier messages…" : "scroll up for earlier messages"}</span></div>`
     : "";
   el.orchestratorChatContent.innerHTML = `<div class="focus-conversation">${historyLoader}${transcript || `<div class="focus-empty">No conversation messages.</div>`}</div>`;
+  applyConversationSearchHighlights();
   const viewport = state.orchestratorViewport;
-  if (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom) {
+  if (!preserveViewport && (!viewport || viewport.sessionId !== state.currentId || viewport.pinnedToBottom)) {
     requestAnimationFrame(() => {
       el.orchestratorChatContent.scrollTop = el.orchestratorChatContent.scrollHeight;
     });
@@ -5756,6 +6028,16 @@ function handleGlobalKeydown(event) {
   if (event.key === "Escape" && state.sessionReorder) {
     event.preventDefault();
     cancelSessionReorder();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && state.currentId) {
+    event.preventDefault();
+    openConversationSearch(event.target);
+    return;
+  }
+  if (event.key === "Escape" && state.conversationSearch.open) {
+    event.preventDefault();
+    closeConversationSearch({ restoreFocus: true });
     return;
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && state.currentId) {

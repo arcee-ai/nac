@@ -62,6 +62,10 @@ function loadApp(overrides = {}) {
       renderSessionInfo, loadSessions, loadSnapshot, acceptSnapshot,
       loadTranscriptMessages, acceptTranscriptPage, scheduleTranscriptRefresh,
       loadOlderOrchestratorMessages, forkSessionSnapshot, forkBoundaryControl, handleForkBoundaryClick,
+      persistedMessageMarkup, conversationSearchText, literalMatchOffsets, resetConversationSearch,
+      openConversationSearch, closeConversationSearch, applyConversationSearchHighlights,
+      navigateConversationSearch, handleConversationSearchInput, handleConversationSearchKeydown,
+      loadConversationSearchHistory, updateConversationSearchControls,
       orchestratorHistoryNeedsFill, ensureOrchestratorScrollableHistory,
       notePendingEcho, displayPromptFromMessage, pendingEchoCoveredByCanonical,
       reconcilePendingEcho, effectivePendingMessages,
@@ -87,7 +91,7 @@ function loadApp(overrides = {}) {
       syncLaunchApiKeyMode, buildLaunchSessionRequest, persistComposerDraft, restoreComposerDraft,
       clearComposerDraftIfUnchanged, compactSession, submitComposer, runCommand, upsertCreatedSession, createSession,
       updateLiveThreadUpdates,
-      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown,
+      confirmSessionDeletion, showPicker, renderCommandMenu, handleComposerKeydown, handleGlobalKeydown,
     };`,
     context, { filename: "app.js" });
   return context.module.exports;
@@ -4702,6 +4706,155 @@ for (const [group, rows] of scenarioGroups) {
     if (failures.length) throw new AggregateError(failures, `${group} scenarios failed`);
   });
 }
+
+
+test("conversation search is integrated above the transcript with accessible controls and match styling", () => {
+  const toolbar = indexSource.indexOf('class="orchestrator-rail-toolbar"');
+  const search = indexSource.indexOf('id="conversationSearch"');
+  const transcript = indexSource.indexOf('id="orchestratorChatContent"');
+  assert.ok(toolbar >= 0 && toolbar < search && search < transcript);
+  assert.match(indexSource, /id="conversationSearchOpen"[^>]*aria-label="Search conversation"/);
+  assert.match(indexSource, /id="conversationSearch"[^>]*role="search"[^>]*aria-label="Search conversation"/);
+  assert.match(indexSource, /id="conversationSearchStatus"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  for (const label of ["Previous match", "Next match", "Close conversation search"]) {
+    assert.match(indexSource, new RegExp(`aria-label="${label}"`));
+  }
+  assert.match(redesignSource, /conversation-search[^}]*focus-visible/s);
+  assert.match(redesignSource, /mark\.conversation-search-match\.is-current/);
+});
+
+test("conversation search source admits persisted visible transcript text and rejects private or synthetic rows", () => {
+  assert.equal(ui.conversationSearchText({ role: "user", content: "Visible prompt" }), "Visible prompt");
+  assert.equal(ui.conversationSearchText({ role: "assistant", content: "Visible answer", reasoning: "private chain" }), "Visible answer");
+  const toolText = ui.conversationSearchText({ role: "assistant", content: "safe copy", tool_calls: [{
+    function: { name: "thread", arguments: JSON.stringify({ name: "worker-a", action: "inspect safely" }) },
+  }] });
+  assert.match(toolText, /safe copy[\s\S]*thread[\s\S]*worker-a[\s\S]*inspect safely/);
+  for (const message of [
+    { role: "system", content: "private system" },
+    { role: "tool", content: "private tool result" },
+    { role: "assistant", content: "pending", pending: true },
+    { role: "user", content: "guidance", pending: true },
+  ]) assert.equal(ui.conversationSearchText(message), "");
+  assert.deepEqual(plain(ui.literalMatchOffsets("One ONE none", "one")), [0, 4, 9]);
+  assert.deepEqual(plain(ui.literalMatchOffsets("literal [.*] text", ".*")), [9]);
+});
+
+test("conversation search pages all earlier history in 100-message batches and preserves canonical ordering", async () => {
+  const requests = [];
+  const pages = new Map([
+    [4, { messages: [{ role: "assistant", content: "two" }, { role: "user", content: "three" }],
+      page: { start: 2, end: 4, total: 6, has_older: true, canonical_indices: [2, 3] } }],
+    [2, { messages: [{ role: "user", content: "zero" }, { role: "assistant", content: "one" }],
+      page: { start: 0, end: 2, total: 6, has_older: false, canonical_indices: [0, 1] } }],
+  ]);
+  const isolated = loadApp({ fetch: async (path) => {
+    requests.push(path);
+    const before = Number(new URL(path, "http://nac.test").searchParams.get("before"));
+    return jsonResponse(pages.get(before));
+  } });
+  installWorkspaceElements(isolated);
+  const sessionId = "search-pages";
+  const snapshot = sessionSnapshot(sessionId, { messages: [
+    { role: "user", content: "four" }, { role: "assistant", content: "five" },
+  ], message_page: { start: 4, end: 6, total: 6, has_older: true, canonical_indices: [4, 5] } });
+  isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, snapshot);
+  isolated.mergeSnapshotMessageWindow(sessionId, snapshot);
+  Object.assign(isolated.state.conversationSearch, {
+    open: true, query: "o", sessionId, generation: 7, loading: false, results: [], current: -1,
+  });
+  await isolated.loadConversationSearchHistory(sessionId, 7);
+  assert.deepEqual(requests, [
+    "/sessions/search-pages/messages?before=4&limit=100",
+    "/sessions/search-pages/messages?before=2&limit=100",
+  ]);
+  assert.deepEqual(plain(snapshot.messages.map((message) => message.content)), ["zero", "one", "two", "three", "four", "five"]);
+  assert.deepEqual(plain(isolated.state.messageWindows.get(sessionId).canonicalIndices), [0, 1, 2, 3, 4, 5]);
+  assert.equal(isolated.state.conversationSearch.loading, false);
+});
+
+test("conversation search generation and session guards reject stale history responses", async () => {
+  const pending = deferred();
+  const isolated = loadApp({ fetch: () => pending.promise });
+  installWorkspaceElements(isolated);
+  const sessionId = "search-stale";
+  const snapshot = sessionSnapshot(sessionId, { messages: [{ role: "assistant", content: "tail" }],
+    message_page: { start: 1, end: 2, total: 2, has_older: true, canonical_indices: [1] } });
+  isolated.state.currentId = sessionId;
+  isolated.state.snapshots.set(sessionId, snapshot);
+  isolated.mergeSnapshotMessageWindow(sessionId, snapshot);
+  Object.assign(isolated.state.conversationSearch, { open: true, query: "old", sessionId, generation: 3 });
+  const loading = isolated.loadConversationSearchHistory(sessionId, 3);
+  isolated.state.conversationSearch.query = "new";
+  isolated.state.conversationSearch.generation = 4;
+  pending.resolve(jsonResponse({ messages: [{ role: "user", content: "stale" }],
+    page: { start: 0, end: 1, total: 2, has_older: false, canonical_indices: [0] } }));
+  assert.equal(await loading, false);
+  assert.deepEqual(plain(snapshot.messages.map((message) => message.content)), ["tail"]);
+  assert.equal(isolated.state.messageWindows.get(sessionId).loading, false);
+});
+
+test("conversation search navigation wraps, scrolls canonical articles, and reports position", () => {
+  const isolated = loadApp();
+  const marks = [0, 1].map((occurrence) => {
+    const mark = fakeElement();
+    mark.dataset = { messageIndex: "12", occurrence: String(occurrence) };
+    mark.closest = () => ({ scrollIntoView() { mark.scrolled = true; } });
+    return mark;
+  });
+  isolated.el.orchestratorChatContent = { querySelectorAll: () => marks };
+  isolated.el.conversationSearchStatus = fakeElement();
+  isolated.el.conversationSearchPrevious = fakeElement();
+  isolated.el.conversationSearchNext = fakeElement();
+  Object.assign(isolated.state.conversationSearch, {
+    open: true, results: [{ canonicalIndex: 12, occurrence: 0 }, { canonicalIndex: 12, occurrence: 1 }], current: 0,
+  });
+  isolated.navigateConversationSearch(-1);
+  assert.equal(isolated.state.conversationSearch.current, 1);
+  assert.equal(marks[1].scrolled, true);
+  assert.equal(isolated.el.conversationSearchStatus.textContent, "2 of 2");
+  isolated.navigateConversationSearch(1);
+  assert.equal(isolated.state.conversationSearch.current, 0);
+});
+
+test("conversation search shortcuts, Escape precedence, and lifecycle preserve composer and focus behavior", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  for (const name of ["conversationSearch", "conversationSearchInput", "conversationSearchStatus",
+    "conversationSearchPrevious", "conversationSearchNext", "conversationSearchClose", "conversationSearchOpen"]) {
+    isolated.el[name] = { ...fakeElement(), hidden: name === "conversationSearch", value: "",
+      focus() { this.focused = true; }, select() { this.selected = true; } };
+  }
+  isolated.state.currentId = "shortcut-session";
+  isolated.el.promptInput.focus = function focus() { this.focused = true; };
+  const opener = fakeElement();
+  opener.focus = function focus() { this.focused = true; };
+  let prevented = 0;
+  isolated.handleGlobalKeydown({ key: "f", ctrlKey: true, metaKey: false, target: opener, preventDefault() { prevented += 1; } });
+  assert.equal(prevented, 1);
+  assert.equal(isolated.state.conversationSearch.open, true);
+  assert.equal(isolated.el.conversationSearch.hidden, false);
+  isolated.state.focusView = { type: "info" };
+  isolated.handleGlobalKeydown({ key: "Escape", preventDefault() { prevented += 1; } });
+  assert.equal(isolated.state.conversationSearch.open, false, "search closes before the focus view");
+  assert.deepEqual(plain(isolated.state.focusView), { type: "info" });
+  assert.equal(opener.focused, true);
+  isolated.handleGlobalKeydown({ key: "k", ctrlKey: true, metaKey: false, preventDefault() {} });
+  assert.equal(isolated.el.promptInput.focused, true, "Ctrl/Command+K remains assigned to the composer");
+});
+
+test("search identity markup cannot enter fork interstitials or relax fork eligibility", () => {
+  const message = ui.persistedMessageMarkup('<article class="focus-message" data-role="user">match</article>', 8);
+  assert.match(message, /^<article data-message-index="8"/);
+  const boundary = ui.forkBoundaryControl(
+    { role: "assistant", content: "answer" }, { role: "user", content: "question" }, 7, 8,
+  );
+  assert.doesNotMatch(boundary, /data-message-index|conversation-search-match|<mark/);
+  assert.equal(ui.forkBoundaryControl(
+    { role: "assistant", content: "answer" }, { role: "user", content: "question" }, 4, 8,
+  ), "");
+});
 
 
 test("dashboard fork uses the returned snapshot, selects the child, and preserves it across stale list refreshes", async () => {
