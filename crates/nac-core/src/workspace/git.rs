@@ -18,7 +18,7 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::paths::PathContext;
 use crate::sandbox::ssh_command::{
-    prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, ssh_args,
+    prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, SshConnection,
 };
 
 /// Exit status ssh reserves for its own failures, as opposed to the remote
@@ -33,7 +33,7 @@ pub enum GitTarget {
         root: PathBuf,
     },
     Ssh {
-        host: String,
+        connection: SshConnection,
         remote_cwd: PathBuf,
         control_path: PathBuf,
     },
@@ -68,68 +68,140 @@ pub(crate) enum WorktreeRead {
 ///
 /// One round trip on a remote host, which is why the answer carries everything
 /// a caller could need rather than what it asked for.
-const REMOTE_WORKTREE_SCRIPT: &str = r#"import base64, json, os, stat, sys
-root, rel, limit, mode = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
-path = os.path.join(root, rel)
-resolved_root = os.path.realpath(root)
+///
+/// Deliberately POSIX shell rather than an interpreter nac would have to hope
+/// for. git is the one thing this layer may demand, because the layer is about
+/// git; anything else is a host nac cannot work on for no good reason, and
+/// clusters that forbid installing software are exactly where remote execution
+/// earns its keep. Everything used here is a shell builtin or a utility as old
+/// as `wc`, and nothing is written to the host.
+///
+/// The answer is a header line followed by raw bytes: contents travel as
+/// themselves rather than base64, which is a third less to send, and the header
+/// says whether any bytes follow at all. Emitted forms are:
+///
+/// ```text
+/// missing
+/// other
+/// error <message>
+/// symlink <0|1>\n<target bytes>
+/// regular <0|1> <size> none
+/// regular <0|1> <size> raw\n<contents>
+/// ```
+const REMOTE_WORKTREE_SCRIPT: &str = r#"root=$1
+rel=$2
+limit=$3
+mode=$4
 
+case $root in
+*/) path=$root$rel ;;
+*) path=$root/$rel ;;
+esac
+dir=${path%/*}
+[ -n "$dir" ] || dir=/
+base=${path##*/}
 
-def within(child, parent):
-    try:
-        return os.path.commonpath([child, parent]) == parent
-    except ValueError:
-        return False
+fail() {
+	printf 'error %s\n' "$1"
+	exit 0
+}
 
+# Component-wise prefix test, so a sibling checkout like /repo-other is not read
+# as something inside /repo. Quoting the expansion keeps a path holding glob
+# characters from being taken for a pattern.
+inside_root() {
+	[ "$2" = / ] && return 0
+	rest=${1#"$2"}
+	[ "$rest" = "$1" ] && return 1
+	[ -z "$rest" ] && return 0
+	case $rest in
+	/*) return 0 ;;
+	esac
+	return 1
+}
 
-def emit(payload):
-    sys.stdout.write(json.dumps(payload))
-    raise SystemExit(0)
+# cd plus pwd -P is the shell's own realpath, with no dependency to install.
+resolve_dir() {
+	cd "$1" 2>/dev/null && pwd -P
+}
 
+# Names the leading directory nac cannot enter, if there is one.
+#
+# A path that cannot be reached is not the same as a path that is not there, and
+# the difference matters: reporting the first as missing would show an
+# unreadable directory as a wholesale deletion. Walking down from the root is
+# what separates them, because a component below a directory that cannot be
+# entered cannot even be tested for existence. Each step is a subshell so the
+# walk leaves the working directory alone.
+unreachable_component() {
+	probe=$root
+	rest=$rel
+	while [ "$rest" != "${rest#*/}" ]; do
+		comp=${rest%%/*}
+		rest=${rest#*/}
+		probe=$probe/$comp
+		if [ ! -e "$probe" ] && [ ! -L "$probe" ]; then
+			return 1
+		fi
+		if ! (cd "$probe" 2>/dev/null); then
+			printf '%s' "$comp"
+			return 0
+		fi
+	done
+	return 1
+}
 
-try:
-    info = os.lstat(path)
-except FileNotFoundError:
-    emit({"kind": "missing"})
-except OSError as error:
-    emit({"kind": "error", "message": str(error)})
+resolved_root=$(resolve_dir "$root") || fail 'cannot resolve the repository root'
 
-if stat.S_ISLNK(info.st_mode):
-    parent = os.path.dirname(path) or root
-    try:
-        escapes = not within(os.path.realpath(parent), resolved_root)
-        target = os.readlink(path)
-    except OSError as error:
-        emit({"kind": "error", "message": str(error)})
-    emit({
-        "kind": "symlink",
-        "escapes": escapes,
-        "target": base64.b64encode(os.fsencode(target)).decode("ascii"),
-    })
+# A symlink is answered as one before anything follows it, so a link pointing
+# out of the repository never serves what it points at. Its escape is decided by
+# the directory holding it, which is the only part of the path already trusted.
+if [ -L "$path" ]; then
+	resolved_dir=$(resolve_dir "$dir") || fail 'cannot resolve the parent directory'
+	target=$(readlink "$path") || fail 'cannot read the symlink target'
+	if inside_root "$resolved_dir" "$resolved_root"; then
+		printf 'symlink 0\n'
+	else
+		printf 'symlink 1\n'
+	fi
+	printf '%s' "$target"
+	exit 0
+fi
 
-if not stat.S_ISREG(info.st_mode):
-    emit({"kind": "other"})
+if [ ! -e "$path" ]; then
+	blocked=$(unreachable_component) && fail "cannot enter '$blocked'"
+	printf 'missing\n'
+	exit 0
+fi
 
-try:
-    escapes = not within(os.path.realpath(path), resolved_root)
-except OSError as error:
-    emit({"kind": "error", "message": str(error)})
+if [ ! -f "$path" ]; then
+	printf 'other\n'
+	exit 0
+fi
 
-size = info.st_size
-if mode != "read" or size > limit:
-    emit({"kind": "regular", "escapes": escapes, "size": size, "bytes": None})
+resolved_dir=$(resolve_dir "$dir") || fail 'cannot resolve the parent directory'
+case $resolved_dir in
+/) resolved_path=/$base ;;
+*) resolved_path=$resolved_dir/$base ;;
+esac
+if inside_root "$resolved_path" "$resolved_root"; then
+	escapes=0
+else
+	escapes=1
+fi
 
-try:
-    with open(path, "rb") as handle:
-        payload = handle.read(limit + 1)
-except OSError as error:
-    emit({"kind": "error", "message": str(error)})
+# An unreadable file fails here rather than being reported as empty, which is
+# what a caller diffing it would otherwise show as a wholesale deletion.
+size=$(wc -c <"$path" | tr -d '[:space:]')
+[ -n "$size" ] || fail 'cannot measure the file'
 
-emit({
-    "kind": "regular",
-    "escapes": escapes,
-    "size": size,
-    "bytes": base64.b64encode(payload).decode("ascii"),
-})
+if [ "$mode" != read ] || [ "$size" -gt "$limit" ]; then
+	printf 'regular %s %s none\n' "$escapes" "$size"
+	exit 0
+fi
+
+printf 'regular %s %s raw\n' "$escapes" "$size"
+cat "$path"
 "#;
 
 impl GitTarget {
@@ -140,11 +212,10 @@ impl GitTarget {
     /// A checkout on an OpenSSH host. `config_cwd` is the *local* directory
     /// nac's own paths resolve against, because that is where the shared
     /// control socket lives.
-    pub fn ssh(host: String, remote_cwd: PathBuf, config_cwd: &Path) -> Self {
-        let control_path =
-            crate::sandbox::ssh_command::ssh_control_path(&host, &PathContext::new(config_cwd));
+    pub fn ssh(connection: SshConnection, remote_cwd: PathBuf, config_cwd: &Path) -> Self {
+        let control_path = connection.control_path(&PathContext::new(config_cwd));
         Self::Ssh {
-            host,
+            connection,
             remote_cwd,
             control_path,
         }
@@ -170,7 +241,16 @@ impl GitTarget {
     pub fn ssh_host(&self) -> Option<&str> {
         match self {
             Self::Local { .. } => None,
-            Self::Ssh { host, .. } => Some(host),
+            Self::Ssh { connection, .. } => Some(&connection.host),
+        }
+    }
+
+    /// The connection behind this checkout, which callers keying a cache need in
+    /// full: the same host name reached with another key is another checkout.
+    pub fn ssh_connection(&self) -> Option<&SshConnection> {
+        match self {
+            Self::Local { .. } => None,
+            Self::Ssh { connection, .. } => Some(connection),
         }
     }
 
@@ -179,8 +259,10 @@ impl GitTarget {
         match self {
             Self::Local { root } => root.display().to_string(),
             Self::Ssh {
-                host, remote_cwd, ..
-            } => format!("{host}:{}", remote_cwd.display()),
+                connection,
+                remote_cwd,
+                ..
+            } => format!("{}:{}", connection.describe(), remote_cwd.display()),
         }
     }
 
@@ -269,7 +351,8 @@ impl GitTarget {
         let stderr = String::from_utf8_lossy(&output.stderr);
         match self {
             Self::Local { .. } => None,
-            Self::Ssh { host, .. } => {
+            Self::Ssh { connection, .. } => {
+                let host = connection.describe();
                 if code == Some(SSH_TRANSPORT_EXIT) {
                     return Some(format!(
                         "cannot reach ssh host '{host}': {}",
@@ -368,14 +451,16 @@ impl GitTarget {
         let args = [
             "-c".to_string(),
             REMOTE_WORKTREE_SCRIPT.to_string(),
+            // $0 for the script, so the reader's own arguments start at $1.
+            "nac-worktree".to_string(),
             repo_root.display().to_string(),
             relpath.to_string(),
             limit.to_string(),
             mode.to_string(),
         ];
-        let output = self.program_output(repo_root, &[], "python3", &args)?;
+        let output = self.program_output(repo_root, &[], "sh", &args)?;
         if !output.status.success() {
-            if let Some(reason) = self.unavailable_reason_for("python3", &output) {
+            if let Some(reason) = self.unavailable_reason_for("sh", &output) {
                 bail!("{reason}");
             }
             bail!(
@@ -419,7 +504,9 @@ impl GitTarget {
                     })
             }
             Self::Ssh {
-                host, control_path, ..
+                connection,
+                control_path,
+                ..
             } => {
                 prepare_control_socket_dir(control_path).with_context(|| {
                     format!(
@@ -436,9 +523,9 @@ impl GitTarget {
                 let remote = remote_command_in_dir(cwd, &envs, &words);
 
                 let mut command = StdCommand::new("ssh");
-                command.args(ssh_args(control_path));
+                command.args(connection.ssh_args(control_path));
                 command.arg("--");
-                command.arg(host);
+                command.arg(&connection.host);
                 command.arg(remote);
                 command
                     .stdin(Stdio::null())
@@ -503,86 +590,60 @@ fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<Worktre
     })
 }
 
+/// Splits the reader's answer into its header line and the bytes after it.
+///
+/// Contents are taken as everything past the first newline, so a file needs no
+/// length prefix and no encoding: whatever the header announced is simply the
+/// rest of the stream.
 fn parse_remote_worktree(stdout: &[u8], relpath: &str) -> Result<WorktreeRead> {
-    let payload: serde_json::Value = serde_json::from_slice(stdout)
-        .with_context(|| format!("failed to parse the remote report for '{}'", relpath))?;
-    let kind = payload
-        .get("kind")
-        .and_then(|kind| kind.as_str())
-        .ok_or_else(|| anyhow!("the remote report for '{}' has no kind", relpath))?;
+    if stdout.is_empty() {
+        bail!("the remote host reported nothing for '{}'", relpath);
+    }
+
+    let (header, body) = match stdout.iter().position(|byte| *byte == b'\n') {
+        Some(index) => (&stdout[..index], &stdout[index + 1..]),
+        None => (stdout, &stdout[stdout.len()..]),
+    };
+    let header = String::from_utf8_lossy(header);
+    let header = header.trim_end();
+    let (kind, rest) = header.split_once(' ').unwrap_or((header, ""));
 
     match kind {
         "missing" => Ok(WorktreeRead::Missing),
         "other" => Ok(WorktreeRead::NotRegular),
         "error" => {
-            let message = payload
-                .get("message")
-                .and_then(|message| message.as_str())
-                .unwrap_or("the remote host reported no details");
+            let message = if rest.is_empty() {
+                "the remote host reported no details"
+            } else {
+                rest
+            };
             bail!("cannot stat '{}': {}", relpath, message)
         }
         "symlink" => Ok(WorktreeRead::Symlink {
-            target: decode_base64_field(&payload, "target", relpath)?.unwrap_or_default(),
-            escapes: payload
-                .get("escapes")
-                .and_then(|escapes| escapes.as_bool())
-                .unwrap_or(false),
+            target: body.to_vec(),
+            escapes: rest.trim() == "1",
         }),
-        "regular" => Ok(WorktreeRead::Regular {
-            size: payload
-                .get("size")
-                .and_then(|size| size.as_u64())
-                .unwrap_or(0),
-            escapes: payload
-                .get("escapes")
-                .and_then(|escapes| escapes.as_bool())
-                .unwrap_or(false),
-            bytes: decode_base64_field(&payload, "bytes", relpath)?,
-        }),
+        "regular" => {
+            let mut fields = rest.split_whitespace();
+            let escapes = fields.next() == Some("1");
+            let size = fields
+                .next()
+                .and_then(|size| size.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    anyhow!("the remote report for '{}' has no readable size", relpath)
+                })?;
+            let bytes = match fields.next() {
+                Some("raw") => Some(body.to_vec()),
+                _ => None,
+            };
+            Ok(WorktreeRead::Regular {
+                size,
+                escapes,
+                bytes,
+            })
+        }
         other => bail!("the remote report for '{}' is unknown: {}", relpath, other),
     }
-}
-
-fn decode_base64_field(
-    payload: &serde_json::Value,
-    field: &str,
-    relpath: &str,
-) -> Result<Option<Vec<u8>>> {
-    let Some(encoded) = payload.get(field).and_then(|value| value.as_str()) else {
-        return Ok(None);
-    };
-    base64_decode(encoded)
-        .map(Some)
-        .with_context(|| format!("the remote report for '{}' is not valid base64", relpath))
-}
-
-fn base64_decode(encoded: &str) -> Result<Vec<u8>> {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut lookup = [u8::MAX; 256];
-    for (index, byte) in ALPHABET.iter().enumerate() {
-        lookup[*byte as usize] = index as u8;
-    }
-
-    let mut out = Vec::with_capacity(encoded.len() / 4 * 3);
-    let mut buffer = 0u32;
-    let mut bits = 0u32;
-    for byte in encoded.bytes() {
-        if byte == b'=' || byte.is_ascii_whitespace() {
-            continue;
-        }
-        let value = lookup[byte as usize];
-        if value == u8::MAX {
-            bail!("invalid base64 character");
-        }
-        buffer = (buffer << 6) | u32::from(value);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buffer >> bits) as u8);
-        }
-    }
-    Ok(out)
 }
 
 pub(crate) fn first_stderr_line(stderr: &[u8]) -> String {

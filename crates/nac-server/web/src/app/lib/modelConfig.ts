@@ -120,17 +120,32 @@ function sameHeaderObject(
 export interface LaunchLocation {
   cwd: string | null;
   ssh_host: string | null;
+  ssh_port: number | null;
+  ssh_identity_file: string | null;
 }
 
-/** A remote session without an explicit path lands in the remote home. */
+/**
+ * A remote session without an explicit path lands in the remote home.
+ *
+ * The port and the key are only sent along with a host, and only when filled in:
+ * left blank, they stay with ssh to decide, which is what a host configured in
+ * `~/.ssh/config` wants.
+ */
 export function launchLocationFromValues(values: {
   cwd: string;
   ssh_host: string;
+  ssh_port?: string;
+  ssh_identity_file?: string;
 }): LaunchLocation {
   const sshHost = nullable(values.ssh_host);
+  const port = sshHost ? nullable(values.ssh_port ?? "") : null;
   return {
     cwd: sshHost ? (nullable(values.cwd) ?? "~") : nullable(values.cwd),
     ssh_host: sshHost,
+    ssh_port: port === null ? null : Number(port),
+    ssh_identity_file: sshHost
+      ? nullable(values.ssh_identity_file ?? "")
+      : null,
   };
 }
 

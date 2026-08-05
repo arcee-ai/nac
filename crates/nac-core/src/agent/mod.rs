@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 use crate::events::{AgentEvent, AssistantStreamDelta, EventSink};
 use crate::mcp::McpRegistry;
 use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
-use crate::sandbox::SandboxSession;
+use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
@@ -76,8 +76,8 @@ pub struct AgentConfig {
     pub working_directory: String,
     pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
-    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; mutually exclusive with sandbox.
+    pub ssh: Option<SshConnection>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
@@ -349,7 +349,7 @@ impl Agent {
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
         let backend = crate::sandbox::select_execution_backend(
-            config.ssh_host,
+            config.ssh,
             config.sandbox,
             &config.workspace_cwd,
             &local_paths,
@@ -404,7 +404,7 @@ impl Agent {
                 working_directory,
                 worker_executable: None,
                 sandbox: None,
-                ssh_host: None,
+                ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),

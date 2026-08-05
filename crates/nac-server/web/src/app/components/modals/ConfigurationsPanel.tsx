@@ -105,7 +105,10 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so the row asks for the model
   // index rather than reporting success on the strength of a file existing.
-  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
+  const reach = useManagedProviderModels(
+    backend,
+    Boolean(provider) && signedIn,
+  );
 
   if (!provider) return null;
 
@@ -139,15 +142,17 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
       </div>
     ) : signedIn ? (
       <div className="flex items-center gap-2">
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={ButtonSize.Medium}
-          content={ButtonContent.Text}
-          loading={logout.isPending}
-          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
-        >
-          Logout
-        </Button>
+        {failed || expired ? null : (
+          <Button
+            variant={ButtonVariant.Ghost}
+            size={ButtonSize.Medium}
+            content={ButtonContent.Text}
+            loading={logout.isPending}
+            onClick={() => void logout.mutateAsync(provider).catch(() => {})}
+          >
+            Logout
+          </Button>
+        )}
         {expired ? (
           <Button
             variant={ButtonVariant.Primary}
@@ -191,7 +196,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
         <div className="flex flex-col items-end gap-1">
           {control}
           {failed || expired ? (
-            <p className="label-micro text-error-primary max-w-[280px] text-right">
+            <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] text-right pt-1 opacity-70">
               {failed ? state.message : errorMessage(reach.error)}
             </p>
           ) : null}
@@ -472,17 +477,28 @@ export function ConfigurationsPanel({
     : (resolved?.models_error ?? "");
   const boxInvalid =
     invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
+  // Authentication already shows the failure (and Login again) for a managed
+  // provider whose model index refused; keep the footer for resolve / key / API
+  // key listing errors that have no other home.
+  const authOwnsError =
+    loginQuery.isError ||
+    Boolean(
+      resolved &&
+        !providerUsesApiKey(resolved.backend) &&
+        resolved.models_error,
+    );
   const message =
-    errorText ?? (keyInvalid ? validation.message : resolveError || modelListError);
-  // Whichever request came back empty is the one worth asking again: the login's
-  // own index for a fresh setup, the whole resolve for a saved one.
+    errorText ??
+    (keyInvalid
+      ? validation.message
+      : resolveError || (authOwnsError ? "" : modelListError));
+  // Resolve failures are always worth asking again. A saved setup whose model
+  // index failed is too — unless Authentication already offers Login again.
   const retry = resolveError
     ? configQuery.refetch
-    : loginQuery.isError
-      ? loginQuery.refetch
-      : modelListError
-        ? configQuery.refetch
-        : null;
+    : resolved?.models_error && providerUsesApiKey(resolved.backend)
+      ? configQuery.refetch
+      : null;
 
   const sourceLabel =
     source.kind === "new"
@@ -671,14 +687,15 @@ export function ConfigurationsPanel({
                       invalid={Boolean(modelListError)}
                       control={
                         <SmallSelect
-                          items={modelItems(models)}
-                          value={chosenModel}
+                          items={modelListError ? [] : modelItems(models)}
+                          value={modelListError ? "" : chosenModel}
                           onValueChange={setDefaultModel}
+                          disabled={Boolean(modelListError)}
                           placeholder={
                             loginQuery.isFetching
                               ? "Reading the model list…"
                               : modelListError
-                                ? "The model list could not be read"
+                                ? "–"
                                 : "No models offered"
                           }
                         />
@@ -872,10 +889,11 @@ function ResolvedRows({
           hint="Model the session starts with; the key reaches all of these."
           control={
             <SmallSelect
-              items={modelChoices}
-              value={model}
+              items={failedListing ? [] : modelChoices}
+              value={failedListing ? "" : model}
               onValueChange={onModel}
-              placeholder="The model list could not be read"
+              disabled={failedListing}
+              placeholder="–"
             />
           }
         />
@@ -921,11 +939,13 @@ function SmallSelect({
   value,
   onValueChange,
   placeholder,
+  disabled = false,
 }: {
   items: SelectItem[];
   value: string;
   onValueChange: (id: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <Select
@@ -933,6 +953,7 @@ function SmallSelect({
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
+      disabled={disabled}
       size={ButtonSize.Medium}
       variant={ButtonVariant.Ghost}
       placement={PopoverPlacement.CenterLeft}

@@ -16,25 +16,35 @@ import {
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useBrowsePath, type BrowseKind } from "@/app/services/queries";
+import {
+  useBrowsePath,
+  useSshBrowsePath,
+  type BrowseKind,
+} from "@/app/services/queries";
+import type { SshTarget } from "@/app/types/api";
 
 /**
- * Picks a path from the machine running the server.
+ * Picks a path from the machine running the server, or from an SSH host when
+ * `ssh` names one.
  *
  * Browsers never hand a web page an absolute path — `<input type="file">` and
  * the File System Access API both withhold it — so the filesystem is browsed
- * through the API instead of through the operating system's dialog.
+ * through the API instead of through the operating system's dialog. A remote
+ * host is browsed the same way for the same reason, one directory per request.
  */
 export function PathPickerModal({
   open,
   kind,
   initialPath,
+  ssh,
   onClose,
   onSelect,
 }: {
   open: boolean;
   kind: BrowseKind;
   initialPath: string;
+  /** Browses this host instead of the local filesystem. */
+  ssh?: SshTarget | null;
   onClose: () => void;
   onSelect: (path: string) => void;
 }) {
@@ -43,6 +53,7 @@ export function PathPickerModal({
     <PathPicker
       kind={kind}
       initialPath={initialPath}
+      ssh={ssh ?? null}
       onClose={onClose}
       onSelect={onSelect}
     />
@@ -52,20 +63,27 @@ export function PathPickerModal({
 function PathPicker({
   kind,
   initialPath,
+  ssh,
   onClose,
   onSelect,
 }: {
   kind: BrowseKind;
   initialPath: string;
+  ssh: SshTarget | null;
   onClose: () => void;
   onSelect: (path: string) => void;
 }) {
   const pickingFile = kind === "toml";
-  // A directory is picked from an empty path so the server starts at its root.
+  // A directory is picked from an empty path so the server starts at its root,
+  // or the host at the login home.
   const [directory, setDirectory] = useState(initialPath.trim());
   const [draft, setDraft] = useState(initialPath.trim());
   const [file, setFile] = useState<string | null>(null);
-  const { data, error, isFetching } = useBrowsePath(directory || null, kind, true);
+  // Both hooks are called every render, as hooks must be; the one that is not
+  // the source of this listing is disabled and never fetches.
+  const local = useBrowsePath(directory || null, kind, !ssh);
+  const remote = useSshBrowsePath(ssh, directory || null, Boolean(ssh));
+  const { data, error, isFetching } = ssh ? remote : local;
 
   const goTo = (path: string) => {
     setDirectory(path);
@@ -79,7 +97,13 @@ function PathPicker({
     <Modal
       open
       onClose={onClose}
-      title={pickingFile ? "Select Config File" : "Select Working Directory"}
+      title={
+        pickingFile
+          ? "Select Config File"
+          : ssh
+            ? `Select Working Directory on ${ssh.ssh_host}`
+            : "Select Working Directory"
+      }
       size={ModalSize.Wide}
       flush
       className="h-[560px]"
@@ -132,7 +156,7 @@ function PathPicker({
           <Input
             inputSize={InputSize.Medium}
             className="flex-1 min-w-0"
-            placeholder="/path/to/directory"
+            placeholder={ssh ? "~/path/on/the/host" : "/path/to/directory"}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {

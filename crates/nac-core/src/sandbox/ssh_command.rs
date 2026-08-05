@@ -11,41 +11,163 @@ use std::path::{Path, PathBuf};
 
 use crate::paths::PathContext;
 
-/// Connection options every nac ssh invocation carries.
+/// How much of the host name the control socket is named after. The rest of the
+/// budget goes to the hash, to `.sock`, to the directory it lives in and to the
+/// suffix ssh appends while opening the master connection.
+const SOCKET_NAME_HOST_CHARS: usize = 16;
+
+/// How to reach one host, stated in full rather than left to `~/.ssh/config`.
 ///
-/// Multiplexing is what makes a chatty caller affordable: the first command
-/// pays for the handshake and the rest travel over the socket it left behind.
-/// `BatchMode` is the other half of the contract — nac never has a terminal to
-/// answer a passphrase prompt, so a host that would ask must fail instead.
-pub(crate) fn ssh_args(control_path: &Path) -> Vec<String> {
-    vec![
-        "-o".to_string(),
-        "ControlMaster=auto".to_string(),
-        "-o".to_string(),
-        format!("ControlPath={}", control_path.display()),
-        "-o".to_string(),
-        "ControlPersist=60s".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "ConnectTimeout=10".to_string(),
-    ]
+/// Everything OpenSSH would otherwise take from a config file lives here, so a
+/// remote session can be described entirely from the launch form. A host that
+/// *is* configured in `~/.ssh/config` still works: an alias as `host` with no
+/// port and no key leaves ssh to resolve the rest as it always did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SshConnection {
+    /// `host` or `user@host`, exactly as `ssh` takes it.
+    pub host: String,
+    /// None leaves the port to ssh, which is what an alias or a default 22 wants.
+    pub port: Option<u16>,
+    /// A private key on *this* machine, already absolute: nac spawns `ssh`
+    /// directly, so no shell is around to expand a leading `~`.
+    pub identity_file: Option<PathBuf>,
 }
 
-/// Where the multiplexed connection to `ssh_host` is shared from.
-///
-/// The name carries a hash as well as the sanitized host because sanitizing
-/// alone collides: `a/b` and `a:b` would otherwise name the same socket.
-pub(crate) fn ssh_control_path(ssh_host: &str, paths: &PathContext) -> PathBuf {
-    let dir = paths
-        .nac_home_dir()
-        .unwrap_or_else(|| std::env::temp_dir().join("nac"))
-        .join("ssh");
-    dir.join(format!(
-        "{}-{:016x}.sock",
-        sanitize_socket_name(ssh_host),
-        stable_hash(ssh_host)
-    ))
+impl SshConnection {
+    pub fn new(host: impl Into<String>) -> Self {
+        Self {
+            host: host.into(),
+            port: None,
+            identity_file: None,
+        }
+    }
+
+    /// A connection from what the user typed, with `~` in the key path resolved
+    /// against the home directory nac itself is running under.
+    pub fn resolved(
+        host: impl Into<String>,
+        port: Option<u16>,
+        identity_file: Option<&Path>,
+        paths: &PathContext,
+    ) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            identity_file: identity_file.map(|path| expand_local_home(path, paths)),
+        }
+    }
+
+    /// Connection options every nac ssh invocation carries.
+    ///
+    /// Multiplexing is what makes a chatty caller affordable: the first command
+    /// pays for the handshake and the rest travel over the socket it left
+    /// behind. `BatchMode` is the other half of the contract — nac never has a
+    /// terminal to answer a passphrase prompt, so a host that would ask must
+    /// fail instead. `IdentitiesOnly` follows an explicit key, so a crowded
+    /// agent cannot offer a different one first and get itself rejected.
+    ///
+    /// `Compression` pays off because everything nac moves over this connection
+    /// is text: status porcelain, path listings, patches and source blobs. The
+    /// worst case is the file reader, which spends a third of its bytes on the
+    /// base64 framing that keeps binary content intact — and that framing is
+    /// exactly what compresses back out. It belongs here rather than at a call
+    /// site: with `ControlMaster` the master's settings govern every session
+    /// that later joins the socket, so a subset of callers asking for it would
+    /// get whatever the first one happened to open.
+    pub(crate) fn ssh_args(&self, control_path: &Path) -> Vec<String> {
+        let mut args = vec![
+            "-o".to_string(),
+            "ControlMaster=auto".to_string(),
+            "-o".to_string(),
+            format!("ControlPath={}", control_path.display()),
+            "-o".to_string(),
+            "ControlPersist=60s".to_string(),
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+            "-o".to_string(),
+            "ConnectTimeout=10".to_string(),
+            "-o".to_string(),
+            "Compression=yes".to_string(),
+        ];
+        if let Some(port) = self.port {
+            args.push("-p".to_string());
+            args.push(port.to_string());
+        }
+        if let Some(identity) = self.identity_file.as_deref() {
+            args.push("-i".to_string());
+            args.push(identity.display().to_string());
+            args.push("-o".to_string());
+            args.push("IdentitiesOnly=yes".to_string());
+        }
+        args
+    }
+
+    /// Where the multiplexed connection to this host is shared from.
+    ///
+    /// The name carries a hash as well as the sanitized host because sanitizing
+    /// alone collides: `a/b` and `a:b` would otherwise name the same socket. The
+    /// hash covers the port and the key too, so two sessions reaching the same
+    /// name as different users or with different keys cannot end up sharing one
+    /// connection.
+    ///
+    /// It also stays short. A unix socket path is limited to about a hundred
+    /// bytes, and ssh appends a random suffix of its own while the master is
+    /// being set up, so a host spelled out in full — `user@sub.domain.example`
+    /// — is enough to push the whole path over the limit and fail the
+    /// connection outright. The hash is what keeps connections apart; the host
+    /// is only there to make the socket recognizable.
+    pub(crate) fn control_path(&self, paths: &PathContext) -> PathBuf {
+        let dir = paths
+            .nac_home_dir()
+            .unwrap_or_else(|| std::env::temp_dir().join("nac"))
+            .join("ssh");
+        dir.join(format!(
+            "{}-{:016x}.sock",
+            sanitize_socket_name(&self.host),
+            stable_hash(&self.identity())
+        ))
+    }
+
+    /// How the connection is named in messages the user reads.
+    pub fn describe(&self) -> String {
+        match self.port {
+            Some(port) => format!("{}:{port}", self.host),
+            None => self.host.clone(),
+        }
+    }
+
+    /// Everything that makes this a distinct connection, for hashing and for
+    /// keying caches that must not confuse one host's two identities.
+    pub fn identity(&self) -> String {
+        format!(
+            "{}\u{1f}{}\u{1f}{}",
+            self.host,
+            self.port.map(|port| port.to_string()).unwrap_or_default(),
+            self.identity_file
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default()
+        )
+    }
+}
+
+/// Expands a leading `~`, which arrives as text from the launch form and would
+/// otherwise reach `ssh` literally, since the command is spawned without a
+/// shell to expand it.
+fn expand_local_home(path: &Path, paths: &PathContext) -> PathBuf {
+    let text = path.to_string_lossy();
+    let rest = if text == "~" {
+        ""
+    } else if let Some(rest) = text.strip_prefix("~/") {
+        rest
+    } else {
+        return path.to_path_buf();
+    };
+    match paths.home_dir() {
+        Some(home) if rest.is_empty() => home,
+        Some(home) => home.join(rest),
+        None => path.to_path_buf(),
+    }
 }
 
 /// Create the directory the control socket lives in, tightening its mode so a
@@ -129,7 +251,7 @@ fn sanitize_socket_name(input: &str) -> String {
         }
     }
     let trimmed = out.trim_matches('-');
-    let shortened: String = trimmed.chars().take(48).collect();
+    let shortened: String = trimmed.chars().take(SOCKET_NAME_HOST_CHARS).collect();
     if shortened.is_empty() {
         "host".to_string()
     } else {

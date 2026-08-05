@@ -22,6 +22,18 @@ import type {
 /** Long sessions would otherwise mount thousands of markdown blocks. */
 const MAX_TURNS = 40;
 
+/**
+ * Orchestrator tools that only read back state the side panel already shows.
+ * A badge for them is noise, so the transcript keeps the steps that changed
+ * something — dispatches, worksets, deletions — and drops the lookups.
+ */
+const SILENT_TOOLS = new Set([
+  "threads",
+  "thread_read",
+  "workset_read",
+  "workset_list",
+]);
+
 export type ThreadState = "running" | "done" | "error";
 
 export interface TranscriptThread {
@@ -413,7 +425,7 @@ export function buildTranscript(
           worksetId: text(parseArguments(call).id),
           pending: !results.has(call.id),
         });
-      } else {
+      } else if (!SILENT_TOOLS.has(name)) {
         blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });
       }
     });

@@ -60,7 +60,7 @@ pub fn new_snapshot(
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
     sandbox_spec: Option<SandboxSpec>,
-    ssh_host: Option<String>,
+    ssh: Option<SshConnection>,
     messages: Vec<Message>,
     api_key_env: Option<String>,
     extra_headers: BTreeMap<String, String>,
@@ -74,7 +74,7 @@ pub fn new_snapshot(
         backend,
         reasoning_effort,
         sandbox_spec,
-        ssh_host,
+        ssh,
         api_key_env,
         extra_headers,
         orchestrator_compaction_threshold: None,
@@ -105,7 +105,7 @@ pub fn refresh_snapshot(
         backend: snapshot.backend,
         reasoning_effort: snapshot.reasoning_effort,
         sandbox_spec: snapshot.sandbox_spec.clone(),
-        ssh_host: snapshot.ssh_host.clone(),
+        ssh: snapshot.ssh.clone(),
         api_key_env: snapshot.api_key_env.clone(),
         extra_headers: snapshot.extra_headers.clone(),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
@@ -141,7 +141,7 @@ pub struct SessionRunState {
 #[derive(Debug, Clone)]
 pub struct SessionRunStateUpdate {
     pub session_id: String,
-    pub ssh_host: Option<String>,
+    pub ssh: Option<SshConnection>,
     pub sandbox_spec: Option<SandboxSpec>,
     pub run_state: SessionRunState,
     pub updated_at: String,
@@ -160,7 +160,7 @@ impl SessionSnapshot {
         self.updated_at = now_utc();
         SessionRunStateUpdate {
             session_id: self.session_id.clone(),
-            ssh_host: self.ssh_host.clone(),
+            ssh: self.ssh.clone(),
             sandbox_spec: self.sandbox_spec.clone(),
             run_state,
             updated_at: self.updated_at.clone(),

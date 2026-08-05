@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{BackendKind, ReasoningEffort};
-use crate::sandbox::{SandboxBackendType, SandboxSpec};
+use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
 
 mod codec;
@@ -99,8 +99,10 @@ pub struct SessionSnapshot {
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub sandbox_spec: Option<SandboxSpec>,
-    /// OpenSSH target for remote sessions; `None` for local sessions.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; `None` for local sessions.
+    /// Persisted in full so resume reaches the same machine the same way,
+    /// without depending on the ssh config of whoever restarts nac.
+    pub ssh: Option<SshConnection>,
     /// Env var name used to resolve the API key at session creation time.
     /// Stored per-session so resume uses the same key source, not current config.
     pub api_key_env: Option<String>,
@@ -136,8 +138,8 @@ pub struct SessionSummary {
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
-    /// OpenSSH target for remote sessions.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session.
+    pub ssh: Option<SshConnection>,
     pub title: Option<String>,
     pub pinned: bool,
     pub sort_order: i64,
@@ -425,7 +427,7 @@ mod tests {
             "legacy rows without token_usages_json column load as empty Vec"
         );
         assert_eq!(
-            loaded.ssh_host, None,
+            loaded.ssh, None,
             "legacy rows without a host_id column load as local sessions"
         );
 
@@ -506,11 +508,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
+    /// The whole connection has to survive, not just the host name: a session
+    /// resumed after a restart has nothing else to tell it which port and key
+    /// reached that machine.
     #[test]
-    fn ssh_host_round_trips_through_store_refresh_and_summaries() {
+    fn ssh_connection_round_trips_through_store_refresh_and_summaries() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("ssh_host_round_trip");
 
+        let connection = SshConnection {
+            host: "deploy@build-box".to_string(),
+            port: Some(2222),
+            identity_file: Some(PathBuf::from("/keys/ci")),
+        };
         let snapshot = new_snapshot(
             "session-remote".to_string(),
             PathBuf::from("/remote/workspace"),
@@ -519,7 +529,7 @@ mod tests {
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(connection.clone()),
             vec![Message::User {
                 content: "hello".to_string(),
             }],
@@ -529,7 +539,7 @@ mod tests {
         create_session(&store_path, &snapshot).unwrap();
 
         let loaded = load_session(&store_path, "session-remote").unwrap();
-        assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(loaded.ssh.as_ref(), Some(&connection));
 
         let refreshed = refresh_snapshot(
             &loaded,
@@ -539,19 +549,16 @@ mod tests {
             None,
             loaded.token_usages.clone(),
         );
-        assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(refreshed.ssh.as_ref(), Some(&connection));
         save_session(&store_path, &refreshed).unwrap();
         assert_eq!(
-            load_session(&store_path, "session-remote")
-                .unwrap()
-                .ssh_host
-                .as_deref(),
-            Some("build-box")
+            load_session(&store_path, "session-remote").unwrap().ssh,
+            Some(connection.clone())
         );
 
         let summaries = list_sessions(&store_path).unwrap();
         assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(summaries[0].ssh.as_ref(), Some(&connection));
         assert_eq!(
             summaries[0].workspace_host_path, None,
             "remote sessions must not expose a local path for host-side git inspection"

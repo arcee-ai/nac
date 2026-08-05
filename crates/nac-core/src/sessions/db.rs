@@ -89,8 +89,10 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
              response_durations_ms_json = ?4,
              token_usages_json = ?5,
              updated_at = ?6,
-             host_id = ?7
-         WHERE session_id = ?8",
+             host_id = ?7,
+             ssh_port = ?8,
+             ssh_identity_file = ?9
+         WHERE session_id = ?10",
         params![
             sandbox_json,
             update.run_state.last_response_duration_ms,
@@ -98,7 +100,9 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
             response_durations_ms_json,
             token_usages_json,
             update.updated_at,
-            update.ssh_host,
+            stored_ssh_host(update.ssh.as_ref()),
+            stored_ssh_port(update.ssh.as_ref()),
+            stored_ssh_identity_file(update.ssh.as_ref()),
             update.session_id,
         ],
     )?;
@@ -222,7 +226,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -279,7 +283,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -345,6 +349,8 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         token_usages_json: row.get(16)?,
         config_version: row.get(17)?,
         orchestrator_compaction_threshold: row.get(18)?,
+        ssh_port: row.get(19)?,
+        ssh_identity_file: row.get(20)?,
     })
 }
 
@@ -585,7 +591,7 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        s.extra_headers_json, s.sandbox_json, s.created_at, s.updated_at, s.host_id,
        p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
        COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
-       s.token_usages_json, COALESCE(s.run_count, 0)
+       s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file
 FROM sessions s
 LEFT JOIN session_presentations p ON p.session_id = s.session_id
 "#;
@@ -655,6 +661,8 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         last_user_prompt: row.get(15)?,
         token_usages_json: row.get(16)?,
         run_count: row.get(17)?,
+        ssh_port: row.get(18)?,
+        ssh_identity_file: row.get(19)?,
     })
 }
 
@@ -677,6 +685,8 @@ struct SessionSummaryRow {
     last_user_prompt: Option<String>,
     token_usages_json: Option<String>,
     run_count: i64,
+    ssh_port: Option<u16>,
+    ssh_identity_file: Option<String>,
 }
 
 impl SessionSummaryRow {
@@ -690,7 +700,8 @@ impl SessionSummaryRow {
         let cwd = PathBuf::from(self.cwd);
         let sandbox_spec = deserialize_sandbox(self.sandbox_json)?;
         let sandboxed = sandbox_spec.is_some();
-        let workspace_host_path = if self.ssh_host.is_some() {
+        let ssh = stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file);
+        let workspace_host_path = if ssh.is_some() {
             None
         } else {
             match sandbox_spec.as_ref() {
@@ -719,7 +730,7 @@ impl SessionSummaryRow {
             visible_message_count,
             last_user_prompt: self.last_user_prompt,
             sandboxed,
-            ssh_host: self.ssh_host,
+            ssh,
             title: self.title,
             pinned: self.pinned,
             sort_order: self.sort_order,
@@ -801,10 +812,10 @@ fn insert_or_replace_session(
              last_response_duration_ms, previous_response_duration_ms,
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
-             orchestrator_compaction_threshold
+             orchestrator_compaction_threshold, ssh_port, ssh_identity_file
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -818,6 +829,8 @@ fn insert_or_replace_session(
              response_durations_ms_json = excluded.response_durations_ms_json,
              updated_at = excluded.updated_at,
              host_id = excluded.host_id,
+             ssh_port = excluded.ssh_port,
+             ssh_identity_file = excluded.ssh_identity_file,
              token_usages_json = excluded.token_usages_json",
         params![
             snapshot.session_id,
@@ -838,12 +851,14 @@ fn insert_or_replace_session(
             response_durations_ms_json,
             snapshot.created_at,
             snapshot.updated_at,
-            snapshot.ssh_host,
+            stored_ssh_host(snapshot.ssh.as_ref()),
             snapshot.api_key_env,
             extra_headers_json,
             token_usages_json,
             snapshot.config_version,
             snapshot.orchestrator_compaction_threshold,
+            stored_ssh_port(snapshot.ssh.as_ref()),
+            stored_ssh_identity_file(snapshot.ssh.as_ref()),
         ],
     )?;
     Ok(())
@@ -869,6 +884,8 @@ struct SessionRow {
     token_usages_json: Option<String>,
     config_version: i64,
     orchestrator_compaction_threshold: Option<u64>,
+    ssh_port: Option<u16>,
+    ssh_identity_file: Option<String>,
 }
 
 impl SessionRow {
@@ -895,7 +912,7 @@ impl SessionRow {
             backend,
             reasoning_effort: parse_reasoning_effort(self.reasoning_effort)?,
             sandbox_spec: deserialize_sandbox(self.sandbox_json)?,
-            ssh_host: self.ssh_host,
+            ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
@@ -972,6 +989,39 @@ fn parse_backend(raw: Option<String>) -> Result<BackendKind> {
             raw,
             error
         )
+    })
+}
+
+fn stored_ssh_host(connection: Option<&SshConnection>) -> Option<String> {
+    connection.map(|connection| connection.host.clone())
+}
+
+fn stored_ssh_port(connection: Option<&SshConnection>) -> Option<u16> {
+    connection.and_then(|connection| connection.port)
+}
+
+fn stored_ssh_identity_file(connection: Option<&SshConnection>) -> Option<String> {
+    connection.and_then(|connection| {
+        connection
+            .identity_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+    })
+}
+
+/// The connection a session row describes, or `None` for a local session.
+///
+/// The host name is what decides: a row without one is local, whatever the port
+/// and key columns happen to hold.
+fn stored_ssh_connection(
+    host: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+) -> Option<SshConnection> {
+    host.map(|host| SshConnection {
+        host,
+        port,
+        identity_file: identity_file.map(PathBuf::from),
     })
 }
 

@@ -17,7 +17,7 @@ use crate::paths::PathContext;
 use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
 use super::ssh_command::{
     prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
-    shell_quote_path, ssh_args, ssh_control_path,
+    shell_quote_path, SshConnection,
 };
 
 const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,7 +25,7 @@ const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 const SSH_PIDFILE_DIR: &str = "~/.cache/nac/exec";
 
 pub struct SshBackend {
-    ssh_host: String,
+    connection: SshConnection,
     remote_cwd: PathBuf,
     control_path: PathBuf,
 }
@@ -34,31 +34,35 @@ impl SshBackend {
     #[cfg(test)]
     pub fn new(ssh_host: String, remote_cwd: PathBuf) -> Self {
         let config_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::new_with_paths(ssh_host, remote_cwd, &PathContext::new(config_cwd))
+        Self::new_with_paths(
+            SshConnection::new(ssh_host),
+            remote_cwd,
+            &PathContext::new(config_cwd),
+        )
     }
 
     pub(crate) fn new_with_paths(
-        ssh_host: String,
+        connection: SshConnection,
         remote_cwd: PathBuf,
         paths: &PathContext,
     ) -> Self {
-        let control_path = ssh_control_path(&ssh_host, paths);
+        let control_path = connection.control_path(paths);
         Self {
-            ssh_host,
+            connection,
             remote_cwd,
             control_path,
         }
     }
 
     fn ssh_args(&self) -> Vec<String> {
-        ssh_args(&self.control_path)
+        self.connection.ssh_args(&self.control_path)
     }
 
     fn ssh_command(&self, remote_command: &str) -> Command {
         let mut command = Command::new("ssh");
         command.args(self.ssh_args());
         command.arg("--");
-        command.arg(&self.ssh_host);
+        command.arg(&self.connection.host);
         command.arg(remote_command);
         command
     }
@@ -96,7 +100,7 @@ impl SshBackend {
         if !output.status.success() {
             bail!(
                 "ssh connection to '{}' failed or remote cwd '{}' is unusable: {}",
-                self.ssh_host,
+                self.connection.describe(),
                 self.remote_cwd.display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             );
@@ -221,16 +225,27 @@ impl SshBackend {
         cmd.arg("-tt");
         cmd.args(self.ssh_args());
         cmd.arg("--");
-        cmd.arg(&self.ssh_host);
+        cmd.arg(&self.connection.host);
         cmd.arg(remote);
         (cmd, Some(pidfile))
     }
 
+    /// What a managed worker needs to rebuild this exact connection, since it
+    /// reaches the host itself and cannot inherit the parent's socket.
     pub(crate) fn worker_cli_args(&self) -> Vec<OsString> {
-        vec![
+        let mut args = vec![
             OsString::from("--ssh-host"),
-            OsString::from(self.ssh_host.clone()),
-        ]
+            OsString::from(self.connection.host.clone()),
+        ];
+        if let Some(port) = self.connection.port {
+            args.push(OsString::from("--ssh-port"));
+            args.push(OsString::from(port.to_string()));
+        }
+        if let Some(identity) = self.connection.identity_file.as_deref() {
+            args.push(OsString::from("--ssh-identity-file"));
+            args.push(OsString::from(identity));
+        }
+        args
     }
 
     pub(crate) fn default_terminal_cwd(&self) -> PathBuf {
@@ -433,7 +448,7 @@ mod tests {
         }
 
         let backend = SshBackend::new_with_paths(
-            "build-box".to_string(),
+            SshConnection::new("build-box"),
             PathBuf::from("~"),
             &PathContext::new(&config_cwd),
         );
@@ -454,9 +469,69 @@ mod tests {
     fn control_socket_name_includes_hash_to_avoid_sanitization_collisions() {
         let paths =
             PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let first = ssh_control_path("a/b", &paths);
-        let second = ssh_control_path("a:b", &paths);
+        let first = SshConnection::new("a/b").control_path(&paths);
+        let second = SshConnection::new("a:b").control_path(&paths);
         assert_ne!(first, second);
         assert!(first.to_string_lossy().contains("a-b-"));
+    }
+
+    /// The socket is shared per connection, and a port or a key is what makes
+    /// one connection a different one even under the same host name.
+    #[test]
+    fn control_socket_separates_connections_that_differ_beyond_the_host() {
+        let paths =
+            PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let plain = SshConnection::new("build-box").control_path(&paths);
+        let other_port = SshConnection {
+            host: "build-box".to_string(),
+            port: Some(2222),
+            identity_file: None,
+        }
+        .control_path(&paths);
+        let other_key = SshConnection {
+            host: "build-box".to_string(),
+            port: None,
+            identity_file: Some(PathBuf::from("/keys/ci")),
+        }
+        .control_path(&paths);
+        assert_ne!(plain, other_port);
+        assert_ne!(plain, other_key);
+        assert_ne!(other_port, other_key);
+    }
+
+    #[test]
+    fn ssh_args_carry_the_port_and_the_key_when_set() {
+        let backend = SshBackend::new_with_paths(
+            SshConnection {
+                host: "build-box".to_string(),
+                port: Some(2222),
+                identity_file: Some(PathBuf::from("/keys/ci")),
+            },
+            PathBuf::from("/srv/work"),
+            &PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
+        );
+        let args = backend.ssh_args();
+        let position = |value: &str| args.iter().position(|arg| arg == value);
+        assert_eq!(
+            args.get(position("-p").expect("port flag") + 1).unwrap(),
+            "2222"
+        );
+        assert_eq!(
+            args.get(position("-i").expect("identity flag") + 1)
+                .unwrap(),
+            "/keys/ci"
+        );
+        assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
+        assert_eq!(
+            backend.worker_cli_args(),
+            vec![
+                OsString::from("--ssh-host"),
+                OsString::from("build-box"),
+                OsString::from("--ssh-port"),
+                OsString::from("2222"),
+                OsString::from("--ssh-identity-file"),
+                OsString::from("/keys/ci"),
+            ]
+        );
     }
 }

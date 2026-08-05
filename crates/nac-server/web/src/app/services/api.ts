@@ -34,6 +34,8 @@ import type {
   RevertSessionResponse,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  SshBrowseRequest,
+  SshTarget,
   StoredCredentialList,
   StoreInfo,
   SubmitPromptResponse,
@@ -214,6 +216,20 @@ export const api = {
     if (path) query.set("path", path);
     return request<BrowseListing>("GET", `/fs/browse?${query.toString()}`, { signal });
   },
+
+  /**
+   * The same listing for a directory on an SSH host. Also the connection test
+   * the launch form runs first: only a working connection can answer.
+   */
+  browseSshPath: (
+    target: SshTarget,
+    path: string | null,
+    signal?: AbortSignal,
+  ) =>
+    request<BrowseListing>("POST", "/ssh/browse", {
+      body: { ...target, path } satisfies SshBrowseRequest,
+      signal,
+    }),
 
   /** Validates the key as a side effect: a bad key cannot list models. */
   listProviderModels: (payload: ProviderModelsRequest) =>

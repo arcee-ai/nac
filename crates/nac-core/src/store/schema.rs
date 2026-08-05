@@ -1,14 +1,19 @@
 use super::*;
 
-// 8 rather than 7: this branch reached 7 while main reached 4 independently, so
-// a store already at 7 would otherwise skip the migration pass that adds main's
-// session-summary columns — `open_runtime_connection` returns early whenever the
-// stored version already equals this one.
-const STORE_SCHEMA_VERSION: i64 = 8;
+// 9 rather than 8: a store already at 8 would otherwise skip the migration pass
+// that adds the ssh port and key columns — `open_runtime_connection` returns
+// early whenever the stored version already equals this one. (8 itself was
+// needed because this branch reached 7 while main reached 4 independently.)
+const STORE_SCHEMA_VERSION: i64 = 9;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
 const RUN_COUNT_BACKFILL_VERSION: i64 = 5;
+
+/// Schema version that introduced the denormalized session-summary columns.
+/// Later versions add columns without touching them, so a store at or past this
+/// one does not need its whole message history walked again.
+const SESSION_SUMMARY_BACKFILL_VERSION: i64 = 8;
 
 #[cfg(test)]
 static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
@@ -93,7 +98,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let needs_session_summary_backfill = schema_version < STORE_SCHEMA_VERSION;
+    let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
             create_base_schema(&transaction)?;
@@ -136,10 +141,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -166,6 +171,17 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER NOT NULL DEFAULT 0 CHECK (visible_message_count >= 0)",
     )?;
     ensure_column(&transaction, "sessions", "last_user_prompt", "TEXT")?;
+    // A remote session records its whole connection, not just the host name, so
+    // resume reaches the same machine without depending on the ssh config of
+    // whoever restarts nac. NULL means "whatever ssh decides", which is what a
+    // session created before these columns existed always relied on.
+    ensure_column(
+        &transaction,
+        "sessions",
+        "ssh_port",
+        "INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535))",
+    )?;
+    ensure_column(&transaction, "sessions", "ssh_identity_file", "TEXT")?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }

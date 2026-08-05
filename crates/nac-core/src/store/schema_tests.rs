@@ -154,6 +154,8 @@ fn assert_current_schema(conn: &Connection) {
         "orchestrator_compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
+        "ssh_port",
+        "ssh_identity_file",
     ] {
         assert!(session_columns.iter().any(|column| column == expected));
     }
@@ -857,18 +859,18 @@ fn future_schema_version_is_rejected_without_changes() {
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future = Connection::open(&path).unwrap();
-    future.pragma_update(None, "user_version", 9).unwrap();
+    future.pragma_update(None, "user_version", 10).unwrap();
     drop(future);
 
     let error = initialize(&path).unwrap_err();
     assert!(error
         .to_string()
-        .contains("unsupported store schema version 9"));
+        .contains("unsupported store schema version 10"));
     let unchanged = Connection::open(&path).unwrap();
     let version: i64 = unchanged
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
     drop(unchanged);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

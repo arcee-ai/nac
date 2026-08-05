@@ -73,6 +73,9 @@ export interface SessionSummarySnapshot {
   last_user_prompt: string | null;
   sandboxed: boolean;
   ssh_host: string | null;
+  /** Omitted when the session leaves the choice to ssh. */
+  ssh_port?: number;
+  ssh_identity_file?: string;
   title?: string | null;
   pinned?: boolean;
   sort_order?: number;
@@ -628,6 +631,8 @@ export interface LaunchModelDefaults {
 export interface LaunchModelDefaultsRequest {
   cwd?: string | null;
   ssh_host?: string | null;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
 }
 
 /**
@@ -703,6 +708,24 @@ export interface BrowseListing {
   entries: BrowseEntry[];
   /** Set when the directory had more entries than the server will serialize. */
   truncated: boolean;
+}
+
+/**
+ * How to reach an SSH host, as the launch form has it before a session exists.
+ *
+ * `POST /ssh/browse` takes it with a path and answers with a `BrowseListing`, so
+ * a remote directory is navigated exactly like a local one — and succeeding is
+ * what proves the connection works.
+ */
+export interface SshTarget {
+  ssh_host: string;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
+}
+
+export interface SshBrowseRequest extends SshTarget {
+  /** Absent or empty opens on the login home on the remote host. */
+  path?: string | null;
 }
 
 export interface ProviderModel {
@@ -819,6 +842,9 @@ export interface CreateSessionRequest {
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
   ssh_host?: string | null;
+  /** Null leaves the port and the key to ssh and to `~/.ssh/config`. */
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
   sandbox?: SandboxRequest;
 }
 

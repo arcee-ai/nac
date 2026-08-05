@@ -2932,7 +2932,7 @@ pub(super) mod tests {
                 working_directory: "/repo".to_string(),
                 worker_executable: None,
                 sandbox: None,
-                ssh_host: None,
+                ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),

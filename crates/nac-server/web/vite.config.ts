@@ -21,6 +21,7 @@ const API_PREFIXES = [
   "/auth",
   "/credentials",
   "/fs",
+  "/ssh",
   "/providers",
   "/model-configs",
 ];

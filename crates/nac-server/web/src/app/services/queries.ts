@@ -26,6 +26,7 @@ import type {
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  SshTarget,
   StoredCredentialList,
   StoreInfo,
   SwitchBranchRequest,
@@ -48,6 +49,16 @@ export const queryKeys = {
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
+  sshBrowse: (target: SshTarget, path: string) =>
+    [
+      "ssh-browse",
+      {
+        host: target.ssh_host,
+        port: target.ssh_port ?? null,
+        identityFile: target.ssh_identity_file ?? null,
+        path,
+      },
+    ] as const,
   providerModels: (backend: string, apiKey: string, baseUrl: string) =>
     ["provider-models", { backend, apiKey, baseUrl }] as const,
   storedKeyProviderModels: (backend: string, apiKeyEnv: string, baseUrl: string) =>
@@ -185,6 +196,44 @@ export function useBrowsePath(path: string | null, kind: BrowseKind, enabled: bo
     enabled,
     staleTime: 2000,
     retry: false,
+  });
+}
+
+/**
+ * The same listing from an SSH host. Only directories come back, so a remote
+ * working directory is picked the way a local one is.
+ */
+export function useSshBrowsePath(
+  target: SshTarget | null,
+  path: string | null,
+  enabled: boolean,
+) {
+  return useQuery<BrowseListing>({
+    queryKey: queryKeys.sshBrowse(target ?? { ssh_host: "" }, path ?? ""),
+    queryFn: ({ signal }) => api.browseSshPath(target!, path, signal),
+    enabled: enabled && Boolean(target?.ssh_host),
+    staleTime: 2000,
+    retry: false,
+  });
+}
+
+/**
+ * Opens the connection the launch form needs before it can offer anything
+ * remote, and reports the login home so the form can start there.
+ *
+ * A mutation rather than a query because connecting is the user pressing a
+ * button, and because the ssh connection it leaves behind is a side effect the
+ * session created next reuses.
+ */
+export function useSshConnect() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (target: SshTarget) => api.browseSshPath(target, null, undefined),
+    onSuccess: (listing, target) => {
+      // Seeding the home listing means the picker opens without a second round
+      // trip over a connection that was just paid for.
+      client.setQueryData(queryKeys.sshBrowse(target, ""), listing);
+    },
   });
 }
 

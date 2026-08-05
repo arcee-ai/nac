@@ -120,15 +120,19 @@ struct SessionManagerInner {
     managed_logins: managed_auth::ManagedLoginRegistry,
 }
 
-/// Identifies a checkout across sessions. The host has to be part of it: two
-/// sessions on the same path of different machines are different checkouts, and
-/// — the reason this is a pair rather than a path — two sessions on the same
-/// path of the *same* remote machine are the same one.
+/// Identifies a checkout across sessions. The connection has to be part of it:
+/// two sessions on the same path of different machines are different checkouts,
+/// and — the reason this is a pair rather than a path — two sessions on the same
+/// path of the *same* remote machine are the same one. The whole connection is
+/// what counts, not just the host name: the same name reached on another port or
+/// as another user is another machine as far as a checkout is concerned.
 type GitTargetKey = (Option<String>, PathBuf);
 
 fn git_target_key(target: &GitTarget) -> GitTargetKey {
     (
-        target.ssh_host().map(str::to_string),
+        target
+            .ssh_connection()
+            .map(|connection| connection.identity()),
         target.root().to_path_buf(),
     )
 }
@@ -136,7 +140,31 @@ fn git_target_key(target: &GitTarget) -> GitTargetKey {
 struct ResolvedLaunchLocation {
     workspace_cwd: PathBuf,
     config_cwd: PathBuf,
-    ssh_host: Option<String>,
+    ssh: runtime::SshOptions,
+}
+
+/// The ssh fields of a launch request as they arrive over HTTP, where a cleared
+/// form field is an empty string rather than an absent one.
+struct SshRequest {
+    host: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+}
+
+impl SshRequest {
+    fn into_options(self) -> runtime::SshOptions {
+        runtime::SshOptions {
+            host: self.host,
+            port: self.port,
+            identity_file: nonblank(self.identity_file).map(PathBuf::from),
+        }
+    }
+}
+
+fn nonblank(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +215,27 @@ pub struct LaunchModelDefaultsRequest {
     /// OpenSSH target for remote sessions; remote paths never select local config.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
+}
+
+/// Where to look on an SSH host, for the remote half of the path picker.
+///
+/// The connection is described in the request rather than taken from a session,
+/// because this is what the launch form asks *before* there is a session.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SshBrowseRequest {
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
+    /// Absent or empty opens on the login home, which is where a fresh remote
+    /// session would start anyway.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -297,6 +346,14 @@ pub struct CreateSessionRequest {
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
+    /// Port and private key for the ssh target. Both are optional: omitted
+    /// leaves the choice to ssh, which is what a host configured in
+    /// `~/.ssh/config` wants. Supplying them is what lets a session reach a box
+    /// nac has no config for at all.
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
     #[serde(default)]
     pub sandbox: SandboxRequest,
 }
@@ -709,13 +766,10 @@ impl SessionManager {
     fn resolve_launch_location(
         &self,
         cwd: Option<PathBuf>,
-        ssh_host: Option<String>,
+        ssh: SshRequest,
     ) -> Result<ResolvedLaunchLocation> {
-        let ssh_host = ssh_host
-            .as_deref()
-            .map(str::trim)
-            .filter(|ssh_host| !ssh_host.is_empty())
-            .map(str::to_string);
+        let ssh = ssh.into_options();
+        let ssh_host = ssh.host();
         let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
             let remote_cwd = cwd
                 .and_then(|cwd| {
@@ -738,7 +792,46 @@ impl SessionManager {
         Ok(ResolvedLaunchLocation {
             workspace_cwd,
             config_cwd,
-            ssh_host,
+            ssh,
+        })
+    }
+
+    /// Lists a directory on an SSH host, in the same shape as a local listing so
+    /// the picker navigates both the same way.
+    ///
+    /// Succeeding is also the evidence the launch form needs that the host, the
+    /// port and the key work together, and the connection it opens is reused by
+    /// the session created next.
+    async fn browse_ssh(
+        &self,
+        request: SshBrowseRequest,
+    ) -> std::result::Result<filesystem::BrowseListing, runtime::RemoteBrowseError> {
+        let options = SshRequest {
+            host: request.ssh_host,
+            port: request.ssh_port,
+            identity_file: request.ssh_identity_file,
+        }
+        .into_options();
+        let listing = runtime::browse_ssh_directory(
+            &options,
+            request.path.as_deref(),
+            &self.inner.root_cwd,
+        )
+        .await?;
+        Ok(filesystem::BrowseListing {
+            path: listing.path,
+            parent: listing.parent,
+            home: listing.home,
+            entries: listing
+                .entries
+                .into_iter()
+                .map(|entry| filesystem::BrowseEntry {
+                    name: entry.name,
+                    path: entry.path,
+                    is_directory: entry.is_directory,
+                })
+                .collect(),
+            truncated: listing.truncated,
         })
     }
 
@@ -746,7 +839,14 @@ impl SessionManager {
         &self,
         request: LaunchModelDefaultsRequest,
     ) -> Result<LaunchModelDefaults> {
-        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        let location = self.resolve_launch_location(
+            request.cwd,
+            SshRequest {
+                host: request.ssh_host,
+                port: request.ssh_port,
+                identity_file: request.ssh_identity_file,
+            },
+        )?;
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let configured_model_backend = config.model.backend;
         let configured_model_base_url = match configured_model_backend {
@@ -959,8 +1059,14 @@ impl SessionManager {
     /// there is nothing durable to inspect, commit or restore.
     fn git_target(&self, summary: &SessionSummarySnapshot) -> Result<GitTarget> {
         if let Some(host) = summary.ssh_host.as_deref() {
+            // The stored connection is used as recorded: the key path was
+            // resolved when the session was created, so it needs no second pass.
             return Ok(GitTarget::ssh(
-                host.to_string(),
+                runtime::SshConnection {
+                    host: host.to_string(),
+                    port: summary.ssh_port,
+                    identity_file: summary.ssh_identity_file.as_deref().map(PathBuf::from),
+                },
                 summary.cwd.clone(),
                 &self.inner.root_cwd,
             ));
@@ -1026,8 +1132,15 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
-        if location.ssh_host.is_some() && sandbox_requested(&request.sandbox) {
+        let location = self.resolve_launch_location(
+            request.cwd,
+            SshRequest {
+                host: request.ssh_host,
+                port: request.ssh_port,
+                identity_file: request.ssh_identity_file,
+            },
+        )?;
+        if location.ssh.host().is_some() && sandbox_requested(&request.sandbox) {
             return Err(anyhow!(
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
@@ -1059,7 +1172,7 @@ impl SessionManager {
                 model,
                 orchestrator_compaction_threshold,
                 sandbox: sandbox_options(request.sandbox),
-                ssh_host: location.ssh_host,
+                ssh: location.ssh,
             },
             &config,
         )
@@ -1836,6 +1949,7 @@ fn api_router(manager: SessionManager) -> Router {
         .route("/health", get(health))
         .route("/store", get(store_info))
         .route("/fs/browse", get(browse_filesystem_handler))
+        .route("/ssh/browse", post(browse_ssh_handler))
         .route("/providers/models", post(provider_models_handler))
         .route(
             "/model-configs",
@@ -2025,6 +2139,17 @@ async fn browse_filesystem_handler(
     Query(query): Query<filesystem::BrowseQuery>,
 ) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
     let listing = filesystem::browse(&query, &manager.inner.root_cwd)?;
+    Ok(Json(listing))
+}
+
+/// The same listing for a directory on an SSH host, which is also how the launch
+/// form tests the connection before it offers the rest of the form.
+async fn browse_ssh_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<SshBrowseRequest>, JsonRejection>,
+) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let listing = manager.browse_ssh(request).await?;
     Ok(Json(listing))
 }
 
@@ -3400,6 +3525,25 @@ impl From<filesystem::BrowseError> for ApiError {
     }
 }
 
+impl From<runtime::RemoteBrowseError> for ApiError {
+    fn from(error: runtime::RemoteBrowseError) -> Self {
+        let status = match &error {
+            runtime::RemoteBrowseError::Invalid(_) => StatusCode::BAD_REQUEST,
+            runtime::RemoteBrowseError::NotFound(_) => StatusCode::NOT_FOUND,
+            runtime::RemoteBrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
+            runtime::RemoteBrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
+            // The host, not this server, is what failed, and the caller can
+            // retry once it is fixed.
+            runtime::RemoteBrowseError::Unreachable { .. }
+            | runtime::RemoteBrowseError::Remote(_) => StatusCode::BAD_GATEWAY,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<RequestConfigurationError> for ApiError {
     fn from(error: RequestConfigurationError) -> Self {
         Self {
@@ -4149,6 +4293,8 @@ mod tests {
         let request = || LaunchModelDefaultsRequest {
             cwd: Some(root.clone()),
             ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
         };
 
         std::fs::write(
@@ -4246,6 +4392,8 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(workspace_a.clone()),
                         ssh_host: None,
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
                     .configured_model_backend,
@@ -4257,6 +4405,8 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(workspace_b.clone()),
                         ssh_host: None,
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
                     .configured_model_backend,
@@ -4268,6 +4418,8 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(std::path::PathBuf::from("remote/project")),
                         ssh_host: Some(" build-box ".to_string()),
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
                     .configured_model_backend,
@@ -4329,6 +4481,8 @@ mod tests {
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
+            ssh_port: None,
+            ssh_identity_file: None,
             sandbox: SandboxRequest {
                 enabled: true,
                 ..SandboxRequest::default()
@@ -4361,6 +4515,8 @@ mod tests {
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
                     ssh_host: None,
+                    ssh_port: None,
+                    ssh_identity_file: None,
                     sandbox: SandboxRequest::default(),
                 })
                 .await
@@ -5726,6 +5882,8 @@ api_key_env = "OPENAI_API_KEY"
                 .launch_model_defaults(LaunchModelDefaultsRequest {
                     cwd: Some(root.clone()),
                     ssh_host: None,
+                    ssh_port: None,
+                    ssh_identity_file: None,
                 })
                 .unwrap();
             assert_eq!(
@@ -6650,6 +6808,8 @@ api_key_env = "OPENAI_API_KEY"
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
                 sandbox: SandboxRequest::default(),
             })
             .await
@@ -6760,6 +6920,8 @@ api_key_env = "OPENAI_API_KEY"
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
                 sandbox: SandboxRequest::default(),
             })
             .await

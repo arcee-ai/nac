@@ -89,6 +89,12 @@ pub fn read_file(target: &GitTarget, path: &str) -> Result<WorkspaceFileContent>
         WorktreeRead::NotRegular | WorktreeRead::Symlink { .. } => {
             bail!("invalid path: '{}' is not a regular file", relpath)
         }
+        // Reaching a file through a symlinked directory lands outside the
+        // repository just as following a link would, and is refused for the
+        // same reason: what is served here has to belong to the workspace.
+        WorktreeRead::Regular { escapes: true, .. } => {
+            bail!("invalid path: path escapes repository root")
+        }
         WorktreeRead::Regular {
             size, bytes: None, ..
         } => {

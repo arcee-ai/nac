@@ -15,9 +15,13 @@ use crate::model::{
     ModelConfigurationError, ReasoningEffort,
 };
 use crate::paths::PathContext;
+/// Public because callers outside this crate build the connections that sessions
+/// and git targets are created from.
+pub use crate::sandbox::SshConnection;
+pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
 use crate::sandbox::{
-    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType, SandboxSession,
-    DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    browse_remote_directory, build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType,
+    SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
@@ -317,8 +321,89 @@ pub struct RunOptions {
     /// `Some(0)` explicitly disables the persisted threshold.
     pub orchestrator_compaction_threshold: Option<u64>,
     pub sandbox: SandboxOptions,
-    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; mutually exclusive with sandbox.
+    pub ssh: SshOptions,
+}
+
+/// How to reach a host, as the caller supplies it: untrimmed, with the key path
+/// still as typed. [`SshOptions::connection`] turns it into what ssh is given.
+///
+/// Every option OpenSSH would otherwise read from `~/.ssh/config` can be stated
+/// here, so a remote session never depends on config nac cannot see. An alias
+/// still works: a host with no port and no key leaves both to ssh.
+#[derive(Debug, Clone, Default)]
+pub struct SshOptions {
+    /// `host` or `user@host`; absent or blank means the session is local.
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<PathBuf>,
+}
+
+impl SshOptions {
+    /// The host name, trimmed, or `None` for a local session.
+    pub fn host(&self) -> Option<String> {
+        trim_ssh_host(self.host.clone())
+    }
+
+    /// The connection these options describe, or `None` for a local session.
+    ///
+    /// `paths` is nac's own local path context, because the key lives on this
+    /// machine: a `~` typed into the launch form has to become a real path
+    /// before ssh, which is spawned without a shell, ever sees it.
+    pub fn connection(&self, paths: &PathContext) -> Option<SshConnection> {
+        self.host().map(|host| {
+            SshConnection::resolved(host, self.port, self.identity_file.as_deref(), paths)
+        })
+    }
+
+    /// Rejects what would otherwise fail later as an opaque ssh error.
+    ///
+    /// nac runs ssh in batch mode, where a missing key is reported as a refused
+    /// authentication rather than as a missing file, so the file is checked here
+    /// while there is still something specific to say about it.
+    fn validate(&self, paths: &PathContext) -> Result<()> {
+        let Some(connection) = self.connection(paths) else {
+            if self.port.is_some() || self.identity_file.is_some() {
+                anyhow::bail!("an ssh port or private key needs an ssh host as well");
+            }
+            return Ok(());
+        };
+        if self.port == Some(0) {
+            anyhow::bail!("ssh port must be between 1 and 65535");
+        }
+        if let Some(key) = connection.identity_file.as_deref() {
+            if !key.exists() {
+                anyhow::bail!("ssh private key '{}' does not exist", key.display());
+            }
+            if !key.is_file() {
+                anyhow::bail!("ssh private key '{}' is not a file", key.display());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Lists a directory on the host these options describe, or the login home when
+/// `path` is empty.
+///
+/// This is also how a launch form finds out whether the connection works: the
+/// listing needs the same handshake a session would, and it leaves the
+/// multiplexed connection behind for the session that follows. `config_cwd` is
+/// the *local* directory nac's own paths resolve against, since the private key
+/// and the control socket are on this machine.
+pub async fn browse_ssh_directory(
+    options: &SshOptions,
+    path: Option<&str>,
+    config_cwd: &Path,
+) -> std::result::Result<RemoteListing, RemoteBrowseError> {
+    let paths = PathContext::new(config_cwd);
+    options
+        .validate(&paths)
+        .map_err(|error| RemoteBrowseError::Invalid(error.to_string()))?;
+    let connection = options.connection(&paths).ok_or_else(|| {
+        RemoteBrowseError::Invalid("an ssh host is required to browse a remote directory".into())
+    })?;
+    browse_remote_directory(&connection, path, &paths).await
 }
 
 #[derive(Debug, Clone, Default)]
@@ -330,8 +415,8 @@ pub struct ManagedWorkerOptions {
     pub store: StoreOptions,
     pub model: ModelOptions,
     pub sandbox: SandboxOptions,
-    /// OpenSSH target for remote workers; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote worker; mutually exclusive with sandbox.
+    pub ssh: SshOptions,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -626,7 +711,7 @@ pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
-    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
         .clone()
@@ -647,12 +732,17 @@ pub async fn build_run_config(
     let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
 
-    if let Some(ssh_host) = ssh_host {
+    let config_paths = PathContext::new(&config_cwd);
+    options.ssh.validate(&config_paths)?;
+    if ssh_host.is_some() {
+        let connection = options
+            .ssh
+            .connection(&config_paths)
+            .expect("a trimmed ssh host yields a connection");
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
-        let workspace_git = GitTarget::ssh(ssh_host.clone(), remote_cwd.clone(), &config_cwd);
+        let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
-        let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         let agent = Agent::with_config(
             client.clone(),
@@ -670,7 +760,7 @@ pub async fn build_run_config(
                 working_directory: working_directory.clone(),
                 worker_executable: options.worker_executable,
                 sandbox: None,
-                ssh_host: Some(ssh_host.clone()),
+                ssh: Some(connection.clone()),
                 mcp: None,
                 skills,
                 extra_tool_defs: Vec::new(),
@@ -686,7 +776,7 @@ pub async fn build_run_config(
             settings.backend,
             settings.reasoning_effort,
             None,
-            Some(ssh_host),
+            Some(connection),
             agent.messages.clone(),
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
@@ -754,7 +844,7 @@ pub async fn build_run_config(
             working_directory: working_directory.clone(),
             worker_executable: options.worker_executable,
             sandbox: sandbox.clone(),
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
@@ -801,7 +891,7 @@ pub async fn build_managed_worker_config(
     let client = ModelClient::from_effective_settings(managed_worker_effective_model_settings(
         &options.model,
     )?)?;
-    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
         .clone()
@@ -883,7 +973,7 @@ pub async fn build_managed_worker_config(
             working_directory,
             worker_executable: None,
             sandbox,
-            ssh_host,
+            ssh: options.ssh.connection(&config_paths),
             mcp,
             skills: None,
             extra_tool_defs,
@@ -973,15 +1063,17 @@ async fn build_resume_config_from_snapshot(
     worker_executable: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
     let snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
-    let ssh_host = snapshot.ssh_host.clone();
-    if ssh_host.is_some() && snapshot.sandbox_spec.is_some() {
+    // Resume reaches the host with the connection the session recorded, not with
+    // whatever the local ssh config happens to say now.
+    let ssh = snapshot.ssh.clone();
+    if ssh.is_some() && snapshot.sandbox_spec.is_some() {
         anyhow::bail!(
             "invalid session configuration: ssh_host and podman sandbox metadata cannot both be set"
         );
     }
 
     let workspace_cwd = snapshot.cwd.clone();
-    let config_cwd = if ssh_host.is_some() {
+    let config_cwd = if ssh.is_some() {
         resume_base_cwd.clone()
     } else {
         workspace_cwd.clone()
@@ -1021,7 +1113,7 @@ async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let sandbox = if ssh_host.is_some() {
+    let sandbox = if ssh.is_some() {
         None
     } else {
         match snapshot.sandbox_spec.clone() {
@@ -1034,7 +1126,7 @@ async fn build_resume_config_from_snapshot(
 
     store::initialize(&store_path)?;
 
-    let (skills, agents_md_status) = if ssh_host.is_some() {
+    let (skills, agents_md_status) = if ssh.is_some() {
         let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         (skills, "off".to_string())
@@ -1053,9 +1145,9 @@ async fn build_resume_config_from_snapshot(
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_git = match ssh_host.as_deref() {
-        Some(host) => Some(GitTarget::ssh(
-            host.to_string(),
+    let workspace_git = match ssh.clone() {
+        Some(connection) => Some(GitTarget::ssh(
+            connection,
             workspace_cwd.clone(),
             &config_cwd,
         )),
@@ -1085,7 +1177,7 @@ async fn build_resume_config_from_snapshot(
             working_directory: working_directory.clone(),
             worker_executable,
             sandbox,
-            ssh_host,
+            ssh,
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
@@ -1124,7 +1216,7 @@ fn normalize_snapshot_paths(
     resume_base_cwd: &Path,
 ) -> Result<SessionSnapshot> {
     // Remote cwd values are not local paths.
-    if snapshot.ssh_host.is_some() {
+    if snapshot.ssh.is_some() {
         return Ok(snapshot);
     }
 
@@ -2171,7 +2263,7 @@ url = "https://mcp.context7.com/mcp"
                     ..ModelOptions::default()
                 },
                 sandbox: SandboxOptions::default(),
-                ssh_host: None,
+                ssh: SshOptions::default(),
             },
             &NacConfig::default(),
         )
@@ -2247,7 +2339,7 @@ url = "https://mcp.context7.com/mcp"
             },
             model: test_openai_model_options(),
             sandbox: SandboxOptions::default(),
-            ssh_host: None,
+            ssh: SshOptions::default(),
         };
 
         let run_config = build_managed_worker_config(options, &NacConfig::default())
@@ -2325,7 +2417,7 @@ url = "https://mcp.context7.com/mcp"
                 },
                 orchestrator_compaction_threshold: Some(48_000),
                 sandbox: SandboxOptions::default(),
-                ssh_host: None,
+                ssh: SshOptions::default(),
             },
             &NacConfig::default(),
         )
@@ -2562,7 +2654,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2583,7 +2675,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2612,7 +2704,7 @@ url = "https://mcp.context7.com/mcp"
                 cpus: 2,
                 memory_mib: 2048,
             }),
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2648,7 +2740,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2731,7 +2823,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             vec![
                 Message::System {
                     content: "You are nac. Working directory: /old/stale/local/path.".to_string(),
@@ -2818,7 +2910,10 @@ url = "https://mcp.context7.com/mcp"
                 model: test_openai_model_options(),
                 orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2854,7 +2949,10 @@ url = "https://mcp.context7.com/mcp"
             .expect("remote creation must produce an active session")
             .to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(stored.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(
+            stored.ssh.as_ref().map(|c| c.host.as_str()),
+            Some("build-box")
+        );
         assert_eq!(stored.cwd, remote_cwd);
         assert_eq!(stored.model, "test-model");
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
@@ -2902,7 +3000,10 @@ url = "https://mcp.context7.com/mcp"
                 model: test_openai_model_options(),
                 orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2983,7 +3084,10 @@ url = "https://mcp.context7.com/mcp"
                     sandbox: true,
                     ..SandboxOptions::default()
                 },
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3025,7 +3129,10 @@ url = "https://mcp.context7.com/mcp"
                     sandbox: true,
                     ..SandboxOptions::default()
                 },
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3069,7 +3176,10 @@ url = "https://mcp.context7.com/mcp"
             model: test_openai_model_options(),
             orchestrator_compaction_threshold: None,
             sandbox,
-            ssh_host: Some("build-box".to_string()),
+            ssh: SshOptions {
+                host: Some("build-box".to_string()),
+                ..SshOptions::default()
+            },
         };
 
         let run_config = build_run_config(
@@ -3082,7 +3192,10 @@ url = "https://mcp.context7.com/mcp"
         let session_id = run_config.session.session_id().unwrap().to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(stored.cwd, PathBuf::from("~"));
-        assert_eq!(stored.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(
+            stored.ssh.as_ref().map(|c| c.host.as_str()),
+            Some("build-box")
+        );
 
         let conflicting = match build_run_config(
             options(
@@ -3145,7 +3258,10 @@ url = "https://mcp.context7.com/mcp"
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3219,7 +3335,10 @@ args = ["-c", {}]
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3308,7 +3427,10 @@ args = ["-c", {}]
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )

@@ -371,7 +371,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),

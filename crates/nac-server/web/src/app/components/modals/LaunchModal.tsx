@@ -10,7 +10,6 @@ import {
   IconName,
   Input,
   InputSize,
-  InputTrailing,
   Modal,
   ModalSize,
   PopoverPlacement,
@@ -41,10 +40,15 @@ import { api } from "@/app/services/api";
 import {
   useCreateModelConfig,
   useCreateSession,
+  useSshConnect,
   useStoreInfo,
   useUpdatePresentation,
 } from "@/app/services/queries";
-import type { BackendKind, CreateSessionRequest } from "@/app/types/api";
+import type {
+  BackendKind,
+  CreateSessionRequest,
+  SshTarget,
+} from "@/app/types/api";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -83,8 +87,18 @@ const EMPTY_SANDBOX: SandboxState = {
 
 /** `field` marks which control to flag; "config" flags the whole box. */
 interface FormError {
-  field: "cwd" | "sshHost" | "config";
+  field: "cwd" | "sshHost" | "sshPort" | "sshKey" | "ssh" | "config";
   message: string;
+}
+
+/** OpenSSH accepts 1-65535; anything else is rejected before the request. */
+function sshPortError(value: string): string | null {
+  if (!value.trim()) return null;
+  const port = Number(value.trim());
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return "The port must be a whole number between 1 and 65535.";
+  }
+  return null;
 }
 
 /** Remounted on every open so the form always starts from the configured defaults. */
@@ -119,6 +133,8 @@ function LaunchForm({
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [sshHost, setSshHost] = useState("");
+  const [sshPort, setSshPort] = useState("");
+  const [sshKey, setSshKey] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
@@ -128,8 +144,16 @@ function LaunchForm({
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [error, setError] = useState<FormError | null>(null);
+  // The host this form has actually reached. Everything remote — the working
+  // directory above all — is meaningless until one connection has answered, so
+  // the rest of the form waits for it.
+  const [connection, setConnection] = useState<SshTarget | null>(null);
 
   const isSsh = mode === "ssh";
+  const connectSsh = useSshConnect();
+  const connected = isSsh ? connection : null;
+  // A local or sandboxed session has nothing to connect to, so it is ready at once.
+  const ready = !isSsh || connected !== null;
   const busy = createSession.isPending || createModelConfig.isPending;
 
   // Any edit clears the previous attempt's error, which also re-enables submit.
@@ -150,16 +174,69 @@ function LaunchForm({
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
 
-  const submit = async () => {
-    if (busy) return;
-    if (isSsh && !nullable(sshHost)) {
+  /** Paths belong to whichever machine runs the session, so they do not carry over. */
+  const changeMode = (next: Mode) => {
+    if (next === mode) return;
+    setError(null);
+    setMode(next);
+    setConnection(null);
+    setCwd(next === "ssh" ? "" : defaultCwd);
+  };
+
+  /**
+   * Opens the connection and starts the form off in the remote home.
+   *
+   * Listing that directory is the test: it needs the same handshake a session
+   * would, so a wrong key or a closed port is reported here rather than after
+   * the session has been created.
+   */
+  const connect = async () => {
+    if (connectSsh.isPending) return;
+    const host = nullable(sshHost);
+    if (!host) {
       setError({
         field: "sshHost",
         message: "An SSH host is required for a remote session.",
       });
       return;
     }
-    if (!isSsh && !nullable(cwd)) {
+    const portError = sshPortError(sshPort);
+    if (portError) {
+      setError({ field: "sshPort", message: portError });
+      return;
+    }
+    const target: SshTarget = {
+      ssh_host: host,
+      ssh_port: nullable(sshPort) ? Number(sshPort.trim()) : null,
+      ssh_identity_file: nullable(sshKey),
+    };
+    try {
+      const home = await connectSsh.mutateAsync(target);
+      setConnection(target);
+      setCwd(home.path);
+      setError(null);
+    } catch (connectError) {
+      setConnection(null);
+      setError({ field: "ssh", message: errorMessage(connectError) });
+    }
+  };
+
+  const disconnect = () => {
+    setConnection(null);
+    setCwd("");
+    setError(null);
+  };
+
+  const submit = async () => {
+    if (busy) return;
+    if (isSsh && !connected) {
+      setError({
+        field: "ssh",
+        message: "Connect to the SSH host before creating a session.",
+      });
+      return;
+    }
+    if (!nullable(cwd)) {
       setError({ field: "cwd", message: "A working directory is required." });
       return;
     }
@@ -210,7 +287,14 @@ function LaunchForm({
     }
 
     const body: CreateSessionRequest = {
-      ...launchLocationFromValues({ cwd, ssh_host: isSsh ? sshHost : "" }),
+      // The connection that answered, rather than what the fields hold now:
+      // this is the one already proved to work.
+      ...launchLocationFromValues({
+        cwd,
+        ssh_host: connected?.ssh_host ?? "",
+        ssh_port: connected?.ssh_port ? String(connected.ssh_port) : "",
+        ssh_identity_file: connected?.ssh_identity_file ?? "",
+      }),
       model,
       base_url: baseUrl,
       backend,
@@ -313,7 +397,7 @@ function LaunchForm({
           content={ButtonContent.Text}
           onClick={submit}
           loading={busy}
-          disabled={Boolean(error) || !selection}
+          disabled={Boolean(error) || !selection || !ready}
         >
           Create Session
         </Button>
@@ -336,7 +420,7 @@ function LaunchForm({
                 }
                 size={ButtonSize.Medium}
                 content={ButtonContent.Text}
-                onClick={() => edit(setMode)(item.id)}
+                onClick={() => changeMode(item.id)}
                 aria-pressed={mode === item.id}
               >
                 {item.label}
@@ -346,87 +430,156 @@ function LaunchForm({
         </div>
 
         {isSsh ? (
-          <div className="flex flex-col gap-1">
-            <FieldLabel
-              label="SSH Host"
-              hint="OpenSSH target, e.g. build-box or user@host."
-              required
-              invalid={invalid("sshHost")}
-            />
-            <Input
-              inputSize={InputSize.Medium}
-              placeholder="build-box or user@host"
-              value={sshHost}
-              validation={invalid("sshHost")}
-              validationText={invalid("sshHost") ? error?.message : ""}
-              onChange={(e) => edit(setSshHost)(e.target.value)}
-            />
+          <div
+            className={cn(
+              "flex flex-col gap-4 p-4 rounded-md shadow-convex",
+              connected
+                ? "bg-info-secondary"
+                : "bg-elevation-sublevel-variant-A",
+            )}
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                <FieldLabel
+                  label="SSH Host"
+                  hint="Hostname or IP, with the user if it is not yours: user@host."
+                  required
+                  invalid={invalid("sshHost")}
+                />
+                <Input
+                  inputSize={InputSize.Medium}
+                  placeholder="deploy@192.0.2.10 or build-box"
+                  value={sshHost}
+                  isDisabled={Boolean(connected)}
+                  validation={invalid("sshHost")}
+                  validationText={invalid("sshHost") ? error?.message : ""}
+                  onChange={(e) => edit(setSshHost)(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1 w-32 shrink-0">
+                <FieldLabel
+                  label="Port"
+                  hint="Blank means 22."
+                  invalid={invalid("sshPort")}
+                />
+                <Input
+                  inputSize={InputSize.Medium}
+                  placeholder="22"
+                  inputMode="numeric"
+                  value={sshPort}
+                  isDisabled={Boolean(connected)}
+                  validation={invalid("sshPort")}
+                  validationText={invalid("sshPort") ? error?.message : ""}
+                  onChange={(e) => edit(setSshPort)(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                <FieldLabel
+                  label="Private Key"
+                  hint="Path on this machine. Blank uses your ssh agent and default keys."
+                  invalid={invalid("sshKey")}
+                />
+                <Input
+                  inputSize={InputSize.Medium}
+                  placeholder="~/.ssh/id_ed25519"
+                  value={sshKey}
+                  isDisabled={Boolean(connected)}
+                  validation={invalid("sshKey")}
+                  validationText={invalid("sshKey") ? error?.message : ""}
+                  onChange={(e) => edit(setSshKey)(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1 w-32 shrink-0">
+                {/* Empty label row, so the button lines up with the input beside it. */}
+                <span className="h-5" aria-hidden />
+                {connected ? (
+                  <Button
+                    variant={ButtonVariant.Ghost}
+                    size={ButtonSize.Medium}
+                    content={ButtonContent.Text}
+                    className="w-full"
+                    onClick={disconnect}
+                  >
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    variant={ButtonVariant.Primary}
+                    size={ButtonSize.Medium}
+                    content={ButtonContent.Text}
+                    className="w-full"
+                    loading={connectSsh.isPending}
+                    onClick={connect}
+                  >
+                    Connect
+                  </Button>
+                )}
+              </div>
+            </div>
+            {invalid("ssh") ? (
+              <p className="text-micro text-error-primary">{error?.message}</p>
+            ) : (
+              <p className="text-micro text-basic-muted">
+                {connected
+                  ? "Connected. The session will run its commands and its git on this host."
+                  : "The key must not need a passphrase typed in: nac connects without a terminal to ask for one."}
+              </p>
+            )}
           </div>
         ) : null}
 
-        <div className="flex items-start gap-4">
-          <div className="flex flex-col gap-1 flex-1 min-w-0">
-            <FieldLabel
-              label="Working Directory"
-              hint={
-                isSsh
-                  ? "Path on the SSH host; defaults to the remote home."
-                  : "Project directory the agent works in."
-              }
-              required={!isSsh}
-              invalid={invalid("cwd")}
-            />
-            {isSsh ? (
-              // Remote paths live on the SSH host, which this server cannot list.
+        {ready ? (
+          <div className="flex items-start gap-4">
+            <div className="flex flex-col gap-1 flex-1 min-w-0">
+              <FieldLabel
+                label="Working Directory"
+                hint={
+                  isSsh
+                    ? "Directory on the SSH host the agent works in."
+                    : "Project directory the agent works in."
+                }
+                required
+                invalid={invalid("cwd")}
+              />
+              <Button
+                variant={ButtonVariant.Secondary}
+                size={ButtonSize.Medium}
+                content={ButtonContent.IconRight}
+                className={cn("w-full", invalid("cwd") && "input-validation")}
+                style={CWD_BUTTON_PADDING}
+                onClick={() => setPicking(true)}
+              >
+                <span
+                  className={cn(
+                    "flex-1 min-w-0 truncate text-left font-normal",
+                    cwd ? "text-basic-primary" : "text-basic-muted",
+                  )}
+                >
+                  {cwd || "/path/to/project"}
+                </span>
+                <Icon iconName={IconName.Folder} className="shrink-0" />
+              </Button>
+              {invalid("cwd") ? (
+                <p className="pt-1 text-error-primary text-micro">
+                  {error?.message}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-1 flex-1 min-w-0">
+              <FieldLabel label="Title (optional)" />
               <Input
                 inputSize={InputSize.Medium}
-                trailing={InputTrailing.Icon}
-                trailingIconName={IconName.Folder}
-                placeholder="~ (remote)"
-                value={cwd}
-                validation={invalid("cwd")}
-                validationText={invalid("cwd") ? error?.message : ""}
-                onChange={(e) => edit(setCwd)(e.target.value)}
+                placeholder="Shown on the session card"
+                value={title}
+                onChange={(e) => edit(setTitle)(e.target.value)}
               />
-            ) : (
-              <>
-                <Button
-                  variant={ButtonVariant.Secondary}
-                  size={ButtonSize.Medium}
-                  content={ButtonContent.IconRight}
-                  className={cn("w-full", invalid("cwd") && "input-validation")}
-                  style={CWD_BUTTON_PADDING}
-                  onClick={() => setPicking(true)}
-                >
-                  <span
-                    className={cn(
-                      "flex-1 min-w-0 truncate text-left font-normal",
-                      cwd ? "text-basic-primary" : "text-basic-muted",
-                    )}
-                  >
-                    {cwd || "/path/to/project"}
-                  </span>
-                  <Icon iconName={IconName.Folder} className="shrink-0" />
-                </Button>
-                {invalid("cwd") ? (
-                  <p className="pt-1 text-error-primary text-micro">
-                    {error?.message}
-                  </p>
-                ) : null}
-              </>
-            )}
+            </div>
           </div>
-          <div className="flex flex-col gap-1 flex-1 min-w-0">
-            <FieldLabel label="Title (optional)" />
-            <Input
-              inputSize={InputSize.Medium}
-              placeholder="Shown on the session card"
-              value={title}
-              onChange={(e) => edit(setTitle)(e.target.value)}
-            />
-          </div>
-        </div>
+        ) : null}
 
+        {ready ? (
         <ConfigurationsPanel
           invalid={invalid("config")}
           errorText={invalid("config") ? error?.message : undefined}
@@ -582,12 +735,14 @@ function LaunchForm({
             ) : null}
           </div>
         </ConfigurationsPanel>
+        ) : null}
       </div>
 
       <PathPickerModal
         open={picking}
         kind="directory"
         initialPath={cwd.trim()}
+        ssh={connected}
         onClose={() => setPicking(false)}
         onSelect={(path) => {
           edit(setCwd)(path);

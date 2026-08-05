@@ -39,6 +39,13 @@ pub struct SessionSummarySnapshot {
     pub sandboxed: bool,
     /// OpenSSH/freeform target the session runs on; `None` = local session.
     pub ssh_host: Option<String>,
+    /// Port and key the session was created with, so anything rebuilding the
+    /// connection reaches the same machine the same way. Omitted when the
+    /// session leaves them to ssh, which is what older snapshots always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_identity_file: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -176,7 +183,17 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             visible_message_count: summary.visible_message_count,
             last_user_prompt: summary.last_user_prompt,
             sandboxed: summary.sandboxed,
-            ssh_host: summary.ssh_host,
+            ssh_host: summary
+                .ssh
+                .as_ref()
+                .map(|connection| connection.host.clone()),
+            ssh_port: summary.ssh.as_ref().and_then(|connection| connection.port),
+            ssh_identity_file: summary.ssh.as_ref().and_then(|connection| {
+                connection
+                    .identity_file
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+            }),
             title: summary.title,
             pinned: summary.pinned,
             sort_order: summary.sort_order,

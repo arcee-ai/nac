@@ -104,6 +104,14 @@ struct ManagedWorkerCli {
     #[arg(long = "ssh-host", alias = "host-id", hide = true)]
     ssh_host: Option<String>,
 
+    /// Internal ssh port for remote workers, when the session set one.
+    #[arg(long = "ssh-port", hide = true)]
+    ssh_port: Option<u16>,
+
+    /// Internal ssh private key for remote workers, when the session set one.
+    #[arg(long = "ssh-identity-file", hide = true)]
+    ssh_identity_file: Option<PathBuf>,
+
     #[command(flatten)]
     dispatch: WorkerDispatchArgs,
 
@@ -440,7 +448,11 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_cpus: cli.sandbox.sandbox_cpus,
             sandbox_mem: cli.sandbox.sandbox_mem,
         },
-        ssh_host: cli.ssh_host,
+        ssh: runtime::SshOptions {
+            host: cli.ssh_host,
+            port: cli.ssh_port,
+            identity_file: cli.ssh_identity_file,
+        },
     };
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }
