@@ -447,8 +447,20 @@ export function ConfigurationsPanel({
       : Boolean(resolved);
 
   const keyInvalid = validation.status === "error";
-  const boxInvalid = invalid || keyInvalid || Boolean(resolveError);
-  const message = errorText ?? (keyInvalid ? validation.message : resolveError);
+  // A login that cannot read the model index leaves the same empty list as a
+  // provider with nothing to offer, so saying which one it is has to be explicit.
+  const modelListError = loginQuery.isError
+    ? errorMessage(loginQuery.error)
+    : "";
+  const boxInvalid =
+    invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
+  const message =
+    errorText ?? (keyInvalid ? validation.message : resolveError || modelListError);
+  const retry = resolveError
+    ? configQuery.refetch
+    : modelListError
+      ? loginQuery.refetch
+      : null;
 
   const sourceLabel =
     source.kind === "new"
@@ -634,6 +646,7 @@ export function ConfigurationsPanel({
                     <ConfigRow
                       label="Default Model"
                       hint="Model the session starts with; the login reaches all of these."
+                      invalid={Boolean(modelListError)}
                       control={
                         <SmallSelect
                           items={modelItems(models)}
@@ -642,7 +655,9 @@ export function ConfigurationsPanel({
                           placeholder={
                             loginQuery.isFetching
                               ? "Reading the model list…"
-                              : "No models offered"
+                              : modelListError
+                                ? "The model list could not be read"
+                                : "No models offered"
                           }
                         />
                       }
@@ -701,12 +716,12 @@ export function ConfigurationsPanel({
           <p className="label-micro text-error-primary flex-1 min-w-0">
             {message}
           </p>
-          {resolveError ? (
+          {retry ? (
             <Button
               variant={ButtonVariant.Ghost}
               size={ButtonSize.Medium}
               content={ButtonContent.Text}
-              onClick={() => void configQuery.refetch()}
+              onClick={() => void retry()}
             >
               Try again
             </Button>

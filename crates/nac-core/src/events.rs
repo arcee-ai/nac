@@ -278,7 +278,7 @@ pub struct SubmittedUserMessageSnapshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
     /// Agent/model progress. The canonical top-level session busy lifecycle is
-    /// represented by RunStarted/RunCompleted/RunFailed. AgentEvent
+    /// represented by RunStarted/RunCompleted/RunFailed/RunCancelled. AgentEvent
     /// RunStarted/RunFinished remain low-level progress markers.
     Agent {
         event: AgentEvent,
@@ -297,6 +297,10 @@ pub enum SessionEvent {
     RunFailed {
         message: String,
     },
+    /// The run ended because the user asked it to, which is an outcome rather
+    /// than a fault. Carries no message: the user already knows what happened,
+    /// and the reason is a constant with nothing to report.
+    RunCancelled,
     SnapshotSaved {
         session_id: String,
     },

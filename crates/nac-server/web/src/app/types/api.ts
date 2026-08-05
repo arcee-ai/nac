@@ -490,6 +490,8 @@ export type SessionEvent =
     }
   | { type: "run_completed"; response: string; duration_ms?: number }
   | { type: "run_failed"; message: string }
+  /** The user stopped the run, which is an outcome rather than a fault. */
+  | { type: "run_cancelled" }
   | { type: "snapshot_saved"; session_id: string }
   /** The orchestrator transcript grew: a message was committed to the log. */
   | { type: "transcript_appended"; transcript_len: number }

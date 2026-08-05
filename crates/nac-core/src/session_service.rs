@@ -1719,7 +1719,6 @@ impl SessionService {
         // the following ordinary call completed.
         let cancel_usage = self.append_cancellation_message().await;
 
-        let message = "run cancelled by user".to_string();
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
@@ -1739,16 +1738,19 @@ impl SessionService {
             }
         };
 
-        let terminal_message = match persistence_error {
-            Some(error) => {
-                format!("{message}\nAdditionally, failed to persist session snapshot: {error}")
-            }
-            None => message,
+        // Cancellation is not a failure, so it gets its own terminal event and
+        // the UI keeps the "stopped by user" story it already told. A snapshot
+        // that could not be persisted is a real fault and still says so.
+        let terminal_event = match persistence_error {
+            Some(error) => SessionEvent::RunFailed {
+                message: format!(
+                    "run cancelled by user\nAdditionally, failed to persist session snapshot: {error}"
+                ),
+            },
+            None => SessionEvent::RunCancelled,
         };
         self.event_bus.emit_with_context(
-            SessionEvent::RunFailed {
-                message: terminal_message,
-            },
+            terminal_event,
             Some(cancelling_run.snapshot.run_id.clone()),
             cancelling_run.snapshot.client_id.clone(),
         );
@@ -5208,14 +5210,9 @@ pub(super) mod tests {
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
-        let failed = events.recv().await.unwrap();
-        assert_eq!(failed.run_id.as_ref(), Some(&active.run_id));
-        assert_eq!(
-            failed.event,
-            SessionEvent::RunFailed {
-                message: "run failed".to_string()
-            }
-        );
+        let cancelled = events.recv().await.unwrap();
+        assert_eq!(cancelled.run_id.as_ref(), Some(&active.run_id));
+        assert_eq!(cancelled.event, SessionEvent::RunCancelled);
         assert!(parts.service.active_run().is_none());
         assert!(parts.service.active_thread_names().await.is_empty());
         assert!(crate::store::list_thread_steering(&store_path, &session_id)

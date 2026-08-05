@@ -287,6 +287,30 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Resolves an Arcee/OpenAI-compatible base URL to its model-index route.
+///
+/// The index is the sibling of the chat-completions route rather than a path off
+/// the base URL, and the two are reached through the same canonicalization: a
+/// stored login records the origin it was issued for, while the REST surface
+/// lives under `/api/v1`. Asked at the bare origin, `/models` answers 200 with an
+/// empty body, which reads as a provider offering nothing rather than as a URL
+/// that was never the index.
+pub(super) fn models_url(base_url: &str) -> Result<Url> {
+    let mut url = chat_completions_url(base_url)?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            anyhow!(
+                "invalid Arcee base URL '{}': URL cannot be a base",
+                base_url
+            )
+        })?;
+        segments.pop();
+        segments.pop();
+        segments.push("models");
+    }
+    Ok(url)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]

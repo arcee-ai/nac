@@ -261,6 +261,19 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       pushEvent({ seq, kind: "error", text: message, isError: true });
       return true;
     }
+    case "run_cancelled":
+      // Stopping is what the user asked for: the transcript already carries the
+      // cancellation marker, so a red box would only contradict it. A provider
+      // refusal seen earlier in this run is moot now for the same reason.
+      setState({
+        running: false,
+        activity: "",
+        error: null,
+        modelError: null,
+        streamSettled: true,
+      });
+      pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
+      return true;
     case "snapshot_saved":
       return true;
     case "transcript_appended":

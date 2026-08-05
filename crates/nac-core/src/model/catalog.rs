@@ -76,6 +76,20 @@ fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
     }
 }
 
+/// The model index of a backend, asked for at a URL the provider will accept.
+///
+/// Arcee is why this is not [`models_url`] alone: its base URL arrives in
+/// several shapes — the canonical `/api/v1`, or the bare origin a stored login
+/// records — and only the route canonicalization inference already does turns
+/// all of them into the index.
+fn model_index_url(backend: BackendKind, base_url: &str) -> Result<String> {
+    if matches!(backend, BackendKind::ArceeApi | BackendKind::ArceeAuth) {
+        return Ok(arcee::models_url(base_url)?.to_string());
+    }
+    models_url(backend, base_url)
+        .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))
+}
+
 fn model_from_value(value: &Value) -> Option<ProviderModel> {
     if let Some(id) = value.as_str() {
         return Some(ProviderModel {
@@ -148,8 +162,7 @@ pub async fn list_provider_models(
     }
 
     let base_url = resolve_model_base_url(backend, Some(base_url.to_string()))?;
-    let url = models_url(backend, &base_url)
-        .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+    let url = model_index_url(backend, &base_url)?;
 
     let request = model_index_request(&url)?;
     let request = match backend {
@@ -179,15 +192,13 @@ pub async fn list_managed_provider_models(
             // offered to an origin other than the one that issued it.
             let base_url = arcee::read_stored_auth()?.base_url;
             let token = arcee::fresh_access_token(&client, &base_url).await?;
-            let url = models_url(backend, &base_url)
-                .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+            let url = model_index_url(backend, &base_url)?;
             (base_url, model_index_request(&url)?.bearer_auth(token))
         }
         ManagedAuthProvider::Codex => {
             let base_url = resolve_model_base_url(backend, None)?;
             let (token, account_id) = chatgpt_codex::stored_auth_for_request(&client).await?;
-            let url = models_url(backend, &base_url)
-                .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))?;
+            let url = model_index_url(backend, &base_url)?;
             let request = model_index_request(&url)?
                 .bearer_auth(token)
                 .header("ChatGPT-Account-Id", account_id);
