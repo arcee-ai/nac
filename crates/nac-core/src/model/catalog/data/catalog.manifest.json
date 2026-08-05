@@ -1,13 +1,13 @@
 {
-  "sha256": "92d29949e1b519e85717166e4bc11ea66931214cd8bf380136275496de2937d6",
+  "sha256": "a0eb367fa1c49f196f8764ae6d2fac890bbe733b4f4ad6f96ff7e1487e993eab",
   "generated_at": "2026-08-03T18:47:22Z",
   "models_dev_url": "https://models.dev/api.json",
   "models_dev_etag": "\"7934128a45100f1ddf11b07bda2c0278\"",
   "model_counts": {
-    "anthropic-messages": 15,
+    "anthropic-messages": 13,
     "deepseek-chat": 4,
     "fireworks-chat": 17,
-    "openai-responses": 47,
-    "together-chat": 34
+    "openai-responses": 29,
+    "together-chat": 17
   }
 }

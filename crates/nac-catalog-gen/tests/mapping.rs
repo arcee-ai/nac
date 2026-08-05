@@ -66,7 +66,11 @@ fn seed_mapping_toggle_effort_and_budget_tokens() {
     assert_eq!(map.get("high").unwrap().as_deref(), Some("high"));
     // `max` addresses nac's xhigh slot with its wire value preserved.
     assert_eq!(map.get("xhigh").unwrap().as_deref(), Some("max"));
-    assert_eq!(map.len(), 5, "budget_tokens contributes no entries: {map:?}");
+    assert_eq!(
+        map.len(),
+        5,
+        "budget_tokens contributes no entries: {map:?}"
+    );
 }
 
 #[test]
@@ -92,7 +96,11 @@ fn seed_mapping_max_wins_over_xhigh_when_both_are_listed() {
         EMPTY_OVERRIDES,
     );
     assert_eq!(
-        only_model(&reversed).thinking_level_map.get("xhigh").unwrap().as_deref(),
+        only_model(&reversed)
+            .thinking_level_map
+            .get("xhigh")
+            .unwrap()
+            .as_deref(),
         Some("max"),
         "order-independent: the higher tier keeps the shared slot"
     );
@@ -130,7 +138,12 @@ fn seed_mapping_missing_limit_and_cost_fall_back() {
     assert_eq!(sparse.context_window, gen::FALLBACK_CONTEXT_WINDOW);
     assert_eq!(sparse.max_tokens, gen::FALLBACK_MAX_TOKENS);
     assert_eq!(
-        (sparse.cost.input, sparse.cost.output, sparse.cost.cache_read, sparse.cost.cache_write),
+        (
+            sparse.cost.input,
+            sparse.cost.output,
+            sparse.cost.cache_read,
+            sparse.cost.cache_write
+        ),
         (0.0, 0.0, 0.0, 0.0)
     );
     assert!(!sparse.reasoning);
@@ -178,9 +191,7 @@ fn unknown_reasoning_option_type_fails_loudly() {
 #[test]
 fn unknown_effort_value_fails_loudly() {
     let result = gen::generate(
-        &one_model(
-            r#", "reasoning_options": [{"type": "effort", "values": ["ultra"]}]"#,
-        ),
+        &one_model(r#", "reasoning_options": [{"type": "effort", "values": ["ultra"]}]"#),
         EMPTY_OVERRIDES,
     );
     let error = format!("{:#}", result.unwrap_err());
@@ -190,10 +201,7 @@ fn unknown_effort_value_fails_loudly() {
 #[test]
 fn negative_cost_rate_fails_loudly() {
     let result = gen::generate(
-        &api_json(
-            r#""m-neg": {"id": "m-neg", "cost": {"input": -1}}"#,
-            "",
-        ),
+        &api_json(r#""m-neg": {"id": "m-neg", "cost": {"input": -1}}"#, ""),
         EMPTY_OVERRIDES,
     );
     let error = format!("{:#}", result.unwrap_err());
@@ -221,7 +229,11 @@ fn provider_env_maps_the_first_conventional_var_name() {
       "openai": {"env": ["OPENAI_API_KEY"], "models": {}}
     }"#;
     let generation = generate(payload, EMPTY_OVERRIDES);
-    let var = |provider: &str| generation.catalog.providers[provider].credential_env_var.as_deref();
+    let var = |provider: &str| {
+        generation.catalog.providers[provider]
+            .credential_env_var
+            .as_deref()
+    };
     // The first entry is the conventional name.
     assert_eq!(var("anthropic-messages"), Some("ANTHROPIC_API_KEY"));
     assert_eq!(var("deepseek-chat"), Some("DEEPSEEK_API_KEY"));
@@ -233,7 +245,11 @@ fn provider_env_maps_the_first_conventional_var_name() {
 
 #[test]
 fn invalid_credential_env_var_fails_loudly() {
-    for env in [r#"["not a valid name!!"]"#, r#"["  "]"#, r#"["1STARTS_WITH_DIGIT"]"#] {
+    for env in [
+        r#"["not a valid name!!"]"#,
+        r#"["  "]"#,
+        r#"["1STARTS_WITH_DIGIT"]"#,
+    ] {
         let payload = format!(
             r#"{{"anthropic": {{"models": {{}}}}, "deepseek": {{"env": {env}, "models": {{}}}},
                "fireworks-ai": {{"models": {{}}}}, "togetherai": {{"models": {{}}}},
@@ -289,8 +305,7 @@ fn model_override_applies_to_dated_snapshot_family_members() {
     let family = models["claude-opus-9-9"].thinking_level_map.clone();
     assert_eq!(family.get("xhigh").unwrap().as_deref(), Some("max"));
     assert_eq!(
-        models["claude-opus-9-9-20270101"].thinking_level_map,
-        family,
+        models["claude-opus-9-9-20270101"].thinking_level_map, family,
         "dated snapshots inherit the family override"
     );
     assert_eq!(
@@ -311,7 +326,8 @@ fn unmatched_override_is_a_review_note_not_an_error() {
         generation
             .notes
             .iter()
-            .any(|note| note.contains("claude-nonexistent") && note.contains("matched no models.dev entry")),
+            .any(|note| note.contains("claude-nonexistent")
+                && note.contains("matched no models.dev entry")),
         "{:?}",
         generation.notes
     );
@@ -346,5 +362,54 @@ fn unrelated_providers_with_drifted_schemas_are_ignored() {
     // The top level parses tolerantly; only nac's five providers are
     // strictly decoded, so drift elsewhere cannot break regeneration.
     let generation = generate(&one_model(""), EMPTY_OVERRIDES);
-    assert!(!generation.catalog.providers.contains_key("unrelated-provider"));
+    assert!(!generation
+        .catalog
+        .providers
+        .contains_key("unrelated-provider"));
+}
+
+#[test]
+fn non_agent_models_are_filtered() {
+    let generation = generate(
+        &api_json(
+            r#""good":{"tool_call":true,"modalities":{"input":["text"],"output":["text"]}},"deprecated":{"status":"deprecated","tool_call":true},"embedding":{"family":"text-embedding","tool_call":false},"image":{"family":"gpt-image","modalities":{"output":["image"]}},"realtime":{"tool_call":true,"modalities":{"input":["text","audio"],"output":["text","audio"]}}"#,
+            "",
+        ),
+        EMPTY_OVERRIDES,
+    );
+    assert_eq!(
+        generation.catalog.providers["anthropic-messages"]
+            .models
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["good"]
+    );
+}
+
+#[test]
+fn final_override_numeric_invariants_are_validated() {
+    for (overrides, expected) in [
+        (
+            r#"[providers."anthropic-messages".models."claude-test-1"]
+context_window=32000"#,
+            "max_tokens 64000",
+        ),
+        (
+            r#"[providers."anthropic-messages".models."claude-test-1"]
+max_tokens=0"#,
+            "must be positive",
+        ),
+        (
+            r#"[providers."anthropic-messages".models."claude-test-1"]
+cost={input=-1,output=1,cache_read=0,cache_write=0}"#,
+            "finite and nonnegative",
+        ),
+    ] {
+        let error = format!(
+            "{:#}",
+            gen::generate(&one_model(""), overrides).unwrap_err()
+        );
+        assert!(error.contains(expected), "{error}");
+    }
 }

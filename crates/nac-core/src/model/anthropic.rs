@@ -15,7 +15,12 @@ pub(super) fn anthropic_messages_request(
     thinking_levels: &ThinkingLevelMap,
     max_tokens: u64,
 ) -> Result<Value> {
-    validate_model_reasoning_effort(BackendKind::AnthropicMessages, model, reasoning_effort)?;
+    super::backend::validate_model_reasoning_effort_with_map(
+        BackendKind::AnthropicMessages,
+        model,
+        reasoning_effort,
+        thinking_levels,
+    )?;
     let (system, mut messages) = anthropic_messages_from_internal(messages)?;
     let mut request = json!({
         "model": model,

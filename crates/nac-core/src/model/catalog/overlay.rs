@@ -237,7 +237,10 @@ pub(crate) enum RefreshOutcome {
     /// advanced, the overlay (if any) is untouched.
     NotModified,
     /// A new overlay was written and the process-global catalog reloaded.
-    Updated { models: usize, warnings: Vec<String> },
+    Updated {
+        models: usize,
+        warnings: Vec<String>,
+    },
     /// Contained failure: any cached overlay and the baseline stay active.
     Failed { error: String },
 }
@@ -252,7 +255,8 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
     let sidecar_path = overlay_etag_path(&home);
     let sidecar = read_sidecar(&sidecar_path);
     if let Some(sidecar) = &sidecar {
-        if now.saturating_sub(sidecar.fetched_at_unix) < REFRESH_CADENCE_SECS {
+        if sidecar.url == url && now.saturating_sub(sidecar.fetched_at_unix) < REFRESH_CADENCE_SECS
+        {
             return RefreshOutcome::SkippedCadence;
         }
     }
@@ -260,8 +264,17 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
     // embedded baseline's ETag: an unchanged models.dev answers 304 and no
     // overlay is ever written.
     let etag = sidecar
+        .filter(|sidecar| sidecar.url == url)
         .and_then(|sidecar| sidecar.etag)
-        .or_else(|| super::data::parse_manifest().ok().and_then(|m| m.models_dev_etag));
+        .or_else(|| {
+            (url == DEFAULT_MODELS_DEV_URL)
+                .then(|| {
+                    super::data::parse_manifest()
+                        .ok()
+                        .and_then(|m| m.models_dev_etag)
+                })
+                .flatten()
+        });
 
     let client = match reqwest::Client::builder()
         .timeout(timeout)
@@ -407,9 +420,19 @@ pub(crate) fn reset_refresh_for_test() {
 #[derive(Debug, Deserialize)]
 struct ModelsDevModel {
     name: Option<String>,
+    family: Option<String>,
+    status: Option<String>,
+    tool_call: Option<bool>,
+    modalities: Option<ModelsDevModalities>,
     reasoning: Option<bool>,
     limit: Option<ModelsDevLimit>,
     cost: Option<ModelsDevCost>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsDevModalities {
+    input: Option<Vec<String>>,
+    output: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -428,10 +451,11 @@ struct ModelsDevCost {
 
 /// Map a models.dev `api.json` payload into overlay provider records.
 /// Tolerant at every level: the top level parses as generic values, only
-/// nac's five providers are consumed, and per-model failures skip the model
-/// with a warning — a partial overlay beats none, and the embedded baseline
-/// covers anything skipped. Total payload parse failure is the only hard
-/// error (nothing is written then).
+/// nac's five providers are consumed, and per-model failures warn and keep a
+/// matching known-good embedded entry. Malformed novel IDs are skipped;
+/// missing or explicitly incompatible IDs remain absent so a successful
+/// provider snapshot can retire them. Total payload parse failure is the only
+/// hard error (nothing is written then).
 pub(super) fn map_models_dev(
     api_json: &str,
     seed: &ModelCatalog,
@@ -441,6 +465,11 @@ pub(super) fn map_models_dev(
     let mut providers = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut model_count = 0usize;
+    // A malformed refreshed record must not erase a known-good embedded
+    // entry. Missing and explicitly incompatible records are intentionally
+    // not copied, so provider snapshots can still retire them.
+    let baseline: Option<super::data::GeneratedCatalog> =
+        serde_json::from_str(super::data::GENERATED_CATALOG_JSON).ok();
     for (models_dev_id, provider) in MODELS_DEV_PROVIDERS {
         let Some(raw_provider) = raw.get(models_dev_id) else {
             warnings.push(format!(
@@ -473,18 +502,49 @@ pub(super) fn map_models_dev(
             let model: ModelsDevModel = match serde_json::from_value(raw_model) {
                 Ok(model) => model,
                 Err(error) => {
+                    let preserved = preserve_baseline_model(
+                        baseline.as_ref(),
+                        provider,
+                        &id,
+                        &mut models,
+                        &mut model_count,
+                    );
                     warnings.push(format!(
-                        "{provider}/{id}: malformed model entry ({error}); skipped"
+                        "{provider}/{id}: malformed model entry ({error}); {}",
+                        if preserved {
+                            "kept embedded baseline"
+                        } else {
+                            "skipped"
+                        }
                     ));
                     continue;
                 }
             };
+            if !is_agent_compatible(&model) {
+                continue;
+            }
             match map_model(seed, provider, &id, &model) {
                 Ok(entry) => {
                     models.insert(id.clone(), entry);
                     model_count += 1;
                 }
-                Err(reason) => warnings.push(format!("{provider}/{id}: {reason}; skipped")),
+                Err(reason) => {
+                    let preserved = preserve_baseline_model(
+                        baseline.as_ref(),
+                        provider,
+                        &id,
+                        &mut models,
+                        &mut model_count,
+                    );
+                    warnings.push(format!(
+                        "{provider}/{id}: {reason}; {}",
+                        if preserved {
+                            "kept embedded baseline"
+                        } else {
+                            "skipped"
+                        }
+                    ));
+                }
             }
         }
         providers.insert(
@@ -496,6 +556,25 @@ pub(super) fn map_models_dev(
         );
     }
     Ok((providers, warnings, model_count))
+}
+
+fn preserve_baseline_model(
+    baseline: Option<&super::data::GeneratedCatalog>,
+    provider: BackendKind,
+    id: &str,
+    models: &mut BTreeMap<String, GeneratedModel>,
+    model_count: &mut usize,
+) -> bool {
+    let Some(entry) = baseline
+        .and_then(|catalog| catalog.providers.get(&provider))
+        .and_then(|provider| provider.models.get(id))
+        .cloned()
+    else {
+        return false;
+    };
+    models.insert(id.to_string(), entry);
+    *model_count += 1;
+    true
 }
 
 /// models.dev provider `env` → the conventional credential variable name
@@ -538,12 +617,37 @@ fn map_credential_env_var(
     Some(name.to_string())
 }
 
+fn is_agent_compatible(model: &ModelsDevModel) -> bool {
+    if model.status.as_deref() == Some("deprecated") || model.tool_call == Some(false) {
+        return false;
+    }
+    if model
+        .family
+        .as_deref()
+        .is_some_and(|f| f.contains("embedding") || f.contains("image"))
+    {
+        return false;
+    }
+    let input = model
+        .modalities
+        .as_ref()
+        .and_then(|m| m.input.as_ref())
+        .is_none_or(|v| v.iter().any(|x| x == "text"));
+    let output = model
+        .modalities
+        .as_ref()
+        .and_then(|m| m.output.as_ref())
+        .is_none_or(|v| v.as_slice() == ["text"]);
+    input && output
+}
+
 fn map_model(
     seed: &ModelCatalog,
     provider: BackendKind,
     id: &str,
     model: &ModelsDevModel,
 ) -> Result<GeneratedModel, String> {
+    debug_assert!(is_agent_compatible(model));
     let (context_window, max_tokens) = map_limits(model.limit.as_ref());
     Ok(GeneratedModel {
         display_name: model.name.clone(),

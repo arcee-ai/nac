@@ -39,7 +39,7 @@ pub(super) struct GeneratedCatalog {
     pub(super) providers: BTreeMap<BackendKind, GeneratedProvider>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct GeneratedProvider {
     /// The provider's conventional credential env var name (models.dev
     /// `env`'s first entry; status-only metadata for the `/models` auth
@@ -50,7 +50,7 @@ pub(super) struct GeneratedProvider {
     pub(super) models: BTreeMap<String, GeneratedModel>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct GeneratedModel {
     #[serde(default)]
     pub(super) display_name: Option<String>,
@@ -118,16 +118,31 @@ pub(super) fn merge_entries(
     source: ModelSource,
 ) {
     let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
-        debug_assert!(false, "generated provider {provider} must have a seed default");
+        debug_assert!(
+            false,
+            "generated provider {provider} must have a seed default"
+        );
         return;
     };
     if let Some(credential_env_var) = generated.credential_env_var {
         provider_catalog.credential_env_var = Some(credential_env_var);
     }
     let compat = provider_catalog.default.compat.clone();
+    if source == ModelSource::Overlay {
+        let ids = generated
+            .models
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        provider_catalog
+            .models
+            .retain(|id, metadata| metadata.source != ModelSource::Baseline || ids.contains(id));
+    }
     for (id, entry) in generated.models {
         let metadata = hydrate_entry(provider, id, entry, &compat, source);
-        provider_catalog.models.insert(metadata.id.clone(), metadata);
+        provider_catalog
+            .models
+            .insert(metadata.id.clone(), metadata);
     }
 }
 

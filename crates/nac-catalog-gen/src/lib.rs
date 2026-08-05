@@ -65,10 +65,20 @@ struct ModelsDevProvider {
 #[derive(Debug, Deserialize)]
 struct ModelsDevModel {
     name: Option<String>,
+    family: Option<String>,
+    status: Option<String>,
+    tool_call: Option<bool>,
+    modalities: Option<ModelsDevModalities>,
     reasoning: Option<bool>,
     reasoning_options: Option<Vec<ReasoningOption>>,
     limit: Option<ModelsDevLimit>,
     cost: Option<ModelsDevCost>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsDevModalities {
+    input: Option<Vec<String>>,
+    output: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,11 +289,14 @@ fn seed_thinking_levels(
     options: Option<&[ReasoningOption]>,
 ) -> Result<BTreeMap<String, Option<String>>> {
     let mut map: BTreeMap<String, Option<String>> = BTreeMap::new();
-    let Some(options) = options else { return Ok(map) };
+    let Some(options) = options else {
+        return Ok(map);
+    };
     for option in options {
         match option {
             ReasoningOption::Toggle => {
-                map.entry("none".to_string()).or_insert_with(|| Some("none".to_string()));
+                map.entry("none".to_string())
+                    .or_insert_with(|| Some("none".to_string()));
             }
             ReasoningOption::BudgetTokens {} => {}
             ReasoningOption::Unknown => bail!(
@@ -337,7 +350,7 @@ fn seed_limits(limit: Option<&ModelsDevLimit>) -> (u64, u64) {
 fn seed_cost(provider: &str, model: &str, cost: Option<&ModelsDevCost>) -> Result<CostDoc> {
     let rate = |rate: Option<f64>, field: &str| -> Result<f64> {
         let rate = rate.unwrap_or(0.0);
-        if rate < 0.0 {
+        if !rate.is_finite() || rate < 0.0 {
             bail!(
                 "models.dev provider '{provider}' model '{model}': negative {field} rate \
                  {rate} (models.dev schema drift)"
@@ -351,6 +364,50 @@ fn seed_cost(provider: &str, model: &str, cost: Option<&ModelsDevCost>) -> Resul
         cache_read: rate(cost.and_then(|cost| cost.cache_read), "cache_read")?,
         cache_write: rate(cost.and_then(|cost| cost.cache_write), "cache_write")?,
     })
+}
+
+fn is_agent_compatible(model: &ModelsDevModel) -> bool {
+    if model.status.as_deref() == Some("deprecated") || model.tool_call == Some(false) {
+        return false;
+    }
+    if model
+        .family
+        .as_deref()
+        .is_some_and(|f| f.contains("embedding") || f.contains("image"))
+    {
+        return false;
+    }
+    let input = model
+        .modalities
+        .as_ref()
+        .and_then(|m| m.input.as_ref())
+        .is_none_or(|v| v.iter().any(|x| x == "text"));
+    let output = model
+        .modalities
+        .as_ref()
+        .and_then(|m| m.output.as_ref())
+        .is_none_or(|v| v.as_slice() == ["text"]);
+    input && output
+}
+
+fn validate_final_model(provider: &str, model: &str, entry: &ModelDoc) -> Result<()> {
+    if entry.context_window == 0 {
+        bail!("{provider}/{model}: context_window must be positive after overrides");
+    }
+    if entry.max_tokens == 0 || entry.max_tokens > entry.context_window {
+        bail!("{provider}/{model}: max_tokens {} must be positive and <= context_window {} after overrides", entry.max_tokens, entry.context_window);
+    }
+    for (field, rate) in [
+        ("input", entry.cost.input),
+        ("output", entry.cost.output),
+        ("cache_read", entry.cost.cache_read),
+        ("cache_write", entry.cost.cache_write),
+    ] {
+        if !rate.is_finite() || rate < 0.0 {
+            bail!("{provider}/{model}: {field} rate {rate} must be finite and nonnegative after overrides");
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +459,11 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
         let provider_override = overrides.providers.get(nac_id);
         let mut models = BTreeMap::new();
         for (id, model) in &provider.models {
-            let seed_map = seed_thinking_levels(models_dev_id, id, model.reasoning_options.as_deref())?;
+            if !is_agent_compatible(model) {
+                continue;
+            }
+            let seed_map =
+                seed_thinking_levels(models_dev_id, id, model.reasoning_options.as_deref())?;
             let (context_window, max_tokens) = seed_limits(model.limit.as_ref());
             let mut entry = ModelDoc {
                 display_name: model.name.clone(),
@@ -413,7 +474,14 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
                 thinking_level_map: seed_map,
             };
             let seed_map = entry.thinking_level_map.clone();
-            apply_overrides(nac_id, id, &mut entry, provider_override, &mut matched_overrides);
+            apply_overrides(
+                nac_id,
+                id,
+                &mut entry,
+                provider_override,
+                &mut matched_overrides,
+            );
+            validate_final_model(nac_id, id, &entry)?;
             if entry.thinking_level_map != seed_map {
                 *seed_maps_replaced.entry(nac_id.to_string()).or_insert(0) += 1;
             }
@@ -450,7 +518,12 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
     let catalog = CatalogDoc { providers };
     let catalog_json =
         serde_json::to_string_pretty(&catalog).context("serializing catalog.json")? + "\n";
-    Ok(Generation { catalog, catalog_json, seed_maps_replaced, notes })
+    Ok(Generation {
+        catalog,
+        catalog_json,
+        seed_maps_replaced,
+        notes,
+    })
 }
 
 fn apply_overrides(
@@ -460,7 +533,9 @@ fn apply_overrides(
     provider_override: Option<&ProviderOverride>,
     matched: &mut Vec<(String, String)>,
 ) {
-    let Some(provider_override) = provider_override else { return };
+    let Some(provider_override) = provider_override else {
+        return;
+    };
     // The provider default replaces nearly every seed map by design (the
     // curated matrix, not models.dev reasoning_options, stays authoritative),
     // so replacements are not noted per-model; the binary prints a
@@ -468,13 +543,10 @@ fn apply_overrides(
     if let Some(levels) = &provider_override.default_thinking_levels {
         entry.thinking_level_map = to_wire_map(levels);
     }
-    let model_override = provider_override
-        .models
-        .get_key_value(id)
-        .or_else(|| {
-            let family = dated_snapshot_family(id)?;
-            provider_override.models.get_key_value(family)
-        });
+    let model_override = provider_override.models.get_key_value(id).or_else(|| {
+        let family = dated_snapshot_family(id)?;
+        provider_override.models.get_key_value(family)
+    });
     if let Some((key, model_override)) = model_override {
         matched.push((provider.to_string(), key.clone()));
         if let Some(levels) = &model_override.thinking_levels {
@@ -490,7 +562,7 @@ fn apply_overrides(
             entry.context_window = context_window;
         }
         if let Some(max_tokens) = model_override.max_tokens {
-            entry.max_tokens = max_tokens.min(entry.context_window);
+            entry.max_tokens = max_tokens;
         }
         if let Some(cost) = &model_override.cost {
             entry.cost = cost.clone();
@@ -538,6 +610,63 @@ pub fn manifest(
 
 pub fn manifest_json(manifest: &ManifestDoc) -> Result<String> {
     Ok(serde_json::to_string_pretty(manifest).context("serializing manifest")? + "\n")
+}
+
+pub fn check_manifest(checked_json: &str, expected: &ManifestDoc) -> Result<()> {
+    let checked: ManifestDoc =
+        serde_json::from_str(checked_json).context("parsing checked-in catalog.manifest.json")?;
+    if checked.sha256 != expected.sha256
+        || checked.models_dev_url != expected.models_dev_url
+        || checked.models_dev_etag != expected.models_dev_etag
+        || checked.model_counts != expected.model_counts
+    {
+        bail!("checked-in catalog.manifest.json differs from fresh generation");
+    }
+    if !is_valid_utc_timestamp(&checked.generated_at) {
+        bail!("checked-in catalog.manifest.json has malformed generated_at");
+    }
+    Ok(())
+}
+
+fn is_valid_utc_timestamp(value: &str) -> bool {
+    let b = value.as_bytes();
+    if b.len() != 20
+        || !b[..4].iter().all(u8::is_ascii_digit)
+        || b[4] != b'-'
+        || !b[5..7].iter().all(u8::is_ascii_digit)
+        || b[7] != b'-'
+        || !b[8..10].iter().all(u8::is_ascii_digit)
+        || b[10] != b'T'
+        || !b[11..13].iter().all(u8::is_ascii_digit)
+        || b[13] != b':'
+        || !b[14..16].iter().all(u8::is_ascii_digit)
+        || b[16] != b':'
+        || !b[17..19].iter().all(u8::is_ascii_digit)
+        || b[19] != b'Z'
+    {
+        return false;
+    }
+    let number =
+        |range: std::ops::Range<usize>| std::str::from_utf8(&b[range]).ok()?.parse::<u32>().ok();
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        number(0..4),
+        number(5..7),
+        number(8..10),
+        number(11..13),
+        number(14..16),
+        number(17..19),
+    ) else {
+        return false;
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    year != 0 && (1..=days).contains(&day) && hour < 24 && minute < 60 && second < 60
 }
 
 pub fn hex_sha256(bytes: &[u8]) -> String {
@@ -592,7 +721,10 @@ mod tests {
 
     #[test]
     fn dated_snapshot_family_matches_the_backend_rule() {
-        assert_eq!(dated_snapshot_family("claude-opus-4-6-20260301"), Some("claude-opus-4-6"));
+        assert_eq!(
+            dated_snapshot_family("claude-opus-4-6-20260301"),
+            Some("claude-opus-4-6")
+        );
         assert_eq!(dated_snapshot_family("claude-opus-4-6-latest"), None);
         assert_eq!(dated_snapshot_family("claude-opus-4-6"), None);
     }

@@ -1359,6 +1359,11 @@ mod tests {
             let explicit = effective_model_settings(
                 &ModelOptions {
                     backend: Some(backend),
+                    api_model: Some(if backend == BackendKind::ArceeAuth {
+                        "trinity-large-thinking".to_string()
+                    } else {
+                        "managed-model".to_string()
+                    }),
                     ..ModelOptions::default()
                 },
                 &explicit_config,

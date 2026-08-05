@@ -9,6 +9,39 @@ mod header_policy;
 mod http_contract;
 mod s5_wire;
 
+#[test]
+fn arcee_auth_rejects_every_model_except_trinity_large_thinking() {
+    let invalid = validate_model_configuration(
+        BackendKind::ArceeAuth,
+        "trinity-mini",
+        Some(crate::model::ARCEE_AUTH_CANONICAL_BASE_URL),
+        None,
+        None,
+        &std::collections::BTreeMap::new(),
+    )
+    .expect_err("managed Arcee auth must reject custom model IDs");
+    assert!(
+        invalid.to_string().contains("trinity-large-thinking"),
+        "{invalid:#}"
+    );
+
+    let settings = EffectiveModelSettings::new(
+        BackendKind::ArceeAuth,
+        "trinity-mini".to_string(),
+        crate::model::ARCEE_AUTH_CANONICAL_BASE_URL.to_string(),
+        None,
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .unwrap();
+    let direct = ModelClient::from_effective_settings(settings)
+        .expect_err("direct model-client construction must enforce the managed model contract");
+    assert!(
+        direct.to_string().contains("trinity-large-thinking"),
+        "{direct:#}"
+    );
+}
+
 fn test_model_client(
     backend: BackendKind,
     base_url: String,
@@ -33,9 +66,7 @@ async fn send_provider_test_request(client: &ModelClient, url: &str) -> Result<V
     let body = json!({"prompt": "sensitive prompt must not replay"});
     match client.backend {
         BackendKind::OpenAiResponses => client.post_json_with_retry(url, &body).await,
-        BackendKind::AnthropicMessages => {
-            client.post_anthropic_json_with_retry(url, &body).await
-        }
+        BackendKind::AnthropicMessages => client.post_anthropic_json_with_retry(url, &body).await,
         backend => panic!("unsupported test backend: {backend}"),
     }
 }
@@ -45,9 +76,7 @@ fn assert_provider_request_contract(
     request: &super::super::test_http::CapturedRequest,
 ) {
     let (credential_header, expected_value) = match backend {
-        BackendKind::OpenAiResponses => {
-            ("authorization", "Bearer selected-provider-credential")
-        }
+        BackendKind::OpenAiResponses => ("authorization", "Bearer selected-provider-credential"),
         BackendKind::AnthropicMessages => ("x-api-key", "selected-provider-credential"),
         backend => panic!("unsupported test backend: {backend}"),
     };

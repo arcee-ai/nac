@@ -5,8 +5,8 @@
 use super::data;
 use super::overlay::{
     format_unix_utc, is_utc_iso8601, map_models_dev, overlay_dir, read_sidecar,
-    refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar,
-    OverlaySidecar, RefreshOutcome, REFRESH_CADENCE_SECS,
+    refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar, OverlaySidecar,
+    RefreshOutcome, DEFAULT_MODELS_DEV_URL, REFRESH_CADENCE_SECS,
 };
 use super::test_support::{write_overlay, EnvGuard, TempHome};
 use super::*;
@@ -46,7 +46,7 @@ fn overlay_model_doc(context_window: u64, max_tokens: u64) -> serde_json::Value 
     })
 }
 
-fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64) {
+fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64, url: &str) {
     let dir = overlay_dir(home);
     std::fs::create_dir_all(&dir).unwrap();
     write_sidecar(
@@ -54,7 +54,7 @@ fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64) {
         &OverlaySidecar {
             etag: etag.map(str::to_string),
             fetched_at_unix,
-            url: "https://models.dev/api.json".to_string(),
+            url: url.to_string(),
         },
     );
 }
@@ -66,10 +66,18 @@ fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64) {
 #[tokio::test]
 async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-200", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-200",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     let started_at = unix_now();
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
-        .with_header("ETag", "\"overlay-etag-1\"")]);
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        novel_model_payload(),
+    )
+    .with_header("ETag", "\"overlay-etag-1\"")]);
     let server_url = server.base_url.clone();
 
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
@@ -81,17 +89,16 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     };
     assert_eq!(models, 1);
     assert_eq!(warnings.len(), 4, "{warnings:?}");
-    assert!(warnings.iter().any(|w| w.contains("fireworks-ai")), "{warnings:?}");
+    assert!(
+        warnings.iter().any(|w| w.contains("fireworks-ai")),
+        "{warnings:?}"
+    );
 
     // The request revalidates with the embedded baseline's ETag (no sidecar
     // existed yet).
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
-    let manifest_etag = data::parse_manifest().unwrap().models_dev_etag.unwrap();
-    assert_eq!(
-        requests[0].headers.get("if-none-match").map(String::as_str),
-        Some(manifest_etag.as_str())
-    );
+    assert_eq!(requests[0].headers.get("if-none-match"), None);
 
     // The overlay file carries the mapped entry with a fresh timestamp.
     let written: serde_json::Value =
@@ -131,14 +138,23 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert_eq!(metadata.context_window, 999_000);
     assert_eq!(metadata.max_tokens, 77_000);
     assert_eq!(metadata.cost.input, 1.5);
-    assert_eq!(metadata.display_name.as_deref(), Some("DeepSeek V9 Overlay Test"));
+    assert_eq!(
+        metadata.display_name.as_deref(),
+        Some("DeepSeek V9 Overlay Test")
+    );
     assert_eq!(metadata.cache_write_1h, None);
     assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        metadata
+            .thinking_level_map
+            .wire_value(ReasoningEffort::Xhigh),
         Some("max")
     );
-    assert!(metadata.thinking_level_map.is_supported(ReasoningEffort::High));
-    assert!(!metadata.thinking_level_map.is_supported(ReasoningEffort::Low));
+    assert!(metadata
+        .thinking_level_map
+        .is_supported(ReasoningEffort::High));
+    assert!(!metadata
+        .thinking_level_map
+        .is_supported(ReasoningEffort::Low));
     assert_eq!(
         metadata.compat.completions_thinking_format,
         Some(CompletionsThinkingFormat::Deepseek)
@@ -160,14 +176,25 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
 #[tokio::test]
 async fn refresh_sends_sidecar_etag_for_revalidation() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-sidecar-etag", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
-    write_sidecar_file(env.path(), Some("\"sidecar-etag\""), 0);
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
-        .with_header("ETag", "\"new-etag\"")]);
+    let env = EnvGuard::new(
+        "refresh-sidecar-etag",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        novel_model_payload(),
+    )
+    .with_header("ETag", "\"new-etag\"")]);
+    write_sidecar_file(env.path(), Some("\"sidecar-etag\""), 0, &server.base_url);
 
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
 
-    assert!(matches!(outcome, RefreshOutcome::Updated { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, RefreshOutcome::Updated { .. }),
+        "{outcome:?}"
+    );
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert_eq!(
@@ -181,7 +208,12 @@ async fn refresh_sends_sidecar_etag_for_revalidation() {
 #[tokio::test]
 async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-304", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-304",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     let started_at = unix_now();
     let server = ScriptedServer::start(vec![ScriptedResponse::json("304 Not Modified", "")]);
 
@@ -197,15 +229,19 @@ async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
     assert_eq!(metadata.source, ModelSource::Baseline);
     // The sidecar clock advances (cadence) and keeps the revalidated ETag.
     let sidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written on 304");
-    let manifest_etag = data::parse_manifest().unwrap().models_dev_etag.unwrap();
-    assert_eq!(sidecar.etag.as_deref(), Some(manifest_etag.as_str()));
+    assert_eq!(sidecar.etag, None);
     assert!(sidecar.fetched_at_unix >= started_at);
 }
 
 #[tokio::test]
 async fn refresh_304_preserves_an_existing_overlay() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-304-keep", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-304-keep",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     write_overlay(
         env.path(),
         "2099-01-01T00:00:00Z",
@@ -213,7 +249,7 @@ async fn refresh_304_preserves_an_existing_overlay() {
             "deepseek-chat": { "models": { "deepseek-v8-preexisting": overlay_model_doc(555_000, 8_000) } }
         }),
     );
-    write_sidecar_file(env.path(), Some("\"old-etag\""), 0);
+    write_sidecar_file(env.path(), Some("\"old-etag\""), 0, DEFAULT_MODELS_DEV_URL);
     let overlay_bytes = std::fs::read_to_string(env.overlay_path()).unwrap();
     reset_for_test();
     assert_eq!(
@@ -225,20 +261,28 @@ async fn refresh_304_preserves_an_existing_overlay() {
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
 
     assert_eq!(outcome, RefreshOutcome::NotModified);
-    assert_eq!(std::fs::read_to_string(env.overlay_path()).unwrap(), overlay_bytes);
+    assert_eq!(
+        std::fs::read_to_string(env.overlay_path()).unwrap(),
+        overlay_bytes
+    );
     assert_eq!(
         resolve(BackendKind::DeepSeekChat, "deepseek-v8-preexisting").source,
         ModelSource::Overlay
     );
     let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
-    assert_eq!(sidecar.etag.as_deref(), Some("\"old-etag\""));
+    assert_eq!(sidecar.etag, None);
     assert!(sidecar.fetched_at_unix > 0);
 }
 
 #[tokio::test]
 async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-500", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-500",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     write_overlay(
         env.path(),
         "2099-01-01T00:00:00Z",
@@ -246,10 +290,13 @@ async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
             "deepseek-chat": { "models": { "deepseek-v8-preexisting": overlay_model_doc(555_000, 8_000) } }
         }),
     );
-    write_sidecar_file(env.path(), Some("\"old-etag\""), 0);
+    write_sidecar_file(env.path(), Some("\"old-etag\""), 0, DEFAULT_MODELS_DEV_URL);
     let overlay_bytes = std::fs::read_to_string(env.overlay_path()).unwrap();
     reset_for_test();
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("500 Internal Server Error", "{}")]);
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "500 Internal Server Error",
+        "{}",
+    )]);
 
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
 
@@ -259,7 +306,10 @@ async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
     assert!(error.contains("HTTP 500"), "{error}");
     // A failed refresh neither clobbers the cached overlay nor advances the
     // sidecar clock (the next process start retries).
-    assert_eq!(std::fs::read_to_string(env.overlay_path()).unwrap(), overlay_bytes);
+    assert_eq!(
+        std::fs::read_to_string(env.overlay_path()).unwrap(),
+        overlay_bytes
+    );
     let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert_eq!(sidecar.fetched_at_unix, 0);
     assert_eq!(
@@ -271,7 +321,12 @@ async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
 #[tokio::test]
 async fn refresh_failures_are_contained_without_touching_state() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-failures", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-failures",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     // A server that accepts and never responds (the timeout case).
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let hang_url = format!("http://{}", listener.local_addr().unwrap());
@@ -285,9 +340,24 @@ async fn refresh_failures_are_contained_without_touching_state() {
 
     let cases: [(&str, String, Duration, &str); 3] = [
         // Nothing listens on 127.0.0.1:1; the connection is refused instantly.
-        ("connection refused", "http://127.0.0.1:1/api.json".to_string(), Duration::from_secs(2), ""),
-        ("hanging server times out", hang_url, Duration::from_millis(200), ""),
-        ("unmappable payload", garbage.base_url.clone(), Duration::from_secs(5), "parsing models.dev payload"),
+        (
+            "connection refused",
+            "http://127.0.0.1:1/api.json".to_string(),
+            Duration::from_secs(2),
+            "",
+        ),
+        (
+            "hanging server times out",
+            hang_url,
+            Duration::from_millis(200),
+            "",
+        ),
+        (
+            "unmappable payload",
+            garbage.base_url.clone(),
+            Duration::from_secs(5),
+            "parsing models.dev payload",
+        ),
     ];
     for (label, url, timeout, expected_error) in cases {
         let outcome = refresh_overlay_once(&url, timeout).await;
@@ -310,7 +380,12 @@ async fn refresh_failures_are_contained_without_touching_state() {
 #[tokio::test]
 async fn refresh_skips_drifted_models_and_providers() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = EnvGuard::new("refresh-drift", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let _env = EnvGuard::new(
+        "refresh-drift",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     let payload = serde_json::json!({
         "deepseek": {
             "models": {
@@ -342,8 +417,16 @@ async fn refresh_skips_drifted_models_and_providers() {
     assert_eq!(models, 1);
     // 4 missing providers + the negative rate + the malformed entry.
     assert_eq!(warnings.len(), 6, "{warnings:?}");
-    assert!(warnings.iter().any(|w| w.contains("deepseek-v9-negative") && w.contains("input rate")), "{warnings:?}");
-    assert!(warnings.iter().any(|w| w.contains("deepseek-v9-malformed")), "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("deepseek-v9-negative") && w.contains("input rate")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("deepseek-v9-malformed")),
+        "{warnings:?}"
+    );
     let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-v9-good");
     assert_eq!(metadata.source, ModelSource::Overlay);
     assert_eq!(metadata.context_window, 100_000);
@@ -356,8 +439,18 @@ async fn refresh_skips_drifted_models_and_providers() {
 #[tokio::test]
 async fn cadence_skips_refresh_within_four_hours() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-cadence", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
-    write_sidecar_file(env.path(), Some("\"fresh\""), unix_now());
+    let env = EnvGuard::new(
+        "refresh-cadence",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
+    write_sidecar_file(
+        env.path(),
+        Some("\"fresh\""),
+        unix_now(),
+        "http://127.0.0.1:1/api.json",
+    );
 
     // The closed port would fail instantly if a request were attempted;
     // SkippedCadence proves none was made.
@@ -369,9 +462,19 @@ async fn cadence_skips_refresh_within_four_hours() {
 #[tokio::test]
 async fn stale_cadence_refetches() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new("refresh-cadence-stale", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let env = EnvGuard::new(
+        "refresh-cadence-stale",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     let started_at = unix_now();
-    write_sidecar_file(env.path(), Some("\"stale\""), unix_now() - REFRESH_CADENCE_SECS - 60);
+    write_sidecar_file(
+        env.path(),
+        Some("\"stale\""),
+        unix_now() - REFRESH_CADENCE_SECS - 60,
+        DEFAULT_MODELS_DEV_URL,
+    );
     let server = ScriptedServer::start(vec![ScriptedResponse::json("304 Not Modified", "")]);
 
     let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
@@ -385,10 +488,18 @@ async fn stale_cadence_refetches() {
 #[tokio::test]
 async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = EnvGuard::new("refresh-spawn", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let _env = EnvGuard::new(
+        "refresh-spawn",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     unsafe { std::env::set_var("MODELS_DEV_URL", "") }; // cleared: must fall back to the default
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", novel_model_payload())
-        .with_header("ETag", "\"spawn-etag\"")]);
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        novel_model_payload(),
+    )
+    .with_header("ETag", "\"spawn-etag\"")]);
     unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
 
     spawn_overlay_refresh();
@@ -399,7 +510,10 @@ async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
         if resolve(BackendKind::DeepSeekChat, NOVEL_MODEL).source == ModelSource::Overlay {
             break;
         }
-        assert!(Instant::now() < deadline, "spawned refresh did not update the catalog");
+        assert!(
+            Instant::now() < deadline,
+            "spawned refresh did not update the catalog"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     // Exactly one request across both spawn calls.
@@ -413,7 +527,12 @@ async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
 #[test]
 fn resolution_and_validation_paths_never_touch_the_network() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
-    let _env = EnvGuard::new("no-network", &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"], &[]).with_env_layers();
+    let _env = EnvGuard::new(
+        "no-network",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
     let server = ScriptedServer::start_unexpected_request_server(Duration::from_millis(300));
     unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
     unsafe { std::env::set_var("DEEPSEEK_API_KEY", "no-network-dummy-key") };
@@ -483,7 +602,9 @@ fn overlay_older_than_baseline_is_ignored() {
         "{warnings:?}"
     );
     assert_eq!(
-        catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v9-stale").source,
+        catalog
+            .resolve(BackendKind::DeepSeekChat, "deepseek-v9-stale")
+            .source,
         ModelSource::ProviderDefault
     );
 }
@@ -526,7 +647,9 @@ fn overlay_with_malformed_generated_at_is_ignored() {
         "{warnings:?}"
     );
     assert_eq!(
-        catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v9-stale").source,
+        catalog
+            .resolve(BackendKind::DeepSeekChat, "deepseek-v9-stale")
+            .source,
         ModelSource::ProviderDefault
     );
 }
@@ -559,9 +682,9 @@ fn fresh_overlay_merges_over_the_baseline() {
     // New ids appear as overlay entries.
     let novel = catalog.resolve(BackendKind::AnthropicMessages, "claude-v9-overlay");
     assert_eq!(novel.source, ModelSource::Overlay);
-    // Untouched baseline entries stay baseline.
+    // Omitted baseline entries are retired by the provider snapshot.
     let sonnet = catalog.resolve(BackendKind::AnthropicMessages, "claude-sonnet-4-6");
-    assert_eq!(sonnet.source, ModelSource::Baseline);
+    assert_eq!(sonnet.source, ModelSource::ProviderDefault);
 }
 
 #[test]
@@ -581,11 +704,15 @@ fn overlay_load_skips_unknown_and_malformed_providers() {
 
     assert_eq!(warnings.len(), 2, "{warnings:?}");
     assert!(
-        warnings.iter().all(|w| matches!(w, CatalogWarning::OverlayEntrySkipped { .. })),
+        warnings
+            .iter()
+            .all(|w| matches!(w, CatalogWarning::OverlayEntrySkipped { .. })),
         "{warnings:?}"
     );
     assert_eq!(
-        catalog.resolve(BackendKind::TogetherChat, "together-v9").source,
+        catalog
+            .resolve(BackendKind::TogetherChat, "together-v9")
+            .source,
         ModelSource::Overlay
     );
 }
@@ -608,7 +735,7 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
     let seed = seed::seed_catalog();
     let (providers, warnings, count) =
         map_models_dev(MODELS_DEV_FIXTURE, &seed).expect("fixture maps");
-    assert_eq!(count, 117, "fixture model count drifted");
+    assert_eq!(count, 80, "fixture agent-compatible model count drifted");
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let baseline: data::GeneratedCatalog =
@@ -641,6 +768,61 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
 }
 
 #[test]
+fn runtime_mapper_preserves_only_malformed_baseline_ids() {
+    let seed = seed::seed_catalog();
+    let payload = serde_json::json!({
+        "deepseek": {
+            "models": {
+                // Known baseline ID whose refreshed record cannot be decoded.
+                "deepseek-chat": "not-an-object",
+                // Known baseline ID explicitly declared incompatible.
+                "deepseek-reasoner": {
+                    "tool_call": false,
+                    "limit": { "context": 1_000, "output": 100 }
+                }
+                // The other known baseline IDs are genuinely absent.
+            }
+        }
+    })
+    .to_string();
+
+    let (mut providers, warnings, count) = map_models_dev(&payload, &seed).unwrap();
+    assert_eq!(count, 1);
+    assert!(warnings.iter().any(|warning| {
+        warning.contains("deepseek-chat") && warning.contains("kept embedded baseline")
+    }));
+    let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
+    let baseline: data::GeneratedCatalog =
+        serde_json::from_str(data::GENERATED_CATALOG_JSON).unwrap();
+    assert_eq!(
+        mapped.models["deepseek-chat"],
+        baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-chat"]
+    );
+    assert!(!mapped.models.contains_key("deepseek-reasoner"));
+    assert!(!mapped.models.contains_key("deepseek-v4-flash"));
+
+    let mut catalog = seed::seed_catalog();
+    data::merge_generated_baseline(&mut catalog);
+    data::merge_entries(
+        &mut catalog,
+        BackendKind::DeepSeekChat,
+        mapped,
+        ModelSource::Overlay,
+    );
+    let preserved = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let expected = &baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-chat"];
+    assert_eq!(preserved.context_window, expected.context_window);
+    assert_eq!(preserved.max_tokens, expected.max_tokens);
+    assert_eq!(preserved.cost, expected.cost);
+    assert_eq!(
+        catalog
+            .resolve(BackendKind::DeepSeekChat, "deepseek-reasoner")
+            .source,
+        ModelSource::ProviderDefault
+    );
+}
+
+#[test]
 fn runtime_mapper_maps_credential_env_var_tolerantly() {
     let seed = seed::seed_catalog();
     let payload = serde_json::json!({
@@ -662,9 +844,14 @@ fn runtime_mapper_maps_credential_env_var_tolerantly() {
     assert_eq!(var(BackendKind::OpenAiResponses), None);
     assert_eq!(var(BackendKind::AnthropicMessages), None);
     assert_eq!(warnings.len(), 2, "{warnings:?}");
-    assert!(warnings.iter().any(|w| w.contains("malformed env list")), "{warnings:?}");
     assert!(
-        warnings.iter().any(|w| w.contains("invalid credential env var name")),
+        warnings.iter().any(|w| w.contains("malformed env list")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("invalid credential env var name")),
         "{warnings:?}"
     );
 }
@@ -745,3 +932,40 @@ fn sidecar_round_trips_and_corrupt_sidecar_is_ignored() {
     assert_eq!(read_sidecar(&path), None);
 }
 
+#[tokio::test]
+async fn source_url_change_bypasses_cadence_and_old_etag() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let env = EnvGuard::new("refresh-url-change", &["NAC_HOME"], &[]).with_env_layers();
+    write_sidecar_file(
+        env.path(),
+        Some("\"old\""),
+        unix_now(),
+        "https://old.example/api.json",
+    );
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        novel_model_payload(),
+    )]);
+    let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
+    assert!(
+        matches!(outcome, RefreshOutcome::Updated { .. }),
+        "{outcome:?}"
+    );
+    let requests = server.finish();
+    assert_eq!(requests[0].headers.get("if-none-match"), None);
+}
+
+#[test]
+fn overlay_provider_snapshot_retires_missing_baseline_models() {
+    let home = TempHome::new("overlay-retires-baseline");
+    write_overlay(
+        home.path(),
+        "2099-01-01T00:00:00Z",
+        serde_json::json!({"deepseek-chat":{"models":{NOVEL_MODEL:overlay_model_doc(999_000,77_000)}}}),
+    );
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let provider = &catalog.providers[&BackendKind::DeepSeekChat];
+    assert_eq!(provider.models.len(), 1);
+    assert!(!provider.models.contains_key("deepseek-chat"));
+}

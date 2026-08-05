@@ -58,8 +58,7 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
         assert_eq!(metadata.id, "never-seen-model", "{provider}");
         assert_eq!(metadata.source, ModelSource::ProviderDefault, "{provider}");
         assert_eq!(
-            metadata.context_window,
-            FALLBACK_CONTEXT_WINDOW,
+            metadata.context_window, FALLBACK_CONTEXT_WINDOW,
             "{provider}"
         );
         assert_eq!(metadata.max_tokens, FALLBACK_MAX_TOKENS, "{provider}");
@@ -161,20 +160,28 @@ fn dated_snapshots_resolve_through_their_family_entry() {
     assert_eq!(metadata.id, "claude-opus-4-6-20260301");
     assert_eq!(metadata.source, ModelSource::Baseline);
     assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        metadata
+            .thinking_level_map
+            .wire_value(ReasoningEffort::Xhigh),
         Some("max")
     );
 
     let sonnet = resolve(BackendKind::AnthropicMessages, "claude-sonnet-4-6-20251001");
     assert_eq!(sonnet.id, "claude-sonnet-4-6-20251001");
     assert_eq!(sonnet.source, ModelSource::Baseline);
-    assert!(sonnet.thinking_level_map.is_supported(ReasoningEffort::High));
-    assert!(!sonnet.thinking_level_map.is_supported(ReasoningEffort::Xhigh));
+    assert!(sonnet
+        .thinking_level_map
+        .is_supported(ReasoningEffort::High));
+    assert!(!sonnet
+        .thinking_level_map
+        .is_supported(ReasoningEffort::Xhigh));
 
     // Non-dated suffixes are not family matches and stay conservative.
     let latest = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6-latest");
     assert_eq!(latest.source, ModelSource::ProviderDefault);
-    assert!(!latest.thinking_level_map.is_supported(ReasoningEffort::High));
+    assert!(!latest
+        .thinking_level_map
+        .is_supported(ReasoningEffort::High));
 }
 
 #[test]
@@ -189,14 +196,20 @@ fn exact_seed_entries_keep_their_own_id_and_source() {
 fn wire_level_special_cases_are_encoded_in_data() {
     let deepseek = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(
-        deepseek.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        deepseek
+            .thinking_level_map
+            .wire_value(ReasoningEffort::Xhigh),
         Some("max")
     );
     assert_eq!(
-        deepseek.thinking_level_map.wire_value(ReasoningEffort::High),
+        deepseek
+            .thinking_level_map
+            .wire_value(ReasoningEffort::High),
         Some("high")
     );
-    assert!(!deepseek.thinking_level_map.is_supported(ReasoningEffort::Low));
+    assert!(!deepseek
+        .thinking_level_map
+        .is_supported(ReasoningEffort::Low));
     assert_eq!(
         deepseek.compat.completions_thinking_format,
         Some(CompletionsThinkingFormat::Deepseek)
@@ -218,10 +231,7 @@ fn wire_level_special_cases_are_encoded_in_data() {
         let arcee = resolve(backend, "arcee-model");
         assert!(arcee.thinking_level_map.0.is_empty(), "{backend}");
         assert!(!arcee.reasoning, "{backend}");
-        assert_eq!(
-            arcee.compat.completions_thinking_format, None,
-            "{backend}"
-        );
+        assert_eq!(arcee.compat.completions_thinking_format, None, "{backend}");
     }
 }
 
@@ -243,12 +253,10 @@ fn effective_settings_resolve_catalog_metadata_at_construction() {
     // the generated baseline (real limits) instead of the provider default.
     assert_eq!(settings.resolved.source, ModelSource::Baseline);
     assert_eq!(settings.resolved.context_window, 1_000_000);
-    assert!(
-        settings
-            .resolved
-            .thinking_level_map
-            .is_supported(ReasoningEffort::High)
-    );
+    assert!(settings
+        .resolved
+        .thinking_level_map
+        .is_supported(ReasoningEffort::High));
 }
 
 #[test]
@@ -265,7 +273,10 @@ fn resolution_is_sync_local_and_credential_free() {
     for provider in ALL_PROVIDERS {
         let metadata = resolve(provider, "picker-model");
         assert_eq!(metadata.source, ModelSource::ProviderDefault, "{provider}");
-        assert_eq!(metadata.context_window, FALLBACK_CONTEXT_WINDOW, "{provider}");
+        assert_eq!(
+            metadata.context_window, FALLBACK_CONTEXT_WINDOW,
+            "{provider}"
+        );
     }
 }
 
@@ -287,7 +298,14 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
     // deliberate.
     let codex_cases = [
         ("gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000, 128_000, 5.0, 30.0),
-        ("gpt-5.6-terra", "GPT-5.6 Terra", 1_050_000, 128_000, 2.0, 12.0),
+        (
+            "gpt-5.6-terra",
+            "GPT-5.6 Terra",
+            1_050_000,
+            128_000,
+            2.0,
+            12.0,
+        ),
         ("gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000, 128_000, 0.2, 1.2),
         ("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, 5.0, 30.0),
         (
@@ -372,16 +390,31 @@ fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
     // A generated entry per models.dev provider: real limits, display name,
     // baseline source, and the provider default's compat inherited.
     let cases = [
-        (BackendKind::DeepSeekChat, "deepseek-v4-flash", 1_000_000, 384_000),
+        (
+            BackendKind::DeepSeekChat,
+            "deepseek-v4-flash",
+            1_000_000,
+            384_000,
+        ),
         (
             BackendKind::FireworksChat,
             "accounts/fireworks/models/kimi-k2p6",
             262_000,
             262_000,
         ),
-        (BackendKind::TogetherChat, "moonshotai/Kimi-K2.6", 262_144, 131_000),
+        (
+            BackendKind::TogetherChat,
+            "moonshotai/Kimi-K2.6",
+            262_144,
+            131_000,
+        ),
         (BackendKind::OpenAiResponses, "gpt-5.2", 400_000, 128_000),
-        (BackendKind::AnthropicMessages, "claude-opus-4-6", 1_000_000, 128_000),
+        (
+            BackendKind::AnthropicMessages,
+            "claude-opus-4-6",
+            1_000_000,
+            128_000,
+        ),
     ];
     for (provider, model, context_window, max_tokens) in cases {
         let metadata = resolve(provider, model);
@@ -409,8 +442,14 @@ fn manifest_sha256_pins_the_embedded_catalog() {
     let manifest = data::parse_manifest().expect("embedded manifest parses");
     assert!(!manifest.sha256.is_empty());
     let digest = sha2::Sha256::digest(data::GENERATED_CATALOG_JSON.as_bytes());
-    let hex = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-    assert_eq!(hex, manifest.sha256, "catalog.json and manifest drifted apart");
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(
+        hex, manifest.sha256,
+        "catalog.json and manifest drifted apart"
+    );
 }
 
 #[test]
@@ -444,16 +483,18 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
             for (effort, wire) in &metadata.thinking_level_map.0 {
                 if let Some(wire) = wire {
-                    assert!(!wire.is_empty(), "{provider}/{id}: empty wire for {}", effort.as_str());
+                    assert!(
+                        !wire.is_empty(),
+                        "{provider}/{id}: empty wire for {}",
+                        effort.as_str()
+                    );
                 }
             }
         }
     }
-    // Snapshot pin: the checked-in models.dev baseline's model count (117)
-    // plus the hand-seeded arcee/codex entries (5 codex + 3 arcee x 2
-    // providers = 11). Drift fails loudly here at regen/seed-edit time,
+    // Snapshot pin: 80 agent-compatible generated models plus 11 hand-seeded entries. Drift fails loudly here at regen/seed-edit time,
     // forcing a deliberate review.
-    assert_eq!(entry_count, 128, "catalog model count drifted");
+    assert_eq!(entry_count, 91, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -572,7 +613,29 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
     .expect("the relaxed effort constructs effective settings");
     assert_eq!(settings.resolved.source, ModelSource::UserOverride);
 
-    // The adapter emits the override's wire value.
+    // A concurrent reload can change the global map, but request validation
+    // and wire translation must stay on the settings snapshot.
+    std::fs::write(
+        env.path().join("models.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "overrides": [{
+                "provider": "anthropic-messages",
+                "model": "claude-haiku-4-5",
+                "set": { "thinking_level_map": { "none": "none" } }
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    reset_for_test();
+    assert!(validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-haiku-4-5",
+        Some(ReasoningEffort::High),
+    )
+    .is_err());
+
+    // The adapter emits the snapshotted override's wire value.
     let request = crate::model::anthropic::anthropic_messages_request(
         "claude-haiku-4-5",
         Some(ReasoningEffort::High),
@@ -586,7 +649,10 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
     )
     .unwrap();
     assert_eq!(request["thinking"], serde_json::json!({"type": "adaptive"}));
-    assert_eq!(request["output_config"], serde_json::json!({"effort": "high"}));
+    assert_eq!(
+        request["output_config"],
+        serde_json::json!({"effort": "high"})
+    );
 }
 
 #[test]
@@ -633,7 +699,11 @@ fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
                 ProviderAuth::CodexOauth,
                 Some(CHATGPT_CODEX_CANONICAL_BASE_URL)
             ),
-            (BackendKind::AnthropicMessages, ProviderAuth::ApiKeyEnv, None),
+            (
+                BackendKind::AnthropicMessages,
+                ProviderAuth::ApiKeyEnv,
+                None
+            ),
             (
                 BackendKind::ArceeAuth,
                 ProviderAuth::ManagedArcee,
@@ -719,7 +789,10 @@ fn api_listing_serializes_the_designed_field_names() {
             "supported_efforts"
         ]
     );
-    assert_eq!(keys(&opus["cost"]), ["cache_read", "cache_write", "input", "output"]);
+    assert_eq!(
+        keys(&opus["cost"]),
+        ["cache_read", "cache_write", "input", "output"]
+    );
     assert_eq!(opus["display_name"], "Claude Opus 4.6");
     assert_eq!(opus["context_window"], 1_000_000);
     assert_eq!(opus["max_tokens"], 128_000);
@@ -796,7 +869,11 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             "{}",
             provider.id
         );
-        assert!(provider.default_limits.context_window > 0, "{}", provider.id);
+        assert!(
+            provider.default_limits.context_window > 0,
+            "{}",
+            provider.id
+        );
         assert!(provider.default_limits.max_tokens > 0, "{}", provider.id);
         for model in &provider.models {
             // The test-build global catalog is seed + embedded baseline.
@@ -805,7 +882,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 128, "catalog model count drifted");
+    assert_eq!(total, 91, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -822,8 +899,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             .unwrap();
         assert!(!provider.models.is_empty(), "{backend}");
         assert_eq!(
-            provider.default_limits.context_window,
-            FALLBACK_CONTEXT_WINDOW,
+            provider.default_limits.context_window, FALLBACK_CONTEXT_WINDOW,
             "{backend}"
         );
     }

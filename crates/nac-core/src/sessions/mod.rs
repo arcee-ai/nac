@@ -118,6 +118,9 @@ pub struct SessionSnapshot {
     pub response_durations_ms: Option<Vec<Option<u64>>>,
     /// Per-response token usage, one entry per assistant response (in order).
     pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+    /// Cumulative usage from billable runs that produced no visible response.
+    /// Kept separate so `token_usages` remains correctly indexed by response.
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1723,6 +1726,7 @@ mod tests {
                     cost: crate::model::TokenCostMicros::default(),
                 }),
             ],
+            unattributed_token_usage: None,
         });
         save_session_run_state(&store_path, &update).unwrap();
 

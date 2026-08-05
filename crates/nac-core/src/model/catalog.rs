@@ -72,16 +72,31 @@ pub(crate) fn api_kind_for(provider: BackendKind) -> ApiKind {
 /// warnings printed once per load (`nac: model catalog: ...`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CatalogWarning {
-    OverlayUnreadable { path: PathBuf, error: String },
-    OverlayCorrupt { path: PathBuf, error: String },
+    OverlayUnreadable {
+        path: PathBuf,
+        error: String,
+    },
+    OverlayCorrupt {
+        path: PathBuf,
+        error: String,
+    },
     OverlayStale {
         path: PathBuf,
         overlay_generated_at: String,
         baseline_generated_at: String,
     },
-    OverlayEntrySkipped { provider: String, reason: String },
-    UserOverridesMalformed { path: PathBuf, error: String },
-    UserOverrideSkipped { index: usize, reason: String },
+    OverlayEntrySkipped {
+        provider: String,
+        reason: String,
+    },
+    UserOverridesMalformed {
+        path: PathBuf,
+        error: String,
+    },
+    UserOverrideSkipped {
+        index: usize,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for CatalogWarning {
@@ -108,7 +123,10 @@ impl std::fmt::Display for CatalogWarning {
                 path.display()
             ),
             Self::OverlayEntrySkipped { provider, reason } => {
-                write!(formatter, "skipping catalog overlay provider '{provider}': {reason}")
+                write!(
+                    formatter,
+                    "skipping catalog overlay provider '{provider}': {reason}"
+                )
             }
             Self::UserOverridesMalformed { path, error } => write!(
                 formatter,
@@ -274,11 +292,11 @@ fn provider_auth(provider: BackendKind) -> ProviderAuth {
 ///
 /// `auth_status`/`auth_hint` are computed per call from the process
 /// environment and the managed credential files (never baked into the
-/// catalog). `configured_api_key_env` is the configured credential selector
-/// NAME from the server's root config (never the value); an API-key
-/// provider reads as ready when either its conventional env var or that
-/// selector names a set variable.
-pub fn api_listing(configured_api_key_env: Option<&str>) -> ModelListing {
+/// catalog). `configured_api_key_env` carries the backend and credential
+/// selector NAME from the server's root config (never the value); only that
+/// backend reads as ready when the selector names a set variable. Other
+/// API-key providers use only their conventional environment variables.
+pub fn api_listing(configured_api_key_env: Option<(BackendKind, &str)>) -> ModelListing {
     let catalog = current();
     let providers = catalog
         .providers

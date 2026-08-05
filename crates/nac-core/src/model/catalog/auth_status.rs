@@ -45,21 +45,24 @@ fn env_var_is_set(name: &str) -> bool {
 /// Compute one provider's `(auth_status, auth_hint)` pair.
 ///
 /// API-key providers are ready when EITHER the provider's conventional env
-/// var (catalog `credential_env_var`) OR the configured selector
-/// (`configured_api_key_env`, config.toml `[model].api_key_env` — one
-/// selector for every backend, per the launch dialog's inherit mode) names
-/// a set variable; otherwise `no_credential` with the conventional var
-/// name as the hint (`None` when no conventional name is known). Managed
+/// var (catalog `credential_env_var`) OR that same provider's root-configured
+/// selector (`configured_api_key_env`, config.toml `[model].api_key_env`)
+/// names a set variable. A selector configured for another provider is not
+/// usable by this provider and therefore does not affect its global hint.
+/// Otherwise returns `no_credential` with the conventional var name as the
+/// hint (`None` when no conventional name is known). Managed
 /// providers are ready when their stored credential exists and parses;
 /// otherwise `no_credential` with the login command as the hint.
 pub(super) fn provider_auth_status(
     provider: BackendKind,
     credential_env_var: Option<&str>,
-    configured_api_key_env: Option<&str>,
+    configured_api_key_env: Option<(BackendKind, &str)>,
 ) -> (AuthStatus, Option<String>) {
     if backend::api_key_backend(provider) {
         let ready = credential_env_var.is_some_and(env_var_is_set)
-            || configured_api_key_env.is_some_and(env_var_is_set);
+            || configured_api_key_env
+                .filter(|(configured_provider, _)| *configured_provider == provider)
+                .is_some_and(|(_, selector)| env_var_is_set(selector));
         if ready {
             return (AuthStatus::Ready, None);
         }

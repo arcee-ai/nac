@@ -39,12 +39,17 @@ fn user_override_patches_an_exact_model() {
     let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 65_536);
-    assert_eq!(metadata.display_name.as_deref(), Some("DeepSeek Chat (patched)"));
+    assert_eq!(
+        metadata.display_name.as_deref(),
+        Some("DeepSeek Chat (patched)")
+    );
     // Untouched fields keep the baseline values.
     assert_eq!(metadata.context_window, 1_000_000);
     assert_eq!(metadata.cost.input, 0.14);
     assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        metadata
+            .thinking_level_map
+            .wire_value(ReasoningEffort::Xhigh),
         Some("max")
     );
 }
@@ -80,14 +85,17 @@ fn precedence_user_beats_overlay_beats_baseline_beats_provider_default() {
     let user = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(user.source, ModelSource::UserOverride);
     assert_eq!(user.max_tokens, 33_333);
-    assert_eq!(user.context_window, 111_111, "overlay value survives under the user patch");
+    assert_eq!(
+        user.context_window, 111_111,
+        "overlay value survives under the user patch"
+    );
     // overlay > baseline
     let overlay = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(overlay.source, ModelSource::Overlay);
     assert_eq!(overlay.context_window, 222_222);
-    // baseline > provider default
+    // Missing baseline ids are retired by the provider snapshot.
     let baseline = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-pro");
-    assert_eq!(baseline.source, ModelSource::Baseline);
+    assert_eq!(baseline.source, ModelSource::ProviderDefault);
     // provider default for unknown ids
     let unknown = catalog.resolve(BackendKind::DeepSeekChat, "never-seen-model");
     assert_eq!(unknown.source, ModelSource::ProviderDefault);
@@ -114,8 +122,12 @@ fn user_override_for_unknown_model_derives_from_provider_default() {
     assert_eq!(metadata.max_tokens, 8_192);
     // Everything else derives from the provider default.
     assert_eq!(metadata.context_window, FALLBACK_CONTEXT_WINDOW);
-    assert!(metadata.thinking_level_map.is_supported(ReasoningEffort::High));
-    assert!(!metadata.thinking_level_map.is_supported(ReasoningEffort::Xhigh));
+    assert!(metadata
+        .thinking_level_map
+        .is_supported(ReasoningEffort::High));
+    assert!(!metadata
+        .thinking_level_map
+        .is_supported(ReasoningEffort::Xhigh));
     assert_eq!(
         metadata.compat.completions_reasoning_field.as_deref(),
         Some("reasoning")
@@ -146,7 +158,9 @@ fn user_override_dated_snapshot_derives_from_the_family_entry() {
     assert_eq!(metadata.max_tokens, 9_999);
     // The family map (adaptive with the "max" tier) carries over.
     assert_eq!(
-        metadata.thinking_level_map.wire_value(ReasoningEffort::Xhigh),
+        metadata
+            .thinking_level_map
+            .wire_value(ReasoningEffort::Xhigh),
         Some("max")
     );
 }

@@ -2855,6 +2855,19 @@ function sameHeaderObject(left, right) {
 }
 
 function buildSettingsPatch(values, initial) {
+  const requestedBackend = String(values?.backend || "").trim();
+  const requestedModel = String(values?.model || "").trim();
+  if (requestedBackend === "arcee-auth" && requestedModel !== "trinity-large-thinking") {
+    throw new Error("arcee-auth supports only trinity-large-thinking");
+  }
+  const initialBackend = String(initial.backend ?? "").trim();
+  const backendChanged = requestedBackend !== initialBackend;
+  const requestedProvider = findCatalogProvider(requestedBackend);
+  // Catalog-backed settings changes normally identify managed providers here.
+  // Keep the two supported managed backends safe in manual-entry fallback too.
+  const switchingToManaged = backendChanged && (Boolean(requestedProvider?.managed_base_url)
+    || requestedBackend === "arcee-auth"
+    || requestedBackend === "chatgpt-codex-responses");
   const changedRequiredString = (value, initialValue, label) => {
     const raw = String(value ?? "");
     if (raw === String(initialValue ?? "")) return initialValue;
@@ -2876,15 +2889,22 @@ function buildSettingsPatch(values, initial) {
 
   const current = {
     model: changedRequiredString(values.model, initial.model, "Model"),
-    base_url: changedRequiredString(values.base_url, initial.base_url, "Base URL"),
+    // Omission selects the canonical endpoint when changing to a managed
+    // provider. Same-provider blank edits still fail rather than accidentally
+    // clearing a required endpoint.
+    base_url: switchingToManaged
+      ? initial.base_url
+      : changedRequiredString(values.base_url, initial.base_url, "Base URL"),
     backend: changedBackend(values.backend, initial.backend),
     reasoning_effort: reasoningEffort,
   };
   const rawApiKeyEnv = String(values.api_key_env ?? "");
   const initialApiKeyText = String(initial.api_key_env ?? "");
-  current.api_key_env = rawApiKeyEnv === initialApiKeyText
+  current.api_key_env = switchingToManaged
     ? initial.api_key_env
-    : (rawApiKeyEnv.trim() || null);
+    : rawApiKeyEnv === initialApiKeyText
+      ? initial.api_key_env
+      : (rawApiKeyEnv.trim() || null);
 
   const rawCompactionThreshold = String(values.orchestrator_compaction_threshold ?? "").trim();
   current.orchestrator_compaction_threshold = rawCompactionThreshold
@@ -2895,7 +2915,6 @@ function buildSettingsPatch(values, initial) {
   for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env", "orchestrator_compaction_threshold"]) {
     if (current[field] !== initial[field]) patch[field] = current[field];
   }
-
   const headerText = String(values.extra_headers ?? "");
   const normalizedHeaderText = (value) => String(value ?? "").replace(/\r\n?/g, "\n");
   const unchangedInvalidHeaders = initial.extra_headers_invalid
@@ -4907,6 +4926,7 @@ function scheduleLaunchDefaultsPreview() {
   state.launchDefaultsPreview = request.ready
     ? { status: "loading", data: null, error: "", request: request.body }
     : { status: "waiting", data: null, error: "", message: request.message, request: null };
+  syncLaunchDefaultsDependentControls();
   if (!request.ready) return Promise.resolve(null);
   state.launchDefaultsTimer = window.setTimeout(() => {
     state.launchDefaultsTimer = null;
@@ -4925,9 +4945,11 @@ async function requestLaunchDefaultsPreview(context, generation) {
   if (generation !== state.launchDefaultsGeneration) return null;
   if (!request.ready) {
     state.launchDefaultsPreview = { status: "waiting", data: null, error: "", message: request.message, request: null };
+    syncLaunchDefaultsDependentControls();
     return null;
   }
   state.launchDefaultsPreview = { status: "loading", data: null, error: "", request: request.body };
+  syncLaunchDefaultsDependentControls();
   try {
     const data = await apiPost("/sessions/launch-defaults", request.body);
     if (generation !== state.launchDefaultsGeneration) return null;
@@ -4935,12 +4957,12 @@ async function requestLaunchDefaultsPreview(context, generation) {
     // The resolved "from config" label and the inherited effort constraint
     // depend on the configured model — refresh them without disturbing an
     // open picker.
-    if (!state.launchPicker.open && !state.launchPicker.custom) syncModelPicker("launch");
-    syncLaunchModelDependentControls();
+    syncLaunchDefaultsDependentControls();
     return data;
   } catch (error) {
     if (generation !== state.launchDefaultsGeneration) return null;
     state.launchDefaultsPreview = { status: "error", data: null, error: error.message, request: request.body };
+    syncLaunchDefaultsDependentControls();
     return null;
   }
 }
@@ -5129,6 +5151,8 @@ function modelPickerRows(query, catalog = state.modelCatalog.data) {
   const rows = [];
   for (const provider of catalogProviders(catalog)) {
     for (const model of Array.isArray(provider?.models) ? provider.models : []) {
+      // arcee-auth currently supports only the thinking model in the dashboard.
+      if (provider?.id === "arcee-auth" && model?.id !== "trinity-large-thinking") continue;
       if (needle) {
         const haystack = `${model?.id || ""} ${model?.display_name || ""} ${provider?.id || ""}`.toLowerCase();
         if (!haystack.includes(needle)) continue;
@@ -5179,10 +5203,14 @@ function modelPickerSelection(scope) {
   return { backend: String(fields.backend?.value || ""), model: String(fields.model?.value || "") };
 }
 
+const ARCEE_AUTH_MODEL = "trinity-large-thinking";
+
 function applyModelPickerSelection(scope, { backend, model }) {
   const fields = modelPickerSelectionElements(scope);
-  if (fields.backend) fields.backend.value = String(backend || "");
-  if (fields.model) fields.model.value = String(model || "");
+  const nextBackend = String(backend || "");
+  const nextModel = nextBackend === "arcee-auth" ? ARCEE_AUTH_MODEL : String(model || "");
+  if (fields.backend) fields.backend.value = nextBackend;
+  if (fields.model) fields.model.value = nextModel;
   if (scope === "launch") syncLaunchModelDependentControls();
   else syncSettingsEffortField();
   suggestCompactionThreshold(scope);
@@ -5300,7 +5328,12 @@ function modelPickerCustomMetaHtml(backend) {
 
 function renderModelPickerCustomHtml(scope, selection) {
   const ids = modelPickerIds(scope);
-  return `<div class="model-picker-custom"><div class="model-picker-custom-fields"><input id="${ids.customModel}" class="model-picker-custom-model" type="text" autocomplete="off" spellcheck="false" value="${escapeAttr(selection.model)}" placeholder="custom model id" aria-label="Custom model id" data-model-picker-custom-model="${scope}"><select class="model-picker-custom-provider" aria-label="Custom model provider" data-model-picker-custom-provider="${scope}">${customProviderOptionsHtml(scope, selection.backend)}</select></div><div id="${ids.customMeta}" class="model-picker-custom-meta">${modelPickerCustomMetaHtml(selection.backend)}</div><small class="model-picker-custom-note">Custom model — the provider's conservative defaults apply until the catalog recognizes it. <button type="button" class="model-picker-back" data-model-picker-back="${scope}">back to catalog</button></small></div>`;
+  const arcee = selection.backend === "arcee-auth";
+  const model = arcee ? ARCEE_AUTH_MODEL : selection.model;
+  const note = arcee
+    ? `Arcee auth currently supports only ${ARCEE_AUTH_MODEL}.`
+    : "Custom model — the provider's conservative defaults apply until the catalog recognizes it.";
+  return `<div class="model-picker-custom"><div class="model-picker-custom-fields"><input id="${ids.customModel}" class="model-picker-custom-model" type="text" autocomplete="off" spellcheck="false" value="${escapeAttr(model)}" placeholder="custom model id" aria-label="Custom model id" data-model-picker-custom-model="${scope}"${arcee ? " readonly" : ""}><select class="model-picker-custom-provider" aria-label="Custom model provider" data-model-picker-custom-provider="${scope}">${customProviderOptionsHtml(scope, selection.backend)}</select></div><div id="${ids.customMeta}" class="model-picker-custom-meta">${modelPickerCustomMetaHtml(selection.backend)}</div><small class="model-picker-custom-note">${escapeHtml(note)} <button type="button" class="model-picker-back" data-model-picker-back="${scope}">back to catalog</button></small></div>`;
 }
 
 // Full picker re-render (state transitions). While open, typing/navigation
@@ -5451,7 +5484,13 @@ function handleModelPickerInput(event, scope) {
   }
   if (event.target.matches?.("[data-model-picker-custom-model]")) {
     const fields = modelPickerSelectionElements(scope);
-    if (fields.model) fields.model.value = event.target.value;
+    const model = String(fields.backend?.value || "") === "arcee-auth"
+      ? ARCEE_AUTH_MODEL : event.target.value;
+    event.target.value = model;
+    if (fields.model) fields.model.value = model;
+    if (scope === "launch") syncLaunchModelDependentControls();
+    else syncSettingsEffortField();
+    suggestCompactionThreshold(scope);
   }
 }
 
@@ -5479,12 +5518,10 @@ function handleModelPickerKeydown(event, scope) {
 
 function handleModelPickerChange(event, scope) {
   if (!event.target.matches?.("[data-model-picker-custom-provider]")) return;
-  const fields = modelPickerSelectionElements(scope);
-  if (fields.backend) fields.backend.value = event.target.value;
-  if (scope === "launch") syncLaunchModelDependentControls();
-  else syncSettingsEffortField();
-  syncModelPickerCustomMeta(scope);
-  suggestCompactionThreshold(scope);
+  const selection = modelPickerSelection(scope);
+  applyModelPickerSelection(scope, { backend: event.target.value, model: selection.model });
+  // Re-render because arcee-auth locks and explains its sole supported model.
+  syncModelPicker(scope, { focus: "custom" });
 }
 
 // --- Compaction threshold auto-suggest ---------------------------------------
@@ -5587,6 +5624,11 @@ function syncLaunchModelDependentControls() {
   syncLaunchManagedFieldVisibility();
 }
 
+function syncLaunchDefaultsDependentControls() {
+  if (!state.launchPicker.open && !state.launchPicker.custom) syncModelPicker("launch");
+  syncLaunchModelDependentControls();
+}
+
 // Toggles the launch dialog between the picker (catalog ready / loading) and
 // manual entry (idle / first-load failure), then re-derives the controls that
 // depend on the selected model.
@@ -5679,6 +5721,11 @@ function handleFocusChange(event) {
 function buildLaunchSessionRequest(values) {
   const mode = String(values?.mode || "local");
   if (!["local", "sandbox", "ssh"].includes(mode)) throw new Error(`Unsupported execution mode: ${mode}`);
+  const requestedBackend = String(values?.backend || "").trim();
+  const requestedModel = String(values?.model || "").trim();
+  if (requestedBackend === "arcee-auth" && requestedModel !== ARCEE_AUTH_MODEL) {
+    throw new Error(`arcee-auth supports only ${ARCEE_AUTH_MODEL}`);
+  }
   const body = {};
   const cwd = String(values?.cwd || "").trim();
   if (mode === "ssh") {

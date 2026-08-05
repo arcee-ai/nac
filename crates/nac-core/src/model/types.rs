@@ -170,8 +170,13 @@ impl EffectiveModelSettings {
         })?;
         let model = required_nonblank_setting(model, "model")?;
         let base_url = resolve_model_base_url(backend, base_url)?;
-        validate_model_reasoning_effort(backend, &model, reasoning_effort)?;
         let resolved = catalog::resolve(backend, &model);
+        super::backend::validate_model_reasoning_effort_with_map(
+            backend,
+            &model,
+            reasoning_effort,
+            &resolved.thinking_level_map,
+        )?;
 
         Ok(Self {
             backend,

@@ -245,8 +245,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
 #[tokio::test]
 async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_headers() {
     for status in ["307 Temporary Redirect", "308 Permanent Redirect"] {
-        let destination =
-            TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect destination");
+        let destination = TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect destination");
         destination
             .set_nonblocking(true)
             .expect("make redirect destination nonblocking");
@@ -339,13 +338,11 @@ async fn anthropic_and_openai_redirects_never_replay_same_or_cross_origin() {
                 same_origin.base_url.clone(),
                 benign_headers.clone(),
             );
-            let error = send_provider_test_request(
-                &client,
-                &format!("{}/initial", same_origin.base_url),
-            )
-            .await
-            .expect_err("same-origin redirect must not be followed")
-            .to_string();
+            let error =
+                send_provider_test_request(&client, &format!("{}/initial", same_origin.base_url))
+                    .await
+                    .expect_err("same-origin redirect must not be followed")
+                    .to_string();
             let requests = same_origin.finish();
 
             assert!(
@@ -377,13 +374,11 @@ async fn anthropic_and_openai_redirects_never_replay_same_or_cross_origin() {
                 cross_origin.base_url.clone(),
                 benign_headers.clone(),
             );
-            let error = send_provider_test_request(
-                &client,
-                &format!("{}/initial", cross_origin.base_url),
-            )
-            .await
-            .expect_err("cross-origin redirect must not be followed")
-            .to_string();
+            let error =
+                send_provider_test_request(&client, &format!("{}/initial", cross_origin.base_url))
+                    .await
+                    .expect_err("cross-origin redirect must not be followed")
+                    .to_string();
             let requests = cross_origin.finish();
 
             assert!(
@@ -518,7 +513,8 @@ async fn anthropic_max_tokens_come_from_the_resolved_catalog_metadata() {
         ("claude-opus-4-5", 64_000),
         ("claude-haiku-4-5", 64_000),
         ("claude-sonnet-4-5", 64_000),
-        ("claude-opus-4-1", 32_000),
+        // Deprecated models are no longer catalogued and resolve conservatively.
+        ("claude-opus-4-1", 16_384),
         // No catalog entry: the conservative fallback (was 128_000).
         ("claude-unknown-future", 16_384),
     ] {

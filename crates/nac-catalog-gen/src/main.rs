@@ -29,8 +29,13 @@ struct Options {
 }
 
 fn parse_options() -> Result<Options> {
-    let mut options =
-        Options { input: None, check: false, output_dir: None, url: None, save_raw: None };
+    let mut options = Options {
+        input: None,
+        check: false,
+        output_dir: None,
+        url: None,
+        save_raw: None,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -45,13 +50,10 @@ fn parse_options() -> Result<Options> {
                     args.next().context("--output-dir requires a directory")?,
                 ))
             }
-            "--url" => {
-                options.url = Some(args.next().context("--url requires a URL")?)
-            }
+            "--url" => options.url = Some(args.next().context("--url requires a URL")?),
             "--save-raw" => {
                 options.save_raw = Some(PathBuf::from(
-                    args.next()
-                        .context("--save-raw requires a file path")?,
+                    args.next().context("--save-raw requires a file path")?,
                 ))
             }
             "--help" | "-h" => {
@@ -69,8 +71,7 @@ fn parse_options() -> Result<Options> {
 
 fn default_output_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/nac-catalog-gen
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../nac-core/src/model/catalog/data")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../nac-core/src/model/catalog/data")
 }
 
 async fn fetch(url: &str) -> Result<(String, Option<String>)> {
@@ -160,16 +161,30 @@ async fn main() -> Result<()> {
     if options.check {
         let checked_in = std::fs::read_to_string(&catalog_path)
             .with_context(|| format!("reading {}", catalog_path.display()))?;
-        if checked_in == generation.catalog_json {
-            println!("check: checked-in catalog.json is up to date");
+        let checked_manifest = std::fs::read_to_string(&manifest_path)
+            .with_context(|| format!("reading {}", manifest_path.display()))?;
+        let catalog_matches = checked_in == generation.catalog_json;
+        // A fixture run cannot reproduce live-fetch provenance (URL/ETag);
+        // inherit those fields from the checked-in manifest so --check
+        // validates generated content, not the recording source.
+        let mut expected_manifest = manifest;
+        if options.input.is_some() {
+            if let Ok(checked) = serde_json::from_str::<gen::ManifestDoc>(&checked_manifest) {
+                expected_manifest.models_dev_url = checked.models_dev_url;
+                expected_manifest.models_dev_etag = checked.models_dev_etag;
+            }
+        }
+        let manifest_result = gen::check_manifest(&checked_manifest, &expected_manifest);
+        if catalog_matches && manifest_result.is_ok() {
+            println!("check: checked-in catalog.json and catalog.manifest.json are up to date");
             return Ok(());
         }
-        eprintln!(
-            "check: checked-in catalog.json differs from a fresh generation \
-             ({} vs {} bytes) — review with a regen",
-            checked_in.len(),
-            generation.catalog_json.len()
-        );
+        if !catalog_matches {
+            eprintln!("check: checked-in catalog.json differs from a fresh generation ({} vs {} bytes) — review with a regen", checked_in.len(), generation.catalog_json.len());
+        }
+        if let Err(error) = manifest_result {
+            eprintln!("check: {error:#}");
+        }
         std::process::exit(1);
     }
 

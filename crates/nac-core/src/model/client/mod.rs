@@ -84,6 +84,15 @@ fn resolve_arcee_api_credentials(
     Ok((base_url.to_string(), api_key, ArceeCredentialSource::ApiKey))
 }
 
+fn validate_backend_model(backend: BackendKind, model: &str) -> Result<()> {
+    if backend == BackendKind::ArceeAuth && model != "trinity-large-thinking" {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: backend 'arcee-auth' supports only model 'trinity-large-thinking', not '{model}'"
+        )));
+    }
+    Ok(())
+}
+
 /// Validates the effective model configuration without issuing a model request.
 pub fn validate_model_configuration(
     backend: BackendKind,
@@ -96,6 +105,13 @@ pub fn validate_model_configuration(
     validate_extra_headers(extra_headers)?;
     validate_model_reasoning_effort(backend, model, reasoning_effort)?;
     validate_backend_api_key_env(backend, api_key_env)?;
+    if backend == BackendKind::ArceeAuth {
+        if let Some(base_url) = base_url {
+            arcee::validate_approved_base_url(base_url)
+                .map_err(classify_model_configuration_error)?;
+        }
+    }
+    validate_backend_model(backend, model)?;
     match backend {
         BackendKind::ArceeAuth => {
             resolve_arcee_auth_base_url(base_url)?;
@@ -165,6 +181,11 @@ impl ModelClient {
         if backend != BackendKind::ArceeApi {
             validate_backend_api_key_env(backend, settings.api_key_env.as_deref())?;
         }
+        if backend == BackendKind::ArceeAuth {
+            arcee::validate_approved_base_url(&settings.base_url)
+                .map_err(classify_model_configuration_error)?;
+        }
+        validate_backend_model(backend, &settings.model)?;
         let (api_key, arcee_credential_source) = match backend {
             BackendKind::ArceeAuth => {
                 resolve_arcee_auth_base_url(Some(&settings.base_url))?;
@@ -288,7 +309,7 @@ impl ModelClient {
         if let Some(usage) = response.usage.as_mut() {
             let cache_write_1h_rate = (self.cache_ttl == Some("1h")
                 && self.resolved_model.api == catalog::ApiKind::AnthropicMessages)
-            .then(|| self.resolved_model.cache_write_1h_rate());
+                .then(|| self.resolved_model.cache_write_1h_rate());
             usage.cost = calculate_cost(&self.resolved_model.cost, cache_write_1h_rate, usage);
         }
         response
@@ -315,11 +336,11 @@ impl ModelClient {
             compat,
         );
         let url = match self.backend {
-            BackendKind::ArceeAuth | BackendKind::ArceeApi => arcee::chat_completions_url(
-                &self.base_url,
-            )
-            .map_err(classify_model_configuration_error)?
-            .to_string(),
+            BackendKind::ArceeAuth | BackendKind::ArceeApi => {
+                arcee::chat_completions_url(&self.base_url)
+                    .map_err(classify_model_configuration_error)?
+                    .to_string()
+            }
             _ => format!("{}/chat/completions", self.base_url),
         };
         let value = match self.backend {

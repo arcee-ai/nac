@@ -38,8 +38,8 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
@@ -528,14 +528,15 @@ impl SessionManager {
         })
     }
 
-    /// The configured credential selector NAME (config.toml
-    /// `[model].api_key_env`, never the value) for the `/models`
-    /// auth-status hint. Root-config scope; a load failure degrades to
-    /// `None` (conventional-var-only status) so the listing never fails.
-    fn configured_model_api_key_env(&self) -> Option<String> {
+    /// The configured backend and credential selector NAME (config.toml
+    /// `[model].backend` and `[model].api_key_env`, never the value) for the
+    /// `/models` auth-status hint. Root-config scope; a load failure or an
+    /// incomplete pair degrades to `None` (conventional-var-only status) so
+    /// the listing never fails.
+    fn configured_model_auth_selector(&self) -> Option<(BackendKind, String)> {
         NacConfig::load_from_cwd(&self.inner.root_cwd)
             .ok()
-            .and_then(|config| config.model.api_key_env)
+            .and_then(|config| config.model.backend.zip(config.model.api_key_env))
     }
 
     pub fn launch_model_defaults(
@@ -1186,7 +1187,6 @@ impl SessionManager {
             prospective.api_key_env.as_deref(),
             &extra_headers,
         )?;
-
         // Persist only revisioned session-configuration columns after all
         // caller-controlled model configuration and credential checks succeed.
         // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
@@ -1386,13 +1386,16 @@ async fn launch_model_defaults_handler(
 /// auth requirements, managed base URL, `_default` limits and real entries.
 /// Reads the process-global catalog; synchronous, local-only, never fails.
 /// `auth_status`/`auth_hint` are computed per request from the process
-/// environment and the managed credential files; the configured selector
-/// NAME (never the value) comes from the root config — a config load
-/// failure degrades to conventional-var-only status rather than failing
-/// the listing.
+/// environment and the managed credential files; the configured backend
+/// and selector NAME (never the value) come from the root config. A config
+/// load failure or incomplete pair degrades to conventional-var-only status
+/// rather than failing the listing.
 async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
+    let configured_selector = manager.configured_model_auth_selector();
     Json(nac_core::model::api_listing(
-        manager.configured_model_api_key_env().as_deref(),
+        configured_selector
+            .as_ref()
+            .map(|(provider, selector)| (*provider, selector.as_str())),
     ))
 }
 
@@ -1515,7 +1518,6 @@ async fn thread_events(
             .await?,
     ))
 }
-
 
 async fn workspace_diff(
     State(manager): State<SessionManager>,
@@ -2522,6 +2524,7 @@ mod tests {
                 "XDG_CONFIG_HOME",
                 "HOME",
                 "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
                 "OPENAI_BASE_URL",
                 "SECOND_API_KEY",
             ];
@@ -2544,6 +2547,7 @@ mod tests {
                     Some(value) => std::env::set_var("OPENAI_API_KEY", value),
                     None => std::env::remove_var("OPENAI_API_KEY"),
                 }
+                std::env::remove_var("ANTHROPIC_API_KEY");
                 std::env::remove_var("OPENAI_BASE_URL");
                 std::env::remove_var("SECOND_API_KEY");
             }
@@ -2987,19 +2991,25 @@ mod tests {
             "nac-web codex-auth login"
         );
 
-        // A configured selector naming a set variable reads ready through
-        // the root config (the launch dialog's inherit semantics).
+        // A configured selector naming a set variable reads ready only for
+        // its root-configured provider. Unrelated providers still report
+        // only their conventional global credential hint.
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\napi_key_env = \"SECOND_API_KEY\"\n",
+            "[model]\nbackend = \"openai-responses\"\napi_key_env = \"SECOND_API_KEY\"\n",
         )
         .unwrap();
         unsafe { std::env::set_var("SECOND_API_KEY", "server-test-key") };
         let body = response_json(get_response(app.clone(), "/models", None).await).await;
         let providers = body["providers"].as_array().unwrap();
-        let openai = providers.iter().find(|p| p["id"] == "openai-responses").unwrap();
-        assert_eq!(openai["auth_status"], "ready");
-        assert!(openai["auth_hint"].is_null());
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+        assert_eq!(by_id("openai-responses")["auth_status"], "ready");
+        assert!(by_id("openai-responses")["auth_hint"].is_null());
+        assert_eq!(by_id("anthropic-messages")["auth_status"], "no_credential");
+        assert_eq!(
+            by_id("anthropic-messages")["auth_hint"],
+            "ANTHROPIC_API_KEY"
+        );
 
         // A parseable stored credential flips its managed provider.
         std::fs::write(
@@ -3145,7 +3155,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -3187,7 +3197,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -3222,7 +3232,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -3584,6 +3594,7 @@ thread_timeout_secs = 7200
             .update_session_config(
                 "unavailable-managed-auth",
                 UpdateConfigRequest {
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                     backend: RequestField::Value("arcee-api".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
@@ -3703,6 +3714,9 @@ thread_timeout_secs = 7200
                     id,
                     UpdateConfigRequest {
                         backend: RequestField::Value("openai-responses".to_string()),
+                        model: RequestField::Value("replacement-model".to_string()),
+                        base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+                        api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                         ..UpdateConfigRequest::default()
                     },
                 )
@@ -4358,7 +4372,7 @@ threshold_tokens = 64000
 
         let cleared = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("explicit-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 reasoning_effort: RequestField::Null,
@@ -4372,7 +4386,7 @@ threshold_tokens = 64000
         let cleared_id = cleared.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &cleared_id).unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
-        assert_eq!(stored.model, "explicit-model");
+        assert_eq!(stored.model, "trinity-large-thinking");
         assert_eq!(stored.reasoning_effort, None);
         assert_eq!(stored.api_key_env, None);
         assert!(stored.extra_headers.is_empty());
@@ -4380,7 +4394,7 @@ threshold_tokens = 64000
 
         let zero_disabled = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("zero-disabled-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 reasoning_effort: RequestField::Null,
@@ -4400,6 +4414,63 @@ threshold_tokens = 64000
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn arcee_auth_rejects_non_thinking_model_on_create_and_update() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("arcee_auth_model_contract");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nbackend = \"openai-responses\"\nmodel = \"openai-model\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        let create_error = manager
+            .create_session(CreateSessionRequest {
+                backend: RequestField::Value("arcee-auth".to_string()),
+                model: RequestField::Value("trinity-mini".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("create must enforce the managed Arcee model contract");
+        assert!(
+            create_error.to_string().contains("trinity-large-thinking"),
+            "{create_error:#}"
+        );
+        assert!(!store_path.exists(), "invalid create must not persist");
+
+        let created = manager
+            .create_session(CreateSessionRequest::default())
+            .await
+            .expect("configured API-key provider should create");
+        let session_id = created.metadata.session_id.unwrap();
+        let before = sessions::load_session(&store_path, &session_id).unwrap();
+        let update_error = manager
+            .update_session_config(
+                &session_id,
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-mini".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("update must enforce the managed Arcee model contract");
+        assert!(
+            update_error.to_string().contains("trinity-large-thinking"),
+            "{update_error:#}"
+        );
+        let after = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(after.backend, before.backend);
+        assert_eq!(after.model, before.model);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -4424,7 +4495,7 @@ api_key_env = "OPENAI_API_KEY"
 
         let created = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("arcee-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 ..CreateSessionRequest::default()
             })
@@ -4467,10 +4538,15 @@ api_key_env = "OPENAI_API_KEY"
             ),
             ("arcee-auth", nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL),
         ] {
+            let model = if backend == "arcee-auth" {
+                "trinity-large-thinking"
+            } else {
+                "managed-model"
+            };
             std::fs::write(
                 nac_home.join("config.toml"),
                 format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
                 ),
             )
             .unwrap();
@@ -4523,7 +4599,7 @@ api_key_env = "OPENAI_API_KEY"
             std::fs::write(
                 nac_home.join("config.toml"),
                 format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"configured-model\"\nbase_url = \"{expected_base}\"\n"
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\nbase_url = \"{expected_base}\"\n"
                 ),
             )
             .unwrap();
@@ -4539,7 +4615,7 @@ api_key_env = "OPENAI_API_KEY"
             let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
                 "backend": backend,
-                "model": "explicit-model",
+                "model": model,
                 "base_url": expected_base,
                 "api_key_env": null
             }))
@@ -4564,10 +4640,15 @@ api_key_env = "OPENAI_API_KEY"
                 "does not match the stored credential origin",
             ),
         ] {
+            let model = if backend == "arcee-auth" {
+                "trinity-large-thinking"
+            } else {
+                "managed-model"
+            };
             std::fs::write(
                 nac_home.join("config.toml"),
                 format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\nbase_url = \"{invalid_base}\"\n"
+                    "[model]\nbackend = \"{backend}\"\nmodel = \"{model}\"\nbase_url = \"{invalid_base}\"\n"
                 ),
             )
             .unwrap();
@@ -4629,6 +4710,9 @@ api_key_env = "OPENAI_API_KEY"
             seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
             let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
             incomplete.backend = backend;
+            if backend == BackendKind::ArceeAuth {
+                incomplete.model = "trinity-large-thinking".to_string();
+            }
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
             sessions::update_session_config(&store_path, &incomplete).unwrap();
@@ -4651,7 +4735,8 @@ api_key_env = "OPENAI_API_KEY"
     }
 
     #[tokio::test]
-    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_fields() {
+    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_and_credentials()
+    {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("api_key_to_arcee_patch");
         let nac_home = root.join("nac-home");
@@ -4669,11 +4754,12 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     ..UpdateConfigRequest::default()
                 },
             )
             .await
-            .expect("backend-only PATCH must select the complete managed tuple");
+            .expect("managed PATCH must normalize its omitted endpoint and credential fields");
 
         let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
@@ -5118,6 +5204,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     reasoning_effort: RequestField::Null,
                     api_key_env: RequestField::Null,
@@ -5140,6 +5227,8 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-api".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
+                    base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     orchestrator_compaction_threshold: RequestField::Value(32_000),
                     ..UpdateConfigRequest::default()
@@ -5156,6 +5245,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    model: RequestField::Value("gpt-5.2-codex".to_string()),
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Value(0),
@@ -5174,6 +5264,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("openai-responses".to_string()),
+                    model: RequestField::Value("gpt-5.2".to_string()),
                     base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(BTreeMap::new())),
@@ -5201,7 +5292,7 @@ api_key_env = "OPENAI_API_KEY"
 
         manager.attach_session("session").await.unwrap();
         let rebuilt = manager.snapshot("session").await.unwrap();
-        assert_eq!(rebuilt.metadata.model, "replacement-model");
+        assert_eq!(rebuilt.metadata.model, "gpt-5.2");
         assert_eq!(rebuilt.metadata.backend, "openai-responses");
 
         let _ = std::fs::remove_dir_all(&root);
@@ -5467,7 +5558,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
                     backend: RequestField::Value("arcee-auth".to_string()),
                     reasoning_effort: RequestField::Omitted,
@@ -5487,7 +5578,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                     backend: RequestField::Value("arcee-api".to_string()),
                     reasoning_effort: RequestField::Omitted,
@@ -5549,7 +5640,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "legacy-arcee",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Omitted,
                     backend: RequestField::Omitted,
                     reasoning_effort: RequestField::Omitted,
@@ -5563,6 +5654,7 @@ api_key_env = "OPENAI_API_KEY"
 
         let stored = sessions::load_session(&root.join("store.db"), "legacy-arcee").unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(stored.model, "trinity-large-thinking");
         assert_eq!(stored.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(&root);

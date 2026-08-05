@@ -68,6 +68,9 @@ pub struct ResponseTimingSnapshot {
     pub token_usages: Option<Vec<Option<crate::model::TokenUsage>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_token_usage: Option<crate::model::TokenUsage>,
+    /// Cumulative usage from runs that produced no visible response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cumulative_token_usage: Option<crate::model::TokenUsage>,
 }
@@ -92,7 +95,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                 .iter()
                 .filter_map(|tu| tu.as_ref())
                 .collect();
-            if non_none.is_empty() {
+            if non_none.is_empty() && snapshot.unattributed_token_usage.is_none() {
                 None
             } else {
                 let mut cumulative = crate::model::TokenUsage::default();
@@ -103,6 +106,12 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                     .last()
                     .map(|u| u.orchestrator_context_tokens)
                     .unwrap_or(0);
+                if let Some(unattributed) = &snapshot.unattributed_token_usage {
+                    cumulative.add_cost_saturating(unattributed);
+                    if unattributed.orchestrator_context_tokens != 0 {
+                        cumulative.replace_context(unattributed.orchestrator_context_tokens);
+                    }
+                }
                 Some(cumulative)
             }
         };
@@ -113,6 +122,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
             response_durations_ms: snapshot.response_durations_ms.clone(),
             token_usages: Some(snapshot.token_usages.clone()),
             last_token_usage,
+            unattributed_token_usage: snapshot.unattributed_token_usage.clone(),
             cumulative_token_usage,
         }
     }
@@ -1537,6 +1547,21 @@ impl SessionService {
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
         self.close_active_thread_dispatches();
 
+        // A cancellation marker is itself a visible response. If the run task
+        // was cancelled before capturing its baseline, record the count before
+        // appending that marker so partial cancellation usage still lands on it.
+        let transcript_baseline = match cancelling_run.transcript_baseline {
+            Some(baseline) => Some(baseline),
+            None => {
+                if let Err(error) = self.update_transcript_scan().await {
+                    eprintln!(
+                        "nac: failed to capture transcript baseline for cancellation: {error:#}"
+                    );
+                }
+                Some(self.lock_transcript_scan().visible_response_count)
+            }
+        };
+
         // Capture partial token usage from the cancelled run, including a
         // committed compaction projection when cancellation happened before
         // the following ordinary call completed.
@@ -1546,7 +1571,7 @@ impl SessionService {
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
-                cancelling_run.transcript_baseline,
+                transcript_baseline,
                 None,
                 cancel_usage,
             )
@@ -2024,6 +2049,11 @@ impl SessionService {
                 &snapshot.token_usages,
                 previous_response_count,
                 current_response_count,
+                completed_usage.clone(),
+            );
+            let unattributed_token_usage = unattributed_usage_after_run(
+                snapshot.unattributed_token_usage.clone(),
+                current_response_count > previous_response_count,
                 completed_usage,
             );
             snapshot.apply_run_state(sessions::SessionRunState {
@@ -2031,6 +2061,7 @@ impl SessionService {
                 previous_response_duration_ms: response_timing.previous_response_duration_ms,
                 response_durations_ms: response_timing.response_durations_ms,
                 token_usages,
+                unattributed_token_usage,
             })
         };
 
@@ -2305,6 +2336,7 @@ fn response_timing_after_run(
         response_durations_ms: Some(durations),
         token_usages: None,
         last_token_usage: None,
+        unattributed_token_usage: None,
         cumulative_token_usage: None,
     }
 }
@@ -2332,8 +2364,10 @@ fn response_duration_history_from_snapshot(
 /// Build the per-response token-usage vector after a run, mirroring the
 /// logic in `response_timing_after_run` for durations.  The existing
 /// vector is preserved and padded to match the new response count; the
-/// most recent response's usage is set from `completed_usage` when the
-/// run completed successfully.
+/// most recent response's usage is set from `completed_usage` only when the
+/// run appended a new visible response. A failed tool loop can accumulate
+/// usage without producing a visible response, and must not overwrite the
+/// usage/cost attributed to the preceding response.
 fn token_usages_after_run(
     existing: &[Option<crate::model::TokenUsage>],
     previous_response_count: usize,
@@ -2348,13 +2382,45 @@ fn token_usages_after_run(
     if usages.len() < current_response_count {
         usages.resize(current_response_count, None);
     }
-    if let (Some(usage), Some(last_index)) =
-        (completed_usage, current_response_count.checked_sub(1))
-    {
-        usages[last_index] = Some(usage);
+    if current_response_count > previous_response_count {
+        if let (Some(usage), Some(last_index)) =
+            (completed_usage, current_response_count.checked_sub(1))
+        {
+            usages[last_index] = Some(usage);
+        }
     }
 
     usages
+}
+
+/// Accumulate billable usage for runs with no visible response without
+/// disturbing the response-indexed history. Context tokens remain a latest
+/// value gauge while token and cost fields accumulate across failed runs.
+fn unattributed_usage_after_run(
+    existing: Option<crate::model::TokenUsage>,
+    appended_visible_response: bool,
+    completed_usage: Option<crate::model::TokenUsage>,
+) -> Option<crate::model::TokenUsage> {
+    if appended_visible_response {
+        return existing.map(|mut cumulative| {
+            if completed_usage.is_some() {
+                // This response has usage and is now the latest context gauge.
+                // Retain failed-run cumulative accounting, but prevent its
+                // older gauge from overriding the response in frontend totals.
+                cumulative.replace_context(0);
+            }
+            cumulative
+        });
+    }
+    let Some(completed_usage) = completed_usage else {
+        return existing;
+    };
+    let mut cumulative = existing.unwrap_or_default();
+    cumulative.add_cost_saturating(&completed_usage);
+    if completed_usage.orchestrator_context_tokens != 0 {
+        cumulative.replace_context(completed_usage.orchestrator_context_tokens);
+    }
+    Some(cumulative)
 }
 
 #[cfg(test)]
@@ -3658,8 +3724,7 @@ pub(super) mod tests {
         })
         .await;
         if reached.is_err() {
-            gate.resume
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = snapshot_task.await;
             panic!("snapshot did not finish workspace inspection");
         }
@@ -3678,8 +3743,7 @@ pub(super) mod tests {
             }],
         )
         .await;
-        gate.resume
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
 
         let snapshot = snapshot_task.await.unwrap();
         assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
@@ -4037,11 +4101,17 @@ pub(super) mod tests {
 
         // Two full runs: the blob stays byte-identical (never-fold) while
         // the run-state bookkeeping accumulates per visible response.
-        for (prompt, response, input_tokens) in [
+        for (loaded_visible_response_count, (prompt, response, input_tokens)) in [
             ("first prompt", "first done", 10_u64),
             ("second prompt", "second done", 20_u64),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let active = parts.service.try_begin_run(None, prompt).unwrap();
+            parts
+                .service
+                .set_run_transcript_baseline(&active.run_id, loaded_visible_response_count);
             {
                 let mut agent = parts.service.agent.lock().await;
                 agent
@@ -4220,10 +4290,7 @@ pub(super) mod tests {
         assert_eq!(loaded.previous_response_duration_ms, Some(999));
         assert_eq!(loaded.token_usages.len(), 2);
         assert!(loaded.token_usages[0].is_none());
-        assert_eq!(
-            loaded.token_usages[1].as_ref().unwrap().input_tokens,
-            10
-        );
+        assert_eq!(loaded.token_usages[1].as_ref().unwrap().input_tokens, 10);
         let blob_json_after: String = crate::store::open_connection(&store_path)
             .unwrap()
             .query_row(
@@ -4276,6 +4343,7 @@ pub(super) mod tests {
         });
 
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
+        parts.service.set_run_transcript_baseline(&active.run_id, 0);
         {
             let mut agent = parts.service.agent.lock().await;
             agent
@@ -4352,7 +4420,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn failed_run_persists_token_usage() {
+    async fn failed_run_without_visible_response_round_trips_token_usage() {
         // Regression test: when a run fails (e.g. model API error after a tool
         // round that dispatched workers), the accumulated token usage —
         // including worker thread tokens — must still be persisted so it is
@@ -4391,22 +4459,12 @@ pub(super) mod tests {
         });
 
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
+        parts.service.set_run_transcript_baseline(&active.run_id, 0);
         {
             let mut agent = parts.service.agent.lock().await;
             agent
                 .push_and_log_for_test(Message::User {
                     content: "prompt".to_string(),
-                })
-                .await
-                .unwrap();
-            agent
-                .push_and_log_for_test(Message::Assistant {
-                    content: Some("partial response".to_string()),
-                    reasoning_text: None,
-                    reasoning_details: None,
-                    tool_calls: None,
-                    model_origin: None,
-                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -4433,19 +4491,167 @@ pub(super) mod tests {
                 .await
         );
 
-        // The failed run should still persist the token usage.
+        // The response-indexed history stays empty, while the failed run's
+        // accounting round-trips through the extended token accounting JSON.
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(loaded.token_usages.len(), 1);
-        let persisted = loaded.token_usages[0]
+        assert!(loaded.token_usages.is_empty());
+        let persisted = loaded
+            .unattributed_token_usage
             .as_ref()
-            .expect("token usage should be persisted even on failed run");
+            .expect("failed usage should persist without a visible response");
         assert_eq!(persisted.input_tokens, 500);
         assert_eq!(persisted.output_tokens, 120);
         assert_eq!(persisted.cache_read_tokens, 80);
         assert_eq!(persisted.cache_write_tokens, 15);
         assert_eq!(persisted.orchestrator_context_tokens, 715);
 
+        let frontend = parts.service.frontend_snapshot().await.unwrap();
+        assert!(frontend.response_timing.token_usages.unwrap().is_empty());
+        assert_eq!(
+            frontend
+                .response_timing
+                .cumulative_token_usage
+                .unwrap()
+                .input_tokens,
+            500
+        );
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
+        let store_path = test_store_path("failed_then_successful_token_usage");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-failed-then-successful";
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.unattributed_token_usage = Some(crate::model::TokenUsage {
+            input_tokens: 500,
+            output_tokens: 120,
+            cache_read_tokens: 80,
+            cache_write_tokens: 15,
+            orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros {
+                input: 1_000,
+                output: 480,
+                total: 1_480,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        });
+        sessions::create_session(&store_path, &snapshot).unwrap();
+
+        let successful_usage = crate::model::TokenUsage {
+            input_tokens: 700,
+            output_tokens: 200,
+            cache_read_tokens: 100,
+            cache_write_tokens: 0,
+            orchestrator_context_tokens: 1_000,
+            cost: crate::model::TokenCostMicros {
+                input: 1_400,
+                output: 800,
+                total: 2_200,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+        let token_usages = token_usages_after_run(&[], 0, 1, Some(successful_usage.clone()));
+        let unattributed_token_usage = unattributed_usage_after_run(
+            snapshot.unattributed_token_usage.clone(),
+            true,
+            Some(successful_usage.clone()),
+        );
+        let update = snapshot.apply_run_state(sessions::SessionRunState {
+            last_response_duration_ms: None,
+            previous_response_duration_ms: None,
+            response_durations_ms: None,
+            token_usages,
+            unattributed_token_usage,
+        });
+        sessions::save_session_run_state(&store_path, &update).unwrap();
+
+        let loaded = sessions::load_session(&store_path, session_id).unwrap();
+        let unattributed = loaded.unattributed_token_usage.as_ref().unwrap();
+        assert_eq!(unattributed.input_tokens, 500);
+        assert_eq!(unattributed.output_tokens, 120);
+        assert_eq!(unattributed.cache_read_tokens, 80);
+        assert_eq!(unattributed.cache_write_tokens, 15);
+        assert_eq!(unattributed.cost.total, 1_480);
+        assert_eq!(unattributed.orchestrator_context_tokens, 0);
+
+        let timing = ResponseTimingSnapshot::from(&loaded);
+        assert_eq!(
+            timing
+                .last_token_usage
+                .as_ref()
+                .unwrap()
+                .orchestrator_context_tokens,
+            1_000
+        );
+        let cumulative = timing.cumulative_token_usage.unwrap();
+        assert_eq!(cumulative.input_tokens, 1_200);
+        assert_eq!(cumulative.output_tokens, 320);
+        assert_eq!(cumulative.cache_read_tokens, 180);
+        assert_eq!(cumulative.cache_write_tokens, 15);
+        assert_eq!(cumulative.cost.total, 3_680);
+        assert_eq!(cumulative.orchestrator_context_tokens, 1_000);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_run_without_new_visible_response_preserves_and_accumulates_usage() {
+        let previous_usage = crate::model::TokenUsage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cost: crate::model::TokenCostMicros {
+                input: 200,
+                output: 80,
+                total: 280,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+        let failed_usage = crate::model::TokenUsage {
+            input_tokens: 900,
+            output_tokens: 70,
+            cost: crate::model::TokenCostMicros {
+                input: 1_800,
+                output: 280,
+                total: 2_080,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+
+        let usages = token_usages_after_run(
+            &[Some(previous_usage.clone())],
+            1,
+            1,
+            Some(failed_usage.clone()),
+        );
+        let unattributed =
+            unattributed_usage_after_run(None, false, Some(failed_usage.clone())).unwrap();
+        let accumulated =
+            unattributed_usage_after_run(Some(unattributed), false, Some(failed_usage.clone()))
+                .unwrap();
+
+        assert_eq!(usages, vec![Some(previous_usage)]);
+        assert_eq!(accumulated.input_tokens, failed_usage.input_tokens * 2);
+        assert_eq!(accumulated.output_tokens, failed_usage.output_tokens * 2);
+        assert_eq!(accumulated.cost.total, failed_usage.cost.total * 2);
     }
 
     #[tokio::test]
@@ -5222,6 +5428,17 @@ pub(super) mod tests {
                 })
                 .await
                 .unwrap();
+            agent.last_usage = Some(crate::model::TokenUsage {
+                input_tokens: 40,
+                output_tokens: 10,
+                cost: crate::model::TokenCostMicros {
+                    input: 80,
+                    output: 40,
+                    total: 120,
+                    ..crate::model::TokenCostMicros::default()
+                },
+                ..crate::model::TokenUsage::default()
+            });
         }
 
         parts.service.request_cancel(&active.run_id).await.unwrap();
@@ -5276,6 +5493,13 @@ pub(super) mod tests {
         // the blob keeps the system head and the cancellation marker lives
         // in the transcript log.
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(loaded.token_usages.len(), 1);
+        let cancellation_usage = loaded.token_usages[0]
+            .as_ref()
+            .expect("early cancellation usage should be attributed to its marker");
+        assert_eq!(cancellation_usage.input_tokens, 40);
+        assert_eq!(cancellation_usage.output_tokens, 10);
+        assert_eq!(cancellation_usage.cost.total, 120);
         assert_eq!(
             serde_json::to_value(&loaded.messages).unwrap(),
             serde_json::to_value(&parts.init.restored_messages).unwrap()

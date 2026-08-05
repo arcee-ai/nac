@@ -23,8 +23,8 @@ impl IsolatedModelEnv {
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
-        let home = std::env::temp_dir()
-            .join(format!("nac-model-{label}-{}-{unique}", std::process::id()));
+        let home =
+            std::env::temp_dir().join(format!("nac-model-{label}-{}-{unique}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         if let Some(contents) = auth_contents {
             write_test_credential(&home.join("auth.json"), contents);
@@ -108,7 +108,12 @@ fn effective_settings(
 ) -> EffectiveModelSettings {
     EffectiveModelSettings::new(
         backend,
-        "test-model".to_string(),
+        if backend == BackendKind::ArceeAuth {
+            "trinity-large-thinking"
+        } else {
+            "test-model"
+        }
+        .to_string(),
         base_url.to_string(),
         None,
         api_key_env.map(str::to_string),
@@ -123,7 +128,7 @@ fn arcee_auth_rejects_nonempty_api_key_env_before_credentials() {
     let error = ModelClient::from_effective_settings(
         EffectiveModelSettings::new(
             BackendKind::ArceeAuth,
-            "test-model".to_string(),
+            "trinity-large-thinking".to_string(),
             "https://api.arcee.ai".to_string(),
             None,
             Some("ARCEE_API_KEY".to_string()),

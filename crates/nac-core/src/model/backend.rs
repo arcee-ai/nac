@@ -48,11 +48,24 @@ pub fn validate_model_reasoning_effort(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<()> {
+    let resolved = catalog::resolve(backend, model);
+    validate_model_reasoning_effort_with_map(
+        backend,
+        model,
+        reasoning_effort,
+        &resolved.thinking_level_map,
+    )
+}
+
+pub(crate) fn validate_model_reasoning_effort_with_map(
+    backend: BackendKind,
+    model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+    map: &catalog::ThinkingLevelMap,
+) -> Result<()> {
     let Some(effort) = reasoning_effort else {
         return Ok(());
     };
-
-    let map = &catalog::resolve(backend, model).thinking_level_map;
     if map.is_supported(effort) {
         return Ok(());
     }
@@ -70,10 +83,7 @@ pub fn validate_model_reasoning_effort(
     )))
 }
 
-pub fn validate_backend_api_key_env(
-    backend: BackendKind,
-    api_key_env: Option<&str>,
-) -> Result<()> {
+pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&str>) -> Result<()> {
     if api_key_backend(backend) {
         let Some(name) = api_key_env else {
             return Err(model_configuration_error(format!(

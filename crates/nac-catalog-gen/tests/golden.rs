@@ -31,7 +31,12 @@ fn recorded_fixture_regenerates_the_checked_in_catalog() {
 #[test]
 fn golden_output_covers_the_five_models_dev_providers() {
     let generation = gen::generate(FIXTURE, OVERRIDES).expect("fixture generates");
-    let providers: Vec<&str> = generation.catalog.providers.keys().map(String::as_str).collect();
+    let providers: Vec<&str> = generation
+        .catalog
+        .providers
+        .keys()
+        .map(String::as_str)
+        .collect();
     assert_eq!(
         providers,
         [
@@ -48,7 +53,10 @@ fn golden_output_covers_the_five_models_dev_providers() {
         .values()
         .map(|provider| provider.models.len())
         .sum();
-    assert_eq!(total, 117, "models.dev snapshot model count drifted");
+    assert_eq!(
+        total, 80,
+        "models.dev snapshot agent-compatible model count drifted"
+    );
 }
 
 #[test]
@@ -74,7 +82,10 @@ fn golden_output_satisfies_catalog_invariants() {
                 assert!(rate >= 0.0, "{provider}/{id}: negative rate {rate}");
             }
             for (effort, wire) in &model.thinking_level_map {
-                assert!(gen::EFFORT_NAMES.contains(&effort.as_str()), "{provider}/{id}: {effort}");
+                assert!(
+                    gen::EFFORT_NAMES.contains(&effort.as_str()),
+                    "{provider}/{id}: {effort}"
+                );
                 if let Some(wire) = wire {
                     assert!(!wire.is_empty(), "{provider}/{id}: empty wire for {effort}");
                 }
@@ -86,10 +97,63 @@ fn golden_output_satisfies_catalog_invariants() {
 #[test]
 fn manifest_hash_matches_the_generated_bytes() {
     let generation = gen::generate(FIXTURE, OVERRIDES).expect("fixture generates");
-    let manifest = gen::manifest(&generation.catalog, &generation.catalog_json, "fixture", None);
+    let manifest = gen::manifest(
+        &generation.catalog,
+        &generation.catalog_json,
+        "fixture",
+        None,
+    );
     assert_eq!(
         manifest.sha256,
         gen::hex_sha256(generation.catalog_json.as_bytes())
     );
     assert_eq!(manifest.model_counts.len(), 5);
+}
+
+#[test]
+fn manifest_check_rejects_malformed_or_invalid_utc_timestamps() {
+    let generation = gen::generate(FIXTURE, OVERRIDES).unwrap();
+    let expected = gen::manifest(
+        &generation.catalog,
+        &generation.catalog_json,
+        "fixture",
+        None,
+    );
+    for generated_at in [
+        "xxxx-xx-xxTxx:xx:xxZ",
+        "2026-00-01T00:00:00Z",
+        "2026-02-29T00:00:00Z",
+        "2024-02-30T00:00:00Z",
+        "2026-01-01T24:00:00Z",
+        "2026-01-01T00:60:00Z",
+        "2026-01-01T00:00:60Z",
+    ] {
+        let mut checked = expected.clone();
+        checked.generated_at = generated_at.to_string();
+        let json = gen::manifest_json(&checked).unwrap();
+        assert!(
+            gen::check_manifest(&json, &expected).is_err(),
+            "accepted {generated_at}"
+        );
+    }
+
+    let mut leap_day = expected.clone();
+    leap_day.generated_at = "2024-02-29T23:59:59Z".to_string();
+    gen::check_manifest(&gen::manifest_json(&leap_day).unwrap(), &expected).unwrap();
+}
+
+#[test]
+fn manifest_check_validates_catalog_and_provenance() {
+    let generation = gen::generate(FIXTURE, OVERRIDES).unwrap();
+    let expected = gen::manifest(
+        &generation.catalog,
+        &generation.catalog_json,
+        "fixture",
+        Some("etag".into()),
+    );
+    let checked = gen::manifest_json(&expected).unwrap();
+    gen::check_manifest(&checked, &expected).unwrap();
+    let mut stale: serde_json::Value = serde_json::from_str(&checked).unwrap();
+    stale["sha256"] = "stale".into();
+    assert!(gen::check_manifest(&serde_json::to_string(&stale).unwrap(), &expected).is_err());
 }

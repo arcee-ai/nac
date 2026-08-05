@@ -85,23 +85,34 @@ fn api_key_providers_read_ready_via_their_conventional_env_var() {
 }
 
 #[test]
-fn api_key_providers_read_ready_via_the_configured_selector() {
+fn only_the_configured_api_key_provider_reads_ready_via_the_configured_selector() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
     let _env = credential_free_guard("status-configured");
     unsafe { std::env::set_var(CONFIGURED_SELECTOR, "test-key") };
 
-    // The configured selector is one name for EVERY API-key backend (the
-    // launch dialog's inherit mode), so a set configured variable reads
-    // ready for all six even with every conventional name unset.
-    let listing = api_listing(Some(CONFIGURED_SELECTOR));
+    // The configured selector is usable only by its configured backend.
+    // Unrelated providers retain their conventional global hints because
+    // provider resolution will not pass this selector to them.
+    let listing = api_listing(Some((BackendKind::OpenAiResponses, CONFIGURED_SELECTOR)));
+    let openai = provider(&listing, BackendKind::OpenAiResponses);
+    assert_eq!(openai.auth_status, AuthStatus::Ready);
+    assert_eq!(openai.auth_hint, None);
+
     for (id, conventional) in API_KEY_PROVIDERS {
+        if id == BackendKind::OpenAiResponses {
+            continue;
+        }
         let listing_provider = provider(&listing, id);
         assert_eq!(
             listing_provider.auth_status,
-            AuthStatus::Ready,
-            "{id} (conventional {conventional})"
+            AuthStatus::NoCredential,
+            "{id}"
         );
-        assert_eq!(listing_provider.auth_hint, None, "{id}");
+        assert_eq!(
+            listing_provider.auth_hint.as_deref(),
+            Some(conventional),
+            "{id}"
+        );
     }
 
     // Managed providers are unaffected by env vars.
@@ -155,7 +166,7 @@ fn empty_and_whitespace_env_vars_do_not_count_as_credentials() {
 
     // Same for the configured selector's variable.
     unsafe { std::env::set_var(CONFIGURED_SELECTOR, "  ") };
-    let listing = api_listing(Some(CONFIGURED_SELECTOR));
+    let listing = api_listing(Some((BackendKind::OpenAiResponses, CONFIGURED_SELECTOR)));
     assert_eq!(
         provider(&listing, BackendKind::OpenAiResponses).auth_status,
         AuthStatus::NoCredential

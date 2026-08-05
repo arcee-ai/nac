@@ -3188,6 +3188,42 @@ test("settings controller reports No changes without issuing PATCH", async () =>
   assert.equal(form.inert, false);
 });
 
+test("settings provider switch to managed backend submits canonicalizable sparse tuple", async () => {
+  const requests = [];
+  const isolated = loadApp({ FormData: FakeFormData,
+    fetch: async (path, options = {}) => {
+      requests.push([path, options]);
+      return errorResponse(422, { error: "captured" });
+    },
+  });
+  seedCatalog(isolated);
+  const form = settingsFormElement({
+    backend: "arcee-auth", model: "trinity-large-thinking",
+    base_url: "", api_key_env: "", reasoning_effort: "__unset__", extra_headers: "",
+  });
+  isolated.state.currentId = "settings-session";
+  isolated.state.focusView = { type: "settings" };
+  isolated.state.settingsRequestGeneration = 4;
+  isolated.state.settingsFocus = { sessionId: "settings-session",
+    requestGeneration: 4, status: "ready", config: persistedConfig(),
+  };
+
+  await isolated.handleFocusPanelSubmit({ target: form, preventDefault() {} });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][0], "/sessions/settings-session/config");
+  assert.equal(requests[0][1].method, "PATCH");
+  const body = JSON.parse(requests[0][1].body);
+  assert.deepEqual(body, {
+    model: "trinity-large-thinking", backend: "arcee-auth",
+    reasoning_effort: null, extra_headers: {},
+  });
+  assert.equal(Object.hasOwn(body, "base_url"), false,
+    "managed selection must let the server install its canonical endpoint");
+  assert.equal(Object.hasOwn(body, "api_key_env"), false,
+    "managed selection must let the server install its credential mode");
+});
+
 test("settings controller suppresses duplicate submissions while a save is pending", async () => {
   const patch = deferred();
   let requestCount = 0;
@@ -3376,10 +3412,11 @@ test("model catalog loads once, keeps stale data on refresh failure, and only de
 
 test("model picker rows filter across display name, id, and provider", () => {
   seedCatalog(ui);
-  assert.equal(ui.modelPickerRows("").length, 10);
+  assert.equal(ui.modelPickerRows("").length, 8);
   assert.equal(ui.modelPickerRows("claude").length, 2);
   assert.equal(ui.modelPickerRows("GPT-5 mini").length, 1);
-  assert.equal(ui.modelPickerRows("arcee").length, 3);
+  assert.equal(ui.modelPickerRows("arcee").length, 1);
+  assert.equal(ui.modelPickerRows("trinity-mini").length, 0);
   assert.equal(ui.modelPickerRows("codex").length, 3);
   assert.equal(ui.modelPickerRows("zzz").length, 0);
   const [first] = ui.modelPickerRows("opus");
@@ -3522,9 +3559,9 @@ test("a persistent Custom model row is pinned to the bottom of the open list", (
   assert.match(list, /Custom model…/);
   assert.ok(list.indexOf("Custom model…") > list.indexOf("gpt-5.3-codex-spark"),
     "the persistent row renders after the last catalog row");
-  assert.match(list, /id="launchModelPickerOption10"[^>]*role="option"[^>]*data-model-picker-custom="launch"/);
+  assert.match(list, /id="launchModelPickerOption8"[^>]*role="option"[^>]*data-model-picker-custom="launch"/);
   assert.doesNotMatch(list, /Use custom model/);
-  assert.equal(isolated.modelPickerOptionCount("launch"), 11);
+  assert.equal(isolated.modelPickerOptionCount("launch"), 9);
   // With a query the zero-results escape row stays, and the persistent row
   // follows it.
   isolated.state.launchPicker.query = "gpt";
@@ -3642,6 +3679,61 @@ test("model picker selection writes the launch fields and constrains effort per 
   assert.equal(isolated.el.launchEffort.value, "inherit");
 });
 
+test("arcee-auth custom mode locks its sole supported model and rejects bypass requests", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
+  isolated.el.launchBackend.value = "openai-responses";
+  isolated.el.launchModel.value = "my-fine-tune";
+
+  isolated.handleModelPickerChange({ target: {
+    matches: (selector) => selector === "[data-model-picker-custom-provider]",
+    value: "arcee-auth",
+  } }, "launch");
+
+  assert.equal(isolated.el.launchBackend.value, "arcee-auth");
+  assert.equal(isolated.el.launchModel.value, "trinity-large-thinking");
+  assert.match(isolated.el.launchModelPicker.innerHTML,
+    /value="trinity-large-thinking"[^>]*readonly/);
+  assert.match(isolated.el.launchModelPicker.innerHTML,
+    /Arcee auth currently supports only trinity-large-thinking/);
+
+  const typed = { matches: (selector) => selector === "[data-model-picker-custom-model]",
+    value: "trinity-mini" };
+  isolated.handleModelPickerInput({ target: typed }, "launch");
+  assert.equal(typed.value, "trinity-large-thinking");
+  assert.equal(isolated.el.launchModel.value, "trinity-large-thinking");
+  assert.throws(() => isolated.buildLaunchSessionRequest(launchValues({
+    backend: "arcee-auth", model: "trinity-mini",
+  })), /arcee-auth supports only trinity-large-thinking/);
+  assert.throws(() => isolated.buildSettingsPatch({
+    backend: "arcee-auth", model: "trinity-mini",
+  }, persistedConfig()), /arcee-auth supports only trinity-large-thinking/);
+});
+
+test("typing a custom model immediately refreshes launch effort and compaction controls", () => {
+  const isolated = loadApp();
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.state.launchPicker = { open: false, query: "", activeIndex: 0, custom: true };
+  isolated.el.launchBackend.value = "openai-responses";
+  isolated.el.launchModel.value = "gpt-5-mini";
+  isolated.syncLaunchModelDependentControls();
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+
+  isolated.handleModelPickerInput({ target: {
+    matches: (selector) => selector === "[data-model-picker-custom-model]",
+    value: "my-fine-tune",
+  } }, "launch");
+
+  assert.equal(isolated.el.launchModel.value, "my-fine-tune");
+  assert.equal(isolated.el.launchEffortField.hidden, false);
+  assert.match(isolated.el.launchEffort.innerHTML, /value="medium">medium/);
+  assert.doesNotMatch(isolated.el.launchEffort.innerHTML, /value="xhigh"/);
+  assert.equal(isolated.el.launchCompactionThreshold.value, "89600");
+});
+
 test("launch effort control assumes provider defaults for custom models and resolves inherit", () => {
   const isolated = loadApp();
   seedCatalog(isolated);
@@ -3710,7 +3802,7 @@ test("managed backend selections hide base url and API key controls", () => {
   assert.equal(isolated.el.launchBaseUrl.value, "");
   assert.equal(isolated.el.launchApiKeyEnv.value, "");
   assert.equal(Object.hasOwn(isolated.buildLaunchSessionRequest(launchValues({
-    backend: "arcee-auth", model: "trinity-mini",
+    backend: "arcee-auth", model: "trinity-large-thinking",
     base_url: isolated.el.launchBaseUrl.value,
     api_key_env: isolated.el.launchApiKeyEnv.value,
   })), "api_key_env"), false, "a hidden managed API key field submits nothing");
@@ -3745,7 +3837,7 @@ test("managed providers render their seeded models with pricing and managed-fiel
   assert.match(open, /model-picker-option-hint">1\.1m ctx · \$5\/\$30 per 1M/);
   // A codex pick hides the managed credential override fields and constrains
   // effort to the all-levels list (codex accepts every level verbatim).
-  isolated.selectModelPickerIndex("launch", 7);
+  isolated.selectModelPickerIndex("launch", 5);
   assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
   assert.equal(isolated.el.launchModel.value, "gpt-5.6-sol");
   assert.equal(isolated.el.launchBaseUrlField.hidden, true);
@@ -3796,8 +3888,8 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   }, "from config");
   // Codex pick: managed credential fields hide as whole wrappers; the effort
   // field stays visible (all-levels); the compaction suggestion fills the value.
-  isolated.state.launchPicker = { open: true, query: "", activeIndex: 7, custom: false };
-  isolated.selectModelPickerIndex("launch", 7);
+  isolated.state.launchPicker = { open: true, query: "", activeIndex: 5, custom: false };
+  isolated.selectModelPickerIndex("launch", 5);
   assert.equal(isolated.el.launchBackend.value, "chatgpt-codex-responses");
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
@@ -3813,7 +3905,7 @@ test("codex and arcee picks hide whole field wrappers, never half-hidden control
   }, "restored to anthropic");
   // Arcee pick: managed wrappers hide AND the effort field hides (empty
   // supported_efforts) — again as whole wrappers.
-  isolated.state.launchPicker = { open: true, query: "trinity-mini", activeIndex: 0, custom: false };
+  isolated.state.launchPicker = { open: true, query: "trinity-large-thinking", activeIndex: 0, custom: false };
   isolated.selectModelPickerIndex("launch", 0);
   assertLaunchVisibilityMap(isolated, {
     launchModelPicker: false, launchModelFallback: true, launchModelCatalogNotice: true,
@@ -3848,9 +3940,9 @@ test("model picker keyboard navigation wraps, selects, enters custom, and closes
   // Wrapping past the top lands on the persistent "Custom model…" row (the
   // last option), then steps up into the catalog rows.
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
-  assert.equal(isolated.state.launchPicker.activeIndex, 10);
+  assert.equal(isolated.state.launchPicker.activeIndex, 8);
   isolated.handleModelPickerKeydown(key("ArrowUp"), "launch");
-  assert.equal(isolated.state.launchPicker.activeIndex, 9);
+  assert.equal(isolated.state.launchPicker.activeIndex, 7);
   isolated.handleModelPickerKeydown(key("Enter"), "launch");
   assert.equal(isolated.el.launchModel.value, "gpt-5.3-codex-spark");
   assert.equal(isolated.state.launchPicker.open, false);
@@ -4663,6 +4755,38 @@ test("launch-default generation guards reject stale same-dialog responses", asyn
   assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_backend, "arcee-auth");
   assert.equal(isolated.state.launchDefaultsPreview.data.configured_model_base_url,
     "https://api.arcee.ai/api/v1", "the stale first response must not overwrite the latest defaults");
+});
+
+test("launch-default loading, error, and waiting states clear stale inherited model UI", async () => {
+  const pending = deferred();
+  const isolated = loadApp({ fetch: () => pending.promise });
+  seedCatalog(isolated);
+  launchPickerElements(isolated);
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data: {
+    configured_model_backend: "openai-responses", configured_model: "gpt-5-mini",
+  } };
+  isolated.syncLaunchModelControls();
+  assert.match(isolated.el.launchModelPicker.innerHTML, /from config: GPT-5 mini/);
+  assert.equal(isolated.el.launchEffortField.hidden, true);
+
+  const failed = isolated.loadLaunchDefaultsPreview({ mode: "local", cwd: "/missing", sshHost: "" });
+  assert.equal(isolated.state.launchDefaultsPreview.status, "loading");
+  assert.doesNotMatch(isolated.el.launchModelPicker.innerHTML, /GPT-5 mini/);
+  assert.equal(isolated.el.launchEffortField.hidden, false);
+  pending.resolve(errorResponse(422, { error: "invalid cwd" }));
+  await failed;
+  assert.equal(isolated.state.launchDefaultsPreview.status, "error");
+  assert.doesNotMatch(isolated.el.launchModelPicker.innerHTML, /GPT-5 mini/);
+  assert.equal(isolated.el.launchEffortField.hidden, false);
+
+  isolated.state.launchDefaultsPreview = { status: "ready", error: "", request: {}, data: {
+    configured_model_backend: "openai-responses", configured_model: "gpt-5-mini",
+  } };
+  isolated.syncLaunchModelControls();
+  await isolated.loadLaunchDefaultsPreview({ mode: "ssh", cwd: "~", sshHost: "" });
+  assert.equal(isolated.state.launchDefaultsPreview.status, "waiting");
+  assert.doesNotMatch(isolated.el.launchModelPicker.innerHTML, /GPT-5 mini/);
+  assert.equal(isolated.el.launchEffortField.hidden, false);
 });
 
 test("launch-default request failures land in the error state", async () => {

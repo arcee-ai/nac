@@ -48,36 +48,6 @@
             "none": "none"
           }
         },
-        "claude-opus-4-1": {
-          "display_name": "Claude Opus 4.1 (latest)",
-          "context_window": 200000,
-          "max_tokens": 32000,
-          "cost": {
-            "input": 15.0,
-            "output": 75.0,
-            "cache_read": 1.5,
-            "cache_write": 18.75
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "none": "none"
-          }
-        },
-        "claude-opus-4-1-20250805": {
-          "display_name": "Claude Opus 4.1",
-          "context_window": 200000,
-          "max_tokens": 32000,
-          "cost": {
-            "input": 15.0,
-            "output": 75.0,
-            "cache_read": 1.5,
-            "cache_write": 18.75
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "none": "none"
-          }
-        },
         "claude-opus-4-5": {
           "display_name": "Claude Opus 4.5 (latest)",
           "context_window": 200000,
@@ -624,86 +594,6 @@
     "openai-responses": {
       "credential_env_var": "OPENAI_API_KEY",
       "models": {
-        "chatgpt-image-latest": {
-          "display_name": "chatgpt-image-latest",
-          "context_window": 128000,
-          "max_tokens": 16384,
-          "cost": {
-            "input": 0.0,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-3.5-turbo": {
-          "display_name": "GPT-3.5-turbo",
-          "context_window": 16385,
-          "max_tokens": 4096,
-          "cost": {
-            "input": 0.5,
-            "output": 1.5,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-4": {
-          "display_name": "GPT-4",
-          "context_window": 8192,
-          "max_tokens": 8192,
-          "cost": {
-            "input": 30.0,
-            "output": 60.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-4-turbo": {
-          "display_name": "GPT-4 Turbo",
-          "context_window": 128000,
-          "max_tokens": 4096,
-          "cost": {
-            "input": 10.0,
-            "output": 30.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
         "gpt-4.1": {
           "display_name": "GPT-4.1",
           "context_window": 1047576,
@@ -744,26 +634,6 @@
             "xhigh": "xhigh"
           }
         },
-        "gpt-4.1-nano": {
-          "display_name": "GPT-4.1 nano",
-          "context_window": 1047576,
-          "max_tokens": 32768,
-          "cost": {
-            "input": 0.1,
-            "output": 0.4,
-            "cache_read": 0.025,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
         "gpt-4o": {
           "display_name": "GPT-4o",
           "context_window": 128000,
@@ -772,26 +642,6 @@
             "input": 2.5,
             "output": 10.0,
             "cache_read": 1.25,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-4o-2024-05-13": {
-          "display_name": "GPT-4o (2024-05-13)",
-          "context_window": 128000,
-          "max_tokens": 4096,
-          "cost": {
-            "input": 5.0,
-            "output": 15.0,
-            "cache_read": 0.0,
             "cache_write": 0.0
           },
           "reasoning": false,
@@ -1284,146 +1134,6 @@
             "xhigh": "xhigh"
           }
         },
-        "gpt-image-1": {
-          "display_name": "gpt-image-1",
-          "context_window": 128000,
-          "max_tokens": 16384,
-          "cost": {
-            "input": 0.0,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-image-1-mini": {
-          "display_name": "gpt-image-1-mini",
-          "context_window": 128000,
-          "max_tokens": 16384,
-          "cost": {
-            "input": 0.0,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-image-1.5": {
-          "display_name": "gpt-image-1.5",
-          "context_window": 128000,
-          "max_tokens": 16384,
-          "cost": {
-            "input": 0.0,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-image-2": {
-          "display_name": "gpt-image-2",
-          "context_window": 128000,
-          "max_tokens": 16384,
-          "cost": {
-            "input": 5.0,
-            "output": 30.0,
-            "cache_read": 1.25,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "gpt-realtime-2.1": {
-          "display_name": "GPT-Realtime-2.1",
-          "context_window": 128000,
-          "max_tokens": 32000,
-          "cost": {
-            "input": 4.0,
-            "output": 24.0,
-            "cache_read": 0.4,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "o1": {
-          "display_name": "o1",
-          "context_window": 200000,
-          "max_tokens": 100000,
-          "cost": {
-            "input": 15.0,
-            "output": 60.0,
-            "cache_read": 7.5,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "o1-pro": {
-          "display_name": "o1-pro",
-          "context_window": 200000,
-          "max_tokens": 100000,
-          "cost": {
-            "input": 150.0,
-            "output": 600.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
         "o3": {
           "display_name": "o3",
           "context_window": 200000,
@@ -1432,26 +1142,6 @@
             "input": 2.0,
             "output": 8.0,
             "cache_read": 0.5,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "o3-mini": {
-          "display_name": "o3-mini",
-          "context_window": 200000,
-          "max_tokens": 100000,
-          "cost": {
-            "input": 1.1,
-            "output": 4.4,
-            "cache_read": 0.55,
             "cache_write": 0.0
           },
           "reasoning": true,
@@ -1483,128 +1173,12 @@
             "none": "none",
             "xhigh": "xhigh"
           }
-        },
-        "o4-mini": {
-          "display_name": "o4-mini",
-          "context_window": 200000,
-          "max_tokens": 100000,
-          "cost": {
-            "input": 1.1,
-            "output": 4.4,
-            "cache_read": 0.275,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "text-embedding-3-large": {
-          "display_name": "text-embedding-3-large",
-          "context_window": 8191,
-          "max_tokens": 3072,
-          "cost": {
-            "input": 0.13,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "text-embedding-3-small": {
-          "display_name": "text-embedding-3-small",
-          "context_window": 8191,
-          "max_tokens": 1536,
-          "cost": {
-            "input": 0.02,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
-        },
-        "text-embedding-ada-002": {
-          "display_name": "text-embedding-ada-002",
-          "context_window": 8192,
-          "max_tokens": 1536,
-          "cost": {
-            "input": 0.1,
-            "output": 0.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "minimal": "minimal",
-            "none": "none",
-            "xhigh": "xhigh"
-          }
         }
       }
     },
     "together-chat": {
       "credential_env_var": "TOGETHER_API_KEY",
       "models": {
-        "LiquidAI/LFM2-24B-A2B": {
-          "display_name": "LFM2-24B-A2B",
-          "context_window": 32768,
-          "max_tokens": 32768,
-          "cost": {
-            "input": 0.03,
-            "output": 0.12,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "MiniMaxAI/MiniMax-M2.5": {
-          "display_name": "MiniMax-M2.5",
-          "context_window": 204800,
-          "max_tokens": 131072,
-          "cost": {
-            "input": 0.3,
-            "output": 1.2,
-            "cache_read": 0.06,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
         "MiniMaxAI/MiniMax-M2.7": {
           "display_name": "MiniMax-M2.7",
           "context_window": 202752,
@@ -1652,78 +1226,6 @@
             "cache_write": 0.0
           },
           "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {
-          "display_name": "Qwen3 235B A22B Instruct 2507 FP8",
-          "context_window": 262144,
-          "max_tokens": 262144,
-          "cost": {
-            "input": 0.2,
-            "output": 0.6,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
-          "display_name": "Qwen3 Coder 480B A35B Instruct",
-          "context_window": 262144,
-          "max_tokens": 262144,
-          "cost": {
-            "input": 2.0,
-            "output": 2.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "Qwen/Qwen3-Coder-Next-FP8": {
-          "display_name": "Qwen3 Coder Next FP8",
-          "context_window": 262144,
-          "max_tokens": 262144,
-          "cost": {
-            "input": 0.5,
-            "output": 1.2,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "Qwen/Qwen3.5-397B-A17B": {
-          "display_name": "Qwen3.5 397B A17B",
-          "context_window": 262144,
-          "max_tokens": 130000,
-          "cost": {
-            "input": 0.6,
-            "output": 3.6,
-            "cache_read": 0.35,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1785,78 +1287,6 @@
             "none": "none"
           }
         },
-        "deepcogito/cogito-v2-1-671b": {
-          "display_name": "Cogito v2.1 671B",
-          "context_window": 163840,
-          "max_tokens": 163840,
-          "cost": {
-            "input": 1.25,
-            "output": 1.25,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "deepseek-ai/DeepSeek-R1": {
-          "display_name": "DeepSeek-R1",
-          "context_window": 163839,
-          "max_tokens": 163839,
-          "cost": {
-            "input": 3.0,
-            "output": 7.0,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "deepseek-ai/DeepSeek-V3": {
-          "display_name": "DeepSeek-V3",
-          "context_window": 131072,
-          "max_tokens": 131072,
-          "cost": {
-            "input": 1.25,
-            "output": 1.25,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "deepseek-ai/DeepSeek-V3-1": {
-          "display_name": "DeepSeek V3.1",
-          "context_window": 131072,
-          "max_tokens": 131072,
-          "cost": {
-            "input": 0.6,
-            "output": 1.7,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
         "deepseek-ai/DeepSeek-V4-Pro": {
           "display_name": "DeepSeek V4 Pro",
           "context_window": 512000,
@@ -1868,42 +1298,6 @@
             "cache_write": 0.0
           },
           "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "essentialai/Rnj-1-Instruct": {
-          "display_name": "Rnj-1 Instruct",
-          "context_window": 32768,
-          "max_tokens": 32768,
-          "cost": {
-            "input": 0.15,
-            "output": 0.15,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "google/gemma-3n-E4B-it": {
-          "display_name": "Gemma 3N E4B Instruct",
-          "context_window": 32768,
-          "max_tokens": 32768,
-          "cost": {
-            "input": 0.06,
-            "output": 0.12,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1940,42 +1334,6 @@
             "cache_write": 0.0
           },
           "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "meta-llama/Meta-Llama-3-8B-Instruct-Lite": {
-          "display_name": "Meta Llama 3 8B Instruct Lite",
-          "context_window": 8192,
-          "max_tokens": 8192,
-          "cost": {
-            "input": 0.14,
-            "output": 0.14,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "moonshotai/Kimi-K2.5": {
-          "display_name": "Kimi K2.5",
-          "context_window": 262144,
-          "max_tokens": 262144,
-          "cost": {
-            "input": 0.5,
-            "output": 2.8,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -2091,24 +1449,6 @@
             "none": "none"
           }
         },
-        "pearl-ai/gemma-4-31b-it": {
-          "display_name": "Pearl AI Gemma 4 31B Instruct",
-          "context_window": 32000,
-          "max_tokens": 32000,
-          "cost": {
-            "input": 0.28,
-            "output": 0.86,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
         "thinkingmachines/Inkling": {
           "display_name": "Inkling",
           "context_window": 524288,
@@ -2117,42 +1457,6 @@
             "input": 1.0,
             "output": 4.05,
             "cache_read": 0.17,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "zai-org/GLM-5": {
-          "display_name": "GLM-5",
-          "context_window": 202752,
-          "max_tokens": 131072,
-          "cost": {
-            "input": 1.0,
-            "output": 3.2,
-            "cache_read": 0.0,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
-        },
-        "zai-org/GLM-5.1": {
-          "display_name": "GLM-5.1",
-          "context_window": 202752,
-          "max_tokens": 131072,
-          "cost": {
-            "input": 1.4,
-            "output": 4.4,
-            "cache_read": 0.26,
             "cache_write": 0.0
           },
           "reasoning": true,
