@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>nac</title>
+    <!-- Referenced from `src/` rather than a `public/` copy: the embedded server
+         serves only `/assets/*`, so an icon at the dist root would 404. -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/src/app/assets/img/favicon.svg"
+    />
+    <title>Telos</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
