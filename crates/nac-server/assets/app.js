@@ -3372,9 +3372,9 @@ function openConversationSearch(opener = null) {
   if (!state.currentId) return false;
   if (state.workspaceView !== "chat") setWorkspaceView("chat");
   const search = state.conversationSearch;
+  if (!search.open) search.opener = opener || el.conversationSearchOpen;
   search.open = true;
   search.sessionId = state.currentId;
-  search.opener = opener || el.conversationSearchOpen;
   el.conversationSearch.hidden = false;
   el.conversationSearchInput.value = search.query;
   updateConversationSearchControls();

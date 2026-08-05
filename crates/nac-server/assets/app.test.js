@@ -4844,6 +4844,31 @@ test("conversation search shortcuts, Escape precedence, and lifecycle preserve c
   assert.equal(isolated.el.promptInput.focused, true, "Ctrl/Command+K remains assigned to the composer");
 });
 
+test("repeated conversation search shortcut retains the original focus opener", () => {
+  const isolated = loadApp();
+  installWorkspaceElements(isolated);
+  for (const name of ["conversationSearch", "conversationSearchInput", "conversationSearchStatus",
+    "conversationSearchPrevious", "conversationSearchNext", "conversationSearchClose", "conversationSearchOpen"]) {
+    isolated.el[name] = { ...fakeElement(), hidden: name === "conversationSearch", value: "",
+      focus() { this.focusCount = (this.focusCount || 0) + 1; }, select() {} };
+  }
+  isolated.state.currentId = "repeat-shortcut-session";
+  const opener = fakeElement();
+  opener.focus = function focus() { this.focusCount = (this.focusCount || 0) + 1; };
+  const shortcut = (target) => isolated.handleGlobalKeydown({
+    key: "f", ctrlKey: true, metaKey: false, target, preventDefault() {},
+  });
+
+  shortcut(opener);
+  shortcut(isolated.el.conversationSearchInput);
+  assert.equal(isolated.state.conversationSearch.opener, opener);
+  isolated.handleGlobalKeydown({ key: "Escape", preventDefault() {} });
+
+  assert.equal(isolated.el.conversationSearch.hidden, true);
+  assert.equal(opener.focusCount, 1, "Escape restores focus to the original visible opener");
+  assert.equal(isolated.el.conversationSearchInput.focusCount, 2, "the hidden input is not focused again on close");
+});
+
 test("search identity markup cannot enter fork interstitials or relax fork eligibility", () => {
   const message = ui.persistedMessageMarkup('<article class="focus-message" data-role="user">match</article>', 8);
   assert.match(message, /^<article data-message-index="8"/);
