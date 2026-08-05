@@ -9,6 +9,8 @@ on:
 jobs:
   test-server:
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
 
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,8 @@ jobs:
 
   test-core:
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
 
     steps:
       - uses: actions/checkout@v4
