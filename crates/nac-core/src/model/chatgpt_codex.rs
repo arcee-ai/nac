@@ -520,7 +520,13 @@ async fn wait_for_loopback_redirect(
 }
 
 /// The authorization carried by a redirect, or `None` when this request was not
-/// the redirect at all.
+/// the redirect this login is waiting for.
+///
+/// The `state` is checked before anything else is read out of the query, so a
+/// redirect belonging to some other login — a stale tab, a replay, a probe that
+/// guessed the path — is reported as unrelated traffic rather than as a failure.
+/// Failing on it would let any such request cancel a sign-in that is still on
+/// its way, including one that merely carries `error` in its query.
 fn authorization_from_target(target: &str, state: &str) -> Option<Result<String>> {
     // The request line carries only a path, which `Url` will not parse alone.
     let url = Url::parse(&format!("http://localhost{target}")).ok()?;
@@ -529,6 +535,9 @@ fn authorization_from_target(target: &str, state: &str) -> Option<Result<String>
     }
 
     let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    if query.get("state").map(String::as_str) != Some(state) {
+        return None;
+    }
     if let Some(error) = query.get("error") {
         let description = query
             .get("error_description")
@@ -536,12 +545,6 @@ fn authorization_from_target(target: &str, state: &str) -> Option<Result<String>
             .unwrap_or("no description given");
         return Some(Err(anyhow!(
             "Codex refused the sign-in: {error} ({description})"
-        )));
-    }
-    if query.get("state").map(String::as_str) != Some(state) {
-        // Someone else's redirect, or a replay of an older one.
-        return Some(Err(anyhow!(
-            "the Codex sign-in came back with a state that does not match the request"
         )));
     }
     match query.get("code") {
