@@ -1,3 +1,5 @@
+// CI cache probe: source changes still rebuild workspace crates.
+
 use std::{
     ffi::{OsStr, OsString},
     net::SocketAddr,
