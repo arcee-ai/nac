@@ -185,7 +185,7 @@ test("System appearance follows media changes while explicit modes ignore them a
 
 test("dark and light palettes cover semantic colors without component literals and keep core text contrast", () => {
   const componentCss = redesignSource.slice(redesignSource.indexOf("* { box-sizing"));
-  assert.doesNotMatch(componentCss, /#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)/,
+  assert.doesNotMatch(componentCss, /#[0-9a-fA-F]{3,8}(?![-_a-zA-Z0-9])|rgba?\([^)]*\)/,
     "theme-dependent literals stay in palette blocks");
   const blocks = [...redesignSource.matchAll(/:root(?:\[data-theme="(light)"\])? \{([\s\S]*?)\n\}/g)];
   assert.equal(blocks.length, 2);
@@ -206,6 +206,25 @@ test("dark and light palettes cover semantic colors without component literals a
       assert.match(redesignSource, new RegExp(`--${token}:`));
     }
   }
+  assert.ok(contrast(dark.paper, dark["search-match"]) >= 4.5,
+    "dark search matches keep normal-size text at AA contrast");
+  for (const surface of ["surface", "surface-code", "surface-user"]) {
+    assert.ok(contrast(dark["ink-faint"], dark[surface]) >= 4.5,
+      `dark faint informational text keeps AA contrast on ${surface}`);
+  }
+  assert.ok(contrast(light["ledger-recency-9"], light.surface) >= 4.5,
+    "the oldest light ledger row keeps AA contrast");
+});
+
+test("color tokens cannot corrupt selectors with hex-like ID prefixes", () => {
+  assert.doesNotMatch(redesignSource, /var\(--[^)]+\)[-_a-zA-Z0-9]+/,
+    "a color-token replacement must not leave an identifier suffix");
+  assert.doesNotMatch(redesignSource, /var\(--[^)]+\)[^;{}]*\{/,
+    "custom-property values cannot appear in a selector prelude");
+  const hexPrefixedIds = [...indexSource.matchAll(/\bid="([0-9a-f]{3}[^\"]*)"/gi)].map((match) => match[1]);
+  assert.deepEqual(hexPrefixedIds, ["backToSessions"]);
+  assert.match(redesignSource, /@media \(pointer: coarse\)[\s\S]*?#backToSessions \{[^}]*min-width: 44px;/);
+  assert.match(redesignSource, /@media \(max-width: 560px\)[\s\S]*?#backToSessions \{ grid-column: 1; grid-row: 1; \}/);
 });
 
 const scenarioGroups = new Map();

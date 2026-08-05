@@ -64,7 +64,7 @@
   --sp-5: 16px;
 
   /* Additional colors */
-  --ink-faint: #6a6a6a;
+  --ink-faint: #7d7d7d;
   --surface-hover: #151515;
   --surface-user: #121212;
   --danger-border: #4a2828;
@@ -100,7 +100,7 @@
   --warning-strong: #c5a978;
   --warning-note: #b39a72;
   --diff-add-ink: #c8d0c8;
-  --search-match: #806f24;
+  --search-match: #786820;
   --search-match-ink: #fff1a8;
   --search-current: #b18e16;
   --text-strong: #d0d0d0;
@@ -201,7 +201,7 @@
   --ledger-recency-6: #525c68;
   --ledger-recency-7: #5c6774;
   --ledger-recency-8: #667280;
-  --ledger-recency-9: #707d8c;
+  --ledger-recency-9: #687583;
 }
 
 * { box-sizing: border-box; }
@@ -1336,7 +1336,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
   /* 13px segment padding grows the pill to exactly 44px, matching the 44px
      coarse-pointer icon buttons (2px border + 6px pill padding + 36px). */
   .view-toggle-option { padding-top: 13px; padding-bottom: 13px; }
-  var(--text-medium)kToSessions { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
+  #backToSessions { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
   .session-title-button { min-height: 44px; display: inline-flex; align-items: center; }
   .session-select { padding-bottom: 62px; }
   .card-controls { top: auto; right: 9px; bottom: 9px; width: auto; flex-direction: row; }
@@ -1371,7 +1371,7 @@ body.session-reordering { cursor: grabbing; user-select: none; }
     gap: var(--sp-3);
     padding: 10px;
   }
-  var(--text-medium)kToSessions { grid-column: 1; grid-row: 1; }
+  #backToSessions { grid-column: 1; grid-row: 1; }
   .session-identity { grid-column: 2; grid-row: 1; min-width: 0; overflow: hidden; flex-direction: column; align-items: stretch; gap: 2px; }
   .session-title-button { max-width: 100%; overflow: hidden; }
   .session-info-button { grid-column: 3; grid-row: 1; }
