@@ -1,3 +1,55 @@
+const THEME_STORAGE_KEY = "nac.theme";
+const THEME_PREFERENCES = new Set(["system", "light", "dark"]);
+let themeMediaQuery = null;
+
+function storedThemePreference(storage) {
+  try {
+    const value = storage && storage.getItem(THEME_STORAGE_KEY);
+    return THEME_PREFERENCES.has(value) ? value : "system";
+  } catch (_) {
+    return "system";
+  }
+}
+
+function resolvedTheme(preference, mediaQuery) {
+  if (preference === "light" || preference === "dark") return preference;
+  return mediaQuery && mediaQuery.matches ? "dark" : "light";
+}
+
+function applyThemePreference(preference, { persist = false, storage, mediaQuery, root = document.documentElement } = {}) {
+  const safePreference = THEME_PREFERENCES.has(preference) ? preference : "system";
+  const theme = resolvedTheme(safePreference, mediaQuery || themeMediaQuery);
+  root.dataset.themePreference = safePreference;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+  for (const control of document.querySelectorAll("[data-theme-control]")) control.value = safePreference;
+  if (persist) {
+    try { storage && storage.setItem(THEME_STORAGE_KEY, safePreference); } catch (_) {}
+  }
+  return theme;
+}
+
+function initializeThemeControls() {
+  let storage = null;
+  try { storage = window.localStorage; } catch (_) {}
+  themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  applyThemePreference(storedThemePreference(storage), { storage, mediaQuery: themeMediaQuery });
+  for (const control of document.querySelectorAll("[data-theme-control]")) {
+    control.addEventListener("change", () => applyThemePreference(control.value, {
+      persist: true, storage, mediaQuery: themeMediaQuery,
+    }));
+  }
+  themeMediaQuery.addEventListener("change", () => {
+    const preference = document.documentElement.dataset.themePreference || "system";
+    if (preference === "system") applyThemePreference(preference, { mediaQuery: themeMediaQuery });
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key !== THEME_STORAGE_KEY) return;
+    const preference = THEME_PREFERENCES.has(event.newValue) ? event.newValue : "system";
+    applyThemePreference(preference, { mediaQuery: themeMediaQuery });
+  });
+}
+
 const state = {
   store: null,
   storeError: "",
@@ -90,6 +142,7 @@ const commands = [
 const el = {};
 
 document.addEventListener("DOMContentLoaded", () => {
+  initializeThemeControls();
   bindElements();
   bindEvents();
   boot();

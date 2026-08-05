@@ -2576,6 +2576,13 @@ mod tests {
         assert!(!HTML.to_ascii_lowercase().contains("prototype"));
         assert!(!CSS.trim().is_empty());
         assert!(!APP.trim().is_empty());
+        assert!(HTML.contains("<meta name=\"color-scheme\" content=\"light dark\""));
+        let theme_bootstrap = HTML.find("localStorage.getItem(\"nac.theme\")").unwrap();
+        let stylesheet = HTML.find("<link rel=\"stylesheet\"").unwrap();
+        assert!(theme_bootstrap < stylesheet, "appearance must resolve before CSS loads");
+        assert_eq!(HTML.matches("data-theme-control").count(), 2);
+        assert!(CSS.contains(":root[data-theme=\"light\"]"));
+        assert!(APP.contains("initializeThemeControls"));
         assert!(
             !APP.contains("include_system"),
             "production frontend must not opt into system messages"

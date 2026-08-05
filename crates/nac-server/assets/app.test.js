@@ -39,6 +39,7 @@ function loadApp(overrides = {}) {
   vm.runInNewContext(
     `${appSource}\nmodule.exports = {
       state, el, boot, openSession, sessionStatus, syncSessionRunIndicators, noteSessionRunEvent,
+      storedThemePreference, resolvedTheme, applyThemePreference, initializeThemeControls,
       emptyCompactionOperation, compactionOperationBusy, reduceCompactionOperation,
       sessionCompactionOperation, transitionSessionCompaction, sessionCompactionBusy,
       reconcileSessionCompactionSnapshot, noteSessionCompactionEvent,
@@ -99,6 +100,113 @@ function loadApp(overrides = {}) {
 
 let ui;
 beforeEach(() => { ui = loadApp(); });
+
+test("appearance bootstrap resolves before CSS and uses synchronized accessible controls", () => {
+  const bootstrap = indexSource.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  assert.ok(indexSource.indexOf("<script>") < indexSource.indexOf('<link rel="stylesheet"'), "theme resolves before stylesheet discovery");
+  assert.match(indexSource, /<meta name="color-scheme" content="light dark"/);
+  assert.equal(occurrences(indexSource, /data-theme-control/g), 2);
+  assert.equal(occurrences(indexSource, /<select data-theme-control aria-label="Appearance">/g), 2);
+  assert.match(indexSource, /redesign\.css\?v=quality-41/);
+  assert.match(indexSource, /app\.js\?v=quality-41/);
+
+  for (const storage of [
+    { getItem: () => "light" },
+    { getItem: () => "invalid" },
+    { getItem() { throw new Error("blocked"); } },
+  ]) {
+    const root = { dataset: {}, style: {} };
+    vm.runInNewContext(bootstrap, {
+      localStorage: storage,
+      matchMedia: () => ({ matches: true }),
+      document: { documentElement: root },
+      Set,
+    });
+    const expected = storage.getItem && (() => { try { return storage.getItem(); } catch (_) { return null; } })() === "light" ? "light" : "dark";
+    assert.equal(root.dataset.theme, expected);
+    assert.equal(root.style.colorScheme, expected);
+  }
+});
+
+test("appearance preference validates storage, preserves explicit modes, and safely persists", () => {
+  assert.equal(ui.storedThemePreference({ getItem: () => "dark" }), "dark");
+  assert.equal(ui.storedThemePreference({ getItem: () => "sepia" }), "system");
+  assert.equal(ui.storedThemePreference({ getItem() { throw new Error("denied"); } }), "system");
+  assert.equal(ui.resolvedTheme("system", { matches: true }), "dark");
+  assert.equal(ui.resolvedTheme("system", { matches: false }), "light");
+  assert.equal(ui.resolvedTheme("light", { matches: true }), "light");
+  assert.equal(ui.resolvedTheme("dark", { matches: false }), "dark");
+
+  const controls = [{ value: "" }, { value: "" }];
+  const root = { dataset: {}, style: {} };
+  const writes = [];
+  const themed = loadApp({ document: {
+    addEventListener() {}, hidden: false, documentElement: root,
+    querySelectorAll: () => controls,
+  } });
+  assert.equal(themed.applyThemePreference("dark", {
+    persist: true, storage: { setItem: (...args) => writes.push(args) }, mediaQuery: { matches: false }, root,
+  }), "dark");
+  assert.deepEqual(controls.map((control) => control.value), ["dark", "dark"]);
+  assert.deepEqual(writes, [["nac.theme", "dark"]]);
+  assert.doesNotThrow(() => themed.applyThemePreference("light", {
+    persist: true, storage: { setItem() { throw new Error("blocked"); } }, root,
+  }));
+});
+
+test("System appearance follows media changes while explicit modes ignore them and storage syncs tabs", () => {
+  const documentListeners = {};
+  const windowListeners = {};
+  const mediaListeners = {};
+  const controls = ["picker", "session"].map(() => ({ value: "", listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; } }));
+  const root = { dataset: {}, style: {} };
+  const media = { matches: false, addEventListener(type, fn) { mediaListeners[type] = fn; } };
+  const storage = { value: "system", getItem() { return this.value; }, setItem(_key, value) { this.value = value; } };
+  const themed = loadApp({
+    document: { hidden: false, documentElement: root, querySelectorAll: () => controls,
+      addEventListener(type, fn) { documentListeners[type] = fn; } },
+    window: { localStorage: storage, matchMedia: () => media,
+      addEventListener(type, fn) { windowListeners[type] = fn; } },
+  });
+  themed.initializeThemeControls();
+  assert.equal(root.dataset.theme, "light");
+  media.matches = true; mediaListeners.change();
+  assert.equal(root.dataset.theme, "dark");
+  controls[0].value = "light"; controls[0].listeners.change();
+  assert.equal(root.dataset.theme, "light");
+  media.matches = false; mediaListeners.change();
+  assert.equal(root.dataset.theme, "light", "explicit preference ignores system changes");
+  windowListeners.storage({ key: "nac.theme", newValue: "dark" });
+  assert.equal(root.dataset.theme, "dark");
+  assert.deepEqual(controls.map((control) => control.value), ["dark", "dark"]);
+  windowListeners.storage({ key: "other", newValue: "light" });
+  assert.equal(root.dataset.theme, "dark");
+});
+
+test("dark and light palettes cover semantic colors without component literals and keep core text contrast", () => {
+  const componentCss = redesignSource.slice(redesignSource.indexOf("* { box-sizing"));
+  assert.doesNotMatch(componentCss, /#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)/,
+    "theme-dependent literals stay in palette blocks");
+  const blocks = [...redesignSource.matchAll(/:root(?:\[data-theme="(light)"\])? \{([\s\S]*?)\n\}/g)];
+  assert.equal(blocks.length, 2);
+  const values = (body) => Object.fromEntries([...body.matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})/g)].map((match) => [match[1], match[2]]));
+  const dark = values(blocks[0][2]);
+  const light = { ...dark, ...values(blocks[1][2]) };
+  const luminance = (hex) => {
+    const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+      .map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2];
+  };
+  const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + .05) / (lo + .05); };
+  for (const palette of [dark, light]) {
+    assert.ok(contrast(palette.ink, palette.bg) >= 7);
+    assert.ok(contrast(palette["ink-muted"], palette.surface) >= 4.5);
+    assert.ok(contrast(palette["ink-on-solid"], palette.paper) >= 7);
+    for (const token of ["surface-user", "focus-ring", "search-match", "surface-diff-add", "surface-diff-remove", "status-running", "overlay-backdrop"]) {
+      assert.match(redesignSource, new RegExp(`--${token}:`));
+    }
+  }
+});
 
 const scenarioGroups = new Map();
 function scenario(group, name, run) {
@@ -2583,7 +2691,7 @@ test("Current action is absent for idle threads and labels queued dispatches", (
 test("Current action styling reuses the episode card and section-label patterns", () => {
   const cardRule = redesignSource.match(/\.focus-episode, \.focus-current-action-card \{[^}]*\}/);
   assert.ok(cardRule, "the current-action card shares the episode card rule");
-  assert.match(cardRule[0], /border: 1px solid #292929;/);
+  assert.match(cardRule[0], /border: 1px solid var\(--line\);/);
   assert.match(cardRule[0], /border-radius: var\(--r-md\);/);
   assert.match(cardRule[0], /background: var\(--surface\);/);
   assert.match(redesignSource, /\.focus-current-action-card \.focus-episode-prompt \{ border-bottom: 0; \}/,
@@ -4590,8 +4698,8 @@ test("mobile view switch CSS: toggle hidden on desktop, panes swap below the 780
   const start = redesignSource.indexOf("@media (max-width: 780px)");
   const mobileBlock = redesignSource.slice(start, redesignSource.indexOf("@media", start + 10));
   assert.match(mobileBlock, /\.view-toggle \{ display: inline-flex; \}/, "toggle appears below the breakpoint");
-  assert.match(mobileBlock, /\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto auto; \}/,
-    "the session bar gains a track for the toggle only below the breakpoint");
+  assert.match(mobileBlock, /\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto auto auto; \}/,
+    "the session bar accommodates appearance and view controls below the breakpoint");
   assert.match(mobileBlock, /\.session-layout:not\(\.is-threads-view\) > \.thread-canvas \{ display: none; \}/);
   assert.match(mobileBlock, /\.session-layout\.is-threads-view > \.overview-rail \{ display: none; \}/);
   assert.match(mobileBlock, /\.session-layout \{[^}]*height: calc\(100dvh - 112px\);[^}]*grid-template-columns: 1fr;[^}]*overflow: hidden;/s,
@@ -4606,8 +4714,8 @@ test("mobile view switch CSS: toggle hidden on desktop, panes swap below the 780
 
 test("desktop workspace layout rules are unchanged by the mobile view switch", () => {
   assert.match(redesignSource, /\.session-layout \{\s*height: calc\(100dvh - 72px\);\s*display: grid;\s*grid-template-columns: min\(780px, 48vw\) minmax\(0, 1fr\);\s*grid-template-rows: minmax\(0, 1fr\) auto;\s*overflow: hidden;\s*\}/);
-  assert.match(redesignSource, /@media \(max-width: 1060px\) \{\s*\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto; \}/,
-    "the 1060px session-bar grid keeps its five tracks");
+  assert.match(redesignSource, /@media \(max-width: 1060px\) \{\s*\.session-bar \{ grid-template-columns: auto minmax\(140px,1fr\) auto auto auto auto auto; \}/,
+    "the 1060px session-bar grid accommodates appearance controls");
   assert.doesNotMatch(redesignSource.slice(0, redesignSource.indexOf("@media")), /is-threads-view/,
     "no view-switch rules exist outside the media queries");
 });
