@@ -86,8 +86,7 @@ fn model_index_url(backend: BackendKind, base_url: &str) -> Result<String> {
     if matches!(backend, BackendKind::ArceeApi | BackendKind::ArceeAuth) {
         return Ok(arcee::models_url(base_url)?.to_string());
     }
-    models_url(backend, base_url)
-        .ok_or_else(|| anyhow!("backend '{backend}' has no model index"))
+    models_url(backend, base_url).ok_or_else(|| anyhow!("backend '{backend}' has no model index"))
 }
 
 fn model_from_value(value: &Value) -> Option<ProviderModel> {

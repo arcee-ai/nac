@@ -135,7 +135,7 @@ impl SshBackend {
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         let words = Self::quoted_program_and_args(program, args);
         let remote = self.remote_command_in_dir(&self.remote_cwd, &[], &words);
@@ -146,6 +146,7 @@ impl SshBackend {
             command.stdin(Stdio::null());
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.kill_on_drop(true);
 
         let mut child = command
             .spawn()
@@ -153,7 +154,7 @@ impl SshBackend {
 
         if let Some(input) = stdin {
             if let Some(mut stdin_pipe) = child.stdin.take() {
-                stdin_pipe.write_all(&input).await?;
+                stdin_pipe.write_all(input).await?;
             }
         }
 

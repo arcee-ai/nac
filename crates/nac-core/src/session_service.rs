@@ -270,6 +270,17 @@ struct DecodedThreadEvents {
     diagnostics: Vec<ThreadEventDecodeDiagnostic>,
 }
 
+struct FrontendSnapshotBlockingLoad {
+    sessions: Vec<SessionSummarySnapshot>,
+    threads: Vec<ThreadSnapshot>,
+    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
+    thread_events: DecodedThreadEvents,
+    thread_event_boundary: SessionEventBoundary,
+    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    worksets: WorksetsSnapshot,
+    workspace: WorkspaceSnapshot,
+}
+
 pub struct SessionServiceParts {
     pub service: SessionService,
     pub init: SessionServiceInit,
@@ -414,6 +425,24 @@ impl SessionClientHandle {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct FrontendSnapshotAfterWorkspaceGate {
+    reached: std::sync::atomic::AtomicBool,
+    resume: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl FrontendSnapshotAfterWorkspaceGate {
+    fn pause(&self) {
+        self.reached
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        while !self.resume.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
@@ -437,6 +466,8 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    #[cfg(test)]
+    frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
 
 enum ActiveSessionOperation {
@@ -615,6 +646,8 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            #[cfg(test)]
+            frontend_snapshot_after_workspace_gate: None,
         };
         let init = SessionServiceInit {
             metadata,
@@ -853,8 +886,9 @@ impl SessionService {
         )
     }
 
-    fn load_all_thread_events_with_limit(
+    fn load_all_thread_events_with_connection(
         &self,
+        conn: &rusqlite::Connection,
         per_thread_limit: usize,
     ) -> Result<DecodedThreadEvents> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
@@ -863,28 +897,101 @@ impl SessionService {
                 diagnostics: Vec::new(),
             });
         };
-        let records = crate::store::load_all_thread_events(
-            &self.metadata.store_path,
+        let records = crate::store::load_all_thread_events_with_connection(
+            conn,
             session_id,
             per_thread_limit,
         )?;
-        let mut events = HashMap::new();
-        let mut diagnostics = Vec::new();
-        for (thread_name, records) in records {
-            let decoded = records
-                .into_iter()
-                .filter_map(|record| decode_thread_event(record, &mut diagnostics))
-                .collect::<Vec<_>>();
-            if !decoded.is_empty() {
-                events.insert(thread_name, decoded);
-            }
-        }
-        Ok(DecodedThreadEvents {
-            events,
-            diagnostics,
-        })
+        Ok(decode_thread_events(records))
     }
 
+    fn load_frontend_snapshot_blocking(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<FrontendSnapshotBlockingLoad> {
+        let workspace = self.workspace_snapshot();
+        #[cfg(test)]
+        if let Some(gate) = &self.frontend_snapshot_after_workspace_gate {
+            gate.pause();
+        }
+
+        let (
+            sessions,
+            threads,
+            thread_episodes,
+            thread_events,
+            thread_event_boundary,
+            thread_steering,
+            worksets,
+        ) = {
+            let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
+            let session_id = self.metadata.session_id.as_deref();
+            let sessions = if options.include_sessions {
+                view::list_sessions_with_connection(&conn)?
+            } else {
+                Vec::new()
+            };
+            let threads = view::list_threads_with_connection(&conn, session_id)?;
+            let thread_episodes =
+                view::load_all_thread_episodes_with_connection(&conn, session_id)?;
+            let (thread_event_boundary, thread_events) =
+                self.event_bus.thread_event_boundary(|| {
+                    self.load_all_thread_events_with_connection(&conn, options.thread_event_limit)
+                })?;
+            let worksets = view::worksets_snapshot_with_connection(&conn, session_id);
+            // Keep this final storage read adjacent to the transcript scan so
+            // a delivery committed during slower workspace inspection has the
+            // current status needed to cover its canonical message.
+            let thread_steering = session_id
+                .map(|session_id| {
+                    crate::store::list_thread_steering_with_connection(&conn, session_id)
+                })
+                .transpose()?
+                .unwrap_or_default();
+            (
+                sessions,
+                threads,
+                thread_episodes,
+                thread_events,
+                thread_event_boundary,
+                thread_steering,
+                worksets,
+            )
+        };
+        Ok(FrontendSnapshotBlockingLoad {
+            sessions,
+            threads,
+            thread_episodes,
+            thread_events,
+            thread_event_boundary,
+            thread_steering,
+            worksets,
+            workspace,
+        })
+    }
+}
+
+fn decode_thread_events(
+    records: HashMap<String, Vec<crate::store::ThreadEventRecord>>,
+) -> DecodedThreadEvents {
+    let mut events = HashMap::new();
+    let mut diagnostics = Vec::new();
+    for (thread_name, records) in records {
+        let decoded = records
+            .into_iter()
+            .filter_map(|record| decode_thread_event(record, &mut diagnostics))
+            .collect::<Vec<_>>();
+        if !decoded.is_empty() {
+            events.insert(thread_name, decoded);
+        }
+    }
+    DecodedThreadEvents {
+        events,
+        diagnostics,
+    }
+}
+
+impl SessionService {
     pub fn thread_events_page(
         &self,
         thread_name: &str,
@@ -984,24 +1091,24 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        let thread_steering = self
-            .metadata
-            .session_id
-            .as_deref()
-            .map(|session_id| {
-                crate::store::list_thread_steering(&self.metadata.store_path, session_id)
-            })
-            .transpose()?
-            .unwrap_or_default();
+        // SQLite and git are synchronous. Keep all dashboard storage reads on
+        // one connection and move that connection plus git subprocesses off
+        // the async runtime workers. Load steering before the transcript so a
+        // concurrently delivered record is either absent here or coverable by
+        // the subsequent transcript scan, never rendered twice.
+        let blocking_service = self.clone();
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            blocking_service.load_frontend_snapshot_blocking(options)
+        });
+        let (active_threads, blocking) = tokio::join!(self.active_thread_names(), blocking_task);
+        let blocking = blocking
+            .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
+
         // Store-backed transcript reads (step 3): the snapshot blob (legacy
         // prefix) ++ the transcript log tail, ALWAYS. The agent-or-persisted
         // duality and the stale-during-run fallback are gone — mid-run
         // appends are visible as they commit to the log.
         self.update_transcript_scan().await?;
-        let covered_orchestrator_steering_ids = {
-            let scan = self.lock_transcript_scan();
-            covered_ids_from_scan(&thread_steering, &scan)
-        };
         let response_timing = {
             let snapshot = self.session_snapshot.lock().await;
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
@@ -1029,10 +1136,10 @@ impl SessionService {
             }
         };
 
-        let (thread_event_boundary, decoded_thread_events) =
-            self.event_bus.thread_event_boundary(|| {
-                self.load_all_thread_events_with_limit(options.thread_event_limit)
-            })?;
+        let covered_orchestrator_steering_ids = {
+            let scan = self.lock_transcript_scan();
+            covered_ids_from_scan(&blocking.thread_steering, &scan)
+        };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
         let snapshot = SessionFrontendSnapshot {
@@ -1042,21 +1149,17 @@ impl SessionService {
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
-            sessions: if options.include_sessions {
-                self.list_sessions()?
-            } else {
-                Vec::new()
-            },
-            active_threads: self.active_thread_names().await,
-            threads: self.list_threads()?,
-            thread_episodes: self.all_thread_episodes()?,
-            thread_events: decoded_thread_events.events,
-            thread_event_boundary,
-            thread_event_diagnostics: decoded_thread_events.diagnostics,
-            thread_steering,
+            sessions: blocking.sessions,
+            active_threads,
+            threads: blocking.threads,
+            thread_episodes: blocking.thread_episodes,
+            thread_events: blocking.thread_events.events,
+            thread_event_boundary: blocking.thread_event_boundary,
+            thread_event_diagnostics: blocking.thread_events.diagnostics,
+            thread_steering: blocking.thread_steering,
             covered_orchestrator_steering_ids,
-            worksets: self.worksets_snapshot(),
-            workspace: self.workspace_snapshot(),
+            worksets: blocking.worksets,
+            workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
             snapshot,
@@ -3038,6 +3141,217 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn frontend_snapshot_reuses_one_runtime_connection() {
+        let (parts, store_path) =
+            test_active_service("snapshot_connection_reuse", "connection-session");
+        for index in 0..3 {
+            crate::store::define_workset(
+                &store_path,
+                "connection-session",
+                &crate::store::WorksetDefinition {
+                    id: format!("workset-{index}"),
+                    goal: "verify connection reuse".to_string(),
+                    status: "active".to_string(),
+                    summary: String::new(),
+                    verification_recipe: None,
+                    items: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
+        crate::store::append_episode(
+            &store_path,
+            "connection-session",
+            "worker",
+            "implementation",
+            "retained episode",
+        )
+        .unwrap();
+        let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+            thread_name: Some("worker".to_string()),
+            content: "retained event".to_string(),
+            usage: None,
+        })
+        .unwrap();
+        crate::store::append_thread_event(&store_path, "connection-session", "worker", &event_json)
+            .unwrap();
+        crate::store::queue_thread_steering(
+            &store_path,
+            "connection-session",
+            "worker",
+            "dispatch",
+            "retained steering",
+        )
+        .unwrap();
+        crate::store::track_connection_opens(&store_path);
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.threads.len(), 1);
+        assert_eq!(snapshot.thread_episodes["worker"].len(), 1);
+        assert_eq!(snapshot.thread_events["worker"].len(), 1);
+        assert_eq!(snapshot.thread_steering.len(), 1);
+        assert_eq!(snapshot.worksets.items.len(), 3);
+        assert_eq!(crate::store::tracked_connection_opens(&store_path), 1);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore = "manual latency benchmark; run with --ignored --nocapture"]
+    async fn benchmark_frontend_snapshot_latency() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        const ITERATIONS: usize = 100;
+        let (mut parts, store_path) =
+            test_active_service("snapshot_benchmark", "benchmark-session");
+        let workspace = store_path.parent().unwrap().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&workspace)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet"]);
+        for index in 0..64 {
+            std::fs::write(
+                workspace.join(format!("file-{index}.txt")),
+                format!("baseline {index}\n"),
+            )
+            .unwrap();
+        }
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=nac benchmark",
+            "-c",
+            "user.email=nac-benchmark@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "benchmark fixture",
+        ]);
+        for index in 0..16 {
+            std::fs::write(
+                workspace.join(format!("file-{index}.txt")),
+                format!("modified {index}\n"),
+            )
+            .unwrap();
+        }
+        let metadata = Arc::make_mut(&mut parts.service.metadata);
+        metadata.cwd = workspace.display().to_string();
+        metadata.workspace_host_path = Some(workspace);
+        for thread_index in 0..16 {
+            let thread_name = format!("worker-{thread_index}");
+            for episode_index in 0..8 {
+                crate::store::append_episode(
+                    &store_path,
+                    "benchmark-session",
+                    &thread_name,
+                    "implementation",
+                    &format!("episode {episode_index}"),
+                )
+                .unwrap();
+            }
+            for event_index in 0..32 {
+                let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+                    thread_name: Some(thread_name.clone()),
+                    content: format!("event {event_index}"),
+                    usage: None,
+                })
+                .unwrap();
+                crate::store::append_thread_event(
+                    &store_path,
+                    "benchmark-session",
+                    &thread_name,
+                    &event_json,
+                )
+                .unwrap();
+            }
+        }
+        for workset_index in 0..4 {
+            crate::store::define_workset(
+                &store_path,
+                "benchmark-session",
+                &crate::store::WorksetDefinition {
+                    id: format!("workset-{workset_index}"),
+                    goal: "measure dashboard reads".to_string(),
+                    status: "active".to_string(),
+                    summary: "benchmark fixture".to_string(),
+                    verification_recipe: None,
+                    items: (0..8)
+                        .map(|item_index| crate::store::WorksetItemDefinition {
+                            title: format!("item-{item_index}"),
+                            scope: "crates/nac-core".to_string(),
+                            description: "exercise workset detail reads".to_string(),
+                            role: "implementation".to_string(),
+                            depends_on: Vec::new(),
+                            acceptance: "snapshot includes this item".to_string(),
+                            notes: None,
+                        })
+                        .collect(),
+                },
+            )
+            .unwrap();
+        }
+        seed_store_transcript(
+            &parts,
+            (0..128)
+                .map(|index| Message::User {
+                    content: format!("benchmark message {index}"),
+                })
+                .collect(),
+        )
+        .await;
+
+        for _ in 0..10 {
+            parts.service.frontend_snapshot().await.unwrap();
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let max_scheduler_gap_us = Arc::new(AtomicU64::new(0));
+        let ticker_stop = Arc::clone(&stop);
+        let ticker_gap = Arc::clone(&max_scheduler_gap_us);
+        let ticker = tokio::spawn(async move {
+            let mut previous = Instant::now();
+            while !ticker_stop.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                let now = Instant::now();
+                let lateness_us =
+                    (now.duration_since(previous).as_micros() as u64).saturating_sub(1_000);
+                ticker_gap.fetch_max(lateness_us, Ordering::Relaxed);
+                previous = now;
+            }
+        });
+
+        let mut latency_us = Vec::with_capacity(ITERATIONS);
+        for _ in 0..ITERATIONS {
+            let started = Instant::now();
+            parts.service.frontend_snapshot().await.unwrap();
+            latency_us.push(started.elapsed().as_micros() as u64);
+        }
+        stop.store(true, Ordering::Relaxed);
+        ticker.await.unwrap();
+        latency_us.sort_unstable();
+        let p95_index = (ITERATIONS * 95).div_ceil(100) - 1;
+        eprintln!(
+            "frontend_snapshot_benchmark iterations={ITERATIONS} median_us={} p95_us={} max_scheduler_lateness_us={}",
+            latency_us[ITERATIONS / 2],
+            latency_us[p95_index],
+            max_scheduler_gap_us.load(Ordering::Relaxed)
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_contract() {
         let (parts, store_path) = test_active_service("paged_snapshot", "paged-session");
         let messages = mixed_message_history();
@@ -3665,6 +3979,79 @@ pub(super) mod tests {
                 "incremental coverage must match the reference pairing"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_reconciles_steering_delivered_during_workspace_load() {
+        let (mut parts, store_path) =
+            test_active_service("steering_workspace_race", "session-steering-workspace-race");
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-1",
+            "change direction",
+        )
+        .unwrap();
+        crate::store::claim_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+
+        let gate = Arc::new(FrontendSnapshotAfterWorkspaceGate::default());
+        parts.service.frontend_snapshot_after_workspace_gate = Some(Arc::clone(&gate));
+        let snapshot_service = parts.service.clone();
+        let snapshot_task =
+            tokio::spawn(async move { snapshot_service.frontend_snapshot().await.unwrap() });
+        let reached = tokio::time::timeout(Duration::from_secs(5), async {
+            while !gate.reached.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        if reached.is_err() {
+            gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = snapshot_task.await;
+            panic!("snapshot did not finish workspace inspection");
+        }
+
+        crate::store::acknowledge_thread_steering_batch(
+            &store_path,
+            &[queued.id],
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+        seed_log_tail(
+            &parts,
+            vec![Message::User {
+                content: "change direction".to_string(),
+            }],
+        )
+        .await;
+        gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let snapshot = snapshot_task.await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+        assert_eq!(
+            snapshot
+                .thread_steering
+                .iter()
+                .find(|record| record.id == queued.id)
+                .map(|record| record.status.as_str()),
+            Some("delivered")
+        );
+        assert!(
+            matches!(
+                snapshot.messages.last(),
+                Some(Message::User { content }) if content == "change direction"
+            ),
+            "the canonical message must cover steering delivered during workspace inspection"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[tokio::test]

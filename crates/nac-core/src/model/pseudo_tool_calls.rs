@@ -363,9 +363,7 @@ fn find_tag(text: &str, name: &str, kind: TagKind) -> Option<(usize, usize)> {
 fn tag_name_boundary(after_name: &str) -> bool {
     match after_name.chars().next() {
         None => false,
-        Some(c) => {
-            !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.' | ':')
-        }
+        Some(c) => !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.' | ':'),
     }
 }
 

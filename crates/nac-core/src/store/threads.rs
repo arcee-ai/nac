@@ -57,6 +57,13 @@ pub fn load_all_episodes(
     session_id: &str,
 ) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
     let conn = open_runtime_connection(store_path)?;
+    load_all_episodes_with_connection(&conn, session_id)
+}
+
+pub(crate) fn load_all_episodes_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
     let mut stmt = conn.prepare(
         "SELECT e.id, e.thread_name, e.session_id, e.action, e.content, e.created_at
          FROM episodes e
@@ -79,6 +86,13 @@ pub fn load_all_episodes(
 
 pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> {
     let conn = open_runtime_connection(path)?;
+    list_threads_with_connection(&conn, session_id)
+}
+
+pub(crate) fn list_threads_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<ThreadRecord>> {
     let mut stmt = conn.prepare(
         "SELECT t.name, t.session_id, t.created_at, t.updated_at,
                 (SELECT COUNT(*) FROM episodes e

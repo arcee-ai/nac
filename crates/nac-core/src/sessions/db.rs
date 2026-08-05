@@ -349,8 +349,14 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 }
 
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
-    let conn = crate::store::open_connection(path)?;
-    query_session_summaries(&conn, None)
+    let conn = crate::store::open_runtime_connection(path)?;
+    list_sessions_with_connection(&conn)
+}
+
+pub(crate) fn list_sessions_with_connection(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<SessionSummary>> {
+    query_session_summaries(conn, None)
 }
 
 pub fn update_session_presentation(
@@ -574,61 +580,48 @@ fn normalize_presentation_title(
     Ok((!title.is_empty()).then(|| title.to_string()))
 }
 
+const SESSION_SUMMARY_QUERY_HEAD: &str = r#"
+SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
+       s.extra_headers_json, s.sandbox_json, s.created_at, s.updated_at, s.host_id,
+       p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
+       COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
+       s.token_usages_json, COALESCE(s.run_count, 0)
+FROM sessions s
+LEFT JOIN session_presentations p ON p.session_id = s.session_id
+"#;
+
 fn query_session_summary(
     conn: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Option<SessionSummary>> {
+    let sql = format!("{SESSION_SUMMARY_QUERY_HEAD} WHERE s.session_id = ?1");
     let row = conn
-        .query_row(
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
-                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
-                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
-                    COALESCE(s.run_count, 0)
-             FROM sessions s
-             LEFT JOIN session_presentations p ON p.session_id = s.session_id
-             WHERE s.session_id = ?1",
-            params![session_id],
-            map_session_summary_row,
-        )
+        .query_row(&sql, params![session_id], map_session_summary_row)
         .optional()?;
-    row.map(|row| row.into_summary(conn)).transpose()
+    row.map(SessionSummaryRow::into_summary).transpose()
 }
 
 fn query_session_summaries(
     conn: &rusqlite::Connection,
     pinned: Option<bool>,
 ) -> Result<Vec<SessionSummary>> {
-    let sql = match pinned {
+    let suffix = match pinned {
         Some(_) => {
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
-                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
-                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
-                    COALESCE(s.run_count, 0)
-             FROM sessions s
-             LEFT JOIN session_presentations p ON p.session_id = s.session_id
-             WHERE COALESCE(p.pinned, 0) = ?1
+            "WHERE COALESCE(p.pinned, 0) = ?1
              ORDER BY COALESCE(p.pinned, 0) DESC,
                       COALESCE(p.sort_order, 0) ASC,
                       s.created_at DESC,
                       s.session_id DESC"
         }
         None => {
-            "SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
-                    s.extra_headers_json, s.sandbox_json, s.messages_json, s.created_at,
-                    s.updated_at, s.host_id, p.title, COALESCE(p.pinned, 0),
-                    COALESCE(p.sort_order, 0), COALESCE(p.version, 0), s.token_usages_json,
-                    COALESCE(s.run_count, 0)
-             FROM sessions s
-             LEFT JOIN session_presentations p ON p.session_id = s.session_id
-             ORDER BY COALESCE(p.pinned, 0) DESC,
+            "ORDER BY COALESCE(p.pinned, 0) DESC,
                       COALESCE(p.sort_order, 0) ASC,
                       s.created_at DESC,
                       s.session_id DESC"
         }
     };
-    let mut stmt = conn.prepare(sql)?;
+    let sql = format!("{SESSION_SUMMARY_QUERY_HEAD} {suffix}");
+    let mut stmt = conn.prepare(&sql)?;
     let rows = match pinned {
         Some(pinned) => stmt
             .query_map(params![i64::from(pinned)], map_session_summary_row)?
@@ -637,7 +630,9 @@ fn query_session_summaries(
             .query_map([], map_session_summary_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
-    rows.into_iter().map(|row| row.into_summary(conn)).collect()
+    rows.into_iter()
+        .map(SessionSummaryRow::into_summary)
+        .collect()
 }
 
 fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummaryRow> {
@@ -649,16 +644,17 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         reasoning_effort_raw: row.get(4)?,
         extra_headers_json: row.get(5)?,
         sandbox_json: row.get(6)?,
-        messages_json: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
-        ssh_host: row.get(10)?,
-        title: row.get(11)?,
-        pinned: row.get::<_, i64>(12)? != 0,
-        sort_order: row.get(13)?,
-        presentation_version: row.get(14)?,
-        token_usages_json: row.get(15)?,
-        run_count: row.get(16)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        ssh_host: row.get(9)?,
+        title: row.get(10)?,
+        pinned: row.get::<_, i64>(11)? != 0,
+        sort_order: row.get(12)?,
+        presentation_version: row.get(13)?,
+        visible_message_count: row.get(14)?,
+        last_user_prompt: row.get(15)?,
+        token_usages_json: row.get(16)?,
+        run_count: row.get(17)?,
     })
 }
 
@@ -670,7 +666,6 @@ struct SessionSummaryRow {
     reasoning_effort_raw: Option<String>,
     extra_headers_json: Option<String>,
     sandbox_json: Option<String>,
-    messages_json: String,
     created_at: String,
     updated_at: String,
     ssh_host: Option<String>,
@@ -678,12 +673,14 @@ struct SessionSummaryRow {
     pinned: bool,
     sort_order: i64,
     presentation_version: i64,
+    visible_message_count: i64,
+    last_user_prompt: Option<String>,
     token_usages_json: Option<String>,
     run_count: i64,
 }
 
 impl SessionSummaryRow {
-    fn into_summary(self, conn: &rusqlite::Connection) -> Result<SessionSummary> {
+    fn into_summary(self) -> Result<SessionSummary> {
         let diagnostics = model_config_diagnostics(
             self.backend_raw.as_deref(),
             self.reasoning_effort_raw.as_deref(),
@@ -701,20 +698,17 @@ impl SessionSummaryRow {
                 None => Some(cwd.clone()),
             }
         };
-        let messages: Vec<Message> = serde_json::from_str(&self.messages_json)
-            .context("failed to parse stored session messages")?;
+        // Never-fold (step 4): the blob is write-once (system head ++ legacy
+        // prefix) and the recent transcript lives in the orchestrator
+        // transcript log, so these two are materialized columns rather than a
+        // count over the blob: the log writer adds its delta on every append,
+        // a truncation rebuilds them, and the migration backfills blob ++ log.
+        let visible_message_count = usize::try_from(self.visible_message_count)
+            .context("session visible message count overflowed")?;
         let total_tokens = parse_token_usages(self.token_usages_json.as_deref())?
             .as_deref()
             .and_then(crate::model::TokenUsage::aggregate)
             .map(|usage| usage.billable_tokens());
-        // Never-fold (step 4): messages_json is the write-once blob (system
-        // head ++ legacy prefix); the recent transcript is the orchestrator
-        // transcript log. Summary stats are blob stats ++ log stats (SQL
-        // aggregates over the log payload, no Message decode). A pre-log
-        // session has no log rows and gets exactly the pre-log numbers.
-        let log_visible =
-            crate::store::count_visible_transcript_log_messages(conn, &self.session_id)?;
-        let log_last_user = crate::store::last_transcript_log_user_prompt(conn, &self.session_id)?;
         Ok(SessionSummary {
             session_id: self.session_id,
             cwd,
@@ -722,8 +716,8 @@ impl SessionSummaryRow {
             model: self.model,
             backend,
             model_config_error: (!diagnostics.is_empty()).then(|| diagnostics.join("; ")),
-            visible_message_count: visible_message_count(&messages) + log_visible,
-            last_user_prompt: log_last_user.or_else(|| last_user_prompt(&messages)),
+            visible_message_count,
+            last_user_prompt: self.last_user_prompt,
             sandboxed,
             ssh_host: self.ssh_host,
             title: self.title,
@@ -771,6 +765,9 @@ fn insert_or_replace_session(
     // transcript again.
     let messages_json = serde_json::to_string(&snapshot.messages)
         .context("failed to serialize session messages")?;
+    let summary_visible_message_count = i64::try_from(visible_message_count(&snapshot.messages))
+        .context("session visible message count overflowed")?;
+    let summary_last_user_prompt = last_user_prompt(&snapshot.messages);
     let response_durations_ms_json = snapshot
         .response_durations_ms
         .as_ref()
@@ -799,13 +796,23 @@ fn insert_or_replace_session(
     // actually opened for this write and is never read back.
     tx.execute(
         "INSERT INTO sessions (
-             session_id, cwd, store_path, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             session_id, cwd, store_path, model, base_url, backend, reasoning_effort,
+             sandbox_json, messages_json, visible_message_count, last_user_prompt,
+             last_response_duration_ms, previous_response_duration_ms,
+             response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
+             extra_headers_json, token_usages_json, config_version,
+             orchestrator_compaction_threshold
+         ) VALUES (
+             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+         )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
              sandbox_json = excluded.sandbox_json,
              messages_json = excluded.messages_json,
+             visible_message_count = excluded.visible_message_count,
+             last_user_prompt = excluded.last_user_prompt,
              last_response_duration_ms = excluded.last_response_duration_ms,
              previous_response_duration_ms = excluded.previous_response_duration_ms,
              response_durations_ms_json = excluded.response_durations_ms_json,
@@ -819,9 +826,13 @@ fn insert_or_replace_session(
             snapshot.model,
             snapshot.base_url,
             snapshot.backend.as_str(),
-            snapshot.reasoning_effort.map(|effort| effort.as_str().to_string()),
+            snapshot
+                .reasoning_effort
+                .map(|effort| effort.as_str().to_string()),
             sandbox_json,
             messages_json,
+            summary_visible_message_count,
+            summary_last_user_prompt,
             snapshot.last_response_duration_ms,
             snapshot.previous_response_duration_ms,
             response_durations_ms_json,
