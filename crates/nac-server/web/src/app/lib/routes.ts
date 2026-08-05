@@ -3,11 +3,12 @@
 
 // The session screen always shows the chat; the URL only selects which panel
 // the side box has open.
-export const SESSION_PANELS = ["files", "worksets", "threads"] as const;
+// Order is also the tab order in the side box.
+export const SESSION_PANELS = ["threads", "files", "worksets"] as const;
 
 export type SessionPanel = (typeof SESSION_PANELS)[number];
 
-export const DEFAULT_SESSION_PANEL: SessionPanel = "files";
+export const DEFAULT_SESSION_PANEL: SessionPanel = "threads";
 
 export function isSessionPanel(value: string | undefined): value is SessionPanel {
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");

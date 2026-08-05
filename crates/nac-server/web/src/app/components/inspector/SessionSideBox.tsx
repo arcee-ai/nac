@@ -37,9 +37,9 @@ import type {
 // The `files` panel is called Changes in the design; its route keeps the older
 // name so links that are already out there still land on it.
 const PANEL_LABEL: Record<SessionPanel, string> = {
+  threads: "Threads",
   files: "Files",
   worksets: "Worksets",
-  threads: "Threads",
 };
 
 interface SessionSideBoxProps {
@@ -113,8 +113,8 @@ function SideBoxFooter({
 }
 
 /**
- * The left half of the session screen: one box with the Files / Worksets /
- * Threads panels, sized by the shared layout store.
+ * The left half of the session screen: one box with the Threads / Files /
+ * Worksets panels, sized by the shared layout store.
  */
 export function SessionSideBox({
   sessionId,
