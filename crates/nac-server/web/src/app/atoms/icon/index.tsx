@@ -183,7 +183,7 @@ const normalizeIconName = (iconName: string): string => {
  */
 export const mapIconName = (
   iconNameString: string | undefined | null,
-  defaultIcon: IconName = IconName.Search
+  defaultIcon: IconName = IconName.Search,
 ): IconName => {
   if (!iconNameString) {
     return defaultIcon;

@@ -38,12 +38,17 @@ import {
   persistedThreadLog,
   type ThreadLogLine,
 } from "@/app/lib/threadLog";
+import {
+  dispatchThreadName,
+  partitionThreadCalls,
+} from "@/app/lib/transcript";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   EpisodeSnapshot,
   SessionSnapshotResponse,
   ThreadSnapshot,
+  ToolCall,
 } from "@/app/types/api";
 
 /**
@@ -61,6 +66,38 @@ function pendingThread(name: string, sessionId: string): ThreadSnapshot {
     latest_action: null,
   };
 }
+
+/** Later DAG waves rank higher so they sort to the top of the list. */
+function waveRankByName(
+  messages: SessionSnapshotResponse["messages"] | undefined,
+): Map<string, number> {
+  const ranks = new Map<string, number>();
+  if (!messages?.length) return ranks;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "assistant") continue;
+    const calls = (message.tool_calls ?? []).filter(
+      (call): call is ToolCall => call.function?.name === "thread",
+    );
+    if (!calls.length) continue;
+    partitionThreadCalls(calls).forEach((level, waveIndex) => {
+      for (const call of level) {
+        ranks.set(dispatchThreadName(call), waveIndex);
+      }
+    });
+    break;
+  }
+  return ranks;
+}
+
+type ListKind = "pending" | "running" | "done";
+
+const LIST_KIND_ORDER: Record<ListKind, number> = {
+  // Last to execute (queued on deps) above currently running, done last.
+  pending: 0,
+  running: 1,
+  done: 2,
+};
 
 /**
  * Everything the thread has run, oldest first, followed by the operation it is
@@ -289,36 +326,71 @@ export function ThreadsView({
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
+  const waveRank = useMemo(
+    () => waveRankByName(snapshot?.messages),
+    [snapshot?.messages],
+  );
 
-  const runningNames = useMemo(() => {
-    const names = new Set(activeThreads ?? []);
-    for (const [name, thread] of Object.entries(liveThreads)) {
-      if (thread.status === "running") names.add(name);
-      else names.delete(name);
+  // Backend pre-marks every name in a DAG batch as active. Only
+  // `thread_started` means the worker is actually running; the rest are
+  // pending on in-batch deps.
+  const { runningNames, pendingNames } = useMemo(() => {
+    const running = new Set<string>();
+    const pending = new Set<string>();
+    for (const name of activeThreads ?? []) {
+      const live = liveThreads[name];
+      if (live?.status === "running") running.add(name);
+      else if (live?.status === "finished") {
+        // Stay out of both sets until the snapshot drops the name.
+      } else pending.add(name);
     }
-    return names;
+    for (const [name, thread] of Object.entries(liveThreads)) {
+      if (thread.status === "running") {
+        running.add(name);
+        pending.delete(name);
+      } else if (thread.status === "finished") {
+        running.delete(name);
+        pending.delete(name);
+      }
+    }
+    return { runningNames: running, pendingNames: pending };
   }, [activeThreads, liveThreads]);
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));
+    const extras = [...runningNames, ...pendingNames].filter(
+      (name) => !persisted.has(name),
+    );
     const rows = [
       ...threads,
-      ...[...runningNames]
-        .filter((name) => !persisted.has(name))
-        .map((name) => pendingThread(name, sessionId)),
+      ...extras.map((name) => pendingThread(name, sessionId)),
     ];
-    // Sorting is stable, so this only lifts the running threads to the top and
-    // otherwise leaves the store's order alone.
-    return rows.sort(
-      (a, b) =>
-        Number(runningNames.has(b.name)) - Number(runningNames.has(a.name)),
-    );
-  }, [threads, runningNames, sessionId]);
+    const kindOf = (name: string): ListKind => {
+      if (pendingNames.has(name)) return "pending";
+      if (runningNames.has(name)) return "running";
+      return "done";
+    };
+    // Stable sort: later DAG waves (and pending) float up; done sinks.
+    return rows.sort((a, b) => {
+      const kindDiff =
+        LIST_KIND_ORDER[kindOf(a.name)] - LIST_KIND_ORDER[kindOf(b.name)];
+      if (kindDiff !== 0) return kindDiff;
+      const rankDiff =
+        (waveRank.get(b.name) ?? -1) - (waveRank.get(a.name) ?? -1);
+      if (rankDiff !== 0) return rankDiff;
+      return 0;
+    });
+  }, [threads, runningNames, pendingNames, sessionId, waveRank]);
 
   if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
 
+  const selectable = ordered.filter(
+    (thread) => !pendingNames.has(thread.name),
+  );
   const current =
-    ordered.find((thread) => thread.name === selected) ?? ordered[0] ?? null;
+    selectable.find((thread) => thread.name === selected) ??
+    selectable[0] ??
+    null;
   const live = current ? liveThreads[current.name] : undefined;
 
   return (
@@ -330,6 +402,7 @@ export function ThreadsView({
           </div>
         ) : (
           ordered.map((thread) => {
+            const pending = pendingNames.has(thread.name);
             const running = runningNames.has(thread.name);
             const errored = liveThreads[thread.name]?.isError;
             return (
@@ -337,8 +410,16 @@ export function ThreadsView({
                 key={thread.name}
                 label={thread.name}
                 active={thread.name === current?.name}
+                disabled={pending}
+                title={pending ? "Waiting on source threads" : undefined}
                 icon={
-                  running ? (
+                  pending ? (
+                    <Icon
+                      iconName={IconName.Timelaps}
+                      size={16}
+                      className="shrink-0 [&>path]:!fill-basic-muted"
+                    />
+                  ) : running ? (
                     <Loader
                       size={LoaderSize.Micro}
                       variant={LoaderVariant.Neutral}

@@ -136,6 +136,7 @@ export function PanelSplit({
 export function PanelRow({
   label,
   active = false,
+  disabled = false,
   icon,
   trailing,
   labelClassName,
@@ -144,6 +145,8 @@ export function PanelRow({
 }: {
   label: string;
   active?: boolean;
+  /** Queued / not yet started rows stay visible but are not selectable. */
+  disabled?: boolean;
   icon?: ReactNode;
   trailing?: ReactNode;
   /** Overrides the label colour, e.g. to mark a file's git status. */
@@ -156,17 +159,24 @@ export function PanelRow({
       type="button"
       className={cn(
         "flex items-center gap-1 p-1 w-full rounded-[4px] text-left",
-        active ? "btn-ghost-highlighted" : "btn-ghost",
+        disabled
+          ? "opacity-50 cursor-default"
+          : active
+            ? "btn-ghost-highlighted"
+            : "btn-ghost",
       )}
       aria-pressed={active}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       title={title}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
     >
       {icon}
       <span
         className={cn(
           "flex-1 min-w-0 truncate label-micro",
-          labelClassName ?? "text-btn-secondary",
+          labelClassName ??
+            (disabled ? "text-basic-muted" : "text-btn-secondary"),
         )}
       >
         {label}

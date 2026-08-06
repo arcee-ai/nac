@@ -215,7 +215,7 @@ export const ModelMessage = memo(function ModelMessage({
                 return (
                   <ThreadWave
                     key={block.key}
-                    threads={block.threads}
+                    rows={block.rows}
                     selected={selectedThreadEpisode}
                     onSelect={onSelectThread}
                   />

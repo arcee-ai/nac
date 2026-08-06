@@ -2,8 +2,8 @@
 //
 // Everything the model does between two user prompts belongs to one model
 // message: reasoning, prose, the worksets it defined and the waves of threads
-// it dispatched. Tool calls issued together in a single assistant message ran
-// in parallel, so each such assistant message becomes one wave.
+// it dispatched. Thread tool calls from one assistant message form one package;
+// in-batch `threads` deps split that package into stacked DAG rows.
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -34,7 +34,7 @@ const SILENT_TOOLS = new Set([
   "workset_list",
 ]);
 
-export type ThreadState = "running" | "done" | "error";
+export type ThreadState = "running" | "pending" | "done" | "error";
 
 export interface TranscriptThread {
   /**
@@ -66,7 +66,8 @@ export type TranscriptBlock =
   | { kind: "text"; key: string; text: string }
   | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
-  | { kind: "wave"; key: string; threads: TranscriptThread[] };
+  /** One assistant dispatch batch, split into topological DAG rows. */
+  | { kind: "wave"; key: string; rows: TranscriptThread[][] };
 
 export interface UserTurn {
   kind: "user";
@@ -161,6 +162,71 @@ function threadName(call: ToolCall): string {
   return text(parseArguments(call).name) || "thread";
 }
 
+/** Public for the threads list, which ranks rows by the open DAG batch. */
+export function dispatchThreadName(call: ToolCall): string {
+  return threadName(call);
+}
+
+/** Source thread names from a dispatch; only strings count. */
+function sourceThreads(call: ToolCall): string[] {
+  const value = parseArguments(call).threads;
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Split one assistant batch into Kahn levels using in-batch `threads` deps.
+ * Cycles / duplicate names fall back to a single row so the UI still renders.
+ */
+export function partitionThreadCalls(calls: ToolCall[]): ToolCall[][] {
+  const n = calls.length;
+  if (n <= 1) return n ? [calls] : [];
+
+  const nameToIndex = new Map<string, number>();
+  for (let i = 0; i < n; i += 1) {
+    const name = threadName(calls[i]);
+    if (nameToIndex.has(name)) return [calls];
+    nameToIndex.set(name, i);
+  }
+
+  const adjacency: number[][] = Array.from({ length: n }, () => []);
+  const inDegree = Array.from({ length: n }, () => 0);
+
+  for (let i = 0; i < n; i += 1) {
+    const seen = new Set<number>();
+    for (const source of sourceThreads(calls[i])) {
+      const depIdx = nameToIndex.get(source);
+      if (depIdx === undefined) continue;
+      if (depIdx === i) return [calls];
+      if (seen.has(depIdx)) continue;
+      seen.add(depIdx);
+      adjacency[depIdx].push(i);
+      inDegree[i] += 1;
+    }
+  }
+
+  const waves: ToolCall[][] = [];
+  const sorted = Array.from({ length: n }, () => false);
+  let sortedCount = 0;
+  const degree = inDegree.slice();
+
+  while (sortedCount < n) {
+    const waveIdxs: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+      if (!sorted[i] && degree[i] === 0) waveIdxs.push(i);
+    }
+    if (!waveIdxs.length) return [calls];
+    for (const node of waveIdxs) {
+      for (const neighbor of adjacency[node]) degree[neighbor] -= 1;
+      sorted[node] = true;
+    }
+    sortedCount += waveIdxs.length;
+    waves.push(waveIdxs.map((i) => calls[i]));
+  }
+
+  return waves;
+}
+
 /**
  * The events of one dispatch.
  *
@@ -201,12 +267,21 @@ function toolResultsForAssistant(
   return results;
 }
 
-/** @param episode Which dispatch of this name the card stands for, from 0. */
+/**
+ * @param episode Which dispatch of this name the card stands for, from 0.
+ * @param batchNames Thread names in this assistant message (for in-batch deps).
+ * @param finishedNames Names in this batch that have finished (tool result or
+ *   live `thread_finished`). Tool results for a DAG batch are committed only
+ *   after every wave returns, so live finish is what flips cards to done while
+ *   later rows are still pending.
+ */
 function describeThread(
   call: ToolCall,
   episode: number,
   ctx: BuildContext,
   results: Map<string, string>,
+  batchNames: Set<string>,
+  finishedNames: Set<string>,
 ): TranscriptThread {
   const name = threadName(call);
   const action = text(parseArguments(call).action);
@@ -219,11 +294,22 @@ function describeThread(
       ? ctx.liveThreads[name]
       : undefined;
 
+  const waitingOnBatchDep = sourceThreads(call).some(
+    (source) => batchNames.has(source) && !finishedNames.has(source),
+  );
+
+  const episodeEvents = eventsForEpisode(ctx, name, episode);
+  const finishedPersisted = episodeEvents?.some(
+    (event) => event.type === "thread_finished",
+  );
+  const finishedLive = live?.status === "finished";
   const state: ThreadState = live?.isError
     ? "error"
-    : result != null
+    : result != null || finishedLive || finishedPersisted
       ? "done"
-      : "running";
+      : waitingOnBatchDep
+        ? "pending"
+        : "running";
 
   return {
     key: `${name}#${episode}`,
@@ -233,7 +319,7 @@ function describeThread(
     // The persisted events are what a reload falls back on, and the stream is
     // what carries the commands issued since the last snapshot.
     log: mergeThreadLog(
-      persistedThreadLog(eventsForEpisode(ctx, name, episode)),
+      persistedThreadLog(episodeEvents),
       live?.log ?? [],
     ),
     state,
@@ -409,15 +495,12 @@ export function buildTranscript(
     }
 
     const results = toolResultsForAssistant(messages, index);
-    const wave: TranscriptThread[] = [];
+    const threadCalls: ToolCall[] = [];
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
       const key = `${name}-${index}-${callIndex}`;
       if (name === "thread") {
-        const dispatched = threadName(call);
-        const episode = dispatchesSeen[dispatched] ?? 0;
-        dispatchesSeen[dispatched] = episode + 1;
-        wave.push(describeThread(call, episode, ctx, results));
+        threadCalls.push(call);
       } else if (name === "workset_define") {
         blocks.push({
           kind: "workset",
@@ -429,7 +512,47 @@ export function buildTranscript(
         blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });
       }
     });
-    if (wave.length) blocks.push({ kind: "wave", key: `wave-${index}`, threads: wave });
+
+    if (threadCalls.length) {
+      const batchNames = new Set(threadCalls.map(threadName));
+      // Prefer live `thread_finished` over tool results: DAG tool rows are
+      // committed only once every topological wave has returned.
+      const finishedNames = new Set<string>();
+      for (const call of threadCalls) {
+        const name = threadName(call);
+        if (results.has(call.id)) {
+          finishedNames.add(name);
+          continue;
+        }
+        if (ctx.liveThreads[name]?.status === "finished") {
+          finishedNames.add(name);
+          continue;
+        }
+        // Snapshot may already have thread_finished before the tool-result
+        // batch is committed for this DAG.
+        const episodes = ctx.threadEpisodes[name] ?? [];
+        const latest = episodes[episodes.length - 1];
+        if (latest?.some((event) => event.type === "thread_finished")) {
+          finishedNames.add(name);
+        }
+      }
+      const rows = partitionThreadCalls(threadCalls).map((level) =>
+        level.map((call) => {
+          const dispatched = threadName(call);
+          const episode = dispatchesSeen[dispatched] ?? 0;
+          dispatchesSeen[dispatched] = episode + 1;
+          return describeThread(
+            call,
+            episode,
+            ctx,
+            results,
+            batchNames,
+            finishedNames,
+          );
+        }),
+      );
+      blocks.push({ kind: "wave", key: `wave-${index}`, rows });
+    }
   });
 
   return turns.length > MAX_TURNS ? turns.slice(-MAX_TURNS) : turns;
