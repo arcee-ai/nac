@@ -1,0 +1,48 @@
+// Which run produced which model turn.
+//
+// The backend captures one workspace revision per finished run and records how
+// long the transcript was at that moment, so a run owns the messages between
+// the previous revision's length and its own. That is the only link there is:
+// nothing stores a run id per message.
+
+import type { ModelTurn, TranscriptTurn } from "@/app/lib/transcript";
+import type { WorkspaceRevision } from "@/app/types/api";
+
+/**
+ * The revision each model turn was captured by, keyed by turn, leaving out the
+ * runs that changed nothing — most of them, in a session that mostly talks.
+ *
+ * Walked in step rather than searched per turn so a revision is claimed once:
+ * a run that finished without writing a message — a failure before the model
+ * answered, or the very first capture, which carries whatever the checkout was
+ * already carrying — would otherwise hand its revision to the next turn along.
+ */
+export function revisionsByTurn(
+  turns: TranscriptTurn[],
+  revisions: WorkspaceRevision[] | undefined,
+): Map<string, WorkspaceRevision> {
+  const result = new Map<string, WorkspaceRevision>();
+  if (!revisions?.length) return result;
+
+  // Rows captured before the backend kept the transcript length cannot be
+  // placed at all, and the endpoint hands them back newest first.
+  const ordered = revisions
+    .filter((revision) => revision.transcript_len != null)
+    .sort((a, b) => a.transcript_len! - b.transcript_len!);
+
+  let next = 0;
+  for (const turn of turns) {
+    if (turn.kind !== "model") continue;
+    const start = (turn as ModelTurn).messageIndex;
+    if (start == null) continue;
+    while (next < ordered.length && ordered[next].transcript_len! <= start) {
+      next += 1;
+    }
+    if (next >= ordered.length) break;
+    const revision = ordered[next];
+    if (revision.changed_files > 0) result.set(turn.key, revision);
+    next += 1;
+  }
+
+  return result;
+}

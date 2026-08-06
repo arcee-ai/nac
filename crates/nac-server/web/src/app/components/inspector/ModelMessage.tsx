@@ -15,16 +15,18 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import {
-  ChatBadge,
-  CodeChangesBadge,
-} from "@/app/components/inspector/ChatBadge";
+  SnapshotBadge,
+  type FilesPanelLink,
+} from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import type { ModelTurn } from "@/app/lib/transcript";
+import type { WorkspaceRevision } from "@/app/types/api";
 
 /** Exact assistant marker written by the agent on session cancel. */
 const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -86,15 +88,13 @@ interface ModelMessageProps {
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
   /**
-   * Workspace-level diff for the latest finished turn. The backend keeps one
-   * running total rather than a snapshot per turn, so only the newest model
-   * message carries it.
+   * The revision captured for the run behind this turn, when that run changed
+   * anything. Absent on a turn whose run is still going, was cancelled, or
+   * touched no files.
    */
-  snapshotChanges?: {
-    additions: number;
-    deletions: number;
-    onClick: () => void;
-  } | null;
+  snapshotRevision?: WorkspaceRevision | null;
+  /** Where a click on the snapshot or one of its files should land. */
+  filesPanel?: FilesPanelLink | null;
 }
 
 /**
@@ -116,7 +116,8 @@ export const ModelMessage = memo(function ModelMessage({
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
-  snapshotChanges = null,
+  snapshotRevision = null,
+  filesPanel = null,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
   const canRefresh = onRefresh != null && userMessageIndex != null;
@@ -224,17 +225,8 @@ export const ModelMessage = memo(function ModelMessage({
                 return null;
             }
           })}
-          {snapshotChanges ? (
-            <ChatBadge
-              label="Snapshot"
-              trailing={
-                <CodeChangesBadge
-                  additions={snapshotChanges.additions}
-                  deletions={snapshotChanges.deletions}
-                />
-              }
-              onClick={snapshotChanges.onClick}
-            />
+          {snapshotRevision && filesPanel ? (
+            <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
           ) : null}
         </div>
 

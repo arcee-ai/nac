@@ -19,6 +19,7 @@ import {
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
 import { cn } from "@/app/lib/cn";
+import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
   buildFileTree,
   changedDirPaths,
@@ -55,26 +56,6 @@ import type {
   WorkspaceDiffSection,
   WorkspaceFileDiff,
 } from "@/app/types/api";
-
-// Modified is yellow and anything newly appearing is blue, the way an editor
-// tints its explorer; a file matching HEAD keeps the ordinary row colour.
-const STATUS_COLOR: Record<string, string> = {
-  M: "text-danger-primary",
-  A: "text-info-primary",
-  "?": "text-info-primary",
-  R: "text-info-primary",
-  C: "text-info-primary",
-  D: "text-error-primary",
-  U: "text-error-primary",
-};
-
-const statusColor = (status: string | null) =>
-  status ? (STATUS_COLOR[status.trim()[0]] ?? "text-basic-primary") : null;
-
-/** A deleted file is gone from the checkout, so its row is struck through. */
-const statusLabelClass = (status: string | null) =>
-  cn(statusColor(status), status?.trim()[0] === "D" && "line-through") ||
-  undefined;
 
 function Chevron({ open }: { open: boolean }) {
   return (

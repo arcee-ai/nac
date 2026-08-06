@@ -19,6 +19,7 @@ import {
   displayPromptFromMessageText,
   formatStoreTime,
 } from "@/app/lib/format";
+import { revisionsByTurn } from "@/app/lib/revisions";
 import type { SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
@@ -28,10 +29,18 @@ import {
   type TranscriptTurn,
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useRegenerateRun, useSubmitRun } from "@/app/services/queries";
 import {
+  useRegenerateRun,
+  useSubmitRun,
+  useWorkspaceRevisions,
+} from "@/app/services/queries";
+import {
+  selectFile,
+  selectRevision,
   selectThread,
   selectWorkset,
+  useSelectedFile,
+  useSelectedRevision,
   useSelectedThreadEpisode,
   useSelectedWorkset,
 } from "@/app/store/sessionLayoutStore";
@@ -103,6 +112,8 @@ export function Transcript({
   const optimisticPrompt = useOptimisticUserPrompt();
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
+  const selectedFile = useSelectedFile();
+  const selectedRevision = useSelectedRevision();
   const toast = useToast();
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
@@ -177,25 +188,13 @@ export function Transcript({
   }, []);
 
   const model = snapshot?.metadata.model ?? "";
-  const workspace = snapshot?.workspace ?? null;
-  const additions = workspace?.total_additions ?? 0;
-  const deletions = workspace?.total_deletions ?? 0;
-  // One workspace-level diff, attached to the newest finished model turn.
-  const snapshotChanges =
-    !running && (additions || deletions)
-      ? {
-          additions,
-          deletions,
-          onClick: () => onFocusPanel("files"),
-        }
-      : null;
-  let lastModelIndex = -1;
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index]?.kind === "model") {
-      lastModelIndex = index;
-      break;
-    }
-  }
+  // A revision is captured per finished run, so each model turn carries what
+  // its own run changed instead of one running total for the whole checkout.
+  const { data: revisions } = useWorkspaceRevisions(sessionId);
+  const turnRevisions = useMemo(
+    () => revisionsByTurn(turns, revisions),
+    [turns, revisions],
+  );
 
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.
@@ -239,6 +238,44 @@ export function Transcript({
       onFocusPanel("worksets");
     },
     [onFocusPanel],
+  );
+  // Opening a snapshot points the panel at that run's revision rather than at
+  // the working tree: the run is what the badge describes, and the tree has
+  // usually moved on — or been committed — since.
+  const focusRevision = useCallback(
+    (revision: number) => {
+      selectRevision(revision);
+      onFocusPanel("files");
+    },
+    [onFocusPanel],
+  );
+  const focusRevisionFile = useCallback(
+    (revision: number, path: string) => {
+      selectRevision(revision);
+      selectFile(path);
+      onFocusPanel("files");
+    },
+    [onFocusPanel],
+  );
+
+  // One object for every turn, and stable across stream deltas, so carrying it
+  // does not re-render the memoized messages.
+  const filesPanel = useMemo(
+    () => ({
+      sessionId,
+      selectedFile: panel === "files" ? selectedFile : null,
+      selectedRevision: panel === "files" ? selectedRevision : null,
+      onOpenFile: focusRevisionFile,
+      onOpenPanel: focusRevision,
+    }),
+    [
+      sessionId,
+      panel,
+      selectedFile,
+      selectedRevision,
+      focusRevisionFile,
+      focusRevision,
+    ],
   );
 
   const runError = error && !running ? error : null;
@@ -327,9 +364,8 @@ export function Transcript({
                       : null
                   }
                   onRevert={openRevert}
-                  snapshotChanges={
-                    index === lastModelIndex ? snapshotChanges : null
-                  }
+                  snapshotRevision={turnRevisions.get(turn.key) ?? null}
+                  filesPanel={filesPanel}
                 />
               );
             })}
@@ -347,6 +383,7 @@ export function Transcript({
                 key: "model-pending",
                 blocks: [],
                 durationMs: null,
+                messageIndex: null,
               }}
               model={model}
               active

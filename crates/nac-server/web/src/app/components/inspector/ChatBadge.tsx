@@ -16,6 +16,11 @@ interface ChatBadgeProps {
   active?: boolean;
   /** Rendered after the label, e.g. the diff counts of a snapshot. */
   trailing?: ReactNode;
+  /**
+   * Rendered above the label, inside the same rule, e.g. the files a snapshot
+   * touched. Unlike `body` it is always visible and is not a disclosure.
+   */
+  preface?: ReactNode;
   /** When given, the badge becomes a disclosure for this body. */
   body?: string;
   onClick?: () => void;
@@ -30,6 +35,7 @@ export function ChatBadge({
   pending = false,
   active = false,
   trailing,
+  preface,
   body,
   onClick,
 }: ChatBadgeProps) {
@@ -46,6 +52,7 @@ export function ChatBadge({
         highlighted ? "border-primary" : "border-tertiary",
       )}
     >
+      {preface}
       <button
         type="button"
         className={cn(

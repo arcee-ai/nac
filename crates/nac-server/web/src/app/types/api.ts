@@ -274,6 +274,11 @@ export interface WorkspaceRevision {
   deletions: number;
   changed_files: number;
   created_at: string;
+  /**
+   * How long the transcript was when the run finished, which is what places the
+   * revision against the messages. Null on rows captured before it was kept.
+   */
+  transcript_len: number | null;
 }
 
 export interface WorkspaceRevisionChanges {

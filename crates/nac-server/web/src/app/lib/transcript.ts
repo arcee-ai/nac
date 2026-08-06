@@ -85,6 +85,12 @@ export interface ModelTurn {
   blocks: TranscriptBlock[];
   /** How long the run behind this turn took, once it finished. */
   durationMs: number | null;
+  /**
+   * Raw snapshot index of the turn's first message, which is what places it
+   * against the transcript lengths the workspace revisions were captured at.
+   * Null while the turn is only a stream and has nothing persisted yet.
+   */
+  messageIndex: number | null;
 }
 
 export type TranscriptTurn = UserTurn | ModelTurn;
@@ -390,6 +396,7 @@ export function withStreamedOutput(
         key: `model-${turns.filter((entry) => entry.kind === "model").length}`,
         blocks: [],
         durationMs: null,
+        messageIndex: null,
       };
 
   let appended = false;
@@ -467,6 +474,7 @@ export function buildTranscript(
         key: `model-${modelTurnIndex}`,
         blocks: [],
         durationMs: durations[modelTurnIndex] ?? null,
+        messageIndex: index,
       };
       turns.push(current);
     }
