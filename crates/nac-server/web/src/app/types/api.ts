@@ -743,6 +743,8 @@ export interface SshTarget {
 export interface SshBrowseRequest extends SshTarget {
   /** Absent or empty opens on the login home on the remote host. */
   path?: string | null;
+  /** Dot-prefixed names are left out unless this asks for them. */
+  hidden?: boolean;
 }
 
 /** A named, reusable SSH connection offered by the launch and settings forms. */

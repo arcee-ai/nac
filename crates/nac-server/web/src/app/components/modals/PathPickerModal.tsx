@@ -32,57 +32,53 @@ import type { SshTarget } from "@/app/types/api";
  * through the API instead of through the operating system's dialog. A remote
  * host is browsed the same way for the same reason, one directory per request.
  */
-export function PathPickerModal({
-  open,
-  kind,
-  initialPath,
-  ssh,
-  onClose,
-  onSelect,
-}: {
-  open: boolean;
+interface PathPickerProps {
   kind: BrowseKind;
   initialPath: string;
   /** Browses this host instead of the local filesystem. */
   ssh?: SshTarget | null;
+  /** Overrides the title derived from `kind`. */
+  title?: string;
+  /** Starts with dot-prefixed entries listed, for paths that live in one. */
+  showHidden?: boolean;
+  /** Offers a way back to whatever the caller treats as no explicit path. */
+  clearLabel?: string;
+  onClear?: () => void;
   onClose: () => void;
   onSelect: (path: string) => void;
-}) {
+}
+
+export function PathPickerModal({
+  open,
+  ssh,
+  ...props
+}: PathPickerProps & { open: boolean }) {
   if (!open) return null;
-  return (
-    <PathPicker
-      kind={kind}
-      initialPath={initialPath}
-      ssh={ssh ?? null}
-      onClose={onClose}
-      onSelect={onSelect}
-    />
-  );
+  return <PathPicker ssh={ssh ?? null} {...props} />;
 }
 
 function PathPicker({
   kind,
   initialPath,
   ssh,
+  title,
+  showHidden = false,
+  clearLabel,
+  onClear,
   onClose,
   onSelect,
-}: {
-  kind: BrowseKind;
-  initialPath: string;
-  ssh: SshTarget | null;
-  onClose: () => void;
-  onSelect: (path: string) => void;
-}) {
-  const pickingFile = kind === "toml";
+}: PathPickerProps) {
+  const pickingFile = kind !== "directory";
   // A directory is picked from an empty path so the server starts at its root,
   // or the host at the login home.
   const [directory, setDirectory] = useState(initialPath.trim());
   const [draft, setDraft] = useState(initialPath.trim());
   const [file, setFile] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(showHidden);
   // Both hooks are called every render, as hooks must be; the one that is not
   // the source of this listing is disabled and never fetches.
-  const local = useBrowsePath(directory || null, kind, !ssh);
-  const remote = useSshBrowsePath(ssh, directory || null, Boolean(ssh));
+  const local = useBrowsePath(directory || null, kind, hidden, !ssh);
+  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
   const { data, error, isFetching } = ssh ? remote : local;
 
   const goTo = (path: string) => {
@@ -98,17 +94,31 @@ function PathPicker({
       open
       onClose={onClose}
       title={
-        pickingFile
+        title ??
+        (kind === "toml"
           ? "Select Config File"
-          : ssh
-            ? `Select Working Directory on ${ssh.ssh_host}`
-            : "Select Working Directory"
+          : kind === "file"
+            ? "Select File"
+            : ssh
+              ? `Select Working Directory on ${ssh.ssh_host}`
+              : "Select Working Directory")
       }
       size={ModalSize.Wide}
       flush
       className="h-[560px]"
       footer={
         <>
+          {onClear ? (
+            <Button
+              variant={ButtonVariant.Ghost}
+              size={ButtonSize.Medium}
+              content={ButtonContent.Text}
+              className="mr-auto"
+              onClick={onClear}
+            >
+              {clearLabel ?? "Clear"}
+            </Button>
+          ) : null}
           <Button
             variant={ButtonVariant.Secondary}
             size={ButtonSize.Medium}
@@ -163,6 +173,19 @@ function PathPicker({
               if (event.key === "Enter") goTo(draft.trim());
             }}
           />
+          <Button
+            variant={
+              hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
+            }
+            size={ButtonSize.Medium}
+            content={ButtonContent.Icon}
+            onClick={() => setHidden((on) => !on)}
+            aria-pressed={hidden}
+            title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
+            aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
+          >
+            <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
+          </Button>
         </div>
 
         {error ? (
@@ -179,9 +202,12 @@ function PathPicker({
           ) : null}
           {data?.entries.length === 0 ? (
             <p className="text-micro text-basic-muted px-2 py-3">
-              {pickingFile
+              {kind === "toml"
                 ? "No directories or .toml files here."
-                : "No subdirectories here."}
+                : kind === "file"
+                  ? "Nothing here."
+                  : "No subdirectories here."}
+              {hidden ? "" : " Hidden entries are not listed."}
             </p>
           ) : null}
           {data?.entries.map((entry) => (

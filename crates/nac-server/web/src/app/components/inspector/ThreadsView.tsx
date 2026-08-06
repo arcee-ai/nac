@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -38,10 +39,7 @@ import {
   persistedThreadLog,
   type ThreadLogLine,
 } from "@/app/lib/threadLog";
-import {
-  dispatchThreadName,
-  partitionThreadCalls,
-} from "@/app/lib/transcript";
+import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
@@ -91,6 +89,37 @@ function waveRankByName(
 }
 
 type ListKind = "pending" | "running" | "done";
+
+/**
+ * One log line, with the glyph and the tool name lifted out of the command so
+ * the eye can find where an entry starts and what issued it.
+ */
+const LogLine = memo(function LogLine({ line }: { line: ThreadLogLine }) {
+  const className =
+    "pt-1 code code-small whitespace-pre-wrap break-words " +
+    (line.isError ? "text-error-primary" : "text-basic-tertiary");
+
+  // A failed call reads as one red line; picking it apart would bury the mark.
+  if (line.isError) return <p className={className}>{line.text}</p>;
+
+  return (
+    <p className={className}>
+      {line.mark ? (
+        <span
+          className={
+            line.mark === "▸" ? "text-info-primary" : "text-success-primary"
+          }
+        >
+          {`${line.mark} `}
+        </span>
+      ) : null}
+      {line.name ? (
+        <span className="text-basic-primary">{`${line.name}: `}</span>
+      ) : null}
+      {line.body}
+    </p>
+  );
+});
 
 const LIST_KIND_ORDER: Record<ListKind, number> = {
   // Last to execute (queued on deps) above currently running, done last.
@@ -214,15 +243,7 @@ function LogTail({
         }}
       >
         {lines.map((line) => (
-          <p
-            key={line.key}
-            className={cn(
-              "pt-1 code code-small whitespace-pre-wrap break-words",
-              line.isError ? "text-error-primary" : "text-basic-secondary",
-            )}
-          >
-            {line.text}
-          </p>
+          <LogLine key={line.key} line={line} />
         ))}
         {running && action ? (
           <p className="pt-1 code code-small text-shimmer-basic">{`▸ ${action}`}</p>
@@ -384,9 +405,7 @@ export function ThreadsView({
 
   if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
 
-  const selectable = ordered.filter(
-    (thread) => !pendingNames.has(thread.name),
-  );
+  const selectable = ordered.filter((thread) => !pendingNames.has(thread.name));
   const current =
     selectable.find((thread) => thread.name === selected) ??
     selectable[0] ??
@@ -426,7 +445,9 @@ export function ThreadsView({
                     />
                   ) : (
                     <Icon
-                      iconName={errored ? IconName.Danger : IconName.CheckCircle}
+                      iconName={
+                        errored ? IconName.Danger : IconName.CheckCircle
+                      }
                       size={16}
                       className={cn(
                         "shrink-0",

@@ -22,6 +22,9 @@ pub enum BrowseKind {
     Directory,
     /// Directories plus `.toml` files, for picking a configuration file.
     Toml,
+    /// Directories plus every file, for picking one that carries no telling
+    /// extension — an ssh key or `~/.ssh/config`, say.
+    File,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -103,6 +106,7 @@ fn keeps_entry(kind: BrowseKind, is_directory: bool, path: &Path) -> bool {
         BrowseKind::Toml => path
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("toml")),
+        BrowseKind::File => true,
     }
 }
 

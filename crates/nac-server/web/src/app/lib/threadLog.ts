@@ -19,6 +19,12 @@ export interface ThreadLogLine {
    * truncated line, where the name costs more than the command it hides.
    */
   bare: string;
+  /** Leading glyph, for the views that colour it apart from the command. */
+  mark: string | null;
+  /** Tool the line belongs to, when it names one. */
+  name: string | null;
+  /** What is left of the line once the glyph and the name are taken out. */
+  body: string;
   isError: boolean;
 }
 
@@ -44,6 +50,9 @@ export function threadLogLine(
         key: `call-${event.call_id}`,
         text: `▸ ${event.name}: ${command}`,
         bare: `▸ ${command}`,
+        mark: "▸",
+        name: event.name,
+        body: command,
         isError: false,
       };
     }
@@ -53,6 +62,9 @@ export function threadLogLine(
         key: `result-${event.call_id}`,
         text: `${mark} ${event.name}: ${event.content_preview}`,
         bare: `${mark} ${event.content_preview}`,
+        mark,
+        name: event.name,
+        body: event.content_preview,
         isError: event.is_error,
       };
     }
@@ -61,6 +73,9 @@ export function threadLogLine(
         key: `log-${seq}`,
         text: event.line,
         bare: event.line,
+        mark: null,
+        name: null,
+        body: event.line,
         isError: false,
       };
     default:

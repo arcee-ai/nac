@@ -237,6 +237,9 @@ pub struct SshBrowseRequest {
     /// session would start anyway.
     #[serde(default)]
     pub path: Option<String>,
+    /// Dot-prefixed names are hidden unless explicitly requested, as locally.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -843,9 +846,13 @@ impl SessionManager {
             identity_file: request.ssh_identity_file,
         }
         .into_options();
-        let listing =
-            runtime::browse_ssh_directory(&options, request.path.as_deref(), &self.inner.root_cwd)
-                .await?;
+        let listing = runtime::browse_ssh_directory(
+            &options,
+            request.path.as_deref(),
+            request.hidden,
+            &self.inner.root_cwd,
+        )
+        .await?;
         Ok(filesystem::BrowseListing {
             path: listing.path,
             parent: listing.parent,

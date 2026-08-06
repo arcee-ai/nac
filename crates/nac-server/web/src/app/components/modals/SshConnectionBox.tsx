@@ -20,6 +20,7 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
+import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
@@ -37,6 +38,20 @@ import type {
 } from "@/app/types/api";
 
 const CREATE_NEW = "__new__";
+
+/**
+ * What an empty identity file means: ssh resolves the key itself, from
+ * `~/.ssh/config` and the agent. Shown in place of a path so the default reads
+ * as a choice rather than as a blank.
+ */
+const DEFAULT_KEY_LABEL = ".ssh/config";
+
+/** Where the key picker opens: beside the current key, or in the ssh directory. */
+function keyDirectory(identityFile: string): string {
+  const trimmed = identityFile.trim();
+  if (!trimmed) return "~/.ssh";
+  return trimmed.replace(/\/[^/]*$/, "") || "/";
+}
 
 /** OpenSSH accepts 1-65535; anything else is rejected before the request. */
 function sshPortError(value: string): string | null {
@@ -172,6 +187,7 @@ export function SshConnectionBox({
     seedTarget?.ssh_identity_file ?? "",
   );
   const [error, setError] = useState<string | null>(null);
+  const [pickingKey, setPickingKey] = useState(false);
 
   const connected = Boolean(connection);
   const busy = connect.isPending || createConfig.isPending || testing;
@@ -419,15 +435,20 @@ export function SshConnectionBox({
           <div className="flex flex-col gap-1 flex-1 min-w-0">
             <FieldLabel
               label="Private Key"
-              hint="Path on this machine. Blank uses your ssh agent and default keys."
+              hint="A key file on this machine. The default leaves the choice to your ~/.ssh/config and ssh agent."
             />
-            <Input
-              inputSize={InputSize.Medium}
-              value={identityFile}
-              isDisabled={fieldsLocked}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="~/.ssh/id_ed25519"
-            />
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Secondary}
+              className="w-full"
+              disabled={fieldsLocked}
+              onClick={() => setPickingKey(true)}
+            >
+              <span className="flex-1 min-w-0 truncate text-left">
+                {identityFile.trim() || DEFAULT_KEY_LABEL}
+              </span>
+              <Icon iconName={IconName.FolderOpen} size={20} />
+            </Button>
           </div>
           <div className="w-[128px] shrink-0 relative">
             {isManage ? (
@@ -473,6 +494,26 @@ export function SshConnectionBox({
           <p className="text-micro text-error-primary">{error}</p>
         ) : null}
       </div>
+
+      {/* The key is read by this machine's ssh client, so it is always browsed
+          locally — never on the host being connected to. */}
+      <PathPickerModal
+        open={pickingKey}
+        kind="file"
+        title="Select Private Key"
+        showHidden
+        initialPath={keyDirectory(identityFile)}
+        clearLabel={`Use ${DEFAULT_KEY_LABEL}`}
+        onClear={() => {
+          setKey("");
+          setPickingKey(false);
+        }}
+        onClose={() => setPickingKey(false)}
+        onSelect={(path) => {
+          setKey(path);
+          setPickingKey(false);
+        }}
+      />
     </div>
   );
 }

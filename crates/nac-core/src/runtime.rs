@@ -458,6 +458,7 @@ impl SshOptions {
 pub async fn browse_ssh_directory(
     options: &SshOptions,
     path: Option<&str>,
+    hidden: bool,
     config_cwd: &Path,
 ) -> std::result::Result<RemoteListing, RemoteBrowseError> {
     let paths = PathContext::new(config_cwd);
@@ -467,7 +468,7 @@ pub async fn browse_ssh_directory(
     let connection = options.connection(&paths).ok_or_else(|| {
         RemoteBrowseError::Invalid("an ssh host is required to browse a remote directory".into())
     })?;
-    browse_remote_directory(&connection, path, &paths).await
+    browse_remote_directory(&connection, path, hidden, &paths).await
 }
 
 #[derive(Debug, Clone, Default)]

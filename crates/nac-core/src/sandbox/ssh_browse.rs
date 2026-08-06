@@ -112,6 +112,7 @@ impl std::error::Error for RemoteBrowseError {}
 /// ```
 const REMOTE_BROWSE_SCRIPT: &str = r#"target=$1
 limit=$2
+hidden=$3
 
 case $target in
 '') target=$HOME ;;
@@ -152,12 +153,18 @@ case $pwd in
 	;;
 esac
 
-# An unquoted glob is the listing: it skips dot-prefixed names, which is what the
-# local picker does too, and it leaves a directory nac cannot read as an empty
-# one rather than as an error. A name is tested with -d so a symlink to a
-# directory stays navigable.
+# An unquoted glob is the listing: it leaves a directory nac cannot read as an
+# empty one rather than as an error. Dot-prefixed names need globs of their own,
+# written so that neither `.` nor `..` is ever matched. A name is tested with -d
+# so a symlink to a directory stays navigable.
+if [ "$hidden" = 1 ]; then
+	set -- * .[!.]* ..?*
+else
+	set -- *
+fi
+
 count=0
-for entry in *; do
+for entry in "$@"; do
 	[ -d "$entry" ] || continue
 	count=$((count + 1))
 	if [ "$count" -gt "$limit" ]; then
@@ -170,11 +177,14 @@ done
 
 /// Lists `path` on `connection`, or the login home when `path` is empty.
 ///
-/// `paths` is nac's *local* path context: it locates the shared control socket
-/// and resolves a `~` in the private key, both of which are on this machine.
+/// `hidden` includes dot-prefixed names, which the picker asks for only when the
+/// user does. `paths` is nac's *local* path context: it locates the shared
+/// control socket and resolves a `~` in the private key, both of which are on
+/// this machine.
 pub async fn browse_remote_directory(
     connection: &SshConnection,
     path: Option<&str>,
+    hidden: bool,
     paths: &PathContext,
 ) -> Result<RemoteListing, RemoteBrowseError> {
     let requested = path.map(str::trim).unwrap_or_default().to_string();
@@ -191,6 +201,7 @@ pub async fn browse_remote_directory(
         "nac-browse".to_string(),
         requested.clone(),
         MAX_ENTRIES.to_string(),
+        if hidden { "1" } else { "0" }.to_string(),
     ];
     let remote = quoted_program_and_args("sh", &args).join(" ");
 

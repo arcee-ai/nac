@@ -214,11 +214,13 @@ export const api = {
   // path is chosen against the filesystem the server sees.
   browsePath: (
     path: string | null,
-    kind: "directory" | "toml" = "directory",
+    kind: "directory" | "toml" | "file" = "directory",
+    hidden = false,
     signal?: AbortSignal,
   ) => {
     const query = new URLSearchParams({ kind });
     if (path) query.set("path", path);
+    if (hidden) query.set("hidden", "true");
     return request<BrowseListing>("GET", `/fs/browse?${query.toString()}`, { signal });
   },
 
@@ -229,10 +231,11 @@ export const api = {
   browseSshPath: (
     target: SshTarget,
     path: string | null,
+    hidden = false,
     signal?: AbortSignal,
   ) =>
     request<BrowseListing>("POST", "/ssh/browse", {
-      body: { ...target, path } satisfies SshBrowseRequest,
+      body: { ...target, path, hidden } satisfies SshBrowseRequest,
       signal,
     }),
 

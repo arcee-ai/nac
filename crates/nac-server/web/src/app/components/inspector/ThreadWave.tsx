@@ -69,6 +69,9 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           key: "action",
           text: thread.action,
           bare: thread.action,
+          mark: null,
+          name: null,
+          body: thread.action,
           isError: false,
         },
       ];

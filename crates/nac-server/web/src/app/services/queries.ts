@@ -54,8 +54,9 @@ export const queryKeys = {
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   sshConfigs: ["ssh-configs"] as const,
-  browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
-  sshBrowse: (target: SshTarget, path: string) =>
+  browse: (path: string, kind: BrowseKind, hidden: boolean) =>
+    ["fs-browse", { path, kind, hidden }] as const,
+  sshBrowse: (target: SshTarget, path: string, hidden = false) =>
     [
       "ssh-browse",
       {
@@ -63,6 +64,7 @@ export const queryKeys = {
         port: target.ssh_port ?? null,
         identityFile: target.ssh_identity_file ?? null,
         path,
+        hidden,
       },
     ] as const,
   providerModels: (backend: string, apiKey: string, baseUrl: string) =>
@@ -190,16 +192,21 @@ export function useManagedLogout() {
   });
 }
 
-export type BrowseKind = "directory" | "toml";
+export type BrowseKind = "directory" | "toml" | "file";
 
 /**
  * Directory listing from the machine running the server. Only fetched while
  * the picker is open, and never cached long: the filesystem moves under us.
  */
-export function useBrowsePath(path: string | null, kind: BrowseKind, enabled: boolean) {
+export function useBrowsePath(
+  path: string | null,
+  kind: BrowseKind,
+  hidden: boolean,
+  enabled: boolean,
+) {
   return useQuery<BrowseListing>({
-    queryKey: queryKeys.browse(path ?? "", kind),
-    queryFn: ({ signal }) => api.browsePath(path, kind, signal),
+    queryKey: queryKeys.browse(path ?? "", kind, hidden),
+    queryFn: ({ signal }) => api.browsePath(path, kind, hidden, signal),
     enabled,
     staleTime: 2000,
     retry: false,
@@ -213,11 +220,12 @@ export function useBrowsePath(path: string | null, kind: BrowseKind, enabled: bo
 export function useSshBrowsePath(
   target: SshTarget | null,
   path: string | null,
+  hidden: boolean,
   enabled: boolean,
 ) {
   return useQuery<BrowseListing>({
-    queryKey: queryKeys.sshBrowse(target ?? { ssh_host: "" }, path ?? ""),
-    queryFn: ({ signal }) => api.browseSshPath(target!, path, signal),
+    queryKey: queryKeys.sshBrowse(target ?? { ssh_host: "" }, path ?? "", hidden),
+    queryFn: ({ signal }) => api.browseSshPath(target!, path, hidden, signal),
     enabled: enabled && Boolean(target?.ssh_host),
     staleTime: 2000,
     retry: false,
@@ -235,11 +243,11 @@ export function useSshBrowsePath(
 export function useSshConnect() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (target: SshTarget) => api.browseSshPath(target, null, undefined),
+    mutationFn: (target: SshTarget) => api.browseSshPath(target, null),
     onSuccess: (listing, target) => {
       // Seeding the home listing means the picker opens without a second round
       // trip over a connection that was just paid for.
-      client.setQueryData(queryKeys.sshBrowse(target, ""), listing);
+      client.setQueryData(queryKeys.sshBrowse(target, "", false), listing);
     },
   });
 }
