@@ -317,6 +317,8 @@ mod tests {
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             )
             .unwrap();

@@ -77,7 +77,10 @@ impl std::fmt::Display for RemoteBrowseError {
                 write!(formatter, "path '{path}' does not exist on the ssh host")
             }
             Self::NotADirectory(path) => {
-                write!(formatter, "path '{path}' on the ssh host is not a directory")
+                write!(
+                    formatter,
+                    "path '{path}' on the ssh host is not a directory"
+                )
             }
             Self::Unreadable { path, reason } => write!(
                 formatter,

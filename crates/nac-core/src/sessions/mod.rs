@@ -120,6 +120,9 @@ pub struct SessionSnapshot {
     pub response_durations_ms: Option<Vec<Option<u64>>>,
     /// Per-response token usage, one entry per assistant response (in order).
     pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+    /// Cumulative usage from billable runs that produced no visible response.
+    /// Kept separate so `token_usages` remains correctly indexed by response.
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -291,6 +294,7 @@ mod tests {
                 cache_write_tokens: 0,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 150,
+                cost: crate::model::TokenCostMicros::default(),
             }),
             None,
             Some(crate::model::TokenUsage {
@@ -300,6 +304,7 @@ mod tests {
                 cache_write_tokens: 10,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 330,
+                cost: crate::model::TokenCostMicros::default(),
             }),
         ];
         create_session(&store_path, &snapshot).unwrap();
@@ -668,6 +673,8 @@ mod tests {
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
             None,
@@ -782,6 +789,80 @@ mod tests {
     }
 
     #[test]
+    fn session_row_with_removed_sandbox_backend_loads_without_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("removed_sandbox_backend");
+        let snapshot = test_snapshot(
+            "legacy-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        // Simulate a row written by an older build whose sandbox backend has
+        // since been removed ("smolvm"): the stored spec must not break loads.
+        let legacy_sandbox_json = r#"{
+            "backend": "smolvm",
+            "image": "python:3.13-bookworm",
+            "workdir": "/workspace",
+            "mounts": [],
+            "gpu_devices": [],
+            "shm_size": "0",
+            "cpus": 2,
+            "memory_mib": 2048
+        }"#;
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET sandbox_json = ?1 WHERE session_id = 'legacy-sandbox'",
+            [legacy_sandbox_json],
+        )
+        .unwrap();
+        drop(conn);
+
+        let loaded = load_session(&store_path, "legacy-sandbox").unwrap();
+        assert!(loaded.sandbox_spec.is_none());
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(!summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_row_with_podman_sandbox_backend_still_loads_with_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("podman_sandbox_backend");
+        let mut snapshot = test_snapshot(
+            "podman-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        snapshot.sandbox_spec = Some(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: "python:3.13-bookworm".to_string(),
+            workdir: PathBuf::from("/workspace"),
+            mounts: Vec::new(),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "podman-sandbox").unwrap();
+        let spec = loaded.sandbox_spec.expect("podman sandbox must survive");
+        assert_eq!(spec.backend, SandboxBackendType::Podman);
+        assert_eq!(spec.image, "python:3.13-bookworm");
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn api_key_env_and_extra_headers_round_trip_through_store() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("api_key_env_headers");
@@ -888,6 +969,8 @@ mod tests {
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ];
             completed_run.last_response_duration_ms = Some(250);
@@ -900,6 +983,7 @@ mod tests {
                 cache_write_tokens: 4,
                 reasoning_tokens: 5,
                 orchestrator_context_tokens: 42,
+                cost: crate::model::TokenCostMicros::default(),
             })];
             completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
 
@@ -1653,8 +1737,10 @@ mod tests {
                     cache_write_tokens: 4,
                     reasoning_tokens: 5,
                     orchestrator_context_tokens: 42,
+                    cost: crate::model::TokenCostMicros::default(),
                 }),
             ],
+            unattributed_token_usage: None,
         });
         save_session_run_state(&store_path, &update).unwrap();
 
@@ -1722,6 +1808,8 @@ mod tests {
                 reasoning_details: None,
                 tool_calls: None,
                 duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ];
         create_session(&store_path, &with_log).unwrap();
@@ -1748,6 +1836,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: None,
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Assistant {
                         content: None,
@@ -1755,6 +1845,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call]),
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),

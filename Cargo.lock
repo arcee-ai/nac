@@ -1161,6 +1161,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nac-catalog-gen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "nac-core"
 version = "0.1.0"
 dependencies = [

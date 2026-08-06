@@ -18,11 +18,11 @@ use crate::paths::PathContext;
 /// Public because callers outside this crate build the connections that sessions
 /// and git targets are created from.
 pub use crate::sandbox::SshConnection;
-pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
 use crate::sandbox::{
     browse_remote_directory, build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType,
     SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
+pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
@@ -61,13 +61,17 @@ pub struct SecurityConfig {
     pub trusted_base_url_hosts: Vec<String>,
 }
 
+/// Model defaults from config.toml's `[model]` section. Slim by design:
+/// the backend is resolved from the configured model id through the
+/// catalog, base URLs materialize from catalog provider endpoint defaults,
+/// and credentials auto-select the provider's conventional env var — so
+/// only the model id, an optional effort, and extra headers remain.
+/// Removed keys (`backend`, `base_url`, `api_key_env`) in an old config
+/// are ignored with a one-time warning at load.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct ModelConfig {
-    pub backend: Option<BackendKind>,
     pub model: Option<String>,
-    pub base_url: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub api_key_env: Option<String>,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
 }
@@ -175,6 +179,20 @@ impl NacConfig {
         })
     }
 
+    /// Read the provider identity an explicitly named config file spells out.
+    ///
+    /// Launching ignores these keys — the catalog resolves the provider from
+    /// the model id — but importing a file the user pointed at is the one
+    /// case where they are the only statement of intent available, so the
+    /// importer reads them directly instead of through [`ModelConfig`].
+    pub fn load_model_identity_from_file(path: &Path) -> Result<ConfiguredModelIdentity> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        toml::from_str::<ConfiguredModelIdentityConfig>(&raw)
+            .map(|config| config.model)
+            .with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
     /// Load a configuration file the user pointed at explicitly.
     ///
     /// Unlike the ambient search, a missing file is an error: the user named
@@ -187,7 +205,39 @@ impl NacConfig {
 
     fn load_from_path(path: PathBuf) -> Result<Self> {
         let raw = Self::read_config(&path)?;
+        Self::warn_removed_model_keys(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    /// One-time migration warning for `[model]` keys removed from the
+    /// config schema (`backend`, `base_url`, `api_key_env`): they parse
+    /// tolerantly (serde ignores them) and the catalog-driven resolution
+    /// replaces them. Printed at most once per process even though config
+    /// loads happen per session launch.
+    fn warn_removed_model_keys(raw: &str) {
+        const REMOVED_KEYS: [&str; 3] = ["backend", "base_url", "api_key_env"];
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WARNED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Ok(value) = raw.parse::<toml::Value>() else {
+            return;
+        };
+        let Some(model) = value.get("model").and_then(|model| model.as_table()) else {
+            return;
+        };
+        let removed: Vec<&str> = REMOVED_KEYS
+            .into_iter()
+            .filter(|key| model.contains_key(*key))
+            .collect();
+        if removed.is_empty() {
+            return;
+        }
+        WARNED.store(true, std::sync::atomic::Ordering::Relaxed);
+        eprintln!(
+            "nac: config: ignoring removed [model] keys ({}) — the backend now resolves from the model id through the catalog, base URLs default from the catalog, and credentials auto-select the provider's conventional environment variable",
+            removed.join(", ")
+        );
     }
 
     fn read_config(path: &Path) -> Result<String> {
@@ -199,6 +249,20 @@ impl NacConfig {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct ConfiguredModelIdentityConfig {
+    #[serde(default)]
+    model: ConfiguredModelIdentity,
+}
+
+/// The `[model]` keys an older config file uses to name a provider outright.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct ConfiguredModelIdentity {
+    pub backend: Option<BackendKind>,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -585,10 +649,6 @@ fn validate_sandbox_options(options: &EffectiveSandboxOptions) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
-    config.model.api_key_env.clone()
-}
-
 /// Merge explicit new-session model options over `config.toml` settings.
 ///
 /// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
@@ -598,31 +658,35 @@ pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
-    let backend = model.backend.or(config.model.backend);
+    let model_id = model
+        .api_model
+        .clone()
+        .or_else(|| config.model.model.clone());
+    // The backend is explicit (request/CLI) or resolved from the model id
+    // through the catalog (unique exact match; collisions prefer the
+    // non-managed provider with a warning; unknown ids stay unresolved and
+    // surface as the missing-backend error).
+    let backend = model.backend.or_else(|| {
+        model_id
+            .as_deref()
+            .and_then(crate::model::provider_for_model)
+    });
     let selected_managed_base_url = model
         .backend
         .and_then(managed_backend_base_url)
         .map(str::to_string);
-    let base_url = model
-        .api_base_url
-        .clone()
-        .or_else(|| selected_managed_base_url.or_else(|| config.model.base_url.clone()));
-    let api_key_env = match (
-        &model.api_key_env,
-        backend.and_then(managed_backend_base_url),
-    ) {
-        // A managed backend always selects its stored credential mode unless
-        // the caller explicitly supplies a selector (which validation rejects).
-        (OptionalModelOption::Inherit, Some(_)) => None,
-        _ => model.api_key_env.resolve(configured_api_key_env(config)),
-    };
+    // base_url chain: request/override → managed-if-request-names-backend →
+    // (catalog provider default → managed second-stage → error, inside
+    // `resolve_model_base_url`). No config tier.
+    let base_url = model.api_base_url.clone().or(selected_managed_base_url);
+    // api_key_env chain: request/override → (conventional-var
+    // auto-selection inside `from_optional`) → managed = None → guided
+    // error. No config tier.
+    let api_key_env = model.api_key_env.snapshot_value();
 
     EffectiveModelSettings::from_optional(
         backend,
-        model
-            .api_model
-            .clone()
-            .or_else(|| config.model.model.clone()),
+        model_id,
         base_url,
         model
             .reasoning_effort
@@ -1398,12 +1462,13 @@ mod tests {
         }
     }
 
+    /// A config whose `[model]` section resolves through the catalog:
+    /// gpt-5.2 is unique to openai-responses, so the backend, the catalog
+    /// endpoint default and the conventional credential variable all come
+    /// from the catalog rather than config fields.
     fn complete_model_config() -> NacConfig {
         let mut config = NacConfig::default();
-        config.model.backend = Some(BackendKind::OpenAiResponses);
-        config.model.model = Some("config-model".to_string());
-        config.model.base_url = Some("https://config.example/v1".to_string());
-        config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
+        config.model.model = Some("gpt-5.2".to_string());
         config
     }
 
@@ -1461,8 +1526,8 @@ mod tests {
 
         let settings =
             effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
-        assert_eq!(settings.base_url, "https://config.example/v1");
-        assert_eq!(settings.model, "config-model");
+        assert_eq!(settings.base_url, "https://api.openai.com/v1");
+        assert_eq!(settings.model, "gpt-5.2");
 
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);
@@ -1470,6 +1535,10 @@ mod tests {
 
     #[test]
     fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
         config
@@ -1479,10 +1548,14 @@ mod tests {
 
         let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
         assert_eq!(inherited.backend, BackendKind::OpenAiResponses);
-        assert_eq!(inherited.model, "config-model");
-        assert_eq!(inherited.base_url, "https://config.example/v1");
+        assert_eq!(inherited.model, "gpt-5.2");
+        assert_eq!(inherited.base_url, "https://api.openai.com/v1");
         assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.api_key_env, None);
+        assert_eq!(
+            inherited.extra_headers.get("X-Config").map(String::as_str),
+            Some("config")
+        );
 
         let headers = BTreeMap::from([("X-Explicit".to_string(), "explicit".to_string())]);
         let explicit = effective_model_settings(
@@ -1503,10 +1576,23 @@ mod tests {
         assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(explicit.api_key_env.as_deref(), Some("EXPLICIT_API_KEY"));
         assert_eq!(explicit.extra_headers, headers);
+
+        restore_env("OPENAI_API_KEY", original_openai_key);
     }
 
     #[test]
     fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
+        // A configured model id that collides with a managed provider's
+        // entries resolves to the non-managed provider (the codex seed ids
+        // all overlap the openai baseline), so managed backends are
+        // reachable only through an explicit selection.
+        let mut colliding_config = NacConfig::default();
+        colliding_config.model.model = Some("gpt-5.3-codex-spark".to_string());
+        let resolved = effective_model_settings(&ModelOptions::default(), &colliding_config)
+            .expect("a colliding configured model resolves the non-managed provider");
+        assert_eq!(resolved.backend, BackendKind::OpenAiResponses);
+        assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+
         for (backend, expected) in [
             (
                 BackendKind::ChatGptCodexResponses,
@@ -1517,18 +1603,16 @@ mod tests {
                 crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
             ),
         ] {
-            let mut inherited_config = NacConfig::default();
-            inherited_config.model.backend = Some(backend);
-            inherited_config.model.model = Some("managed-model".to_string());
-            let inherited = effective_model_settings(&ModelOptions::default(), &inherited_config)
-                .expect("managed config should not require a redundant base_url");
-            assert_eq!(inherited.base_url, expected);
-
             let mut explicit_config = NacConfig::default();
             explicit_config.model.model = Some("managed-model".to_string());
             let explicit = effective_model_settings(
                 &ModelOptions {
                     backend: Some(backend),
+                    api_model: Some(if backend == BackendKind::ArceeAuth {
+                        "trinity-large-thinking".to_string()
+                    } else {
+                        "managed-model".to_string()
+                    }),
                     ..ModelOptions::default()
                 },
                 &explicit_config,
@@ -1583,11 +1667,15 @@ mod tests {
 
     #[test]
     fn optional_model_overrides_distinguish_inherit_value_and_clear() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
 
         let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
-        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.api_key_env, None);
         assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
 
         let valued = effective_model_settings(
@@ -1613,15 +1701,45 @@ mod tests {
         .unwrap();
         assert_eq!(cleared.api_key_env, None);
         assert_eq!(cleared.reasoning_effort, None);
+
+        // With the conventional variable set, Inherit and Clear both fall
+        // through to auto-selection; an explicit Value always wins.
+        unsafe { std::env::set_var("OPENAI_API_KEY", "env-key") };
+        let auto_selected = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(auto_selected.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        let cleared = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Clear,
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(cleared.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        let valued = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(valued.api_key_env.as_deref(), Some("CLI_API_KEY"));
+
+        restore_env("OPENAI_API_KEY", original_openai_key);
     }
 
     #[test]
     fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_auth() {
         for selector in ["", "   ", " SURROUNDED_KEY "] {
-            let mut config = complete_model_config();
-            config.model.api_key_env = Some(selector.to_string());
-
-            let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+            let settings = effective_model_settings(
+                &ModelOptions {
+                    api_key_env: OptionalModelOption::Value(selector.to_string()),
+                    ..ModelOptions::default()
+                },
+                &complete_model_config(),
+            )
+            .unwrap();
             assert_eq!(settings.api_key_env.as_deref(), Some(selector));
             let error = ModelClient::from_effective_settings(settings)
                 .expect_err("invalid configured selector must not be normalized or ignored");
@@ -1629,38 +1747,43 @@ mod tests {
             assert!(error.to_string().contains("api_key_env"), "{error:#}");
         }
 
-        let mut managed = complete_model_config();
-        managed.model.backend = Some(BackendKind::ArceeAuth);
-        managed.model.base_url = Some("https://api.arcee.ai".to_string());
-        managed.model.api_key_env = Some("STALE_CONFIG_KEY".to_string());
-        let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
+        // A managed backend never auto-selects and rejects any explicit
+        // selector at validation.
+        let settings = effective_model_settings(
+            &ModelOptions {
+                backend: Some(BackendKind::ArceeAuth),
+                api_model: Some("trinity-large-thinking".to_string()),
+                ..ModelOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .unwrap();
         assert_eq!(settings.api_key_env, None);
     }
 
     #[test]
     fn required_model_settings_are_rejected_without_defaults() {
-        for (config, expected) in [
-            (NacConfig::default(), "backend"),
-            (
-                {
-                    let mut config = complete_model_config();
-                    config.model.model = None;
-                    config
-                },
-                "model",
-            ),
-            (
-                {
-                    let mut config = complete_model_config();
-                    config.model.base_url = Some("   ".to_string());
-                    config
-                },
-                "base_url",
-            ),
-        ] {
+        // No configured or requested model: no id to resolve a backend
+        // from. An unknown configured model id fails the same way.
+        for config in [NacConfig::default(), {
+            let mut config = NacConfig::default();
+            config.model.model = Some("never-seen-model".to_string());
+            config
+        }] {
             let error = effective_model_settings(&ModelOptions::default(), &config).unwrap_err();
-            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(error.to_string().contains("backend"), "{error:#}");
         }
+
+        // An explicit backend with no model id anywhere fails on the model.
+        let error = effective_model_settings(
+            &ModelOptions {
+                backend: Some(BackendKind::OpenAiResponses),
+                ..ModelOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("model"), "{error:#}");
     }
 
     #[test]
@@ -1799,6 +1922,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn resume_picker_and_selection_perform_no_network() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let server = crate::model::test_http::ScriptedServer::start_unexpected_request_server(
+            std::time::Duration::from_millis(300),
+        );
+        let original_url = std::env::var_os("MODELS_DEV_URL");
+        unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
+        let key_name = "NAC_MISSING_NETWORK_FREE_PICKER_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::remove_var(key_name) };
+
+        let root = temp_store_path("network_free_picker")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        store::initialize(&store_path).unwrap();
+        sessions::create_session(
+            &store_path,
+            &sessions::new_snapshot(
+                "network-free-session".to_string(),
+                root.clone(),
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+
+        let picker = build_resume_picker_config(
+            ResumeOptions {
+                lookup_cwd: root.clone(),
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                ..ResumeOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("picker startup must not touch the network");
+        // The selection path resolves model settings and catalog metadata
+        // locally (it fails on the missing credential, never on network).
+        let error = match build_resume_config_for_session(
+            picker.store_path,
+            "network-free-session",
+            &NacConfig::default(),
+            picker.lookup_cwd,
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("selection without a credential must fail locally"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(key_name), "{error:#}");
+
+        match original_url {
+            Some(value) => unsafe { std::env::set_var("MODELS_DEV_URL", value) },
+            None => unsafe { std::env::remove_var("MODELS_DEV_URL") },
+        }
+        match original_key {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+        let _ = std::fs::remove_dir_all(root);
+        let requests = server.finish();
+        assert!(
+            requests.is_empty(),
+            "resume/picker paths must not touch the network: {requests:?}"
+        );
+    }
+
     #[test]
     fn parse_extra_headers_json_requires_valid_object() {
         assert!(parse_extra_headers_json("").is_err());
@@ -1819,27 +2023,28 @@ mod tests {
             .unwrap()
             .to_path_buf();
         std::fs::create_dir_all(&root).unwrap();
-        let cases = [
-            (NacConfig::default(), "backend"),
+        let cases: [(ModelOptions, NacConfig, &str); 3] = [
+            (ModelOptions::default(), NacConfig::default(), "backend"),
             (
+                ModelOptions::default(),
                 {
-                    let mut config = complete_model_config();
-                    config.model.model = None;
+                    let mut config = NacConfig::default();
+                    config.model.model = Some("never-seen-model".to_string());
                     config
                 },
-                "model",
+                "backend",
             ),
             (
-                {
-                    let mut config = complete_model_config();
-                    config.model.base_url = Some("".to_string());
-                    config
+                ModelOptions {
+                    backend: Some(BackendKind::OpenAiResponses),
+                    ..ModelOptions::default()
                 },
-                "base_url",
+                NacConfig::default(),
+                "model",
             ),
         ];
 
-        for (index, (config, expected)) in cases.into_iter().enumerate() {
+        for (index, (model, config, expected)) in cases.into_iter().enumerate() {
             let store_path = root.join(format!("store-{index}.db"));
             let error = match build_run_config(
                 RunOptions {
@@ -1847,6 +2052,7 @@ mod tests {
                     store: StoreOptions {
                         store_path: Some(store_path.clone()),
                     },
+                    model,
                     ..RunOptions::default()
                 },
                 &config,
@@ -1929,11 +2135,8 @@ mod tests {
 store_path = "custom/store.db"
 
 [model]
-backend = "openai-responses"
 model = "config-model"
-base_url = "https://config.example/v1"
 reasoning_effort = "high"
-api_key_env = " NAC_TEST_API_KEY "
 
 [sandbox]
 image = "config-image"
@@ -1957,17 +2160,8 @@ url = "https://mcp.context7.com/mcp"
             config.storage.store_path.as_deref(),
             Some(Path::new("custom/store.db"))
         );
-        assert_eq!(config.model.backend, Some(BackendKind::OpenAiResponses));
         assert_eq!(config.model.model.as_deref(), Some("config-model"));
-        assert_eq!(
-            config.model.base_url.as_deref(),
-            Some("https://config.example/v1")
-        );
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(
-            config.model.api_key_env.as_deref(),
-            Some(" NAC_TEST_API_KEY ")
-        );
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
 
@@ -1991,13 +2185,23 @@ url = "https://mcp.context7.com/mcp"
             std::env::set_var("NAC_HOME", &root);
         }
 
+        // Removed `[model]` keys (backend/base_url/api_key_env) are
+        // parse-tolerated by the new-session load too — they are ignored
+        // with a one-time warning, so only genuinely invalid remaining
+        // fields fail.
         let invalid_model_sections = [
-            "[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n",
-            "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
-            "model = [\"not\", \"a\", \"table\"]\n",
-            "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+            ("[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n", true),
+            (
+                "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
+                true,
+            ),
+            ("model = [\"not\", \"a\", \"table\"]\n", false),
+            (
+                "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+                false,
+            ),
         ];
-        for invalid_model in invalid_model_sections {
+        for (invalid_model, accepted) in invalid_model_sections {
             std::fs::write(
                 root.join("config.toml"),
                 format!(
@@ -2013,11 +2217,11 @@ url = "https://mcp.context7.com/mcp"
             );
             assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
             assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-            assert!(config.model.backend.is_none());
             assert!(config.model.model.is_none());
-            assert!(
-                NacConfig::load_from_cwd(&root).is_err(),
-                "new-session config unexpectedly accepted {invalid_model:?}"
+            assert_eq!(
+                NacConfig::load_from_cwd(&root).is_ok(),
+                accepted,
+                "new-session config mishandled {invalid_model:?}"
             );
         }
 
@@ -2030,6 +2234,69 @@ url = "https://mcp.context7.com/mcp"
         assert!(error.to_string().contains("non-model config"), "{error:#}");
 
         restore_env("NAC_HOME", original_nac_home);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn removed_model_config_keys_are_ignored_and_resolution_uses_the_catalog() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        let root = std::env::temp_dir().join(format!(
+            "nac_removed_model_keys_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        // A pre-slimming config: backend/base_url/api_key_env are ignored
+        // (with a one-time warning); the kept fields load and the
+        // configured model resolves through the catalog.
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+[model]
+backend = "fireworks-chat"
+model = "gpt-5.2"
+base_url = "https://stale.example/v1"
+api_key_env = "STALE_KEY"
+reasoning_effort = "high"
+
+[model.extra_headers]
+X-Config = "yes"
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+            std::env::set_var("OPENAI_API_KEY", "env-openai-key");
+        }
+
+        let config = NacConfig::load().expect("removed keys parse tolerantly");
+        assert_eq!(config.model.model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            config
+                .model
+                .extra_headers
+                .get("X-Config")
+                .map(String::as_str),
+            Some("yes")
+        );
+
+        // The stale backend/base_url/api_key_env values play no role:
+        // gpt-5.2 resolves to openai-responses, the base URL comes from the
+        // catalog default, and the credential auto-selects the conventional
+        // variable.
+        let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(settings.backend, BackendKind::OpenAiResponses);
+        assert_eq!(settings.base_url, "https://api.openai.com/v1");
+        assert_eq!(settings.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(settings.reasoning_effort, Some(ReasoningEffort::High));
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("OPENAI_API_KEY", original_openai_key);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2527,6 +2794,8 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::User {
                     content: "hello".to_string(),
@@ -2537,6 +2806,8 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
             Some("OPENAI_API_KEY".to_string()),
@@ -2568,7 +2839,6 @@ url = "https://mcp.context7.com/mcp"
         let caller_cwd = original_cwd.canonicalize().unwrap();
         let mut changed_config = complete_model_config();
         changed_config.model.model = Some("changed-config-model".to_string());
-        changed_config.model.base_url = Some("https://changed-config.example/v1".to_string());
         changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
         let mut run_config = build_resume_config(
             ResumeOptions {

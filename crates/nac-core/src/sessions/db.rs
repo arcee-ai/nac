@@ -1,5 +1,56 @@
 use super::*;
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum StoredTokenAccounting {
+    Legacy(Vec<Option<crate::model::TokenUsage>>),
+    WithUnattributed {
+        response_usages: Vec<Option<crate::model::TokenUsage>>,
+        unattributed_usage: crate::model::TokenUsage,
+    },
+}
+
+fn serialize_token_accounting(
+    response_usages: &[Option<crate::model::TokenUsage>],
+    unattributed_usage: Option<&crate::model::TokenUsage>,
+) -> Result<Option<String>> {
+    if let Some(unattributed_usage) = unattributed_usage {
+        return serde_json::to_string(&StoredTokenAccounting::WithUnattributed {
+            response_usages: response_usages.to_vec(),
+            unattributed_usage: unattributed_usage.clone(),
+        })
+        .map(Some)
+        .context("failed to serialize session token accounting");
+    }
+    if response_usages.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::to_string(&StoredTokenAccounting::Legacy(response_usages.to_vec()))
+            .map(Some)
+            .context("failed to serialize session token usages")
+    }
+}
+
+fn deserialize_token_accounting(
+    json: Option<&str>,
+) -> Result<(
+    Vec<Option<crate::model::TokenUsage>>,
+    Option<crate::model::TokenUsage>,
+)> {
+    let Some(json) = json.filter(|json| !json.is_empty()) else {
+        return Ok((Vec::new(), None));
+    };
+    match serde_json::from_str::<StoredTokenAccounting>(json)
+        .context("failed to parse stored session token accounting")?
+    {
+        StoredTokenAccounting::Legacy(response_usages) => Ok((response_usages, None)),
+        StoredTokenAccounting::WithUnattributed {
+            response_usages,
+            unattributed_usage,
+        } => Ok((response_usages, Some(unattributed_usage))),
+    }
+}
+
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
@@ -70,14 +121,10 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         .map(serde_json::to_string)
         .transpose()
         .context("failed to serialize session response durations")?;
-    let token_usages_json = if update.run_state.token_usages.is_empty() {
-        None
-    } else {
-        Some(
-            serde_json::to_string(&update.run_state.token_usages)
-                .context("failed to serialize session token usages")?,
-        )
-    };
+    let token_usages_json = serialize_token_accounting(
+        &update.run_state.token_usages,
+        update.run_state.unattributed_token_usage.as_ref(),
+    )?;
 
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -716,9 +763,8 @@ impl SessionSummaryRow {
         // a truncation rebuilds them, and the migration backfills blob ++ log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
-        let total_tokens = parse_token_usages(self.token_usages_json.as_deref())?
-            .as_deref()
-            .and_then(crate::model::TokenUsage::aggregate)
+        let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
+        let total_tokens = crate::model::TokenUsage::aggregate(&response_usages)
             .map(|usage| usage.billable_tokens());
         Ok(SessionSummary {
             session_id: self.session_id,
@@ -741,17 +787,6 @@ impl SessionSummaryRow {
             run_count: self.run_count.max(0) as u64,
         })
     }
-}
-
-/// Shared by the snapshot and summary readers; legacy rows store NULL or an
-/// empty string and must load as "no usage recorded".
-fn parse_token_usages(json: Option<&str>) -> Result<Option<Vec<Option<crate::model::TokenUsage>>>> {
-    json.filter(|json| !json.is_empty())
-        .map(|json| {
-            serde_json::from_str::<Vec<Option<crate::model::TokenUsage>>>(json)
-                .context("failed to parse stored session token usages")
-        })
-        .transpose()
 }
 
 fn insert_or_replace_session(
@@ -793,14 +828,10 @@ fn insert_or_replace_session(
                 .context("failed to serialize session extra_headers")?,
         )
     };
-    let token_usages_json = if snapshot.token_usages.is_empty() {
-        None
-    } else {
-        Some(
-            serde_json::to_string(&snapshot.token_usages)
-                .context("failed to serialize session token usages")?,
-        )
-    };
+    let token_usages_json = serialize_token_accounting(
+        &snapshot.token_usages,
+        snapshot.unattributed_token_usage.as_ref(),
+    )?;
 
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
@@ -902,8 +933,8 @@ impl SessionRow {
         let base_url = self.base_url;
         let backend = parse_backend(self.backend)?;
         let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
-        let token_usages =
-            parse_token_usages(self.token_usages_json.as_deref())?.unwrap_or_default();
+        let (token_usages, unattributed_token_usage) =
+            deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
             session_id: self.session_id,
             cwd: PathBuf::from(self.cwd),
@@ -924,6 +955,7 @@ impl SessionRow {
             previous_response_duration_ms: self.previous_response_duration_ms,
             response_durations_ms,
             token_usages,
+            unattributed_token_usage,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })

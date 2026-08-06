@@ -769,6 +769,12 @@ async fn request_token_refresh(
     }
 }
 
+/// Whether a stored Arcee credential exists and parses (the `/models`
+/// auth-status check; any read/parse/permission failure reads as absent).
+pub(super) fn stored_credential_present() -> bool {
+    matches!(read_stored_auth_optional(), Ok(Some(_)))
+}
+
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
     read_stored_auth_optional()
         .map_err(classify_stored_auth_data_error)?

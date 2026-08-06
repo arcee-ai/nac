@@ -520,6 +520,8 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
             reasoning_details: None,
             tool_calls: None,
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
     )
     .unwrap();
@@ -689,6 +691,8 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
             reasoning_details: None,
             tool_calls: None,
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         crate::types::Message::User {
             content: "latest prompt".to_string(),

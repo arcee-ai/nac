@@ -648,6 +648,8 @@ mod tests {
                     },
                 }]),
                 duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
@@ -680,6 +682,8 @@ mod tests {
                     reasoning_details: None,
                     tool_calls: None,
                     duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 TranscriptMessageKind::Assistant,
                 "assistant",
@@ -885,6 +889,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: None,
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                 ],
             )
@@ -901,6 +907,8 @@ mod tests {
                 reasoning_details: None,
                 tool_calls: None,
                 duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ];
         crate::sessions::save_session(&path, &snapshot).unwrap();
@@ -919,6 +927,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: None,
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                 ],
             )
@@ -1110,6 +1120,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: None,
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     // Assistant with tool calls: not visible even with content.
                     Message::Assistant {
@@ -1118,6 +1130,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call.clone()]),
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),
@@ -1130,6 +1144,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: None,
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     // Assistant with an empty tool-call list: visible.
                     Message::Assistant {
@@ -1138,6 +1154,8 @@ mod tests {
                         reasoning_details: None,
                         tool_calls: Some(Vec::new()),
                         duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::User {
                         content: "latest prompt".to_string(),

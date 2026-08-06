@@ -187,6 +187,8 @@ fn compactable_server_messages() -> Vec<Message> {
             reasoning_details: None,
             tool_calls: None,
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent request".to_string(),

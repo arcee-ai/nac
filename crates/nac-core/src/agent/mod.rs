@@ -579,6 +579,8 @@ impl Agent {
                     reasoning_details: response.assistant.reasoning_details.clone(),
                     tool_calls: response.assistant.tool_calls.clone(),
                     duration_ms: Some(duration_millis(call_started.elapsed())),
+                    model_origin: Some(self.client.model_origin()),
+                    reasoning_field: response.assistant.reasoning_field.clone(),
                 })
                 .await
             {
@@ -852,6 +854,8 @@ impl Agent {
             reasoning_details: None,
             tool_calls: None,
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         })
         .await
     }

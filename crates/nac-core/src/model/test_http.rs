@@ -30,6 +30,11 @@ impl ScriptedResponse {
             body: body.into(),
         }
     }
+
+    pub(crate) fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -116,6 +121,40 @@ impl ScriptedServer {
                         thread::sleep(Duration::from_millis(5));
                     }
                     Err(error) => panic!("observe redirected request: {error}"),
+                }
+            }
+            requests
+        });
+        Self { base_url, handle }
+    }
+
+    /// Binds a listener that treats every connection as unexpected: for
+    /// `window`, it captures any request and answers 500, then stops.
+    /// `finish()` returns whatever arrived — the zero-network assertion is
+    /// `finish().is_empty()`.
+    pub(crate) fn start_unexpected_request_server(window: Duration) -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind unexpected-request server");
+        listener
+            .set_nonblocking(true)
+            .expect("set unexpected-request listener nonblocking");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + window;
+            let mut requests = Vec::new();
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_request(&mut stream);
+                        write_response(
+                            &mut stream,
+                            &ScriptedResponse::json("500 Internal Server Error", "{}"),
+                        );
+                        requests.push(request);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept unexpected request: {error}"),
                 }
             }
             requests

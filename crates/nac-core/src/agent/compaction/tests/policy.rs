@@ -214,6 +214,7 @@ fn summary_acceptance_requires_nonblank_text_without_tools_or_length_finish() {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls,
+                    reasoning_field: None,
                 },
                 finish_reason: finish.map(str::to_string),
                 usage: None,
