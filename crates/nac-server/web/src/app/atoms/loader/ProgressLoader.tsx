@@ -16,7 +16,7 @@ const ProgressLoader: React.FC<ProgressLoaderProps> = ({
 }) => (
   <div
     className={cn(
-      "h-px w-full overflow-hidden transition-opacity duration-300",
+      "h-px w-full overflow-hidden transition-opacity duration-150",
       active ? "opacity-100" : "opacity-0",
       className,
     )}

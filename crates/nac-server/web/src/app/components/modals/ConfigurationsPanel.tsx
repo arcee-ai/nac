@@ -21,6 +21,10 @@ import {
   TabButtonSize,
   TabButtonVariant,
 } from "@/app/atoms";
+import {
+  CatalogModelPicker,
+  type CatalogPick,
+} from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
@@ -44,6 +48,7 @@ import {
   useDeleteModelConfig,
   useManagedLogout,
   useManagedProviderModels,
+  useModelCatalog,
   useModelConfigs,
   useProviderModels,
   useResolvedModelConfig,
@@ -68,6 +73,7 @@ export type LaunchModelSelection =
     };
 
 type Source =
+  | { kind: "catalog" }
   | { kind: "new" }
   | { kind: "file" }
   | { kind: "saved"; configId: string };
@@ -207,13 +213,16 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
 }
 
 /**
- * Picks the provider setup a new session launches with: a fresh one, a setup
- * saved earlier, or one read out of a `config.toml`.
+ * Picks the provider setup a new session launches with: a model chosen out of
+ * the catalog, a fresh setup, one saved earlier, or one read out of a
+ * `config.toml`.
  *
  * A key is checked by listing the models it can reach, which is also where the
  * default model choices come from — the same request answers both questions.
  * Keys are handed to the server only to be validated, and are persisted solely
- * as part of saving a named configuration.
+ * as part of saving a named configuration. Browsing the catalog asks for
+ * nothing: it is local data, and a provider the server already authenticates as
+ * launches straight from it.
  */
 export function ConfigurationsPanel({
   invalid,
@@ -230,12 +239,14 @@ export function ConfigurationsPanel({
 }) {
   const toast = useToast();
   const { data: saved } = useModelConfigs();
+  const catalog = useModelCatalog();
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
   // Null until the user picks a source themselves, so the default below can
   // still settle once the list arrives.
   const [picked, setPicked] = useState<Source | null>(null);
+  const [catalogPick, setCatalogPick] = useState<CatalogPick | null>(null);
   const [provider, setProvider] = useState<ProviderChoice>("openai-responses");
   const [protocol, setProtocol] = useState<BackendKind>("openai-responses");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -253,29 +264,40 @@ export function ConfigurationsPanel({
   const [modelOverride, setModelOverride] = useState<string | null>(null);
 
   // Launching usually means reusing the setup from last time, so the newest
-  // saved configuration opens selected and only an empty list falls back to
-  // building one. The server orders by creation, hence the last entry.
+  // saved configuration opens selected. With nothing saved yet the catalog is
+  // the only source that asks for nothing up front, so it opens instead.
   const latestSaved = configurations.at(-1);
   const source: Source =
     picked ??
     (latestSaved
       ? { kind: "saved", configId: latestSaved.config_id }
-      : { kind: "new" });
+      : { kind: "catalog" });
 
-  const backend: BackendKind = provider === CUSTOM ? protocol : provider;
+  // A catalog entry names its own provider; everywhere else the dropdown does.
+  const backend: BackendKind =
+    source.kind === "catalog" && catalogPick
+      ? catalogPick.backend
+      : provider === CUSTOM
+        ? protocol
+        : provider;
   const needsKey = providerUsesApiKey(backend);
   // A hand-written gateway may not implement a model index, so its model and
   // URL are typed in rather than discovered.
   const discovers = provider !== CUSTOM && needsKey;
 
   const autoName = useMemo(() => {
-    const base = provider === CUSTOM ? "custom" : provider;
+    const base =
+      source.kind === "catalog"
+        ? (catalogPick?.backend ?? "catalog")
+        : provider === CUSTOM
+          ? "custom"
+          : provider;
     const taken = new Set(configurations.map((entry) => entry.name));
     for (let index = 1; ; index += 1) {
       const candidate = `${base}-config-${index}`;
       if (!taken.has(candidate)) return candidate;
     }
-  }, [provider, configurations]);
+  }, [source.kind, catalogPick, provider, configurations]);
   const name = nameDraft ?? autoName;
 
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
@@ -284,13 +306,28 @@ export function ConfigurationsPanel({
   const configId = source.kind === "saved" ? source.configId : null;
   const configFile = source.kind === "file" ? debouncedPath : "";
 
-  const keyQuery = useProviderModels(
-    backend,
-    debouncedKey,
-    null,
-    source.kind === "new" && discovers,
-  );
   const { signedIn } = useManagedSignIn(backend);
+
+  const catalogProvider =
+    catalog.data?.providers.find((entry) => entry.id === backend) ?? null;
+  /**
+   * Whether the server can already authenticate as the picked provider. A
+   * managed one answers from the live sign-in rather than the catalog snapshot,
+   * which still reads `no_credential` for the seconds after a login lands.
+   */
+  const catalogCredential = needsKey
+    ? catalogProvider?.auth_status === "ready"
+    : signedIn;
+  // Only an API-key provider can be fixed from here; a managed one needs its
+  // browser login, which the Authentication row owns.
+  const catalogNeedsKey =
+    source.kind === "catalog" &&
+    Boolean(catalogPick) &&
+    needsKey &&
+    !catalogCredential;
+
+  const validates = (source.kind === "new" && discovers) || catalogNeedsKey;
+  const keyQuery = useProviderModels(backend, debouncedKey, null, validates);
   // A login reaches a model index the same way a key does; it just cannot be
   // read before the sign-in exists.
   const loginQuery = useManagedProviderModels(
@@ -299,11 +336,7 @@ export function ConfigurationsPanel({
   );
   const configQuery = useResolvedModelConfig(configId, configFile);
 
-  const validation: Validation = !(
-    source.kind === "new" &&
-    discovers &&
-    debouncedKey
-  )
+  const validation: Validation = !(validates && debouncedKey)
     ? { status: "idle" }
     : keyQuery.isFetching
       ? { status: "validating" }
@@ -353,7 +386,8 @@ export function ConfigurationsPanel({
     setBaseUrlOverride(null);
     setModelOverride(null);
     if (next?.kind !== "file") setFilePath("");
-    if (next?.kind !== "new") setNameDraft(null);
+    if (next?.kind !== "catalog") setCatalogPick(null);
+    if (next?.kind !== "new" && next?.kind !== "catalog") setNameDraft(null);
   };
 
   const savedRecord = configId
@@ -361,6 +395,39 @@ export function ConfigurationsPanel({
     : null;
 
   const selection = useMemo<LaunchModelSelection | null>(() => {
+    if (source.kind === "catalog") {
+      if (!catalogPick || !catalogPick.baseUrl) return null;
+      if (catalogCredential) {
+        // The credential is already on the server, so nothing is saved and
+        // `api_key_env` stays unset for session resolution to fill in with the
+        // same variable the catalog checked.
+        return {
+          kind: "resolved",
+          backend: catalogPick.backend,
+          model: catalogPick.model,
+          base_url: catalogPick.baseUrl,
+          api_key_env: null,
+          reasoning_effort: null,
+          extra_headers: null,
+        };
+      }
+      // A managed provider is waiting on its login, which nothing here can
+      // stand in for.
+      if (!needsKey) return null;
+      const trimmedName = name.trim();
+      if (!trimmedName || !keyValidated) return null;
+      return {
+        kind: "save",
+        request: {
+          name: trimmedName,
+          backend: catalogPick.backend,
+          model: catalogPick.model,
+          base_url: validatedBaseUrl || catalogPick.baseUrl,
+          api_key: apiKey.trim(),
+        },
+      };
+    }
+
     if (source.kind === "new") {
       const trimmedName = name.trim();
       if (!trimmedName) return null;
@@ -419,6 +486,8 @@ export function ConfigurationsPanel({
     };
   }, [
     source.kind,
+    catalogPick,
+    catalogCredential,
     name,
     apiKey,
     needsKey,
@@ -461,13 +530,15 @@ export function ConfigurationsPanel({
    * fields being filled in, so having them is the equivalent milestone.
    */
   const credentialReady =
-    source.kind === "new"
-      ? provider === CUSTOM
-        ? Boolean(baseUrlDraft.trim() && modelDraft.trim())
-        : needsKey
-          ? keyValidated
-          : signedIn
-      : Boolean(resolved);
+    source.kind === "catalog"
+      ? Boolean(catalogPick) && (catalogCredential || keyValidated)
+      : source.kind === "new"
+        ? provider === CUSTOM
+          ? Boolean(baseUrlDraft.trim() && modelDraft.trim())
+          : needsKey
+            ? keyValidated
+            : signedIn
+        : Boolean(resolved);
 
   const keyInvalid = validation.status === "error";
   // A login that cannot read the model index leaves the same empty list as a
@@ -501,11 +572,13 @@ export function ConfigurationsPanel({
       : null;
 
   const sourceLabel =
-    source.kind === "new"
-      ? "Create New"
-      : source.kind === "file"
-        ? "From a .toml file"
-        : (savedRecord?.name ?? "Configuration");
+    source.kind === "catalog"
+      ? "Browse Models"
+      : source.kind === "new"
+        ? "Create New"
+        : source.kind === "file"
+          ? "From a .toml file"
+          : (savedRecord?.name ?? "Configuration");
 
   return (
     <div className="flex flex-col gap-1">
@@ -539,6 +612,120 @@ export function ConfigurationsPanel({
         <Separator />
 
         <div className="flex flex-col gap-2 p-3">
+          {source.kind === "catalog" ? (
+            <>
+              <ConfigRow
+                label="Model"
+                required
+                hint="Every model this build knows about; picking one names its provider."
+                control={
+                  <CatalogModelPicker
+                    catalog={catalog.data}
+                    loading={catalog.isLoading}
+                    failed={catalog.isError}
+                    value={catalogPick}
+                    onSelect={(pick) => {
+                      setCatalogPick(pick);
+                      setApiKey("");
+                      setNameDraft(null);
+                    }}
+                  />
+                }
+              />
+              {catalogPick ? (
+                <>
+                  <Separator />
+                  <ConfigRow
+                    label="Base URL"
+                    hint="Endpoint the catalog names for this provider."
+                    control={
+                      <Input
+                        inputSize={InputSize.Medium}
+                        className={CONTROL_WIDTH}
+                        value={catalogPick.baseUrl}
+                        isDisabled
+                        readOnly
+                      />
+                    }
+                  />
+                  {needsKey ? (
+                    <>
+                      <Separator />
+                      {catalogCredential ? (
+                        <ConfigRow
+                          label="Credential"
+                          hint="This provider's conventional environment variable is set on the server; the session reuses it."
+                          control={
+                            <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+                              <Icon
+                                iconName={IconName.CheckCircle}
+                                className="text-success-primary"
+                              />
+                              <span className="label-small text-success-primary">
+                                Detected
+                              </span>
+                            </div>
+                          }
+                        />
+                      ) : (
+                        <>
+                          <ConfigRow
+                            label="Name"
+                            required
+                            hint="How this setup is listed the next time a session is created."
+                            control={
+                              <Input
+                                inputSize={InputSize.Medium}
+                                className={CONTROL_WIDTH}
+                                value={name}
+                                onChange={(event) =>
+                                  setNameDraft(event.target.value)
+                                }
+                              />
+                            }
+                          />
+                          <Separator />
+                          <ConfigRow
+                            label="API Key"
+                            required
+                            invalid={keyInvalid}
+                            hint={
+                              catalogProvider?.auth_hint
+                                ? `Stored in NAC once the setup is saved, or set ${catalogProvider.auth_hint} on the server instead.`
+                                : "Stored in NAC under a generated name once the setup is saved."
+                            }
+                            control={
+                              <Input
+                                inputSize={InputSize.Medium}
+                                className={CONTROL_WIDTH}
+                                type="password"
+                                autoComplete="off"
+                                placeholder="Paste the provider key"
+                                leadingSlot={
+                                  <KeyStatus status={validation.status} />
+                                }
+                                validation={keyInvalid}
+                                value={apiKey}
+                                onChange={(event) =>
+                                  setApiKey(event.target.value)
+                                }
+                              />
+                            }
+                          />
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Separator />
+                      <AuthenticationRow backend={backend} />
+                    </>
+                  )}
+                </>
+              ) : null}
+            </>
+          ) : null}
+
           {source.kind === "file" ? (
             <>
               <ConfigRow
@@ -723,7 +910,7 @@ export function ConfigurationsPanel({
             </>
           ) : null}
 
-          {source.kind !== "new" ? (
+          {source.kind === "saved" || source.kind === "file" ? (
             <ResolvedRows
               resolving={resolving}
               resolved={resolved}
@@ -998,6 +1185,19 @@ function SourceMenu({
           <TabButton
             size={TabButtonSize.Medium}
             variant={
+              source === "catalog"
+                ? TabButtonVariant.Accent
+                : TabButtonVariant.Regular
+            }
+            active={source === "catalog"}
+            onClick={() => pick({ kind: "catalog" })}
+          >
+            <Icon iconName={IconName.Search} />
+            <span className="text-left flex-grow">Browse Models</span>
+          </TabButton>
+          <TabButton
+            size={TabButtonSize.Medium}
+            variant={
               source === "new"
                 ? TabButtonVariant.Accent
                 : TabButtonVariant.Regular
@@ -1069,7 +1269,7 @@ function SourceMenu({
         <Icon
           iconName={IconName.Down}
           className={cn(
-            "transition-transform duration-300 ease-in-out",
+            "transition-transform duration-150 ease-out",
             open ? "rotate-180" : "rotate-0",
           )}
         />

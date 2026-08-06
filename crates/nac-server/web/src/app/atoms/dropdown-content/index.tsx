@@ -109,7 +109,7 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
     <div
       {...props}
       ref={containerRef}
-      className={`${overflowClass} transition-[height] duration-300 ease-in-out ${className}`}
+      className={`${overflowClass} transition-[height] duration-150 ease-out ${className}`}
       style={{
         height: `${height}px`,
         ...props.style,

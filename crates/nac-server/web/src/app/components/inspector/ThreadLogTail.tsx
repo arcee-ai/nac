@@ -6,8 +6,8 @@ import type { ThreadLogLine } from "@/app/lib/threadLog";
 /** Height of one log row, which is also how far a new line travels. */
 const ROW_HEIGHT = 16;
 
-/** How long a new line takes to rise into place. `duration-300` mirrors it. */
-const SLIDE_MS = 300;
+/** How long a new line takes to rise into place. `duration-150` mirrors it. */
+const SLIDE_MS = 150;
 
 /**
  * Rows kept in the DOM. Three sit within the card's log area and the fourth is
@@ -88,7 +88,7 @@ export function ThreadLogTail({
               "w-full truncate code code-micro !text-[11px] !leading-[16px] !m-0 block",
               // Aging is a fade rather than a step, so a line dims over the same
               // beat as the slide that pushed it up.
-              "transition-opacity duration-300 ease-out",
+              "transition-opacity duration-150 ease-out",
               line.isError ? "text-error-primary" : "text-basic-tertiary",
               lineOpacity(visible.length - 1 - index),
             )}

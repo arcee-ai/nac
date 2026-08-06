@@ -47,7 +47,7 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
         className="rounded-[4px] max-w-[360px] w-full pointer-events-auto"
         style={{
           transform: isVisible ? "translateY(0)" : "translateY(-100%)",
-          transition: "transform 300ms ease-out",
+          transition: "transform 150ms ease-out",
         }}
       >
         <div

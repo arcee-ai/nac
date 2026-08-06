@@ -367,18 +367,16 @@ export function useStickToBottom({
     stuck.current = true;
     setShowJumpButton(false);
     beginProgrammaticScroll();
-    void smoothScrollTo(
-      element,
-      element.scrollHeight,
-      JUMP_DURATION_MS,
-    ).then((completed) => {
-      endProgrammaticScroll();
-      // An interrupted animation means the user took over on the way down.
-      if (!completed) {
-        stuck.current = distanceFromBottom(element) <= STICK_TOLERANCE_PX;
-        syncJumpButton();
-      }
-    });
+    void smoothScrollTo(element, element.scrollHeight, JUMP_DURATION_MS).then(
+      (completed) => {
+        endProgrammaticScroll();
+        // An interrupted animation means the user took over on the way down.
+        if (!completed) {
+          stuck.current = distanceFromBottom(element) <= STICK_TOLERANCE_PX;
+          syncJumpButton();
+        }
+      },
+    );
   }, [
     beginProgrammaticScroll,
     cancelFollow,

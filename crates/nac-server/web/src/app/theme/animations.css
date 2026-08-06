@@ -1,5 +1,10 @@
 /* Animations that Tailwind does not generate. The spin/progress/shimmer family
-   and the `text-shimmer-*` utilities come from `tailwind.config.js` instead. */
+   and the `text-shimmer-*` utilities come from `tailwind.config.js` instead.
+
+   Anything that plays once on appearance runs for 150ms: past that the UI
+   reads as lag rather than as motion, because the thing being waited for is
+   already there. The looping indicators below keep their own pace — they mark
+   time passing rather than something arriving. */
 
 @keyframes fade {
   from {
@@ -15,20 +20,6 @@
     transform: translateY(-8px);
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@keyframes fade-up-8-delayed {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  33% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
     opacity: 1;
     transform: translateY(0);
   }
@@ -64,37 +55,21 @@
   }
 }
 .fade {
-  animation: fade 0.3s ease-out;
+  animation: fade 0.15s ease-out;
 }
 .fade-up {
-  animation: fade-up-8 0.3s ease-out;
+  animation: fade-up-8 0.15s ease-out;
 }
 .fade-down {
-  animation: fade-down-8 0.3s ease-out;
+  animation: fade-down-8 0.15s ease-out;
 }
 .fade-left {
-  animation: fade-left-8 0.3s ease-out;
+  animation: fade-left-8 0.15s ease-out;
 }
 .fade-right {
-  animation: fade-right-8 0.3s ease-out;
-}
-.fade-up-delayed {
-  animation: fade-up-8-delayed 0.6s ease-out;
+  animation: fade-right-8 0.15s ease-out;
 }
 
-@keyframes popup-bounce {
-  0% {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-.popup-bounce {
-  animation: popup-bounce 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);
@@ -104,7 +79,7 @@
   }
 }
 .slide-in-right {
-  animation: slide-in-right 0.3s ease-in-out;
+  animation: slide-in-right 0.15s ease-out;
 }
 
 @keyframes loading_gleam {

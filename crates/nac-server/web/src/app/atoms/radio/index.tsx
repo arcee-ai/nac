@@ -41,7 +41,7 @@ const Radio: React.FC<RadioProps> = ({
     <span
       aria-hidden="true"
       className={cn(
-        "flex items-center justify-center shrink-0 mt-[1px] w-4 h-4 rounded-full border transition-colors duration-200",
+        "flex items-center justify-center shrink-0 mt-[1px] w-4 h-4 rounded-full border transition-colors duration-150",
         "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-accent-primary",
         disabled
           ? "bg-btn-secondary-disabled border-muted"

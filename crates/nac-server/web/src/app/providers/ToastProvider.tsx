@@ -43,7 +43,7 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 // Must match the transition in the Toast atom, otherwise the node is removed
 // before it has finished sliding out.
-const ANIMATION_MS = 300;
+const ANIMATION_MS = 150;
 const DEFAULT_LIFE = 3;
 
 let seq = 0;

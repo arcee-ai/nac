@@ -221,7 +221,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   !chromeless && "bg-elevation-level-1",
                 )
               : cn(
-                  "popup-bounce w-full",
+                  "fade w-full",
                   size,
                   chromeless
                     ? "shadow-none"

@@ -39,7 +39,7 @@ const Checkbox: React.FC<CheckboxProps> = ({
     <span
       aria-hidden="true"
       className={cn(
-        "flex items-center justify-center shrink-0 w-4 h-4 rounded-[4px] border transition-colors duration-200",
+        "flex items-center justify-center shrink-0 w-4 h-4 rounded-[4px] border transition-colors duration-150",
         "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-accent-primary",
         disabled
           ? "bg-btn-secondary-disabled border-muted"
