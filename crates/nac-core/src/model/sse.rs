@@ -68,6 +68,9 @@ type ByteStream = Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>;
 
 pub(super) struct SseReader {
     body: ByteStream,
+    /// Incomplete UTF-8 sequence waiting for the rest of a multi-byte character
+    /// that was split across network reads.
+    pending_bytes: Vec<u8>,
     /// Text read but not yet terminated by a newline.
     pending_line: String,
     data_lines: Vec<String>,
@@ -77,6 +80,7 @@ impl SseReader {
     pub fn new(response: Response) -> Self {
         Self {
             body: Box::pin(response.bytes_stream()),
+            pending_bytes: Vec::new(),
             pending_line: String::new(),
             data_lines: Vec::new(),
         }
@@ -95,20 +99,71 @@ impl SseReader {
             }
 
             match self.body.next().await {
-                Some(Ok(chunk)) => match std::str::from_utf8(&chunk) {
-                    Ok(text) => self.pending_line.push_str(text),
-                    // Provider bodies are JSON, so a split multi-byte sequence
-                    // is the only realistic cause; recover the valid prefix and
-                    // let the JSON parse surface anything worse.
-                    Err(error) => {
-                        let (valid, _) = chunk.split_at(error.valid_up_to());
-                        self.pending_line.push_str(&String::from_utf8_lossy(valid));
-                    }
-                },
+                Some(Ok(chunk)) => self.push_chunk(&chunk),
                 Some(Err(error)) => {
                     return Some(Err(anyhow!("model stream failed mid-response: {error}")))
                 }
-                None => return self.flush().map(Ok),
+                None => {
+                    // A trailing incomplete sequence would only appear if the
+                    // body itself is truncated mid-character; surface it as the
+                    // replacement char so the JSON parse can fail loudly.
+                    if !self.pending_bytes.is_empty() {
+                        self.pending_line
+                            .push_str(&String::from_utf8_lossy(&self.pending_bytes));
+                        self.pending_bytes.clear();
+                    }
+                    return self.flush().map(Ok);
+                }
+            }
+        }
+    }
+
+    /// Decode `chunk` into `pending_line`, carrying any incomplete trailing
+    /// multi-byte sequence into `pending_bytes` for the next read.
+    fn push_chunk(&mut self, chunk: &[u8]) {
+        if self.pending_bytes.is_empty() {
+            self.decode_bytes(chunk);
+            return;
+        }
+        self.pending_bytes.extend_from_slice(chunk);
+        let bytes = std::mem::take(&mut self.pending_bytes);
+        self.decode_bytes(&bytes);
+    }
+
+    fn decode_bytes(&mut self, bytes: &[u8]) {
+        let mut at = 0;
+        while at < bytes.len() {
+            match std::str::from_utf8(&bytes[at..]) {
+                Ok(text) => {
+                    self.pending_line.push_str(text);
+                    return;
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+                    if valid_up_to > 0 {
+                        // `valid_up_to` is the first invalid byte; the prefix is UTF-8.
+                        self.pending_line.push_str(
+                            std::str::from_utf8(&bytes[at..at + valid_up_to])
+                                .expect("valid_up_to marks a UTF-8 prefix"),
+                        );
+                        at += valid_up_to;
+                    }
+                    match error.error_len() {
+                        // Incomplete sequence at the end of this buffer — hold
+                        // the bytes until the next chunk completes them.
+                        None => {
+                            self.pending_bytes.extend_from_slice(&bytes[at..]);
+                            return;
+                        }
+                        // Hard invalid sequence mid-stream. Skip it with a
+                        // replacement and keep decoding so a later JSON parse
+                        // can surface the corruption.
+                        Some(len) => {
+                            self.pending_line.push('\u{FFFD}');
+                            at += len;
+                        }
+                    }
+                }
             }
         }
     }
@@ -159,6 +214,7 @@ mod tests {
     fn frames(chunks: &[&str]) -> Vec<String> {
         let mut reader = SseReader {
             body: Box::pin(futures_util::stream::empty()),
+            pending_bytes: Vec::new(),
             pending_line: String::new(),
             data_lines: Vec::new(),
         };
