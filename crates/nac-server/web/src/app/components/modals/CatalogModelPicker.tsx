@@ -55,7 +55,7 @@ interface Row {
 }
 
 /** Where a session on this provider sends its requests. */
-export function catalogBaseUrl(provider: CatalogProvider): string {
+function catalogBaseUrl(provider: CatalogProvider): string {
   return provider.managed_base_url ?? provider.default_base_url ?? "";
 }
 
@@ -140,7 +140,13 @@ export function CatalogModelPicker({
   // A shorter list can leave the highlight past its end.
   const index = Math.min(active, Math.max(rows.length - 1, 0));
 
-  useEffect(() => setActive(0), [query]);
+  // The highlight belongs to the list a query produced, so it is reset next to
+  // the query itself: an effect would land a frame later, over rows the search
+  // has already replaced.
+  const search = (next: string) => {
+    setQuery(next);
+    setActive(0);
+  };
 
   // Keeps the keyboard highlight visible without scrolling the modal behind it.
   useEffect(() => {
@@ -162,7 +168,7 @@ export function CatalogModelPicker({
       baseUrl: catalogBaseUrl(row.provider),
     });
     setOpen(false);
-    setQuery("");
+    search("");
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -216,7 +222,7 @@ export function CatalogModelPicker({
             autoComplete="off"
             spellCheck={false}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => search(event.target.value)}
             onKeyDown={onKeyDown}
           />
           <div
