@@ -31,6 +31,19 @@ export interface StoreInfo {
   worker_executable: string;
 }
 
+/**
+ * Cost in micro-USD (1e-6 USD), priced from the model catalog when the
+ * response was parsed. All-zero means the catalog has no rates for the model,
+ * never that the call was free.
+ */
+export interface TokenCostMicros {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  total: number;
+}
+
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
@@ -38,6 +51,8 @@ export interface TokenUsage {
   cache_write_tokens: number;
   reasoning_tokens?: number;
   total_tokens: number;
+  /** Absent on usage recorded before the catalog started pricing responses. */
+  cost?: TokenCostMicros;
 }
 
 export interface ToolCall {

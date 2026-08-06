@@ -14,7 +14,12 @@ import {
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { cn } from "@/app/lib/cn";
-import { formatClock, formatTokensCompact, runMetrics } from "@/app/lib/format";
+import {
+  formatClock,
+  formatCostMicros,
+  formatTokensCompact,
+  runMetrics,
+} from "@/app/lib/format";
 import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -198,6 +203,14 @@ export function ChatInputBox({
                 value={formatTokensCompact(metrics.usage.output_tokens)}
                 className="text-info-secondary opacity-75"
                 title="Output tokens"
+              />
+              {/* Priced from the model catalog, so a model the catalog has no
+                  rates for shows "--" rather than a misleading zero. */}
+              <StatBadge
+                iconName={IconName.Money}
+                value={formatCostMicros(metrics.usage.cost?.total)}
+                className="text-info-secondary opacity-75"
+                title="Session cost"
               />
             </div>
           ) : null}

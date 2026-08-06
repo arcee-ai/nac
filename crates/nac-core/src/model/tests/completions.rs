@@ -253,7 +253,8 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
 
     let openai_levels = test_resolved(BackendKind::OpenAiResponses, "model").thinking_level_map;
     let openai_absent = openai_responses_request("model", None, &messages, &[], &openai_levels);
-    assert!(openai_absent.get("reasoning").is_none());
+    // Readable reasoning is asked for regardless; only the effort is opt-in.
+    assert_eq!(openai_absent["reasoning"], json!({"summary": "auto"}));
     assert!(openai_absent.get("tools").is_none());
     // OpenAI's uniform path emits the map's wire value for every effort,
     // including `none`.

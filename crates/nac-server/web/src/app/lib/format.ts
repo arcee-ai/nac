@@ -88,6 +88,20 @@ export function formatTokensCompact(n: number | null | undefined): string {
   return String(v);
 }
 
+/**
+ * Spend for the chat input bar. Anything that is not a positive amount reads
+ * as "--": zero means the catalog has no rates for the model, so naming a
+ * price would be a claim the backend never made.
+ */
+export function formatCostMicros(micros: number | null | undefined): string {
+  if (micros == null) return "--";
+  const value = Math.round(Number(micros));
+  if (!Number.isFinite(value) || value <= 0) return "--";
+  const dollars = value / 1_000_000;
+  if (dollars >= 0.01) return `$${dollars.toFixed(2)}`;
+  return `$${Number(dollars.toPrecision(3))}`;
+}
+
 /** Clock for a running session card: MM:SS, widening to H:MM:SS past an hour. */
 export function formatClock(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return "--:--";
