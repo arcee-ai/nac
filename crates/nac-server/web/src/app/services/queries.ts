@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
+import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   BackendKind,
   BranchList,
@@ -18,6 +19,7 @@ import type {
   CreateModelConfigurationRequest,
   CreateSessionRequest,
   ManagedSessionSummary,
+  ModelCatalog,
   ModelConfigurationList,
   ProviderModelList,
   RawSessionConfig,
@@ -26,6 +28,9 @@ import type {
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  SshConfigurationList,
+  CreateSshConfigurationRequest,
+  UpdateSshConfigurationRequest,
   SshTarget,
   StoredCredentialList,
   StoreInfo,
@@ -48,6 +53,7 @@ export const queryKeys = {
   credentials: ["credentials"] as const,
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
+  sshConfigs: ["ssh-configs"] as const,
   browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
   sshBrowse: (target: SshTarget, path: string) =>
     [
@@ -66,6 +72,7 @@ export const queryKeys = {
   managedProviderModels: (backend: string) =>
     ["managed-provider-models", backend] as const,
   managedProviderModelsAll: ["managed-provider-models"] as const,
+  modelCatalog: ["model-catalog"] as const,
   resolvedModelConfig: (configId: string) =>
     ["model-config-resolved", configId] as const,
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
@@ -237,6 +244,52 @@ export function useSshConnect() {
   });
 }
 
+export function useSshConfigs() {
+  return useQuery<SshConfigurationList>({
+    queryKey: queryKeys.sshConfigs,
+    queryFn: ({ signal }) => api.listSshConfigs(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useCreateSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateSshConfigurationRequest) =>
+      api.createSshConfig(payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
+    },
+  });
+}
+
+export function useUpdateSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      configId,
+      payload,
+    }: {
+      configId: string;
+      payload: UpdateSshConfigurationRequest;
+    }) => api.updateSshConfig(configId, payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
+    },
+  });
+}
+
+export function useDeleteSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (configId: string) => api.deleteSshConfig(configId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
+    },
+  });
+}
+
 export function useModelConfigs() {
   return useQuery<ModelConfigurationList>({
     queryKey: queryKeys.modelConfigs,
@@ -313,6 +366,21 @@ export function useManagedProviderModels(
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * The server's model catalog: context windows, prices and the efforts each
+ * model accepts. It only changes when the server reloads it, and a failure is
+ * never fatal — every consumer falls back to showing the raw numbers.
+ */
+export function useModelCatalog(enabled = true) {
+  return useQuery<ModelCatalog>({
+    queryKey: queryKeys.modelCatalog,
+    queryFn: ({ signal }) => api.getModelCatalog(signal),
+    enabled,
+    staleTime: 10 * 60_000,
+    retry: false,
   });
 }
 
@@ -637,6 +705,12 @@ export function useSubmitRun() {
   return useMutation({
     mutationFn: ({ id, prompt }: { id: string; prompt: string }) =>
       api.submitRun(id, prompt),
+    onMutate: ({ prompt }) => {
+      setOptimisticUserPrompt(prompt);
+    },
+    onError: () => {
+      setOptimisticUserPrompt(null);
+    },
     onSuccess: (_data, { id }) => invalidate.session(id),
   });
 }

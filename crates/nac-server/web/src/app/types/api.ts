@@ -31,6 +31,19 @@ export interface StoreInfo {
   worker_executable: string;
 }
 
+/**
+ * Cost in micro-USD (1e-6 USD), priced from the model catalog when the
+ * response was parsed. All-zero means the catalog has no rates for the model,
+ * never that the call was free.
+ */
+export interface TokenCostMicros {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  total: number;
+}
+
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
@@ -38,6 +51,8 @@ export interface TokenUsage {
   cache_write_tokens: number;
   reasoning_tokens?: number;
   total_tokens: number;
+  /** Absent on usage recorded before the catalog started pricing responses. */
+  cost?: TokenCostMicros;
 }
 
 export interface ToolCall {
@@ -83,6 +98,8 @@ export interface SessionSummarySnapshot {
   created_at: string;
   updated_at: string;
   total_tokens?: number;
+  /** Micro-USD spend for the session; zero means unknown catalog rates. */
+  total_cost_micros?: number;
   run_count: number;
 }
 
@@ -728,6 +745,36 @@ export interface SshBrowseRequest extends SshTarget {
   path?: string | null;
 }
 
+/** A named, reusable SSH connection offered by the launch and settings forms. */
+export interface SshConfigurationRecord {
+  config_id: string;
+  name: string;
+  ssh_host: string;
+  ssh_port: number | null;
+  ssh_identity_file: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SshConfigurationList {
+  configurations: SshConfigurationRecord[];
+}
+
+export interface CreateSshConfigurationRequest {
+  name: string;
+  ssh_host: string;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
+}
+
+/** Tri-state fields: omit to keep, null to clear, value to replace. */
+export interface UpdateSshConfigurationRequest {
+  name?: RequestField<string>;
+  ssh_host?: RequestField<string>;
+  ssh_port?: RequestField<number>;
+  ssh_identity_file?: RequestField<string>;
+}
+
 export interface ProviderModel {
   id: string;
   display_name: string | null;
@@ -745,6 +792,65 @@ export interface ProviderModelsRequest {
 export interface ProviderModelList {
   base_url: string;
   models: ProviderModel[];
+}
+
+/** `nac_core::model::catalog::ModelSource`, serialized snake_case. */
+export type ModelSource =
+  | "baseline"
+  | "overlay"
+  | "user_override"
+  | "provider_default"
+  | "fallback";
+
+/** `nac_core::model::catalog::ProviderAuth`: how a provider authenticates. */
+export type ProviderAuth = "api_key_env" | "managed_arcee" | "codex_oauth";
+
+/** Whether the server can currently authenticate as this provider. */
+export type AuthStatus = "ready" | "no_credential";
+
+/** Per-million-token rates in micro-USD, as the catalog records them. */
+export interface ModelCostRates {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+/** The provider `_default` entry an unrecognized model falls back to. */
+export interface CatalogDefaultLimits {
+  context_window: number;
+  max_tokens: number;
+  supported_efforts: ReasoningEffort[];
+}
+
+/** One real catalog entry, never a synthesized fallback. */
+export interface CatalogModel {
+  id: string;
+  display_name: string | null;
+  context_window: number;
+  max_tokens: number;
+  cost: ModelCostRates;
+  reasoning: boolean;
+  supported_efforts: ReasoningEffort[];
+  source: ModelSource;
+}
+
+export interface CatalogProvider {
+  id: BackendKind;
+  auth: ProviderAuth;
+  auth_status: AuthStatus;
+  /** The env var name or login command to fix a missing credential. */
+  auth_hint: string | null;
+  managed_base_url: string | null;
+  default_base_url: string | null;
+  default_limits: CatalogDefaultLimits;
+  models: CatalogModel[];
+}
+
+/** `GET /models`: the server's local model catalog, no credentials involved. */
+export interface ModelCatalog {
+  catalog_version: number;
+  providers: CatalogProvider[];
 }
 
 /**

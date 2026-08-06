@@ -1,0 +1,345 @@
+//! Completions/responses request-builder tests: the single compat-driven
+//! completions builder and the responses input-item expansion.
+
+use super::*;
+
+#[test]
+fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
+    let messages = [Message::Assistant {
+        content: Some("calling a tool".to_string()),
+        reasoning_text: Some("need current context".to_string()),
+        reasoning_details: None,
+        tool_calls: None,
+        model_origin: None,
+        reasoning_field: None,
+        duration_ms: None,
+    }];
+    let levels = test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").thinking_level_map;
+    let compat = test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").compat;
+    let absent = completions_chat_request(
+        "deepseek-v4-pro",
+        None,
+        &messages,
+        &[],
+        &levels,
+        &compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert!(absent.get("thinking").is_none());
+    assert!(absent.get("reasoning_effort").is_none());
+    // DeepSeek's compat omits an explicit temperature.
+    assert!(absent.get("temperature").is_none());
+    assert_eq!(
+        absent["messages"][0]["reasoning_content"],
+        "need current context"
+    );
+
+    let disabled = completions_chat_request(
+        "deepseek-v4-pro",
+        Some(ReasoningEffort::None),
+        &messages,
+        &[],
+        &levels,
+        &compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
+    assert!(disabled.get("reasoning_effort").is_none());
+
+    // The wire tier `max` for `xhigh` comes from the catalog map, not
+    // from adapter code (requests.rs carries no "max" literal).
+    for (effort, wire_effort) in [
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "max"),
+    ] {
+        let request = completions_chat_request(
+            "deepseek-v4-pro",
+            Some(effort),
+            &messages,
+            &[],
+            &levels,
+            &compat,
+            CompletionsMessageShape::Standard,
+        );
+        assert_eq!(request["thinking"], json!({"type": "enabled"}));
+        assert_eq!(request["reasoning_effort"], wire_effort);
+    }
+}
+
+#[test]
+fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
+    // S6 consolidation guard: a single builder, driven only by catalog
+    // compat data, reproduces the four distinct completions request
+    // shapes (DeepSeek, Fireworks, Together, Arcee) — including the
+    // per-provider reasoning replay field for unstamped (legacy)
+    // assistant messages.
+    let messages = [
+        Message::User {
+            content: "hi".to_string(),
+        },
+        Message::Assistant {
+            content: Some("prior".to_string()),
+            reasoning_text: Some("thought".to_string()),
+            reasoning_details: None,
+            tool_calls: None,
+            model_origin: None,
+            reasoning_field: None,
+            duration_ms: None,
+        },
+    ];
+    let user = json!({"role": "user", "content": "hi"});
+
+    let deepseek = completions_chat_request(
+        "m",
+        Some(ReasoningEffort::High),
+        &messages,
+        &[],
+        &test_resolved(BackendKind::DeepSeekChat, "m").thinking_level_map,
+        &test_resolved(BackendKind::DeepSeekChat, "m").compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(
+        deepseek,
+        json!({
+            "model": "m",
+            "messages": [
+                user,
+                {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+            ],
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": "high"
+        }),
+        "DeepSeek: thinking dialect, no explicit temperature"
+    );
+
+    let fireworks = completions_chat_request(
+        "m",
+        Some(ReasoningEffort::High),
+        &messages,
+        &[],
+        &test_resolved(BackendKind::FireworksChat, "m").thinking_level_map,
+        &test_resolved(BackendKind::FireworksChat, "m").compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(
+        fireworks,
+        json!({
+            "model": "m",
+            "messages": [
+                user,
+                {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+            ],
+            "temperature": 0.0,
+            "reasoning_effort": "high",
+            "reasoning_history": "preserved"
+        }),
+        "Fireworks: reasoning_effort + reasoning_history dialect"
+    );
+
+    let together = completions_chat_request(
+        "m",
+        Some(ReasoningEffort::High),
+        &messages,
+        &[],
+        &test_resolved(BackendKind::TogetherChat, "m").thinking_level_map,
+        &test_resolved(BackendKind::TogetherChat, "m").compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(
+        together,
+        json!({
+            "model": "m",
+            "messages": [
+                user,
+                {"role": "assistant", "content": "prior", "reasoning": "thought"}
+            ],
+            "temperature": 0.0,
+            "reasoning": {"enabled": true},
+            "reasoning_effort": "high",
+            "chat_template_kwargs": {"clear_thinking": false}
+        }),
+        "Together: reasoning.enabled dialect, reasoning replay field"
+    );
+
+    // Arcee accepts no explicit effort levels (its map is empty), so the
+    // effort-free shape is the only reachable one.
+    let arcee = completions_chat_request(
+        "m",
+        None,
+        &messages,
+        &[],
+        &test_resolved(BackendKind::ArceeApi, "m").thinking_level_map,
+        &test_resolved(BackendKind::ArceeApi, "m").compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(
+        arcee,
+        json!({
+            "model": "m",
+            "messages": [
+                user,
+                {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
+            ],
+            "temperature": 0.0
+        }),
+        "Arcee: no thinking dialect"
+    );
+}
+
+#[test]
+fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
+    // The absent/None emission dialects per completions format, plus tools
+    // handling. The supported-effort wire values are pinned byte-exactly by
+    // `one_completions_builder_reproduces_every_provider_shape_from_compat`
+    // (and the map data by the catalog guards), so only the cases that
+    // test does not cover remain here.
+    let messages = [Message::User {
+        content: "hi".into(),
+    }];
+
+    let fireworks_levels = test_resolved(BackendKind::FireworksChat, "model").thinking_level_map;
+    let fireworks_compat = test_resolved(BackendKind::FireworksChat, "model").compat;
+    let fireworks_absent = completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &[],
+        &fireworks_levels,
+        &fireworks_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert!(fireworks_absent.get("reasoning_effort").is_none());
+    assert!(fireworks_absent.get("reasoning_history").is_none());
+    assert!(fireworks_absent.get("tools").is_none());
+    assert_eq!(fireworks_absent["temperature"], json!(0.0));
+    let fireworks_none = completions_chat_request(
+        "model",
+        Some(ReasoningEffort::None),
+        &messages,
+        &[],
+        &fireworks_levels,
+        &fireworks_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(fireworks_none["reasoning_effort"], "none");
+    assert_eq!(fireworks_none["reasoning_history"], "disabled");
+
+    let together_levels = test_resolved(BackendKind::TogetherChat, "model").thinking_level_map;
+    let together_compat = test_resolved(BackendKind::TogetherChat, "model").compat;
+    let together_absent = completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &[],
+        &together_levels,
+        &together_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert!(together_absent.get("reasoning").is_none());
+    assert!(together_absent.get("reasoning_effort").is_none());
+    assert!(together_absent.get("chat_template_kwargs").is_none());
+    assert!(together_absent.get("tools").is_none());
+    let together_none = completions_chat_request(
+        "model",
+        Some(ReasoningEffort::None),
+        &messages,
+        &[],
+        &together_levels,
+        &together_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(together_none["reasoning"], json!({"enabled": false}));
+    assert!(together_none.get("reasoning_effort").is_none());
+
+    let openai_levels = test_resolved(BackendKind::OpenAiResponses, "model").thinking_level_map;
+    let openai_absent = openai_responses_request("model", None, &messages, &[], &openai_levels);
+    // Readable reasoning is asked for regardless; only the effort is opt-in.
+    assert_eq!(openai_absent["reasoning"], json!({"summary": "auto"}));
+    assert!(openai_absent.get("tools").is_none());
+    // OpenAI's uniform path emits the map's wire value for every effort,
+    // including `none`.
+    let openai_none = openai_responses_request(
+        "model",
+        Some(ReasoningEffort::None),
+        &messages,
+        &[],
+        &openai_levels,
+    );
+    assert_eq!(openai_none["reasoning"]["effort"], "none");
+
+    let tools = [ToolDefinition {
+        def_type: "function".to_string(),
+        function: crate::types::FunctionDef {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object"}),
+        },
+    }];
+    assert!(completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &tools,
+        &fireworks_levels,
+        &fireworks_compat,
+        CompletionsMessageShape::Standard,
+    )
+    .get("tools")
+    .is_some());
+    assert!(completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &tools,
+        &together_levels,
+        &together_compat,
+        CompletionsMessageShape::Standard,
+    )
+    .get("tools")
+    .is_some());
+    assert!(
+        openai_responses_request("model", None, &messages, &tools, &openai_levels)
+            .get("tools")
+            .is_some()
+    );
+}
+
+#[test]
+fn responses_input_items_expand_reasoning_and_tool_state() {
+    let items = responses_input_items(&[
+        Message::System {
+            content: "system".to_string(),
+        },
+        Message::Assistant {
+            content: Some("assistant text".to_string()),
+            reasoning_text: Some("hidden".to_string()),
+            reasoning_details: Some(json!([{
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "keep this"}]
+            }])),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_1".to_string(),
+                call_type: "function".to_string(),
+                function: FunctionCall {
+                    name: "read".to_string(),
+                    arguments: "{\"path\":\"src/main.rs\"}".to_string(),
+                },
+            }]),
+            model_origin: None,
+            reasoning_field: None,
+            duration_ms: None,
+        },
+        Message::Tool {
+            tool_call_id: "call_1".to_string(),
+            content: "tool output".to_string(),
+        },
+    ]);
+
+    assert_eq!(items.len(), 5);
+    assert_eq!(items[0]["role"], "system");
+    assert_eq!(items[1]["type"], "reasoning");
+    assert_eq!(items[2]["type"], "function_call");
+    assert_eq!(items[3]["role"], "assistant");
+    assert_eq!(items[4]["type"], "function_call_output");
+}

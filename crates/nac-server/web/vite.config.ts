@@ -24,6 +24,8 @@ const API_PREFIXES = [
   "/ssh",
   "/providers",
   "/model-configs",
+  "/ssh-configs",
+  "/models",
 ];
 const API_TARGET = process.env.NAC_API_URL ?? "http://127.0.0.1:3210";
 

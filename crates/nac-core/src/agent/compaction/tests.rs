@@ -16,6 +16,8 @@ fn assistant(content: &str) -> Message {
         reasoning_details: None,
         tool_calls: None,
         duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
     }
 }
 

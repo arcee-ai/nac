@@ -84,6 +84,7 @@ pub fn new_snapshot(
         previous_response_duration_ms: None,
         response_durations_ms: None,
         token_usages: Vec::new(),
+        unattributed_token_usage: None,
         created_at: now.clone(),
         updated_at: now,
     }
@@ -115,6 +116,7 @@ pub fn refresh_snapshot(
         previous_response_duration_ms,
         response_durations_ms,
         token_usages,
+        unattributed_token_usage: snapshot.unattributed_token_usage.clone(),
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }
@@ -131,6 +133,7 @@ pub struct SessionRunState {
     pub previous_response_duration_ms: Option<u64>,
     pub response_durations_ms: Option<Vec<Option<u64>>>,
     pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
 }
 
 /// The sparing run-end persistence update consumed by
@@ -157,6 +160,7 @@ impl SessionSnapshot {
         self.previous_response_duration_ms = run_state.previous_response_duration_ms;
         self.response_durations_ms = run_state.response_durations_ms.clone();
         self.token_usages = run_state.token_usages.clone();
+        self.unattributed_token_usage = run_state.unattributed_token_usage.clone();
         self.updated_at = now_utc();
         SessionRunStateUpdate {
             session_id: self.session_id.clone(),

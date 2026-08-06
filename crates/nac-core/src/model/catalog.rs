@@ -1,551 +1,488 @@
-//! Provider defaults and model discovery.
+//! Provider/model catalog: metadata resolution with never-fail fallback.
 //!
-//! The launch UI lets a user pick a provider and paste a key instead of hand
-//! writing a base URL, so each API-key backend needs a canonical inference URL
-//! and a way to turn a key into the list of models it can actually reach.
-//! Discovery doubles as key validation: the same request that lists models
-//! fails when the key is wrong.
+//! The catalog layers four local sources, lowest precedence first:
+//!
+//! 1. the hand-written seed catalog (every provider's `_default` entry,
+//!    transcribing the `backend.rs` effort-validation matrix into data);
+//! 2. the generated models.dev baseline (S1; per-model limits, cost rates
+//!    and matrix-conformant thinking maps for the five models.dev
+//!    providers), embedded via `include_str!`;
+//! 3. the runtime overlay (S2): `$NAC_HOME/model-catalog/overlay.json`,
+//!    refreshed in the background from models.dev — see `overlay.rs`;
+//! 4. user overrides (S2): `$NAC_HOME/models.json` — see
+//!    `user_overrides.rs`.
+//!
+//! Unknown models fall back to a clone of the provider's `_default` entry
+//! (pi's buildFallbackModel pattern). Resolution is synchronous and
+//! local-only — no network, no credentials — so the session picker and
+//! resume paths stay credential-free; the overlay refresh only ever runs
+//! as a fire-and-forget task spawned from server/CLI startup. Validation
+//! (S4) and adapter effort translation read these maps; adapter dispatch
+//! consolidation (S6) follows.
 
-use super::*;
+use crate::model::{managed_backend_base_url, BackendKind};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
-/// Discovery is interactive — the user is watching a spinner — so it gives up
-/// well before the generous timeouts used for inference.
-const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(20);
+mod auth_status;
+#[cfg(test)]
+mod auth_status_tests;
+mod data;
+mod overlay;
+#[cfg(test)]
+mod overlay_tests;
+mod seed;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
+mod types;
+#[cfg(test)]
+mod user_override_tests;
+mod user_overrides;
 
-/// Provider error bodies are echoed back to help diagnose a rejected key, but
-/// only far enough to carry the message.
-const MAX_PROVIDER_ERROR_BODY: usize = 400;
+pub use overlay::spawn_overlay_refresh;
+pub use types::{
+    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates,
+    ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing,
+    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+};
 
-/// The Codex model index hides every model whose `minimal_client_version` is
-/// above the version the caller reports, so asking without one lists nothing.
-///
-/// This is sent only when reading the index — inference never reports a version
-/// — and is set well ahead of the models currently gated behind it. A model
-/// released above this floor stays invisible until the number is raised.
-const CODEX_MODEL_INDEX_CLIENT_VERSION: &str = "0.200.0";
+/// Well-known id of each provider's fallback entry.
+pub(crate) const PROVIDER_DEFAULT_MODEL_ID: &str = "_default";
 
-/// The inference URL used when a provider is chosen by name rather than by URL.
-///
-/// This is deliberately separate from [`managed_backend_base_url`], which feeds
-/// the resolution of an *omitted* base URL and must keep returning `None` for
-/// API-key backends so an incomplete configuration still fails loudly.
-pub fn provider_default_base_url(backend: BackendKind) -> Option<&'static str> {
-    match backend {
-        BackendKind::OpenAiResponses => Some("https://api.openai.com/v1"),
-        BackendKind::AnthropicMessages => Some("https://api.anthropic.com"),
-        BackendKind::DeepSeekChat => Some("https://api.deepseek.com/v1"),
-        BackendKind::FireworksChat => Some("https://api.fireworks.ai/inference/v1"),
-        BackendKind::TogetherChat => Some("https://api.together.xyz/v1"),
-        BackendKind::ArceeApi | BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),
-        BackendKind::ChatGptCodexResponses => Some(CHATGPT_CODEX_CANONICAL_BASE_URL),
-    }
-}
-
-/// Whether the provider authenticates with a user-supplied API key rather than
-/// a stored login.
-pub fn provider_uses_api_key(backend: BackendKind) -> bool {
-    backend::api_key_backend(backend)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ProviderModel {
-    pub id: String,
-    pub display_name: Option<String>,
-}
-
-/// Where a backend lists the models it can reach.
-///
-/// Anthropic mounts its REST surface under `/v1`, matching how the messages
-/// endpoint is built; Codex keeps its index beside the responses endpoint
-/// rather than at the OpenAI-shaped path; every other supported provider
-/// speaks the OpenAI shape where the base URL already includes any version
-/// segment.
-fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
-    let trimmed = base_url.trim_end_matches('/');
-    match backend {
-        BackendKind::AnthropicMessages => Some(format!("{trimmed}/v1/models")),
-        BackendKind::ChatGptCodexResponses => Some(format!(
-            "{trimmed}/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
-        )),
-        BackendKind::OpenAiResponses
-        | BackendKind::DeepSeekChat
+/// Wire protocol for a provider; the seed catalog's `api` assignments.
+pub(crate) fn api_kind_for(provider: BackendKind) -> ApiKind {
+    match provider {
+        BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
-        | BackendKind::ArceeApi
-        | BackendKind::ArceeAuth => Some(format!("{trimmed}/models")),
+        | BackendKind::ArceeAuth
+        | BackendKind::ArceeApi => ApiKind::OpenAiCompletions,
+        BackendKind::OpenAiResponses => ApiKind::OpenAiResponses,
+        BackendKind::ChatGptCodexResponses => ApiKind::ChatGptCodexResponses,
+        BackendKind::AnthropicMessages => ApiKind::AnthropicMessages,
     }
 }
 
-/// The model index of a backend, asked for at a URL the provider will accept.
-///
-/// Arcee is why this is not [`models_url`] alone: its base URL arrives in
-/// several shapes — the canonical `/api/v1`, or the bare origin a stored login
-/// records — and only the route canonicalization inference already does turns
-/// all of them into the index.
-fn model_index_url(backend: BackendKind, base_url: &str) -> Result<String> {
-    if matches!(backend, BackendKind::ArceeApi | BackendKind::ArceeAuth) {
-        return Ok(arcee::models_url(base_url)?.to_string());
-    }
-    models_url(backend, base_url).ok_or_else(|| anyhow!("backend '{backend}' has no model index"))
+/// Non-fatal catalog load diagnostics. Loading never fails on the
+/// machine-state layers (overlay, user overrides); problems surface as
+/// warnings printed once per load (`nac: model catalog: ...`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CatalogWarning {
+    OverlayUnreadable {
+        path: PathBuf,
+        error: String,
+    },
+    OverlayCorrupt {
+        path: PathBuf,
+        error: String,
+    },
+    OverlayStale {
+        path: PathBuf,
+        overlay_generated_at: String,
+        baseline_generated_at: String,
+    },
+    OverlayEntrySkipped {
+        provider: String,
+        reason: String,
+    },
+    UserOverridesMalformed {
+        path: PathBuf,
+        error: String,
+    },
+    UserOverrideSkipped {
+        index: usize,
+        reason: String,
+    },
 }
 
-fn model_from_value(value: &Value) -> Option<ProviderModel> {
-    if let Some(id) = value.as_str() {
-        return Some(ProviderModel {
-            id: id.to_string(),
-            display_name: None,
-        });
-    }
-    // Codex marks the models it does not mean to offer directly, such as the
-    // one backing its review command.
-    if value.get("visibility").and_then(Value::as_str) == Some("hide") {
-        return None;
-    }
-    // Codex names a model by its slug where the OpenAI shape uses an id.
-    let id = value
-        .get("id")
-        .or_else(|| value.get("slug"))
-        .and_then(Value::as_str)?;
-    Some(ProviderModel {
-        id: id.to_string(),
-        display_name: value
-            .get("display_name")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-    })
-}
-
-/// Providers disagree on the envelope: OpenAI-compatible APIs wrap the list in
-/// `data`, while some return the array on its own.
-fn parse_model_list(body: &str) -> Result<Vec<ProviderModel>> {
-    let parsed: Value = serde_json::from_str(body)
-        .map_err(|error| anyhow!("provider returned a model list that is not JSON: {error}"))?;
-    let items = parsed
-        .get("data")
-        .or_else(|| parsed.get("models"))
-        .unwrap_or(&parsed)
-        .as_array()
-        .ok_or_else(|| anyhow!("provider returned a model list without an array of models"))?;
-
-    let mut models: Vec<ProviderModel> = items.iter().filter_map(model_from_value).collect();
-    models.sort_by(|left, right| left.id.cmp(&right.id));
-    models.dedup_by(|left, right| left.id == right.id);
-    Ok(models)
-}
-
-fn truncated_body(body: &str) -> String {
-    let trimmed = body.trim();
-    match trimmed.char_indices().nth(MAX_PROVIDER_ERROR_BODY) {
-        Some((index, _)) => format!("{}…", &trimmed[..index]),
-        None => trimmed.to_string(),
-    }
-}
-
-/// Ask a provider which models the key may use.
-///
-/// The caller is responsible for having approved `base_url` as a credential
-/// destination; this function only checks that the URL is a well-formed https
-/// endpoint before attaching the key.
-pub async fn list_provider_models(
-    backend: BackendKind,
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<ProviderModel>> {
-    // A backend that signs in through a browser has a model index, but it is
-    // read with the stored login; a key offered for one is a caller mistake and
-    // must not be forwarded.
-    if ManagedAuthProvider::for_backend(backend).is_some() {
-        return Err(anyhow!(
-            "backend '{backend}' authenticates with a stored login, so it takes no API key"
-        ));
-    }
-
-    let base_url = resolve_model_base_url(backend, Some(base_url.to_string()))?;
-    let url = model_index_url(backend, &base_url)?;
-
-    let request = model_index_request(&url)?;
-    let request = match backend {
-        BackendKind::AnthropicMessages => request
-            .header("x-api-key", api_key)
-            .header("anthropic-version", anthropic::ANTHROPIC_VERSION),
-        _ => request.bearer_auth(api_key),
-    };
-
-    read_model_list(request, &base_url, "the provider rejected this API key").await
-}
-
-/// Ask a provider signed in through the browser which models the login reaches.
-///
-/// This doubles as a check that the stored credential still works, the way
-/// listing with a key doubles as key validation — which is what lets the launch
-/// UI report a login as good without a separate probe.
-pub async fn list_managed_provider_models(
-    provider: ManagedAuthProvider,
-) -> Result<Vec<ProviderModel>> {
-    let backend = provider.backend();
-    let client = client::no_redirect_model_client()?;
-
-    let (base_url, request) = match provider {
-        ManagedAuthProvider::Arcee => {
-            // The login names the endpoint it belongs to, so the token is never
-            // offered to an origin other than the one that issued it.
-            let base_url = arcee::read_stored_auth()?.base_url;
-            let token = arcee::fresh_access_token(&client, &base_url).await?;
-            let url = model_index_url(backend, &base_url)?;
-            (base_url, model_index_request(&url)?.bearer_auth(token))
+impl std::fmt::Display for CatalogWarning {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OverlayUnreadable { path, error } => write!(
+                formatter,
+                "cannot read catalog overlay {}: {error} (embedded baseline stays active)",
+                path.display()
+            ),
+            Self::OverlayCorrupt { path, error } => write!(
+                formatter,
+                "ignoring corrupt catalog overlay {}: {error} (embedded baseline stays active)",
+                path.display()
+            ),
+            Self::OverlayStale {
+                path,
+                overlay_generated_at,
+                baseline_generated_at,
+            } => write!(
+                formatter,
+                "ignoring catalog overlay {}: generated {overlay_generated_at}, older than \
+                 the embedded baseline {baseline_generated_at}",
+                path.display()
+            ),
+            Self::OverlayEntrySkipped { provider, reason } => {
+                write!(
+                    formatter,
+                    "skipping catalog overlay provider '{provider}': {reason}"
+                )
+            }
+            Self::UserOverridesMalformed { path, error } => write!(
+                formatter,
+                "ignoring malformed user model overrides {}: {error}",
+                path.display()
+            ),
+            Self::UserOverrideSkipped { index, reason } => {
+                write!(formatter, "skipping user model override #{index}: {reason}")
+            }
         }
-        ManagedAuthProvider::Codex => {
-            let base_url = resolve_model_base_url(backend, None)?;
-            let (token, account_id) = chatgpt_codex::stored_auth_for_request(&client).await?;
-            let url = model_index_url(backend, &base_url)?;
-            let request = model_index_request(&url)?
-                .bearer_auth(token)
-                .header("ChatGPT-Account-Id", account_id);
-            (base_url, request)
+    }
+}
+
+#[derive(Debug)]
+struct ProviderCatalog {
+    default: ModelMetadata,
+    models: BTreeMap<String, ModelMetadata>,
+    /// The provider's conventional credential env var name: the generated
+    /// baseline owns the five models.dev providers' names, the seed
+    /// hand-maintains arcee-api's, and a present overlay value upgrades.
+    /// Managed providers carry `None` (their hint is the login command).
+    /// Powers the `/models` auth-status hint and the conventional-var
+    /// auto-selection in `EffectiveModelSettings`.
+    credential_env_var: Option<String>,
+    /// The provider's endpoint default: the generated baseline/overlay
+    /// layers carry the five models.dev providers' URLs (models.dev `api`
+    /// or the curated SDK-default URL) and the seed hand-maintains
+    /// arcee-api's. Managed providers carry `None` (their canonical URLs
+    /// stay code-side, `managed_backend_base_url`). Fills a genuinely
+    /// absent request `base_url` in `resolve_model_base_url`.
+    default_base_url: Option<String>,
+}
+
+impl ProviderCatalog {
+    /// The single implementation of the resolution chain: exact entry, then
+    /// a dated-snapshot family match (`name-YYYYMMDD` → `name`, the pre-S4
+    /// `backend.rs` Anthropic family rule, now generic), then a clone of the
+    /// provider's `_default` entry with the id swapped in and `source`
+    /// re-marked `ProviderDefault` (pi's buildFallbackModel pattern).
+    /// `ModelCatalog::resolve`, user overrides and the overlay's seed-map
+    /// lookup all share it.
+    fn resolve_entry(&self, model: &str) -> ModelMetadata {
+        if let Some(metadata) = self.models.get(model) {
+            return metadata.clone();
         }
-    };
-
-    read_model_list(request, &base_url, "the provider rejected this login").await
+        if let Some(family) = dated_snapshot_family(model) {
+            if let Some(metadata) = self.models.get(family) {
+                let mut resolved = metadata.clone();
+                resolved.id = model.to_string();
+                return resolved;
+            }
+        }
+        let mut resolved = self.default.clone();
+        resolved.id = model.to_string();
+        resolved.source = ModelSource::ProviderDefault;
+        resolved
+    }
 }
 
-fn model_index_request(url: &str) -> Result<reqwest::RequestBuilder> {
-    Ok(client::no_redirect_model_client()?
-        .get(url)
-        .timeout(MODEL_DISCOVERY_TIMEOUT))
+/// Local model metadata catalog. Resolution never fails for unknown models;
+/// see [`ModelCatalog::resolve`].
+#[derive(Debug)]
+pub struct ModelCatalog {
+    providers: BTreeMap<BackendKind, ProviderCatalog>,
 }
 
-/// Sends a prepared model-index request and turns the answer into models.
+impl ModelCatalog {
+    /// Load from local sources only — never network, never credentials.
+    /// Prints any machine-state-layer warnings (overlay, user overrides)
+    /// once per load.
+    fn load() -> Self {
+        let home = crate::paths::nac_home_dir();
+        let (catalog, warnings) = Self::load_layered(home.as_deref(), env_layers_for_global());
+        for warning in &warnings {
+            eprintln!("nac: model catalog: {warning}");
+        }
+        catalog
+    }
+
+    /// Layered load from an explicit home directory with every layer
+    /// applied. The testable core of [`ModelCatalog::load`]: tests drive
+    /// this directly against temp homes, so they never touch the
+    /// process-global catalog or the environment.
+    #[cfg(test)]
+    fn load_from_home(home: Option<&Path>) -> (Self, Vec<CatalogWarning>) {
+        Self::load_layered(home, true)
+    }
+
+    fn load_layered(home: Option<&Path>, env_layers: bool) -> (Self, Vec<CatalogWarning>) {
+        let mut catalog = seed::seed_catalog();
+        let mut warnings = Vec::new();
+        data::merge_generated_baseline(&mut catalog);
+        if env_layers {
+            if let Some(home) = home {
+                overlay::merge_overlay(&mut catalog, home, &mut warnings);
+                user_overrides::apply_user_overrides(&mut catalog, home, &mut warnings);
+            }
+        }
+        (catalog, warnings)
+    }
+
+    /// The provider's catalog endpoint default, when any applied layer
+    /// carries one (the five models.dev providers and arcee-api; managed
+    /// providers have none).
+    pub fn default_base_url(&self, provider: BackendKind) -> Option<String> {
+        self.providers.get(&provider)?.default_base_url.clone()
+    }
+
+    /// The provider's conventional credential env var name, when any
+    /// applied layer carries one (the six API-key providers; managed
+    /// providers have none).
+    pub fn credential_env_var(&self, provider: BackendKind) -> Option<String> {
+        self.providers.get(&provider)?.credential_env_var.clone()
+    }
+
+    /// Resolve a model id to its provider by exact catalog entry match:
+    /// the unique provider carrying a real entry (Baseline/Overlay/
+    /// UserOverride) with that id wins. A collision (the same id on
+    /// several providers — the hand-seeded arcee pair shares the Trinity
+    /// ids, and the codex seed overlaps the openai baseline) prefers the
+    /// first non-managed provider with a warning. Unknown ids resolve to
+    /// `None` (the caller renders them unrecognized).
+    pub fn provider_for_model(&self, model: &str) -> Option<BackendKind> {
+        let matches: Vec<BackendKind> = self
+            .providers
+            .iter()
+            .filter(|(_, provider)| provider.models.contains_key(model))
+            .map(|(provider, _)| *provider)
+            .collect();
+        match matches.as_slice() {
+            [] => None,
+            [only] => Some(*only),
+            [first, ..] => {
+                let chosen = matches
+                    .iter()
+                    .find(|provider| managed_backend_base_url(**provider).is_none())
+                    .unwrap_or(first);
+                eprintln!(
+                    "nac: model catalog: model id '{model}' exists on multiple providers ({}); resolving to '{chosen}'",
+                    matches
+                        .iter()
+                        .map(|provider| provider.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                Some(*chosen)
+            }
+        }
+    }
+
+    /// Resolve metadata for `model` on `provider` through
+    /// [`ProviderCatalog::resolve_entry`]; never fails for unknown models.
+    pub fn resolve(&self, provider: BackendKind, model: &str) -> ModelMetadata {
+        let Some(catalog) = self.providers.get(&provider) else {
+            // Unreachable while every provider ships a seed `_default` entry;
+            // resolution must still never fail.
+            return ModelMetadata::sparse(
+                provider,
+                api_kind_for(provider),
+                model,
+                ModelSource::Fallback,
+            );
+        };
+        catalog.resolve_entry(model)
+    }
+}
+
+/// Strip a `-YYYYMMDD` dated-snapshot suffix — the family-matching rule
+/// `backend.rs` used for Anthropic families before S4, now generic over
+/// every provider's catalog entries.
+pub(super) fn dated_snapshot_family(model: &str) -> Option<&str> {
+    let (base, snapshot) = model.rsplit_once('-')?;
+    (snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())).then_some(base)
+}
+
+static CATALOG: OnceLock<RwLock<ModelCatalog>> = OnceLock::new();
+
+/// Read access to the process-global catalog. Initializes from local sources
+/// on first use; recovers from lock poisoning (catalog data is immutable
+/// between loads, so a poisoned lock still holds valid data).
+pub(crate) fn current() -> RwLockReadGuard<'static, ModelCatalog> {
+    CATALOG
+        .get_or_init(|| RwLock::new(ModelCatalog::load()))
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Resolve via the process-global catalog. Never fails for unknown models.
+pub(crate) fn resolve(provider: BackendKind, model: &str) -> ModelMetadata {
+    current().resolve(provider, model)
+}
+
+/// The provider's catalog endpoint default via the process-global catalog.
+/// Read by `resolve_model_base_url` after the request merge, so an
+/// explicit `base_url` always beats the generated default.
+pub(crate) fn default_base_url(provider: BackendKind) -> Option<String> {
+    current().default_base_url(provider)
+}
+
+/// The provider's conventional credential env var name via the
+/// process-global catalog. Read by the conventional-var auto-selection
+/// and the guided missing-credential error.
+pub(crate) fn credential_env_var(provider: BackendKind) -> Option<String> {
+    current().credential_env_var(provider)
+}
+
+/// Resolve a model id to its provider via the process-global catalog
+/// (exact match; collisions prefer the non-managed provider with a
+/// warning; unknown ids resolve to `None`).
+pub fn provider_for_model(model: &str) -> Option<BackendKind> {
+    current().provider_for_model(model)
+}
+
+/// The seed + generated-baseline catalog without any machine-state layer:
+/// the overlay refresh's mapping reference (thinking maps and provider
+/// endpoint defaults derive from it, reproducing the generator's
+/// `overrides.toml` application).
+pub(super) fn baseline_catalog() -> ModelCatalog {
+    let mut catalog = seed::seed_catalog();
+    data::merge_generated_baseline(&mut catalog);
+    catalog
+}
+
+/// Monotonic version of the process-global catalog; `reload` bumps it after
+/// every swap, so an overlay-refresh reload is observable to `/models`
+/// clients. The initial load is version 1.
+static CATALOG_VERSION: AtomicU64 = AtomicU64::new(1);
+
+fn catalog_version() -> u64 {
+    CATALOG_VERSION.load(Ordering::SeqCst)
+}
+
+/// Auth requirements for a provider, derived from the same split
+/// `validate_backend_api_key_env` enforces.
+fn provider_auth(provider: BackendKind) -> ProviderAuth {
+    if crate::model::backend::api_key_backend(provider) {
+        return ProviderAuth::ApiKeyEnv;
+    }
+    match provider {
+        BackendKind::ArceeAuth => ProviderAuth::ManagedArcee,
+        BackendKind::ChatGptCodexResponses => ProviderAuth::CodexOauth,
+        other => unreachable!("non-API-key backend '{other}' has managed auth"),
+    }
+}
+
+/// Build the `GET /models` listing from the process-global catalog: every
+/// provider with its auth requirements, managed base URL, catalog endpoint
+/// default, `_default` limits and real entries. Synthesis products
+/// (ProviderDefault/Fallback) never enter the `models` map by construction;
+/// the source filter pins that contract at the boundary. Synchronous and
+/// local-only, like resolution.
 ///
-/// Provider hostnames and status codes are safe to surface; the request itself
-/// is never echoed, because it carries the credential.
-async fn read_model_list(
-    request: reqwest::RequestBuilder,
-    base_url: &str,
-    rejected: &str,
-) -> Result<Vec<ProviderModel>> {
-    let response = request
-        .send()
-        .await
-        .map_err(|error| anyhow!("could not reach the provider at {base_url}: {error}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+/// `auth_status`/`auth_hint` are computed per call from the process
+/// environment and the managed credential files (never baked into the
+/// catalog): an API-key provider reads ready when its conventional
+/// credential variable is set — the same variable session resolution
+/// auto-selects.
+pub fn api_listing() -> ModelListing {
+    let catalog = current();
+    let providers = catalog
+        .providers
+        .iter()
+        .map(|(provider, provider_catalog)| {
+            let (auth_status, auth_hint) = auth_status::provider_auth_status(
+                *provider,
+                provider_catalog.credential_env_var.as_deref(),
+            );
+            ProviderListing {
+                id: *provider,
+                auth: provider_auth(*provider),
+                auth_status,
+                auth_hint,
+                managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
+                default_base_url: provider_catalog.default_base_url.clone(),
+                default_limits: DefaultLimits {
+                    context_window: provider_catalog.default.context_window,
+                    max_tokens: provider_catalog.default.max_tokens,
+                    supported_efforts: provider_catalog
+                        .default
+                        .thinking_level_map
+                        .supported_efforts(),
+                },
+                models: provider_catalog
+                    .models
+                    .values()
+                    .filter(|metadata| {
+                        matches!(
+                            metadata.source,
+                            ModelSource::Baseline
+                                | ModelSource::Overlay
+                                | ModelSource::UserOverride
+                        )
+                    })
+                    .map(|metadata| ModelEntry {
+                        id: metadata.id.clone(),
+                        display_name: metadata.display_name.clone(),
+                        context_window: metadata.context_window,
+                        max_tokens: metadata.max_tokens,
+                        cost: metadata.cost,
+                        reasoning: metadata.reasoning,
+                        supported_efforts: metadata.thinking_level_map.supported_efforts(),
+                        source: metadata.source,
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    ModelListing {
+        catalog_version: catalog_version(),
+        providers,
+    }
+}
 
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(anyhow!("{rejected} ({status})"));
-    }
-    if !status.is_success() {
-        return Err(anyhow!(
-            "the provider returned {status} for the model list: {}",
-            truncated_body(&body)
-        ));
-    }
+/// Reload the process-global catalog from local sources. S2's overlay
+/// refresh calls this after writing a new overlay; tests pair it with
+/// `TEST_ENV_LOCK` for isolation.
+pub(crate) fn reload() {
+    let mut catalog = CATALOG
+        .get_or_init(|| RwLock::new(ModelCatalog::load()))
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *catalog = ModelCatalog::load();
+    CATALOG_VERSION.fetch_add(1, Ordering::SeqCst);
+}
 
-    let models = parse_model_list(&body)?;
-    if models.is_empty() {
-        return Err(anyhow!("the provider returned an empty model list"));
-    }
-    Ok(models)
+/// Reload the process-global catalog from local sources. Test-isolation hook
+/// (pair with `TEST_ENV_LOCK`).
+#[cfg(test)]
+pub(crate) fn reset_for_test() {
+    reload();
+}
+
+/// Whether the process-global catalog applies the machine-state layers
+/// (overlay + user overrides) from NAC_HOME. Always on in production; in
+/// nac-core's own test builds it defaults off so unrelated tests stay
+/// hermetic against a developer's real `~/.config/nac` files — overlay and
+/// refresh tests opt in via `set_env_layers_for_test` (under
+/// `TEST_ENV_LOCK`). Tests that only need the layered load itself call
+/// `ModelCatalog::load_from_home` with an explicit temp home instead.
+#[cfg(not(test))]
+fn env_layers_for_global() -> bool {
+    true
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+fn env_layers_for_global() -> bool {
+    ENV_LAYERS_FOR_GLOBAL.load(std::sync::atomic::Ordering::SeqCst)
+}
 
-    use serde_json::json;
+#[cfg(test)]
+static ENV_LAYERS_FOR_GLOBAL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
-
-    const ALL_BACKENDS: [BackendKind; 8] = [
-        BackendKind::OpenAiResponses,
-        BackendKind::ChatGptCodexResponses,
-        BackendKind::AnthropicMessages,
-        BackendKind::DeepSeekChat,
-        BackendKind::FireworksChat,
-        BackendKind::TogetherChat,
-        BackendKind::ArceeAuth,
-        BackendKind::ArceeApi,
-    ];
-
-    /// Restates the classification the launch UI depends on. A new backend has
-    /// to be triaged here, because the match below stops compiling without it.
-    fn expects_api_key(backend: BackendKind) -> bool {
-        match backend {
-            BackendKind::OpenAiResponses
-            | BackendKind::AnthropicMessages
-            | BackendKind::DeepSeekChat
-            | BackendKind::FireworksChat
-            | BackendKind::TogetherChat
-            | BackendKind::ArceeApi => true,
-            BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => false,
-        }
-    }
-
-    #[test]
-    fn every_backend_offers_a_default_url_the_launch_modal_can_preselect() {
-        for backend in ALL_BACKENDS {
-            let default = provider_default_base_url(backend)
-                .unwrap_or_else(|| panic!("{backend} has no default base URL"));
-            assert!(
-                default.starts_with("https://"),
-                "{backend} defaults to a plaintext URL: {default}"
-            );
-            resolve_model_base_url(backend, Some(default.to_string()))
-                .unwrap_or_else(|error| panic!("{backend} default URL is unusable: {error}"));
-        }
-    }
-
-    #[test]
-    fn every_backend_exposes_a_model_index_however_it_authenticates() {
-        for backend in ALL_BACKENDS {
-            assert_eq!(
-                provider_uses_api_key(backend),
-                expects_api_key(backend),
-                "{backend} is classified inconsistently"
-            );
-            let base_url = provider_default_base_url(backend).expect("default base URL");
-            assert!(
-                models_url(backend, base_url).is_some(),
-                "{backend} has no model index"
-            );
-        }
-    }
-
-    #[test]
-    fn model_index_follows_each_provider_rest_shape() {
-        assert_eq!(
-            models_url(BackendKind::AnthropicMessages, "https://api.anthropic.com"),
-            Some("https://api.anthropic.com/v1/models".to_string())
-        );
-        assert_eq!(
-            models_url(BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
-            Some("https://api.openai.com/v1/models".to_string())
-        );
-        // A pasted URL often carries a trailing slash; it must not double up.
-        assert_eq!(
-            models_url(BackendKind::TogetherChat, "https://api.together.xyz/v1/"),
-            Some("https://api.together.xyz/v1/models".to_string())
-        );
-        // Codex keeps its index off the OpenAI-shaped path, and hides every
-        // model unless the request says which client version is asking.
-        assert_eq!(
-            models_url(
-                BackendKind::ChatGptCodexResponses,
-                "https://chatgpt.com/backend-api"
-            ),
-            Some(format!(
-                "https://chatgpt.com/backend-api/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
-            ))
-        );
-    }
-
-    #[test]
-    fn model_lists_parse_from_every_envelope_providers_use() {
-        let expected = vec![
-            ProviderModel {
-                id: "a-model".to_string(),
-                display_name: None,
-            },
-            ProviderModel {
-                id: "b-model".to_string(),
-                display_name: None,
-            },
-        ];
-        let bodies = [
-            json!({"data": [{"id": "b-model"}, {"id": "a-model"}]}),
-            json!({"models": [{"id": "b-model"}, {"id": "a-model"}]}),
-            json!([{"id": "b-model"}, {"id": "a-model"}]),
-            json!(["b-model", "a-model"]),
-        ];
-        for body in bodies {
-            assert_eq!(parse_model_list(&body.to_string()).unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn model_lists_are_sorted_deduplicated_and_keep_display_names() {
-        let body = json!({
-            "data": [
-                {"id": "zeta", "display_name": "Zeta"},
-                {"id": "alpha"},
-                {"id": "zeta"},
-                {"unnamed": true},
-            ]
-        });
-
-        let models = parse_model_list(&body.to_string()).unwrap();
-
-        assert_eq!(
-            models,
-            vec![
-                ProviderModel {
-                    id: "alpha".to_string(),
-                    display_name: None,
-                },
-                ProviderModel {
-                    id: "zeta".to_string(),
-                    display_name: Some("Zeta".to_string()),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn unusable_model_lists_are_reported_rather_than_silently_empty() {
-        let error = parse_model_list("not json at all").unwrap_err().to_string();
-        assert!(error.contains("not JSON"), "unexpected error: {error}");
-
-        let error = parse_model_list(&json!({"data": {"id": "x"}}).to_string())
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("without an array"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn long_error_bodies_are_truncated_without_splitting_a_character() {
-        let short = truncated_body("  provider said no  ");
-        assert_eq!(short, "provider said no");
-
-        // Multibyte input would panic if the cut were made at a byte offset.
-        let long = truncated_body(&"ą".repeat(MAX_PROVIDER_ERROR_BODY + 50));
-        assert_eq!(long.chars().count(), MAX_PROVIDER_ERROR_BODY + 1);
-        assert!(long.ends_with('…'));
-    }
-
-    #[tokio::test]
-    async fn discovery_authenticates_with_a_bearer_token_and_returns_the_models() {
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "200 OK",
-            json!({"data": [{"id": "gpt-5.5"}, {"id": "gpt-5.5-mini"}]}).to_string(),
-        )]);
-
-        let models =
-            list_provider_models(BackendKind::OpenAiResponses, &server.base_url, "sk-test")
-                .await
-                .expect("the model list should parse");
-        let requests = server.finish();
-
-        assert_eq!(
-            models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["gpt-5.5", "gpt-5.5-mini"]
-        );
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].method, "GET");
-        assert_eq!(requests[0].path, "/models");
-        assert_eq!(
-            requests[0].headers.get("authorization").map(String::as_str),
-            Some("Bearer sk-test")
-        );
-    }
-
-    #[tokio::test]
-    async fn anthropic_discovery_uses_its_own_key_header_and_api_version() {
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "200 OK",
-            json!({"data": [{"id": "claude-4", "display_name": "Claude 4"}]}).to_string(),
-        )]);
-
-        let models =
-            list_provider_models(BackendKind::AnthropicMessages, &server.base_url, "ant-test")
-                .await
-                .expect("the model list should parse");
-        let requests = server.finish();
-
-        assert_eq!(models[0].display_name.as_deref(), Some("Claude 4"));
-        assert_eq!(requests[0].path, "/v1/models");
-        assert_eq!(
-            requests[0].headers.get("x-api-key").map(String::as_str),
-            Some("ant-test")
-        );
-        assert_eq!(
-            requests[0]
-                .headers
-                .get("anthropic-version")
-                .map(String::as_str),
-            Some(anthropic::ANTHROPIC_VERSION)
-        );
-        assert!(
-            !requests[0].headers.contains_key("authorization"),
-            "the bearer header must not be sent alongside x-api-key"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_refused_key_is_reported_as_a_rejection_not_as_a_provider_fault() {
-        for status in ["401 Unauthorized", "403 Forbidden"] {
-            let server = ScriptedServer::start(vec![ScriptedResponse::json(
-                status,
-                json!({"error": {"message": "invalid api key"}}).to_string(),
-            )]);
-
-            let error =
-                list_provider_models(BackendKind::OpenAiResponses, &server.base_url, "sk-wrong")
-                    .await
-                    .expect_err("a refused key must not resolve");
-            server.finish();
-
-            let message = error.to_string();
-            assert!(
-                message.contains("rejected this API key"),
-                "unexpected error for {status}: {message}"
-            );
-            assert!(
-                !message.contains("sk-wrong"),
-                "the key leaked into the error: {message}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn other_provider_failures_carry_the_status_and_the_body() {
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "500 Internal Server Error",
-            "upstream exploded",
-        )]);
-
-        let error = list_provider_models(BackendKind::DeepSeekChat, &server.base_url, "key")
-            .await
-            .expect_err("a failed lookup must not resolve");
-        server.finish();
-
-        let message = error.to_string();
-        assert!(message.contains("500"), "unexpected error: {message}");
-        assert!(
-            message.contains("upstream exploded"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_empty_model_list_is_treated_as_a_failed_lookup() {
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "200 OK",
-            json!({"data": []}).to_string(),
-        )]);
-
-        let error = list_provider_models(BackendKind::TogetherChat, &server.base_url, "key")
-            .await
-            .expect_err("an empty list gives the user nothing to pick");
-        server.finish();
-
-        assert!(error.to_string().contains("empty model list"));
-    }
-
-    #[tokio::test]
-    async fn stored_login_backends_are_refused_before_any_request() {
-        let error = list_provider_models(
-            BackendKind::ArceeAuth,
-            ARCEE_AUTH_CANONICAL_BASE_URL,
-            "unused",
-        )
-        .await
-        .expect_err("a stored login takes no key");
-
-        assert!(error.to_string().contains("stored login"));
-    }
+/// Opt the process-global catalog into the machine-state layers for the
+/// duration of a test; pair with `TEST_ENV_LOCK` and restore with `false`.
+#[cfg(test)]
+pub(crate) fn set_env_layers_for_test(enabled: bool) {
+    ENV_LAYERS_FOR_GLOBAL.store(enabled, std::sync::atomic::Ordering::SeqCst);
 }

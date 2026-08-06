@@ -6,7 +6,7 @@ pub(super) fn is_valid_env_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-pub(super) fn api_key_backend(backend: BackendKind) -> bool {
+pub(crate) fn api_key_backend(backend: BackendKind) -> bool {
     matches!(
         backend,
         BackendKind::DeepSeekChat
@@ -18,113 +18,88 @@ pub(super) fn api_key_backend(backend: BackendKind) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnthropicReasoningCapabilities {
-    /// Model family supports adaptive thinking and low/medium/high effort.
-    Adaptive,
-    /// Model family additionally supports Anthropic's wire-level `max` effort.
-    AdaptiveWithMax,
-    /// The configured model is not known to support this request schema.
-    NoneOnly,
+/// Whether `name` exists in the process environment with a usable value.
+/// Empty or whitespace-only values do not count, matching the
+/// `api_key_for_backend` launch-time semantics.
+pub(crate) fn env_var_is_set(name: &str) -> bool {
+    std::env::var_os(name)
+        .and_then(|value| value.into_string().ok())
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
-/// Match a documented Anthropic family name or one of its dated snapshots.
-///
-/// Deliberately do not treat arbitrary suffixes (including `-latest`) as known:
-/// new aliases and older models must be reviewed before NAC emits thinking
-/// controls for them.
-fn anthropic_model_family(model: &str, family: &str) -> bool {
-    model == family
-        || model
-            .strip_prefix(family)
-            .and_then(|suffix| suffix.strip_prefix('-'))
-            .is_some_and(|snapshot| {
-                snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())
-            })
+/// Conventional-var auto-selection: an API-key backend with no explicit
+/// `api_key_env` selector adopts the provider's conventional credential
+/// variable (catalog `credential_env_var`) when it exists in the
+/// environment with a usable value. Managed backends and providers with an
+/// unset conventional variable return `None` — validation then fails with
+/// the guided missing-credential error.
+pub(crate) fn auto_select_api_key_env(backend: BackendKind) -> Option<String> {
+    if !api_key_backend(backend) {
+        return None;
+    }
+    let name = catalog::credential_env_var(backend)?;
+    env_var_is_set(&name).then_some(name)
 }
 
-fn anthropic_reasoning_capabilities(model: &str) -> AnthropicReasoningCapabilities {
-    if anthropic_model_family(model, "claude-opus-4-6") {
-        AnthropicReasoningCapabilities::AdaptiveWithMax
-    } else if anthropic_model_family(model, "claude-sonnet-4-6") {
-        AnthropicReasoningCapabilities::Adaptive
-    } else {
-        // Older and unknown models may use a different thinking schema (for
-        // example, manual budget_tokens) or may keep thinking always on.
-        AnthropicReasoningCapabilities::NoneOnly
+/// Human-readable supported-effort list for validation errors, derived from
+/// the model's catalog thinking map ("none, high, or xhigh"; "none only";
+/// "no explicit effort levels" for an empty map).
+fn supported_effort_values(map: &ThinkingLevelMap) -> String {
+    let supported = map
+        .supported_efforts()
+        .iter()
+        .map(|effort| effort.as_str())
+        .collect::<Vec<_>>();
+    match supported.as_slice() {
+        [] => "no explicit effort levels".to_string(),
+        [only] => format!("{only} only"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
     }
 }
 
-/// Validate effort values against the selected backend and model request schema.
+/// Validate effort values against the model's catalog thinking map (S4).
 ///
-/// No backend receives an application-selected default. Anthropic is checked at
-/// model-family granularity because adaptive thinking and effort tiers are not
-/// portable across Claude generations.
+/// Known models resolve to their catalog entry (dated snapshots resolve
+/// through their family entry); unknown models resolve to the provider's
+/// `_default` entry, which encodes the conservative pre-S4 validation
+/// matrix, so unknown models keep the historical conservative rejection.
+/// No backend receives an application-selected default, and an explicitly
+/// configured effort is rejected — never clamped — when the map does not
+/// support it.
 pub fn validate_model_reasoning_effort(
     backend: BackendKind,
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<()> {
+    let resolved = catalog::resolve(backend, model);
+    validate_model_reasoning_effort_with_map(
+        backend,
+        model,
+        reasoning_effort,
+        &resolved.thinking_level_map,
+    )
+}
+
+pub(crate) fn validate_model_reasoning_effort_with_map(
+    backend: BackendKind,
+    model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+    map: &catalog::ThinkingLevelMap,
+) -> Result<()> {
     let Some(effort) = reasoning_effort else {
         return Ok(());
     };
-
-    let supported = match backend {
-        BackendKind::DeepSeekChat => matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
-        ),
-        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        ),
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
-        BackendKind::AnthropicMessages => match anthropic_reasoning_capabilities(model) {
-            // `none` means omission on Anthropic. It is safe for every family,
-            // including models whose adaptive thinking is always on.
-            _ if effort == ReasoningEffort::None => true,
-            AnthropicReasoningCapabilities::AdaptiveWithMax => matches!(
-                effort,
-                ReasoningEffort::Low
-                    | ReasoningEffort::Medium
-                    | ReasoningEffort::High
-                    | ReasoningEffort::Xhigh
-            ),
-            AnthropicReasoningCapabilities::Adaptive => matches!(
-                effort,
-                ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
-            ),
-            AnthropicReasoningCapabilities::NoneOnly => false,
-        },
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
-    };
-    if supported {
+    if map.is_supported(effort) {
         return Ok(());
     }
 
+    let allowed = supported_effort_values(map);
     if backend == BackendKind::AnthropicMessages {
-        let allowed = match anthropic_reasoning_capabilities(model) {
-            AnthropicReasoningCapabilities::AdaptiveWithMax => "none, low, medium, high, or xhigh",
-            AnthropicReasoningCapabilities::Adaptive => "none, low, medium, or high",
-            AnthropicReasoningCapabilities::NoneOnly => "none only",
-        };
         return Err(model_configuration_error(format!(
             "invalid model configuration: reasoning effort '{}' is not supported by backend '{}' for Anthropic model '{}'; supported values: {}",
             effort.as_str(), backend, model, allowed
         )));
     }
-
-    let allowed = match backend {
-        BackendKind::DeepSeekChat => "none, high, or xhigh",
-        BackendKind::FireworksChat | BackendKind::TogetherChat => "none, low, medium, or high",
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => "no explicit effort levels",
-        BackendKind::OpenAiResponses
-        | BackendKind::ChatGptCodexResponses
-        | BackendKind::AnthropicMessages => unreachable!(),
-    };
     Err(model_configuration_error(format!(
         "invalid model configuration: reasoning effort '{}' is not supported by backend '{}'; supported values: {}",
         effort.as_str(), backend, allowed
@@ -200,17 +175,22 @@ pub fn validate_caller_supplied_base_url(
     )))
 }
 
-pub fn validate_backend_api_key_env(
-    backend: BackendKind,
-    _base_url: Option<&str>,
-    api_key_env: Option<&str>,
-) -> Result<()> {
+pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&str>) -> Result<()> {
     if api_key_backend(backend) {
         let Some(name) = api_key_env else {
-            return Err(model_configuration_error(format!(
-                "invalid model configuration: backend '{}' requires a nonblank api_key_env naming the environment variable containing its API key",
-                backend
-            )));
+            // Guided error: name the provider's conventional credential
+            // variable (auto-selection would have adopted it had it been
+            // set) so the fix is one env var away.
+            return Err(model_configuration_error(
+                match catalog::credential_env_var(backend) {
+                    Some(var) => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; set the {var} environment variable or provide an API key variable in overrides"
+                    ),
+                    None => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; provide an API key variable in overrides for backend '{backend}'"
+                    ),
+                },
+            ));
         };
         if name.trim().is_empty() {
             return Err(model_configuration_error(format!(
@@ -246,7 +226,7 @@ pub(super) fn api_key_for_backend(
     backend: BackendKind,
     configured_env: Option<&str>,
 ) -> Result<String> {
-    validate_backend_api_key_env(backend, None, configured_env)?;
+    validate_backend_api_key_env(backend, configured_env)?;
     if !api_key_backend(backend) {
         return Ok(String::new());
     }

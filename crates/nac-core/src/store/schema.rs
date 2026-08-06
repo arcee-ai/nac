@@ -1,10 +1,10 @@
 use super::*;
 
-// 9 rather than 8: a store already at 8 would otherwise skip the migration pass
-// that adds the ssh port and key columns — `open_runtime_connection` returns
-// early whenever the stored version already equals this one. (8 itself was
-// needed because this branch reached 7 while main reached 4 independently.)
-const STORE_SCHEMA_VERSION: i64 = 9;
+// 10 rather than 9: a store already at 9 would otherwise skip creating the
+// ssh_configurations table — `open_runtime_connection` returns early whenever
+// the stored version already equals this one. (9 itself added the per-session
+// ssh port and key columns after this branch and main advanced independently.)
+const STORE_SCHEMA_VERSION: i64 = 10;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -141,10 +141,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -200,6 +200,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0)",
     )?;
     create_model_configurations_table(&transaction)?;
+    create_ssh_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -614,6 +615,26 @@ fn create_model_configurations_table(conn: &Connection) -> Result<()> {
         &format!("INTEGER CHECK ({})", model_configuration_threshold_check()),
     )?;
     ensure_column(conn, "model_configurations", "initial_prompt", "TEXT")?;
+    Ok(())
+}
+
+/// Named SSH connection presets the launch UI can reuse.
+///
+/// Global rather than per-session (no foreign key): a saved host is chosen when
+/// starting a session, then the session row keeps its own copy of the fields.
+fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ssh_configurations (
+             config_id TEXT PRIMARY KEY,
+             name TEXT NOT NULL UNIQUE,
+             ssh_host TEXT NOT NULL,
+             ssh_port INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535)),
+             ssh_identity_file TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_ssh_configurations_name ON ssh_configurations(name);",
+    )?;
     Ok(())
 }
 

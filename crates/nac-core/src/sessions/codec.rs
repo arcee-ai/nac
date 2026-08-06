@@ -2,8 +2,10 @@ use super::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedSandboxSpec {
-    #[serde(default)]
-    backend: SandboxBackendType,
+    // Raw string rather than `SandboxBackendType` so removed/unknown backend
+    // names in old session rows parse tolerantly (see `deserialize_sandbox`).
+    #[serde(default = "default_backend")]
+    backend: String,
     image: String,
     workdir: String,
     mounts: Vec<PersistedMountSpec>,
@@ -24,6 +26,11 @@ struct PersistedMountSpec {
     read_only: bool,
 }
 
+fn default_backend() -> String {
+    // Rows written before the backend field existed are Podman rows.
+    SandboxBackendType::default().as_str().to_string()
+}
+
 fn default_sandbox_shm_size() -> Option<String> {
     Some("0".to_string())
 }
@@ -38,7 +45,7 @@ fn default_memory_mib() -> u32 {
 
 pub(super) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
     let persisted = PersistedSandboxSpec {
-        backend: spec.backend,
+        backend: spec.backend.as_str().to_string(),
         image: spec.image.clone(),
         workdir: spec.workdir.display().to_string(),
         mounts: spec
@@ -64,8 +71,22 @@ pub(super) fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxS
     };
     let persisted: PersistedSandboxSpec =
         serde_json::from_str(&raw).context("failed to parse sandbox spec")?;
+    // Parse-tolerate removed backends: session rows written while the smolvm
+    // backend existed (or naming any backend this build does not provide) must
+    // still load. The session resumes without a sandbox rather than failing.
+    let backend = match SandboxBackendType::from_str(&persisted.backend) {
+        Ok(backend) => backend,
+        Err(_) => {
+            eprintln!(
+                "nac: stored sandbox backend '{}' is not available in this build; \
+                 session will run without a sandbox",
+                persisted.backend
+            );
+            return Ok(None);
+        }
+    };
     Ok(Some(SandboxSpec {
-        backend: persisted.backend,
+        backend,
         image: persisted.image,
         workdir: PathBuf::from(persisted.workdir),
         mounts: persisted

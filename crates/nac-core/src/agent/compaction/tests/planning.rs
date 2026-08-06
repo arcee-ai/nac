@@ -26,6 +26,8 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
             reasoning_details: Some(serde_json::json!([{"type":"reasoning","id":"r1"}])),
             tool_calls: None,
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         user("current user"),
     ];
@@ -181,6 +183,8 @@ fn weighted_boundary_counts_complete_tool_groups_atomically() {
             reasoning_details: Some(serde_json::json!({"opaque": true})),
             tool_calls: Some(vec![call("a"), call("b")]),
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::Tool {
             tool_call_id: "b".to_string(),
@@ -217,6 +221,8 @@ fn weighted_boundary_preserves_exact_reasoning_suffix_and_snaps_huge_message_to_
             ])),
             tool_calls: Some(Vec::new()),
             duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         user("current"),
     ];
@@ -247,6 +253,8 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
         reasoning_details: None,
         tool_calls: Some(ids.iter().map(|id| call(id)).collect()),
         duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
     };
     let tool = |id: &str| Message::Tool {
         tool_call_id: id.to_string(),

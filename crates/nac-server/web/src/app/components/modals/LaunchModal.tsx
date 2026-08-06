@@ -24,8 +24,13 @@ import {
   ConfigurationsPanel,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
-import { REASONING_OPTIONS } from "@/app/components/modals/options";
+import {
+  REASONING_OPTIONS,
+  reasoningOptionsFor,
+} from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
+import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   CLEAR_EFFORT,
@@ -40,7 +45,7 @@ import { api } from "@/app/services/api";
 import {
   useCreateModelConfig,
   useCreateSession,
-  useSshConnect,
+  useModelCatalog,
   useStoreInfo,
   useUpdatePresentation,
 } from "@/app/services/queries";
@@ -87,18 +92,8 @@ const EMPTY_SANDBOX: SandboxState = {
 
 /** `field` marks which control to flag; "config" flags the whole box. */
 interface FormError {
-  field: "cwd" | "sshHost" | "sshPort" | "sshKey" | "ssh" | "config";
+  field: "cwd" | "ssh" | "config";
   message: string;
-}
-
-/** OpenSSH accepts 1-65535; anything else is rejected before the request. */
-function sshPortError(value: string): string | null {
-  if (!value.trim()) return null;
-  const port = Number(value.trim());
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    return "The port must be a whole number between 1 and 65535.";
-  }
-  return null;
 }
 
 /** Remounted on every open so the form always starts from the configured defaults. */
@@ -132,9 +127,6 @@ function LaunchForm({
   const [mode, setMode] = useState<Mode>("local");
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
-  const [sshHost, setSshHost] = useState("");
-  const [sshPort, setSshPort] = useState("");
-  const [sshKey, setSshKey] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
@@ -149,8 +141,19 @@ function LaunchForm({
   // the rest of the form waits for it.
   const [connection, setConnection] = useState<SshTarget | null>(null);
 
+  // The override only makes sense for the model the selection settles on, so
+  // the catalog narrows it to the efforts that model accepts.
+  const catalog = useModelCatalog();
+  const chosen =
+    selection?.kind === "save" ? selection.request : (selection ?? null);
+  const reasoningItems = reasoningOptionsFor(
+    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model)
+      .supportedEfforts,
+    reasoning,
+    ADVANCED_REASONING,
+  );
+
   const isSsh = mode === "ssh";
-  const connectSsh = useSshConnect();
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
   const ready = !isSsh || connected !== null;
@@ -184,47 +187,17 @@ function LaunchForm({
   };
 
   /**
-   * Opens the connection and starts the form off in the remote home.
-   *
-   * Listing that directory is the test: it needs the same handshake a session
-   * would, so a wrong key or a closed port is reported here rather than after
-   * the session has been created.
+   * The SSH box owns Connect/Disconnect; we only keep the proved target and
+   * seed the working directory from the login home it returned.
    */
-  const connect = async () => {
-    if (connectSsh.isPending) return;
-    const host = nullable(sshHost);
-    if (!host) {
-      setError({
-        field: "sshHost",
-        message: "An SSH host is required for a remote session.",
-      });
-      return;
-    }
-    const portError = sshPortError(sshPort);
-    if (portError) {
-      setError({ field: "sshPort", message: portError });
-      return;
-    }
-    const target: SshTarget = {
-      ssh_host: host,
-      ssh_port: nullable(sshPort) ? Number(sshPort.trim()) : null,
-      ssh_identity_file: nullable(sshKey),
-    };
-    try {
-      const home = await connectSsh.mutateAsync(target);
-      setConnection(target);
-      setCwd(home.path);
-      setError(null);
-    } catch (connectError) {
-      setConnection(null);
-      setError({ field: "ssh", message: errorMessage(connectError) });
-    }
-  };
-
-  const disconnect = () => {
-    setConnection(null);
-    setCwd("");
+  const onSshConnectionChange = (target: SshTarget | null, homePath?: string) => {
     setError(null);
+    setConnection(target);
+    if (target) {
+      if (homePath) setCwd(homePath);
+    } else {
+      setCwd("");
+    }
   };
 
   const submit = async () => {
@@ -430,104 +403,11 @@ function LaunchForm({
         </div>
 
         {isSsh ? (
-          <div
-            className={cn(
-              "flex flex-col gap-4 p-4 rounded-md shadow-convex",
-              connected
-                ? "bg-info-secondary"
-                : "bg-elevation-sublevel-variant-A",
-            )}
-          >
-            <div className="flex items-start gap-4">
-              <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <FieldLabel
-                  label="SSH Host"
-                  hint="Hostname or IP, with the user if it is not yours: user@host."
-                  required
-                  invalid={invalid("sshHost")}
-                />
-                <Input
-                  inputSize={InputSize.Medium}
-                  placeholder="deploy@192.0.2.10 or build-box"
-                  value={sshHost}
-                  isDisabled={Boolean(connected)}
-                  validation={invalid("sshHost")}
-                  validationText={invalid("sshHost") ? error?.message : ""}
-                  onChange={(e) => edit(setSshHost)(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1 w-32 shrink-0">
-                <FieldLabel
-                  label="Port"
-                  hint="Blank means 22."
-                  invalid={invalid("sshPort")}
-                />
-                <Input
-                  inputSize={InputSize.Medium}
-                  placeholder="22"
-                  inputMode="numeric"
-                  value={sshPort}
-                  isDisabled={Boolean(connected)}
-                  validation={invalid("sshPort")}
-                  validationText={invalid("sshPort") ? error?.message : ""}
-                  onChange={(e) => edit(setSshPort)(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex items-start gap-4">
-              <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <FieldLabel
-                  label="Private Key"
-                  hint="Path on this machine. Blank uses your ssh agent and default keys."
-                  invalid={invalid("sshKey")}
-                />
-                <Input
-                  inputSize={InputSize.Medium}
-                  placeholder="~/.ssh/id_ed25519"
-                  value={sshKey}
-                  isDisabled={Boolean(connected)}
-                  validation={invalid("sshKey")}
-                  validationText={invalid("sshKey") ? error?.message : ""}
-                  onChange={(e) => edit(setSshKey)(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1 w-32 shrink-0">
-                {/* Empty label row, so the button lines up with the input beside it. */}
-                <span className="h-5" aria-hidden />
-                {connected ? (
-                  <Button
-                    variant={ButtonVariant.Ghost}
-                    size={ButtonSize.Medium}
-                    content={ButtonContent.Text}
-                    className="w-full"
-                    onClick={disconnect}
-                  >
-                    Disconnect
-                  </Button>
-                ) : (
-                  <Button
-                    variant={ButtonVariant.Primary}
-                    size={ButtonSize.Medium}
-                    content={ButtonContent.Text}
-                    className="w-full"
-                    loading={connectSsh.isPending}
-                    onClick={connect}
-                  >
-                    Connect
-                  </Button>
-                )}
-              </div>
-            </div>
-            {invalid("ssh") ? (
-              <p className="text-micro text-error-primary">{error?.message}</p>
-            ) : (
-              <p className="text-micro text-basic-muted">
-                {connected
-                  ? "Connected. The session will run its commands and its git on this host."
-                  : "The key must not need a passphrase typed in: nac connects without a terminal to ask for one."}
-              </p>
-            )}
-          </div>
+          <SshConnectionBox
+            mode="launch"
+            connection={connection}
+            onConnectionChange={onSshConnectionChange}
+          />
         ) : null}
 
         {ready ? (
@@ -605,7 +485,7 @@ function LaunchForm({
                   label="Reasoning"
                   hint="Reasoning effort passed to the model."
                   control={smallSelect(
-                    ADVANCED_REASONING,
+                    reasoningItems,
                     reasoning,
                     edit(setReasoning),
                   )}

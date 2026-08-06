@@ -18,6 +18,16 @@ pub mod model_configurations {
     };
 }
 
+/// Named, reusable SSH connections the launch UI offers instead of asking for a
+/// host, port and identity file every time.
+pub mod ssh_configurations {
+    pub use crate::store::{
+        delete_ssh_configuration, insert_ssh_configuration, list_ssh_configurations,
+        load_ssh_configuration, update_ssh_configuration, NewSshConfiguration,
+        SshConfigurationRecord, SshConfigurationStoreError,
+    };
+}
+
 mod paths;
 mod process;
 pub mod runtime;

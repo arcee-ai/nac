@@ -9,6 +9,9 @@ use super::stream::{DeltaSink, ModelStreamDelta};
 /// buffered parsers stay the only place that reads a provider's response shape.
 pub(super) struct ChatStreamFold<'sink> {
     on_delta: DeltaSink<'sink>,
+    /// The field the buffered parser will read reasoning back out of, so the
+    /// rebuilt response matches what the provider would have sent unstreamed.
+    reasoning_field: &'sink str,
     content: String,
     reasoning: String,
     finish_reason: Option<String>,
@@ -28,9 +31,10 @@ struct PartialToolCall {
 }
 
 impl<'sink> ChatStreamFold<'sink> {
-    pub fn new(on_delta: DeltaSink<'sink>) -> Self {
+    pub fn new(on_delta: DeltaSink<'sink>, reasoning_field: &'sink str) -> Self {
         Self {
             on_delta,
+            reasoning_field,
             content: String::new(),
             reasoning: String::new(),
             finish_reason: None,
@@ -132,7 +136,7 @@ impl StreamFold for ChatStreamFold<'_> {
             "content": if self.content.is_empty() { Value::Null } else { Value::String(self.content) },
         });
         if !self.reasoning.is_empty() {
-            message["reasoning_content"] = Value::String(self.reasoning);
+            message[self.reasoning_field] = Value::String(self.reasoning);
         }
         if !self.tool_calls.is_empty() {
             message["tool_calls"] = Value::Array(

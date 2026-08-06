@@ -5,6 +5,7 @@ import { Logo } from "@/app/atoms";
 import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
+import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { routes } from "@/app/lib/routes";
 
 // Figma "HeaderSurface": the same ground-to-transparent gradient stacked twice,
@@ -15,6 +16,7 @@ const SURFACE_STYLE = { backgroundImage: `${GROUND_FADE}, ${GROUND_FADE}` };
 
 export function TopBar() {
   const [configuring, setConfiguring] = useState(false);
+  const [sshConfigs, setSshConfigs] = useState(false);
 
   return (
     <>
@@ -34,13 +36,17 @@ export function TopBar() {
           <Breadcrumbs />
         </div>
         <div className="relative flex items-center gap-3 ml-auto shrink-0">
-          <HeaderMenu onConfigurations={() => setConfiguring(true)} />
+          <HeaderMenu
+            onConfigurations={() => setConfiguring(true)}
+            onSshConfigs={() => setSshConfigs(true)}
+          />
         </div>
       </header>
       <ConfigurationsModal
         open={configuring}
         onClose={() => setConfiguring(false)}
       />
+      <SshConfigsModal open={sshConfigs} onClose={() => setSshConfigs(false)} />
     </>
   );
 }

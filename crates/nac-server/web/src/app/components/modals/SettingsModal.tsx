@@ -21,11 +21,14 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { SshBadge } from "@/app/components/SshBadge";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
   BACKEND_OPTIONS,
-  REASONING_OPTIONS,
+  reasoningOptionsFor,
 } from "@/app/components/modals/options";
+import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
@@ -49,6 +52,7 @@ import { ApiError } from "@/app/services/api";
 import {
   useManagedLogout,
   useManagedProviderModels,
+  useModelCatalog,
   useProviderModels,
   useSessionConfig,
   useSessionSnapshot,
@@ -57,11 +61,16 @@ import {
   useUpdateConfig,
   useUpdatePresentation,
 } from "@/app/services/queries";
+import {
+  sshTargetFromSummary,
+  useSshConnectionStatus,
+} from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
   RawSessionConfig,
   SessionMetadata,
   SessionSummarySnapshot,
+  SshTarget,
 } from "@/app/types/api";
 
 /** Stands in for the name a key gets while the form is only being checked. */
@@ -112,17 +121,28 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
 function SettingsShell({
   onClose,
   footer,
+  titleExtra,
   children,
 }: {
   onClose: () => void;
   footer?: React.ReactNode;
+  titleExtra?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <Modal
       open
       onClose={onClose}
-      title="Session settings"
+      title={
+        titleExtra ? (
+          <div className="flex items-center gap-4">
+            <span className="flex-1 min-w-0">Session settings</span>
+            {titleExtra}
+          </div>
+        ) : (
+          "Session settings"
+        )
+      }
       size={ModalSize.Wide}
       flush
       className="h-[700px]"
@@ -256,6 +276,14 @@ function SettingsForm({
             }
           : { status: "idle" };
 
+  // Only the levels this model actually accepts: the backend rejects the rest,
+  // so offering them would only produce a save that fails.
+  const catalog = useModelCatalog();
+  const reasoningItems = reasoningOptionsFor(
+    resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
+    reasoning,
+  );
+
   const { provider, signedIn } = useManagedSignIn(kind);
   const loginQuery = useManagedProviderModels(kind, Boolean(provider) && signedIn);
   const models =
@@ -278,6 +306,24 @@ function SettingsForm({
     Boolean(provider && !signedIn);
   const busy =
     updateConfig.isPending || updatePresentation.isPending || storeKey.isPending;
+
+  const seedTarget = sshTargetFromSummary(summary);
+  const sshStatus = useSshConnectionStatus(seedTarget);
+  // Null means "follow the shared store"; a concrete value is the user's last
+  // Connect/Disconnect action in this dialog.
+  const [sshConnection, setSshConnection] = useState<SshTarget | null | undefined>(
+    undefined,
+  );
+  const connectedTarget =
+    sshConnection === undefined
+      ? sshStatus === "connected"
+        ? seedTarget
+        : null
+      : sshConnection;
+
+  const onSshConnectionChange = (target: SshTarget | null) => {
+    setSshConnection(target);
+  };
 
   const saveTitle = async () => {
     if (title.trim() === initialTitle.trim()) return;
@@ -392,7 +438,17 @@ function SettingsForm({
   );
 
   return (
-    <SettingsShell onClose={onClose} footer={footer}>
+    <SettingsShell
+      onClose={onClose}
+      footer={footer}
+      titleExtra={
+        seedTarget ? (
+          <SshBadge
+            state={sshStatus === "connected" ? "connected" : "disconnected"}
+          />
+        ) : null
+      }
+    >
       <div className="flex flex-col gap-6 [&>*]:shrink-0">
         {diagnostics.length > 0 ? (
           <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
@@ -401,6 +457,18 @@ function SettingsForm({
               <div key={diagnostic}>• {diagnostic}</div>
             ))}
           </div>
+        ) : null}
+
+        {seedTarget ? (
+          <>
+            <SshConnectionBox
+              mode="settings"
+              connection={connectedTarget}
+              seedTarget={seedTarget}
+              onConnectionChange={onSshConnectionChange}
+            />
+            <Separator />
+          </>
         ) : null}
 
         <Input
@@ -458,7 +526,7 @@ function SettingsForm({
           />
           <InputWrapper label="Reasoning effort">
             <Select
-              items={REASONING_OPTIONS}
+              items={reasoningItems}
               value={reasoning}
               onValueChange={setReasoning}
               className="w-full"

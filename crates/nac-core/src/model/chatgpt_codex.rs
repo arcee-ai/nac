@@ -148,6 +148,14 @@ pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Whether a stored Codex credential exists and parses (the `/models`
+/// auth-status check; any read/parse/permission failure reads as absent,
+/// as does a foreign-provider credential file — the status read path's
+/// existing policy).
+pub(super) fn stored_credential_present() -> bool {
+    matches!(read_auth_file_optional_for_status(), Ok(Some(_)))
+}
+
 pub(super) fn preflight_stored_auth() -> Result<()> {
     let _lock = acquire_auth_lock()?;
     read_auth_file().map(|_| ())
@@ -412,10 +420,12 @@ pub async fn send_responses(
     reasoning_effort: Option<ReasoningEffort>,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    thinking_levels: &ThinkingLevelMap,
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
-    let request = codex_responses_request(model, reasoning_effort, &messages, &tools);
+    let request =
+        codex_responses_request(model, reasoning_effort, &messages, &tools, thinking_levels);
     let auth = fresh_auth(client).await?;
 
     match post_codex_json_with_retry(client, &url, &request, &auth, on_delta).await {
@@ -792,6 +802,7 @@ fn codex_responses_request(
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
+    thinking_levels: &ThinkingLevelMap,
 ) -> Value {
     let (instructions, input) = codex_instructions_and_input(messages);
     let mut request = json!({
@@ -823,7 +834,7 @@ fn codex_responses_request(
     // asked for whether or not an effort is configured.
     let mut reasoning = json!({"summary": "auto"});
     if let Some(effort) = reasoning_effort {
-        reasoning["effort"] = json!(effort.as_str());
+        reasoning["effort"] = json!(validated_wire_effort(thinking_levels, effort));
     }
     request["reasoning"] = reasoning;
     request["include"] = json!(["reasoning.encrypted_content"]);
@@ -908,7 +919,14 @@ async fn post_codex_json_with_retry(
         if status.is_success() {
             // Reading the body incrementally forfeits the retry: by the time a
             // read fails the caller has already seen part of the answer.
-            if let Some(on_delta) = on_delta.filter(|_| is_event_stream(content_type.as_deref())) {
+            //
+            // Codex often omits Content-Type on streamed responses. We already
+            // asked for an event stream (`Accept` + `stream: true`), and the
+            // buffered fallback detects SSE from `data:` lines — so a missing
+            // header must not force the non-streaming path and drop live deltas.
+            if let Some(on_delta) = on_delta.filter(|_| {
+                content_type.is_none() || is_event_stream(content_type.as_deref())
+            }) {
                 return stream_codex_responses(response, url, status, on_delta).await;
             }
             let response_body = read_codex_body(response, url, status).await?;
@@ -1934,7 +1952,9 @@ mod tests {
                 content: "hello".to_string(),
             },
         ];
-        let absent = codex_responses_request("gpt-5.5", None, &messages, &[]);
+        let levels =
+            catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.5").thinking_level_map;
+        let absent = codex_responses_request("gpt-5.5", None, &messages, &[], &levels);
         assert_eq!(absent["model"], "gpt-5.5");
         assert_eq!(
             absent["instructions"],
@@ -1963,6 +1983,7 @@ mod tests {
                     parameters: json!({"type": "object"}),
                 },
             }],
+            &levels,
         );
         assert!(with_tools.get("tools").is_some());
         assert_eq!(with_tools["tool_choice"], "auto");
@@ -1976,10 +1997,24 @@ mod tests {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ] {
-            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[]);
+            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[], &levels);
             assert_eq!(request["reasoning"]["effort"], effort.as_str());
             assert_eq!(request["include"][0], "reasoning.encrypted_content");
         }
+
+        // The wire value comes from the passed catalog map, not adapter code.
+        let custom = ThinkingLevelMap(std::collections::BTreeMap::from([(
+            ReasoningEffort::Xhigh,
+            Some("tier-four".to_string()),
+        )]));
+        let request = codex_responses_request(
+            "gpt-5.5",
+            Some(ReasoningEffort::Xhigh),
+            &messages,
+            &[],
+            &custom,
+        );
+        assert_eq!(request["reasoning"]["effort"], "tier-four");
     }
 
     #[test]

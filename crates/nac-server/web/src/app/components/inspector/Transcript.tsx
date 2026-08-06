@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -11,10 +11,6 @@ import {
   MessageBoxSize,
   MessageBoxVariant,
 } from "@/app/atoms";
-import {
-  ChatBadge,
-  CodeChangesBadge,
-} from "@/app/components/inspector/ChatBadge";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
@@ -41,8 +37,10 @@ import {
 } from "@/app/store/sessionLayoutStore";
 import {
   pushLocalEvent,
+  setOptimisticUserPrompt,
   useActivity,
   useLiveThreads,
+  useOptimisticUserPrompt,
   useRunError,
   useRunning,
   useStreamReasoning,
@@ -102,6 +100,7 @@ export function Transcript({
   const liveThreads = useLiveThreads();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
+  const optimisticPrompt = useOptimisticUserPrompt();
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const toast = useToast();
@@ -181,15 +180,31 @@ export function Transcript({
   const workspace = snapshot?.workspace ?? null;
   const additions = workspace?.total_additions ?? 0;
   const deletions = workspace?.total_deletions ?? 0;
+  // One workspace-level diff, attached to the newest finished model turn.
+  const snapshotChanges =
+    !running && (additions || deletions)
+      ? {
+          additions,
+          deletions,
+          onClick: () => onFocusPanel("files"),
+        }
+      : null;
+  let lastModelIndex = -1;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.kind === "model") {
+      lastModelIndex = index;
+      break;
+    }
+  }
 
-  // While a run is in flight the just-submitted user message may not be in the
-  // persisted snapshot yet; surface it from active_run so the chat feels live.
+  // Prefer the live active_run copy; fall back to the optimistic prompt set at
+  // Send so the bubble is already above the model pill before the round-trip.
   const submitted = running
     ? snapshot?.active_run?.submitted_user_message
     : undefined;
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
-    : "";
+    : (optimisticPrompt ?? "");
   // Compared against the last *user* turn rather than the last turn of any
   // kind: everything the run produces lands after the prompt it answers, so
   // once that prompt is in the snapshot the copy is a duplicate no matter how
@@ -197,11 +212,19 @@ export function Transcript({
   const showPending = Boolean(
     pendingText && lastUserText(turns) !== pendingText,
   );
+  useEffect(() => {
+    if (!showPending && optimisticPrompt) {
+      setOptimisticUserPrompt(null);
+    }
+  }, [showPending, optimisticPrompt]);
 
   // Once the run has a model message of its own, that message carries the
   // liveness — its pill spins and its header names the activity. A standalone
   // row below would be a second pill for the same run.
   const liveTurn = running && turns[turns.length - 1]?.kind === "model";
+  // Keep the pill under the optimistic bubble too; otherwise it only appears
+  // when `running` flips and the layout jumps.
+  const showModelPending = (running || showPending) && !liveTurn;
 
   const focusThread = useCallback(
     (name: string, episodeKey: string) => {
@@ -304,6 +327,9 @@ export function Transcript({
                       : null
                   }
                   onRevert={openRevert}
+                  snapshotChanges={
+                    index === lastModelIndex ? snapshotChanges : null
+                  }
                 />
               );
             })}
@@ -314,7 +340,7 @@ export function Transcript({
           {/* Before the first assistant message or stream delta lands, keep the
               same chrome as a live ModelMessage — pill + model name — rather
               than a separate "Run started…" / loader row. */}
-          {running && !liveTurn ? (
+          {showModelPending ? (
             <ModelMessage
               turn={{
                 kind: "model",
@@ -331,18 +357,6 @@ export function Transcript({
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}
-            />
-          ) : null}
-
-          {/* The backend keeps one running diff for the workspace rather than a
-              snapshot per turn, so it belongs after the last message. */}
-          {!running && (additions || deletions) ? (
-            <ChatBadge
-              label="Snapshot"
-              trailing={
-                <CodeChangesBadge additions={additions} deletions={deletions} />
-              }
-              onClick={() => onFocusPanel("files")}
             />
           ) : null}
 

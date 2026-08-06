@@ -21,6 +21,7 @@ import type {
   GeneratedCredential,
   ManagedSessionSummary,
   MessagesPageResponse,
+  ModelCatalog,
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
@@ -35,6 +36,10 @@ import type {
   SessionSnapshotResponse,
   SessionSummarySnapshot,
   SshBrowseRequest,
+  SshConfigurationList,
+  SshConfigurationRecord,
+  CreateSshConfigurationRequest,
+  UpdateSshConfigurationRequest,
   SshTarget,
   StoredCredentialList,
   StoreInfo,
@@ -235,6 +240,14 @@ export const api = {
   listProviderModels: (payload: ProviderModelsRequest) =>
     request<ProviderModelList>("POST", "/providers/models", { body: payload }),
 
+  /**
+   * The server's own catalog: limits, prices and effort support for the models
+   * it knows about. Local and credential-free, so it answers for every provider
+   * at once — unlike `listProviderModels`, which asks one provider.
+   */
+  getModelCatalog: (signal?: AbortSignal) =>
+    request<ModelCatalog>("GET", "/models", { signal }),
+
   listModelConfigs: (signal?: AbortSignal) =>
     request<ModelConfigurationList>("GET", "/model-configs", { signal }),
 
@@ -253,6 +266,22 @@ export const api = {
 
   deleteModelConfig: (configId: string) =>
     request<void>("DELETE", `/model-configs/${encodeURIComponent(configId)}`),
+
+  listSshConfigs: (signal?: AbortSignal) =>
+    request<SshConfigurationList>("GET", "/ssh-configs", { signal }),
+
+  createSshConfig: (payload: CreateSshConfigurationRequest) =>
+    request<SshConfigurationRecord>("POST", "/ssh-configs", { body: payload }),
+
+  updateSshConfig: (configId: string, payload: UpdateSshConfigurationRequest) =>
+    request<SshConfigurationRecord>(
+      "PATCH",
+      `/ssh-configs/${encodeURIComponent(configId)}`,
+      { body: payload },
+    ),
+
+  deleteSshConfig: (configId: string) =>
+    request<void>("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
 
   /** Resolves a saved configuration's credential and lists its models. */
   resolveModelConfig: (configId: string) =>

@@ -694,9 +694,6 @@ export function FilesView({
   if (isLoading || !listing) {
     return <PanelEmpty>Loading…</PanelEmpty>;
   }
-  if (nodes.length === 0) {
-    return <PanelEmpty>No files in the workspace.</PanelEmpty>;
-  }
 
   return (
     <PanelSplit
@@ -709,7 +706,11 @@ export function FilesView({
         />
       }
       list={
-        fileListing === "changed" ? (
+        nodes.length === 0 ? (
+          <div className="p-1 label-micro text-basic-muted">
+            No files in the workspace.
+          </div>
+        ) : fileListing === "changed" ? (
           <ChangedList
             files={changedNodes}
             selected={current}
@@ -735,7 +736,11 @@ export function FilesView({
       }
     >
       {!current ? (
-        <PanelEmpty>Select a file to see it.</PanelEmpty>
+        <PanelEmpty>
+          {nodes.length === 0
+            ? "No files in the workspace."
+            : "Select a file to see it."}
+        </PanelEmpty>
       ) : currentChange ? (
         <DiffPane
           key={current}

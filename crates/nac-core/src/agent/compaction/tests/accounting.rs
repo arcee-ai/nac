@@ -14,6 +14,7 @@ fn full_summary_prompt_usage_aggregates_uncached_cache_read_and_cache_write_toke
         cache_write_tokens: 50_000,
         reasoning_tokens: 0,
         orchestrator_context_tokens: 180_500,
+        cost: crate::model::TokenCostMicros::default(),
     };
 
     assert_eq!(full_summary_prompt_tokens(&usage), Some(180_000));
@@ -25,6 +26,7 @@ fn full_summary_prompt_usage_aggregates_uncached_cache_read_and_cache_write_toke
         cache_write_tokens: 1,
         reasoning_tokens: 0,
         orchestrator_context_tokens: u64::MAX,
+        cost: crate::model::TokenCostMicros::default(),
     };
     assert_eq!(full_summary_prompt_tokens(&overflow), None);
 }
@@ -80,6 +82,7 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
         cache_write_tokens: 50_000,
         reasoning_tokens: 0,
         orchestrator_context_tokens: 180_500,
+        cost: crate::model::TokenCostMicros::default(),
     };
     let prompt_tokens = full_summary_prompt_tokens(&summary_usage);
     assert_eq!(prompt_tokens, Some(180_000));

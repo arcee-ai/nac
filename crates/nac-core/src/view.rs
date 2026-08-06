@@ -60,6 +60,10 @@ pub struct SessionSummarySnapshot {
     /// older stored snapshots keep deserializing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u64>,
+    /// Micro-USD spend for the session. Omitted when no usage was recorded;
+    /// zero means the catalog had no rates for the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost_micros: Option<u64>,
     /// Runs ever started in this session. Older stored snapshots default to 0.
     #[serde(default)]
     pub run_count: u64,
@@ -201,6 +205,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             created_at: summary.created_at,
             updated_at: summary.updated_at,
             total_tokens: summary.total_tokens,
+            total_cost_micros: summary.total_cost_micros,
             run_count: summary.run_count,
         }
     }
