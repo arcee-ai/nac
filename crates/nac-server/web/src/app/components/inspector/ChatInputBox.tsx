@@ -13,6 +13,10 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
+import {
+  resolveCatalogModel,
+  type ResolvedCatalogModel,
+} from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   formatClock,
@@ -24,7 +28,7 @@ import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { useSubmitRun } from "@/app/services/queries";
+import { useModelCatalog, useSubmitRun } from "@/app/services/queries";
 import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
 import type {
   ManagedSessionSummary,
@@ -61,6 +65,33 @@ function StatBadge({
 }
 
 /**
+ * Context reading against the catalog's window: "6.8K / 200K" for a model the
+ * catalog knows, and the same with an "est." marker and no percentage when the
+ * window is only the provider's default — the figure itself is a guess then.
+ */
+function contextGauge(
+  used: number | null,
+  resolved: ResolvedCatalogModel,
+): { value: string; title: string } {
+  const tokens = formatTokensCompact(used);
+  const window = resolved.contextWindow;
+  if (!window || used == null) {
+    return { value: tokens, title: "Orchestrator context" };
+  }
+  const limit = formatTokensCompact(window);
+  if (resolved.estimated) {
+    return {
+      value: `${tokens} / ${limit} est.`,
+      title: `Orchestrator context against ${resolved.provider?.id ?? "the provider"}'s default window — the catalog does not know this model, so the limit is an estimate`,
+    };
+  }
+  return {
+    value: `${tokens} / ${limit}`,
+    title: `Orchestrator context — ${Math.round((used / window) * 100)}% of the model's context window`,
+  };
+}
+
+/**
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
@@ -78,6 +109,15 @@ export function ChatInputBox({
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const metrics = runMetrics(snapshot, entry);
+  const catalog = useModelCatalog();
+  const context = contextGauge(
+    metrics.usage?.total_tokens ?? null,
+    resolveCatalogModel(
+      catalog.data,
+      snapshot?.metadata?.backend,
+      metrics.model,
+    ),
+  );
   const now = useNow(1000, running);
   const elapsedMs = metrics.startedAt
     ? now - metrics.startedAt
@@ -188,9 +228,9 @@ export function ChatInputBox({
                   of the columns beside it. */}
               <StatBadge
                 iconName={IconName.Timelaps}
-                value={formatTokensCompact(metrics.usage.total_tokens)}
+                value={context.value}
                 className="text-info-primary"
-                title="Orchestrator context"
+                title={context.title}
               />
               <StatBadge
                 iconName={IconName.ArrowTop}

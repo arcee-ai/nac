@@ -25,7 +25,11 @@ import {
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { AuthenticationRow } from "@/app/components/modals/ConfigurationsPanel";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import { REASONING_OPTIONS } from "@/app/components/modals/options";
+import {
+  REASONING_OPTIONS,
+  reasoningOptionsFor,
+} from "@/app/components/modals/options";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
@@ -45,6 +49,7 @@ import {
   useCreateModelConfig,
   useDeleteModelConfig,
   useManagedProviderModels,
+  useModelCatalog,
   useModelConfigs,
   useProviderModels,
   useResolvedModelConfig,
@@ -213,6 +218,14 @@ function ConfigurationForm({
 
   const name = nameDraft ?? autoName(backend, takenNames);
   const needsKey = providerUsesApiKey(backend);
+  // The catalog knows which efforts this model takes; the rest would only be
+  // saved for the backend to reject at launch.
+  const catalog = useModelCatalog();
+  const reasoningItems = reasoningOptionsFor(
+    resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
+    reasoning,
+    REASONING_ITEMS,
+  );
   const { signedIn } = useManagedSignIn(backend);
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
   // A saved setup keeps its key on the server; only a key typed here is ours
@@ -460,7 +473,7 @@ function ConfigurationForm({
             hint="Reasoning effort passed to the model."
             control={
               <SmallSelect
-                items={REASONING_ITEMS}
+                items={reasoningItems}
                 value={reasoning}
                 onValueChange={edit(setReasoning)}
               />

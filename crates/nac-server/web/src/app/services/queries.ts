@@ -18,6 +18,7 @@ import type {
   CreateModelConfigurationRequest,
   CreateSessionRequest,
   ManagedSessionSummary,
+  ModelCatalog,
   ModelConfigurationList,
   ProviderModelList,
   RawSessionConfig,
@@ -66,6 +67,7 @@ export const queryKeys = {
   managedProviderModels: (backend: string) =>
     ["managed-provider-models", backend] as const,
   managedProviderModelsAll: ["managed-provider-models"] as const,
+  modelCatalog: ["model-catalog"] as const,
   resolvedModelConfig: (configId: string) =>
     ["model-config-resolved", configId] as const,
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
@@ -313,6 +315,21 @@ export function useManagedProviderModels(
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * The server's model catalog: context windows, prices and the efforts each
+ * model accepts. It only changes when the server reloads it, and a failure is
+ * never fatal — every consumer falls back to showing the raw numbers.
+ */
+export function useModelCatalog(enabled = true) {
+  return useQuery<ModelCatalog>({
+    queryKey: queryKeys.modelCatalog,
+    queryFn: ({ signal }) => api.getModelCatalog(signal),
+    enabled,
+    staleTime: 10 * 60_000,
+    retry: false,
   });
 }
 

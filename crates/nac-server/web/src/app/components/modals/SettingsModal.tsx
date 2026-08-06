@@ -24,8 +24,9 @@ import {
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
   BACKEND_OPTIONS,
-  REASONING_OPTIONS,
+  reasoningOptionsFor,
 } from "@/app/components/modals/options";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
@@ -49,6 +50,7 @@ import { ApiError } from "@/app/services/api";
 import {
   useManagedLogout,
   useManagedProviderModels,
+  useModelCatalog,
   useProviderModels,
   useSessionConfig,
   useSessionSnapshot,
@@ -256,6 +258,14 @@ function SettingsForm({
             }
           : { status: "idle" };
 
+  // Only the levels this model actually accepts: the backend rejects the rest,
+  // so offering them would only produce a save that fails.
+  const catalog = useModelCatalog();
+  const reasoningItems = reasoningOptionsFor(
+    resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
+    reasoning,
+  );
+
   const { provider, signedIn } = useManagedSignIn(kind);
   const loginQuery = useManagedProviderModels(kind, Boolean(provider) && signedIn);
   const models =
@@ -458,7 +468,7 @@ function SettingsForm({
           />
           <InputWrapper label="Reasoning effort">
             <Select
-              items={REASONING_OPTIONS}
+              items={reasoningItems}
               value={reasoning}
               onValueChange={setReasoning}
               className="w-full"

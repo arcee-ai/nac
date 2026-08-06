@@ -21,6 +21,7 @@ import type {
   GeneratedCredential,
   ManagedSessionSummary,
   MessagesPageResponse,
+  ModelCatalog,
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
@@ -234,6 +235,14 @@ export const api = {
   /** Validates the key as a side effect: a bad key cannot list models. */
   listProviderModels: (payload: ProviderModelsRequest) =>
     request<ProviderModelList>("POST", "/providers/models", { body: payload }),
+
+  /**
+   * The server's own catalog: limits, prices and effort support for the models
+   * it knows about. Local and credential-free, so it answers for every provider
+   * at once — unlike `listProviderModels`, which asks one provider.
+   */
+  getModelCatalog: (signal?: AbortSignal) =>
+    request<ModelCatalog>("GET", "/models", { signal }),
 
   listModelConfigs: (signal?: AbortSignal) =>
     request<ModelConfigurationList>("GET", "/model-configs", { signal }),

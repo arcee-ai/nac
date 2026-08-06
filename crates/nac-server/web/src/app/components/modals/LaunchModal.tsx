@@ -24,8 +24,12 @@ import {
   ConfigurationsPanel,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
-import { REASONING_OPTIONS } from "@/app/components/modals/options";
+import {
+  REASONING_OPTIONS,
+  reasoningOptionsFor,
+} from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   CLEAR_EFFORT,
@@ -40,6 +44,7 @@ import { api } from "@/app/services/api";
 import {
   useCreateModelConfig,
   useCreateSession,
+  useModelCatalog,
   useSshConnect,
   useStoreInfo,
   useUpdatePresentation,
@@ -148,6 +153,18 @@ function LaunchForm({
   // directory above all — is meaningless until one connection has answered, so
   // the rest of the form waits for it.
   const [connection, setConnection] = useState<SshTarget | null>(null);
+
+  // The override only makes sense for the model the selection settles on, so
+  // the catalog narrows it to the efforts that model accepts.
+  const catalog = useModelCatalog();
+  const chosen =
+    selection?.kind === "save" ? selection.request : (selection ?? null);
+  const reasoningItems = reasoningOptionsFor(
+    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model)
+      .supportedEfforts,
+    reasoning,
+    ADVANCED_REASONING,
+  );
 
   const isSsh = mode === "ssh";
   const connectSsh = useSshConnect();
@@ -605,7 +622,7 @@ function LaunchForm({
                   label="Reasoning"
                   hint="Reasoning effort passed to the model."
                   control={smallSelect(
-                    ADVANCED_REASONING,
+                    reasoningItems,
                     reasoning,
                     edit(setReasoning),
                   )}
