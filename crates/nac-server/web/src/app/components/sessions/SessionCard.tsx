@@ -138,7 +138,7 @@ export function SessionCard({
   return (
     <div
       className={cn(
-        "group fade-up relative flex flex-col gap-4 px-6 pt-5 pb-3 rounded-[8px] overflow-hidden cursor-default",
+        "group fade relative flex flex-col gap-4 px-6 pt-5 pb-3 rounded-[8px] overflow-hidden cursor-default",
         "shadow-convex",
         running ? "bg-elevation-level-3" : "bg-elevation-level-1",
       )}

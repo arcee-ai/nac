@@ -22,7 +22,7 @@ const Switch: React.FC<SwitchProps> = ({
     disabled={disabled}
     onClick={() => !disabled && onChange?.(!checked)}
     className={cn(
-      "relative shrink-0 w-9 h-5 rounded-full transition-colors duration-200",
+      "relative shrink-0 w-9 h-5 rounded-full transition-colors duration-150",
       disabled
         ? "bg-input-switcher-disabled cursor-not-allowed"
         : checked
@@ -34,7 +34,7 @@ const Switch: React.FC<SwitchProps> = ({
   >
     <span
       className={cn(
-        "absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform duration-200",
+        "absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform duration-150",
         disabled
           ? "bg-input-knob-disabled"
           : checked

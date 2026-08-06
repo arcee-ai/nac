@@ -149,7 +149,7 @@ export function ModelPicker({
         <Icon
           iconName={IconName.Down}
           className={cn(
-            "transition-transform duration-300 ease-in-out",
+            "transition-transform duration-150 ease-out",
             open ? "rotate-180" : "rotate-0",
           )}
         />

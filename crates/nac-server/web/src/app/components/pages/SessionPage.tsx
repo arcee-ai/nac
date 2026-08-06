@@ -160,7 +160,7 @@ export default function SessionPage() {
       {/* Yields the box's half of the row to the chat as the box slides away. */}
       <div
         className={cn(
-          "h-full shrink-0 transition-[width] duration-500 ease-in-out",
+          "h-full shrink-0 transition-[width] duration-150 ease-out",
           collapsed ? "w-0" : "w-1/2",
         )}
       />
@@ -174,7 +174,7 @@ export default function SessionPage() {
         className={cn(
           "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
           "pt-[72px] pb-2 pl-2 pr-6",
-          "transition-transform duration-500 ease-in-out",
+          "transition-transform duration-150 ease-out",
           collapsed && "-translate-x-full",
         )}
         aria-hidden={collapsed}
@@ -182,7 +182,7 @@ export default function SessionPage() {
       >
         <div
           className={cn(
-            "flex flex-col flex-1 min-h-0 transition-opacity duration-300 ease-in-out",
+            "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
             collapsed && "opacity-0",
           )}
         >
@@ -195,7 +195,7 @@ export default function SessionPage() {
       <div
         className={cn(
           "flex flex-col items-center flex-1 min-w-0 h-full pr-2",
-          "transition-[padding] duration-500 ease-in-out",
+          "transition-[padding] duration-150 ease-out",
           collapsed ? "pl-2" : "pl-6",
         )}
       >

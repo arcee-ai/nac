@@ -48,7 +48,7 @@ export function ChatBadge({
   return (
     <div
       className={cn(
-        "flex flex-col items-start w-full my-6 border-l-2 border-solid transition-colors duration-200",
+        "flex flex-col items-start w-full my-6 border-l-2 border-solid transition-colors duration-150",
         highlighted ? "border-primary" : "border-tertiary",
       )}
     >

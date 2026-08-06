@@ -421,7 +421,7 @@ export function Transcript({
       {/* Always mounted so show/hide can animate opacity + translate like
           ArceeFM's "Last messages" control — unmounting would skip the exit. */}
       <div
-        className={`absolute z-[2] left-1/2 bottom-0 -translate-x-1/2 rounded-full  transition-all duration-200 ease-in-out ${
+        className={`absolute z-[2] left-1/2 bottom-0 -translate-x-1/2 rounded-full  transition-all duration-150 ease-out ${
           showJumpButton
             ? "translate-y-0 scale-100 opacity-100"
             : "translate-y-3 scale-75 opacity-0 pointer-events-none"

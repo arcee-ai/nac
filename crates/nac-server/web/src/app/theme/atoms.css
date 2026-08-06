@@ -5,7 +5,7 @@
 
 /* ============================ ICON ============================ */
 .icon { display: block; }
-.icon path { transition: fill 0.2s ease-out; }
+.icon path { transition: fill 0.15s ease-out; }
 
 /* ============================ BUTTON ============================ */
 .btn {
@@ -18,8 +18,8 @@
   border: none;
   border-radius: 4px;
   box-shadow: none;
-  transition: color 0.2s ease-out, background-color 0.2s ease-out,
-    border-color 0.2s ease-out;
+  transition: color 0.15s ease-out, background-color 0.15s ease-out,
+    border-color 0.15s ease-out;
   transition-property: color, background-color, border-color;
 }
 .btn:focus-visible { outline: 2px solid var(--blue-500); outline-offset: -2px; }
@@ -133,7 +133,7 @@
 .btn-tertiary-accent.btn-disabled, .btn-tertiary-accent.btn-disabled:hover, .btn-tertiary-accent.btn-disabled:active { color: var(--color-text-btn-accent-disabled); }
 
 /* icon rotate helper */
-.btn.btn-icon-rotate .icon { transition: transform 0.2s ease-out; }
+.btn.btn-icon-rotate .icon { transition: transform 0.15s ease-out; }
 .btn.btn-icon-rotate:hover .icon { transform: rotate(180deg); }
 
 /* icon sizing per button size */
@@ -170,7 +170,7 @@
   color: var(--color-text-input);
   background-color: var(--color-bg-input);
   box-shadow: var(--shadow-concave);
-  transition: color 0.3s ease-out, background-color 0.3s ease-out, outline 0.3s ease-out;
+  transition: color 0.15s ease-out, background-color 0.15s ease-out, outline 0.15s ease-out;
   outline: 2px solid transparent;
   outline-offset: -2px;
 }

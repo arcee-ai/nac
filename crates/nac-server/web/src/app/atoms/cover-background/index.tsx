@@ -26,7 +26,7 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
 }) => (
   <div
     className={cn(
-      "fixed inset-0 transition-opacity duration-300 ease-out",
+      "fixed inset-0 transition-opacity duration-150 ease-out",
       open ? "opacity-100" : "opacity-0 pointer-events-none",
       className,
     )}

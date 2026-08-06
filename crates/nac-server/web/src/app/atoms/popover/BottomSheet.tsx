@@ -4,7 +4,7 @@ import { cn } from "../../lib/cn";
 import CoverBackground from "../cover-background";
 
 /** Kept in step with the transition below, so the sheet is torn down after it. */
-const EXIT_MS = 300;
+const EXIT_MS = 150;
 
 interface BottomSheetProps {
   open: boolean;
@@ -67,7 +67,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         className={cn(
           "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto",
           "rounded-t-[24px] py-4 bg-elevation-level-2 shadow-2xl",
-          "transition-transform duration-300 ease-in-out [&>*]:shrink-0",
+          "transition-transform duration-150 ease-out [&>*]:shrink-0",
           down ? "translate-y-full" : "translate-y-0",
           className,
         )}

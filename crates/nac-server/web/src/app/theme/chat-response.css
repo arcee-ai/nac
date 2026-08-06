@@ -28,7 +28,7 @@
 .chat-response.streaming h5 .streaming-chunk,
 .chat-response.streaming h6 .streaming-chunk {
   opacity: 0;
-  animation: fadeInOut 500ms ease-out forwards;
+  animation: fadeInOut 150ms ease-out forwards;
 }
 
 @keyframes fadeInOut {
@@ -233,7 +233,7 @@
 .chat-response a {
   color: var(--color-text-accent-primary);
   text-decoration: underline;
-  transition: color 0.3s ease-out;
+  transition: color 0.15s ease-out;
   cursor: pointer;
   word-break: break-all;
   overflow-wrap: break-word;
