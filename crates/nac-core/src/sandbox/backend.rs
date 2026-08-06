@@ -10,6 +10,7 @@ use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+use super::ssh_command::SshConnection;
 use super::{HostMountPath, SandboxSession};
 use crate::paths::PathContext;
 
@@ -238,18 +239,18 @@ pub fn execution_backend_from_sandbox(
 }
 
 pub fn select_execution_backend(
-    ssh_host: Option<String>,
+    connection: Option<SshConnection>,
     sandbox: Option<SandboxSession>,
     workspace_cwd: &Path,
     local_paths: &PathContext,
 ) -> Result<Arc<ExecutionBackend>> {
-    match (ssh_host, sandbox) {
-        (Some(ssh_host), Some(_)) => anyhow::bail!(
+    match (connection, sandbox) {
+        (Some(connection), Some(_)) => anyhow::bail!(
             "invalid session configuration: ssh_host '{}' and sandbox cannot both be set",
-            ssh_host
+            connection.host
         ),
-        (Some(ssh_host), None) => Ok(Arc::new(ExecutionBackend::Ssh(
-            super::SshBackend::new_with_paths(ssh_host, workspace_cwd.to_path_buf(), local_paths),
+        (Some(connection), None) => Ok(Arc::new(ExecutionBackend::Ssh(
+            super::SshBackend::new_with_paths(connection, workspace_cwd.to_path_buf(), local_paths),
         ))),
         (None, sandbox) => Ok(execution_backend_from_sandbox(sandbox, workspace_cwd)),
     }
@@ -308,7 +309,7 @@ mod tests {
         }
 
         let backend = select_execution_backend(
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             None,
             Path::new("~"),
             &PathContext::new(&config_cwd),
@@ -331,7 +332,7 @@ mod tests {
     #[test]
     fn select_backend_uses_ssh_for_remote_sessions() {
         let backend = select_execution_backend(
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             None,
             Path::new("/remote/project"),
             &local_paths(),
@@ -353,7 +354,7 @@ mod tests {
     #[test]
     fn select_backend_rejects_ssh_plus_sandbox() {
         let error = match select_execution_backend(
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Some(sandbox()),
             Path::new("/x"),
             &local_paths(),

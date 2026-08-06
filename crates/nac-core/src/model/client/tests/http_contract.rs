@@ -51,6 +51,7 @@ fn both_arcee_backends_preserve_summary_system_order_and_omit_empty_tools() {
             &[],
             &client.resolved_model.thinking_level_map,
             &client.resolved_model.compat,
+            CompletionsMessageShape::Standard,
         );
 
         assert_eq!(request["messages"], expected_messages, "{backend}");
@@ -231,7 +232,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
         };
 
         client
-            .send_completions_chat(Vec::new(), Vec::new())
+            .send_completions_chat(Vec::new(), Vec::new(), None)
             .await
             .unwrap_or_else(|error| panic!("{configured_path}: {error:#}"));
         let requests = server.finish();
@@ -281,6 +282,7 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
                     content: "sensitive prompt".to_string(),
                 }],
                 Vec::new(),
+                None,
             )
             .await
             .expect_err("Arcee inference redirects must not be followed")
@@ -452,7 +454,7 @@ async fn arcee_multibyte_error_body_does_not_panic() {
     };
 
     let error = client
-        .send_completions_chat(Vec::new(), Vec::new())
+        .send_completions_chat(Vec::new(), Vec::new(), None)
         .await
         .expect_err("HTTP 400 should return an error")
         .to_string();

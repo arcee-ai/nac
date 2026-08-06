@@ -99,12 +99,8 @@ fn entry(
     thinking_level_map: ThinkingLevelMap,
     compat: Compat,
 ) -> ModelMetadata {
-    let mut entry = ModelMetadata::sparse(
-        provider,
-        api_kind_for(provider),
-        id,
-        ModelSource::Baseline,
-    );
+    let mut entry =
+        ModelMetadata::sparse(provider, api_kind_for(provider), id, ModelSource::Baseline);
     entry.reasoning = reasoning;
     entry.thinking_level_map = thinking_level_map;
     entry.compat = compat;
@@ -190,7 +186,13 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             128_000,
             rates(0.2, 1.2, 0.02, 0.25),
         ),
-        model("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, rates(5.0, 30.0, 0.5, 6.25)),
+        model(
+            "gpt-5.6",
+            "GPT-5.6",
+            1_050_000,
+            128_000,
+            rates(5.0, 30.0, 0.5, 6.25),
+        ),
         model(
             "gpt-5.3-codex-spark",
             "GPT-5.3 Codex Spark",
@@ -215,23 +217,20 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
 /// levels. `reasoning` marks the thinking variant's reasoning_content
 /// output; it accepts no effort knob.
 fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
-    let model = |id: &str,
-                 display_name: &str,
-                 max_tokens: u64,
-                 cost: ModelCostRates,
-                 reasoning: bool| {
-        seeded_model(
-            provider,
-            id,
-            display_name,
-            128_000,
-            max_tokens,
-            cost,
-            reasoning,
-            ThinkingLevelMap::default(),
-            completions_compat(None, "reasoning_content", Some(0.0)),
-        )
-    };
+    let model =
+        |id: &str, display_name: &str, max_tokens: u64, cost: ModelCostRates, reasoning: bool| {
+            seeded_model(
+                provider,
+                id,
+                display_name,
+                128_000,
+                max_tokens,
+                cost,
+                reasoning,
+                ThinkingLevelMap::default(),
+                completions_compat(None, "reasoning_content", Some(0.0)),
+            )
+        };
     vec![
         model(
             "trinity-large-thinking",

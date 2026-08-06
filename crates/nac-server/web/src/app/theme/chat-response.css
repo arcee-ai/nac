@@ -1,0 +1,282 @@
+/* Ported from ArceeFM ChatResponse/index.css — prose for model replies. */
+
+.chat-response {
+  will-change: auto;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: subpixel-antialiased;
+  transform: translateZ(0);
+}
+
+/* Streaming animation for paragraphs, list items, and headers */
+.chat-response.streaming p,
+.chat-response.streaming li,
+.chat-response.streaming h1,
+.chat-response.streaming h2,
+.chat-response.streaming h3,
+.chat-response.streaming h4,
+.chat-response.streaming h5,
+.chat-response.streaming h6 {
+  position: relative;
+}
+
+.chat-response.streaming p .streaming-chunk,
+.chat-response.streaming li .streaming-chunk,
+.chat-response.streaming h1 .streaming-chunk,
+.chat-response.streaming h2 .streaming-chunk,
+.chat-response.streaming h3 .streaming-chunk,
+.chat-response.streaming h4 .streaming-chunk,
+.chat-response.streaming h5 .streaming-chunk,
+.chat-response.streaming h6 .streaming-chunk {
+  opacity: 0;
+  animation: fadeInOut 500ms ease-out forwards;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.chat-response .katex-error {
+  color: var(--color-text-basic-tertiary) !important;
+}
+
+.chat-response h1,
+.chat-response h2,
+.chat-response h3,
+.chat-response h4,
+.chat-response h5,
+.chat-response h6 {
+  color: var(--color-text-basic-primary);
+}
+
+.chat-response h1 {
+  margin-bottom: 1.75rem;
+  margin-top: 2.5rem;
+  font-family: Inter, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 28px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h1 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.chat-response h2 {
+  margin-bottom: 1.25rem;
+  margin-top: 2.25rem;
+  font-family: Inter, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 24px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h2 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.chat-response h3 {
+  margin-bottom: 1rem;
+  margin-top: 1.5rem;
+  font-family: Inter, sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 24px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h3 {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.chat-response h4 {
+  margin-bottom: 0.75rem;
+  margin-top: 1.25rem;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 20px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h4 {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.chat-response h5 {
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 20px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h5 {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.chat-response h6 {
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 16px;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content h6 {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.chat-response p {
+  margin-bottom: 0.5rem;
+  margin-top: 0.75rem;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  font-weight: normal;
+  font-stretch: normal;
+  font-style: normal;
+  line-height: 24px;
+  letter-spacing: normal;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-response .thinking-content p {
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.chat-response ul {
+  list-style: disc;
+  margin-bottom: 1rem;
+  margin-top: 1rem;
+}
+
+.chat-response ul li::marker {
+  color: var(--color-text-basic-primary);
+}
+
+.chat-response strong {
+  font-weight: 600;
+}
+
+.chat-response ol {
+  list-style-type: decimal;
+  margin-bottom: 1rem;
+  margin-top: 1rem;
+}
+
+.chat-response ol li::marker {
+  color: var(--color-text-basic-primary);
+  font-weight: 500;
+}
+
+.chat-response li {
+  margin-left: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.chat-response .thinking-content li {
+  font-size: 12px;
+  line-height: 20px;
+}
+.chat-response .thinking-content code {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.chat-response a {
+  color: var(--color-text-accent-primary);
+  text-decoration: underline;
+  transition: color 0.3s ease-out;
+  cursor: pointer;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+.chat-response a:hover {
+  color: var(--color-text-accent-secondary);
+}
+
+.chat-response code {
+  color: var(--color-text-basic-primary);
+}
+
+.chat-response table {
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: 14px;
+  line-height: 1.2;
+  border: 1px solid var(--color-border-tertiary);
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.chat-response table th,
+.chat-response table td {
+  border: 1px solid var(--color-border-tertiary);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.chat-response table th {
+  background-color: var(--color-bg-elevation-sublevel-variant-A);
+  font-weight: bold;
+  color: var(--color-text-basic-primary);
+}
+
+.chat-response code,
+.chat-response code * {
+  line-height: 20px;
+}
+
+.chat-response hr {
+  border-color: var(--color-border-tertiary);
+  margin: 2rem 0;
+}

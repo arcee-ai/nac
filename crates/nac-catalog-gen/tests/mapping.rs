@@ -491,10 +491,7 @@ fn invalid_default_base_urls_fail_loudly() {
     ] {
         let result = gen::generate(&with_api(api), EMPTY_OVERRIDES);
         let error = format!("{:#}", result.unwrap_err());
-        assert!(
-            error.contains(expected),
-            "{error} (expected '{expected}')"
-        );
+        assert!(error.contains(expected), "{error} (expected '{expected}')");
     }
 
     let result = gen::generate(

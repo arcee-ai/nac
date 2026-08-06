@@ -65,7 +65,10 @@ pub(super) fn parse_completions_response(
             cache_read_tokens: cached,
             cache_write_tokens: 0,
             reasoning_tokens,
-            orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            orchestrator_context_tokens: u
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
             cost: TokenCostMicros::default(),
         }
     });
@@ -80,9 +83,7 @@ pub(super) fn parse_completions_response(
                 .get("content")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            reasoning_field: reasoning_text
-                .as_ref()
-                .map(|_| reasoning_field.to_string()),
+            reasoning_field: reasoning_text.as_ref().map(|_| reasoning_field.to_string()),
             reasoning_text,
             reasoning_details: None,
             tool_calls,

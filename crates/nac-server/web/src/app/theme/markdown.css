@@ -1,0 +1,73 @@
+/* Syntax highlighting for fenced code. Prose (headings, paragraphs, lists,
+   tables, …) lives in `chat-response.css` — every Markdown root also carries
+   the `chat-response` class so chat and side panels share one look. */
+
+.chat-response.markdown > *:first-child,
+.chat-response .markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+.chat-response.markdown > *:last-child,
+.chat-response .markdown-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-response :not(pre) > code {
+  padding: 0.0625rem 0.25rem;
+  border-radius: 4px;
+  background: var(--color-bg-elevation-level-0-5);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-text-basic-muted);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-type {
+  color: var(--color-text-accent-primary);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--color-text-success-primary);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--color-text-danger-primary);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section,
+.hljs-built_in {
+  color: var(--color-text-info-primary);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--color-text-basic-secondary);
+}
+
+.hljs-deletion {
+  color: var(--color-text-error-primary);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
+}

@@ -118,15 +118,13 @@ fn api_key_selector_validation_and_values_are_typed_configuration_errors() {
         assert!(error.to_string().contains("nonblank api_key_env"));
     }
     for selector in ["9INVALID", "HAS-DASH", " HAS_SPACE"] {
-        let error =
-            api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
+        let error = api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
         assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
         assert!(error.to_string().contains(selector));
         assert!(error.to_string().contains("[A-Za-z_][A-Za-z0-9_]*"));
     }
     for selector in names {
-        let error =
-            api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
+        let error = api_key_for_backend(BackendKind::OpenAiResponses, Some(selector)).unwrap_err();
         assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
         assert!(error.to_string().contains(selector));
         assert!(!error.to_string().contains("ambient-must-not-win"));
@@ -192,9 +190,8 @@ fn managed_backends_reject_any_present_api_key_selector() {
         ),
     ] {
         for selector in ["MANAGED_KEY", "", "   ", " SURROUNDED_KEY "] {
-            let error =
-                validate_backend_api_key_env(backend, Some(selector))
-            .expect_err("managed credentials must reject every present api_key_env");
+            let error = validate_backend_api_key_env(backend, Some(selector))
+                .expect_err("managed credentials must reject every present api_key_env");
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             assert!(error.to_string().contains(source));
             assert!(error.to_string().contains("is not supported"));
@@ -318,7 +315,10 @@ fn managed_backends_materialize_only_absent_base_urls() {
             std::collections::BTreeMap::new(),
         )
         .expect("an explicit base URL remains accepted");
-        assert_eq!(explicit.base_url, "https://explicit.example/v1", "{backend}");
+        assert_eq!(
+            explicit.base_url, "https://explicit.example/v1",
+            "{backend}"
+        );
     }
 }
 
@@ -403,8 +403,8 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
                     panic!("{backend} rejected {}: {error:#}", effort.as_str())
                 });
             } else {
-                let error = result
-                    .expect_err("unsupported effort must fail effective settings validation");
+                let error =
+                    result.expect_err("unsupported effort must fail effective settings validation");
                 assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
                 assert!(error.to_string().contains(effort.as_str()), "{error:#}");
                 assert!(error.to_string().contains(backend.as_str()), "{error:#}");
@@ -516,6 +516,7 @@ fn adapters_translate_effort_through_the_catalog_map() {
         &[],
         &custom,
         &test_resolved(BackendKind::DeepSeekChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(deepseek["thinking"], json!({"type": "enabled"}));
     assert_eq!(deepseek["reasoning_effort"], "tier-four");
@@ -527,6 +528,7 @@ fn adapters_translate_effort_through_the_catalog_map() {
         &[],
         &custom,
         &test_resolved(BackendKind::FireworksChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(fireworks["reasoning_effort"], "tier-three");
     assert_eq!(fireworks["reasoning_history"], "preserved");
@@ -538,6 +540,7 @@ fn adapters_translate_effort_through_the_catalog_map() {
         &[],
         &custom,
         &test_resolved(BackendKind::TogetherChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(together["reasoning"], json!({"enabled": true}));
     assert_eq!(together["reasoning_effort"], "tier-three");

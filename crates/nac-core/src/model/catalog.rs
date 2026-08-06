@@ -336,7 +336,7 @@ pub(crate) fn credential_env_var(provider: BackendKind) -> Option<String> {
 /// Resolve a model id to its provider via the process-global catalog
 /// (exact match; collisions prefer the non-managed provider with a
 /// warning; unknown ids resolve to `None`).
-pub(crate) fn provider_for_model(model: &str) -> Option<BackendKind> {
+pub fn provider_for_model(model: &str) -> Option<BackendKind> {
     current().provider_for_model(model)
 }
 

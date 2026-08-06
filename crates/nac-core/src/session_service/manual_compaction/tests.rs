@@ -295,7 +295,7 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
         sandbox_status: "off".to_string(),
         agents_md_status: "off".to_string(),
         workspace_display: "/repo".to_string(),
-        workspace_host_path: Some(std::path::PathBuf::from("/repo")),
+        workspace_git: Some(crate::workspace::GitTarget::local("/repo")),
         resume_base_cwd: std::path::PathBuf::from("/repo"),
     });
 
@@ -449,7 +449,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
         sandbox_status: "off".to_string(),
         agents_md_status: "off".to_string(),
         workspace_display: "/repo".to_string(),
-        workspace_host_path: Some(std::path::PathBuf::from("/repo")),
+        workspace_git: Some(crate::workspace::GitTarget::local("/repo")),
         resume_base_cwd: std::path::PathBuf::from("/repo"),
     });
     let mut events = parts.service.subscribe_events();

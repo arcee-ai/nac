@@ -36,6 +36,11 @@ pub enum Message {
         reasoning_details: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>,
+        /// Wall-clock time the model call behind this message took. Only ever
+        /// read by the UI: every provider mapper drops it, so it never travels
+        /// back out on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
         /// The model that produced this message (S5). Stamped at the
         /// transcript push site; `None` on pre-S5 (legacy) messages, which
         /// the wire normalization treats as same-model. Drives the
@@ -112,6 +117,7 @@ mod tests {
                     arguments: r#"{"path": "src/main.rs"}"#.to_string(),
                 },
             }]),
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         };
@@ -155,6 +161,7 @@ mod tests {
                 tool_calls,
                 model_origin: None,
                 reasoning_field: None,
+                ..
             } => {
                 assert_eq!(content.as_deref(), Some("hello"));
                 assert_eq!(reasoning_text.as_deref(), Some("thinking"));
@@ -228,6 +235,7 @@ mod tests {
             reasoning_text: Some("t".to_string()),
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: Some(ModelOrigin {
                 backend: BackendKind::TogetherChat,
                 model: "together-model".to_string(),
@@ -247,10 +255,11 @@ mod tests {
             panic!("assistant message expected");
         };
         assert_eq!(
-            model_origin.as_ref().map(|origin| (origin.backend, origin.model.as_str())),
+            model_origin
+                .as_ref()
+                .map(|origin| (origin.backend, origin.model.as_str())),
             Some((BackendKind::TogetherChat, "together-model"))
         );
         assert_eq!(reasoning_field.as_deref(), Some("reasoning"));
     }
-
 }

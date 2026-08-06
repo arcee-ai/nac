@@ -35,30 +35,68 @@ Run the web dashboard:
 nac-web -C /path/to/project --bind 127.0.0.1:3210
 ```
 
-Open `http://127.0.0.1:3210/` for the dense session dashboard. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once. Useful endpoints:
+Open `http://127.0.0.1:3210/` for the session dashboard. It is a React app whose build output is committed under `crates/nac-server/assets/dist` and embedded in the binary, so a release never needs Node. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once.
+
+Server and session lifecycle:
 
 - `GET /health`
 - `GET /store`
 - `GET /sessions`
 - `POST /sessions`
+- `PUT /sessions/order`
 - `GET /sessions/{session_id}`
+- `DELETE /sessions/{session_id}`
+- `PUT /sessions/{session_id}/presentation`
+
+Conversation and runs:
+
 - `GET /sessions/{session_id}/messages`
 - `GET /sessions/{session_id}/threads/{thread_name}/events`
-- `GET /sessions/{session_id}/config`
-- `PATCH /sessions/{session_id}/config`
-- `POST /sessions/{session_id}/compact`
 - `POST /sessions/{session_id}/runs`
+- `POST /sessions/{session_id}/compact`
 - `POST /sessions/{session_id}/steering`
 - `POST /sessions/{session_id}/threads/{thread_name}/steering`
 - `GET /sessions/{session_id}/events?after_sequence_id=0`
 - `GET /sessions/{session_id}/events/stream?after_sequence_id=0`
 - `POST /sessions/{session_id}/cancel-active-run`
 
-`nac-web` binds only to IPv4/IPv6 loopback and has no built-in authentication. NAC does not enforce `Host` or `Origin` headers, restrict `Sec-Fetch-Site`, or provide built-in CSRF protection. Tunnels and reverse proxies can expose the loopback listener remotely; if you use one, it must provide strong authentication before forwarding traffic to `nac-web`. Anyone able to reach the server is trusted.
+Session settings:
+
+- `GET /sessions/{session_id}/config`
+- `PATCH /sessions/{session_id}/config`
+
+Workspace, for browsing what a session changed. In a git checkout every run also freezes the tree as a revision under `refs/nac/revisions/*`, staged through a private index so the user's own index is never touched, which keeps earlier runs inspectable. Capture is a convenience: a workspace nac cannot capture still finishes its runs normally:
+
+- `GET /sessions/{session_id}/workspace/diff`
+- `GET /sessions/{session_id}/workspace/files`
+- `GET /sessions/{session_id}/workspace/file`
+- `GET /sessions/{session_id}/workspace/branches`
+- `POST /sessions/{session_id}/workspace/branches`
+- `GET /sessions/{session_id}/workspace/revisions`
+- `GET /sessions/{session_id}/workspace/revisions/{revision_id}/changes`
+
+Launch support, used by the new-session form. Saved model configurations live in the store; `POST /providers/models` forwards a key once to list the models it may use and never stores it, while `/model-configs/from-file` resolves an on-disk configuration the same way a session launch would:
+
+- `GET /fs/browse`
+- `POST /sessions/launch-defaults`
+- `POST /providers/models`
+- `GET /model-configs`
+- `POST /model-configs`
+- `POST /model-configs/from-file`
+- `DELETE /model-configs/{config_id}`
+- `POST /model-configs/{config_id}/models`
+
+Stored credentials are write-only over HTTP: a caller may add, replace, or drop a key, but the value is never echoed back — only a suffix long enough to tell two keys apart:
+
+- `GET /credentials`
+- `PUT /credentials/{name}`
+- `DELETE /credentials/{name}`
+
+`nac-web` binds only to IPv4/IPv6 loopback and has no built-in authentication. Requests are refused unless the `Host` header names a loopback address or `localhost`, which blocks DNS rebinding; `Origin`, `Sec-Fetch-Site`, and CSRF are still not enforced. Tunnels and reverse proxies can expose the loopback listener remotely; their public name must be listed in `NAC_ALLOWED_HOSTS` (comma-separated, `*` disables the check), and whatever fronts the server must provide strong authentication before forwarding traffic to `nac-web`. Anyone able to reach the server is trusted.
 
 Snapshot messages can be bounded with `message_limit`; only then does snapshot `include_system=true` affect the selected page and add `message_page`/`message_cycle`. `GET .../messages` pages backward with `before` and `limit` (and accepts `include_system`), while thread events page with `before_id` and `limit` and return `next_before_id`. Persisted snapshot and initial thread-event-page baselines carry `thread_event_boundary: {epoch_id, sequence_id}`; merge only later envelopes from the same epoch. SSE first reports `{epoch_id, replay_boundary_sequence_id}` and supports sequence replay within that epoch. Finite responses may be gzip-compressed; SSE is never compressed.
 
-The store schema is version 3 and upgrades forward. Back up each store before upgrading; v3 stores must not be opened with older binaries or downgraded. Do not use mixed-version writers against one store. Parent binaries and custom worker executables must use matching releases; mixed versions are unsupported because the required `--dispatch-id` worker protocol is version-coupled. Operational tool telemetry is intentionally lossy: full tool arguments, tool results, and log/error text are omitted or sanitized before persistence and streaming. The deliberate exception is `key_arg_preview`: each tool call persists and streams a short (roughly 120-character) human-readable snippet of its key argument — the path for file tools, the command for `exec_command`, the input for `write_stdin` — so the dashboard can show what a call is doing. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view. `/assets/app.css` is a compatibility alias for `/assets/redesign.css`.
+The store schema is version 6 and upgrades forward. Back up each store before upgrading; v6 stores must not be opened with older binaries or downgraded. Do not use mixed-version writers against one store. Parent binaries and custom worker executables must use matching releases; mixed versions are unsupported because the required `--dispatch-id` worker protocol is version-coupled. Operational tool telemetry is intentionally lossy: full tool arguments, tool results, and log/error text are omitted or sanitized before persistence and streaming. The deliberate exception is `key_arg_preview`: each tool call persists and streams a short (roughly 120-character) human-readable snippet of its key argument — the path for file tools, the command for `exec_command`, the input for `write_stdin` — so the dashboard can show what a call is doing. Snapshots, SSE, and thread-event APIs may still carry conversation or assistant content and remain sensitive, as do canonical message APIs. Snapshot metadata omits extra-header values; `GET /sessions/{session_id}/config` is the authoritative, sensitive repair view.
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): open the web dashboard to list and select existing sessions, or use the `GET /sessions` and `GET /sessions/{session_id}` API endpoints to inspect a specific session. Worker thread history does not auto-compact.
 
@@ -101,13 +139,13 @@ Model selection is config-first, not environment-driven:
 
 Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
 
-The web dashboard has the same tri-state launch behavior. Omit a model option to inherit its new-session config value. Use `--clear-api-key-env` to remove a configured selector, `--clear-effort` to omit reasoning effort, and `--extra-headers '{}'` to replace configured headers with an empty map. `--effort none` is a concrete effort value and is distinct from `--clear-effort`. Use `--orchestrator-compaction-threshold TOKENS` for a fresh session; omit it to inherit `[compaction].threshold_tokens`, or pass `0` to disable an inherited value. Resume always uses the value persisted with the session, and managed workers do not inherit this orchestrator-only setting.
+The new-session form and `POST /sessions` share one tri-state rule: omitting a model field inherits its new-session config value, and `null` clears it. So `api_key_env: null` removes a configured selector and `reasoning_effort: null` omits the effort, while `"none"` is a concrete effort value rather than a way to clear it; `extra_headers: {}` replaces configured headers with an empty map. `orchestrator_compaction_threshold` inherits `[compaction].threshold_tokens` when omitted and is disabled by `null` or `0`. Resume always uses the value persisted with the session, and managed workers do not inherit this orchestrator-only setting.
 
 ### Orchestrator compaction threshold
 
 `[compaction].threshold_tokens` is an optional absolute token count for new orchestrator sessions. A positive value is captured in each new session; an absent or zero value disables creating new checkpoints. The create-session JSON field is `orchestrator_compaction_threshold`: omission inherits config, while `null` or `0` disables it. GET returns the persisted positive value or `null`; PATCH omission preserves it, and PATCH `null` or `0` disables it. The web launch and Settings forms expose the same rules.
 
-Before each ordinary model call, a session-backed orchestrator automatically compacts only when its estimated context reaches the configured threshold. Compaction replaces an oldest prefix with a durable historical summary, targeting at least half (rounded up) of the serialized UTF-8 JSON byte weight of the compactable provider context. Canonical System messages and separately supplied tool definitions are excluded from that weight and remain preserved; Tool messages count toward it, and the cut snaps forward to the first safe User, Assistant, or end boundary without splitting a tool-call/result group. The complete canonical transcript remains unchanged in session storage, checkpoint rows stay private, and workers never compact. The threshold is a proactive trigger rather than a hard context limit; an oversized retained tail can still produce a terminal `finish_reason=length`. Existing valid checkpoints remain active on resume even when creating new checkpoints is disabled. Use `/compact` in the web dashboard to bypass the threshold and request the same operation immediately without submitting a prompt; the manual command is unavailable while another run or manual compaction is active.
+Before each ordinary model call, a session-backed orchestrator automatically compacts only when its estimated context reaches the configured threshold. Compaction replaces an oldest prefix with a durable historical summary, targeting at least half (rounded up) of the serialized UTF-8 JSON byte weight of the compactable provider context. Canonical System messages and separately supplied tool definitions are excluded from that weight and remain preserved; Tool messages count toward it, and the cut snaps forward to the first safe User, Assistant, or end boundary without splitting a tool-call/result group. The complete canonical transcript remains unchanged in session storage, checkpoint rows stay private, and workers never compact. The threshold is a proactive trigger rather than a hard context limit; an oversized retained tail can still produce a terminal `finish_reason=length`. Existing valid checkpoints remain active on resume even when creating new checkpoints is disabled. `POST /sessions/{session_id}/compact` bypasses the threshold and requests the same operation immediately without submitting a prompt; it is refused while another run or manual compaction is active.
 
 ### API-key selection
 
@@ -221,7 +259,7 @@ The `compaction threshold (tokens)` field auto-suggests 70% of the selected mode
 
 ### ChatGPT Codex OAuth
 
-Run `nac-web codex-auth login`, `nac-web codex-auth status`, or `nac-web codex-auth logout` to manage Codex OAuth. Login requests device codes from `https://auth.openai.com/api/accounts/deviceauth/usercode`, polls `https://auth.openai.com/api/accounts/deviceauth/token`, opens `https://auth.openai.com/codex/device` for browser verification, and exchanges or refreshes tokens at `https://auth.openai.com/oauth/token`. The `chatgpt-codex-responses` backend materializes `base_url = "https://chatgpt.com/backend-api"` when the setting is absent; an explicitly supplied value must still pass the managed Codex endpoint checks (an optional trailing slash is accepted). It sends non-streaming Responses requests to `https://chatgpt.com/backend-api/codex/responses`, reads OAuth only from `auth.json`, and never accepts an API-key selector.
+Run `nac-web codex-auth login`, `nac-web codex-auth status`, or `nac-web codex-auth logout` to manage Codex OAuth. Login requests device codes from `https://auth.openai.com/api/accounts/deviceauth/usercode`, polls `https://auth.openai.com/api/accounts/deviceauth/token`, opens `https://auth.openai.com/codex/device` for browser verification, and exchanges or refreshes tokens at `https://auth.openai.com/oauth/token`. The `chatgpt-codex-responses` backend materializes `base_url = "https://chatgpt.com/backend-api"` when the setting is absent; an explicitly supplied value must still pass the managed Codex endpoint checks (an optional trailing slash is accepted). It posts streaming Responses requests (`stream: true`, `Accept: text/event-stream`) to `https://chatgpt.com/backend-api/codex/responses`, forwards live text and reasoning deltas to the dashboard when a client is watching, reads OAuth only from `auth.json`, and never accepts an API-key selector.
 
 ### Arcee managed auth and API keys
 

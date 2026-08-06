@@ -12,11 +12,19 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
         tool_calls: None,
         model_origin: None,
         reasoning_field: None,
+        duration_ms: None,
     }];
     let levels = test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").thinking_level_map;
     let compat = test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").compat;
-    let absent =
-        completions_chat_request("deepseek-v4-pro", None, &messages, &[], &levels, &compat);
+    let absent = completions_chat_request(
+        "deepseek-v4-pro",
+        None,
+        &messages,
+        &[],
+        &levels,
+        &compat,
+        CompletionsMessageShape::Standard,
+    );
     assert!(absent.get("thinking").is_none());
     assert!(absent.get("reasoning_effort").is_none());
     // DeepSeek's compat omits an explicit temperature.
@@ -33,6 +41,7 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
         &[],
         &levels,
         &compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
     assert!(disabled.get("reasoning_effort").is_none());
@@ -50,6 +59,7 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
             &[],
             &levels,
             &compat,
+            CompletionsMessageShape::Standard,
         );
         assert_eq!(request["thinking"], json!({"type": "enabled"}));
         assert_eq!(request["reasoning_effort"], wire_effort);
@@ -74,6 +84,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
             tool_calls: None,
             model_origin: None,
             reasoning_field: None,
+            duration_ms: None,
         },
     ];
     let user = json!({"role": "user", "content": "hi"});
@@ -85,6 +96,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         &[],
         &test_resolved(BackendKind::DeepSeekChat, "m").thinking_level_map,
         &test_resolved(BackendKind::DeepSeekChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(
         deepseek,
@@ -107,6 +119,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         &[],
         &test_resolved(BackendKind::FireworksChat, "m").thinking_level_map,
         &test_resolved(BackendKind::FireworksChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(
         fireworks,
@@ -130,6 +143,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         &[],
         &test_resolved(BackendKind::TogetherChat, "m").thinking_level_map,
         &test_resolved(BackendKind::TogetherChat, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(
         together,
@@ -156,6 +170,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         &[],
         &test_resolved(BackendKind::ArceeApi, "m").thinking_level_map,
         &test_resolved(BackendKind::ArceeApi, "m").compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(
         arcee,
@@ -191,6 +206,7 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
         &[],
         &fireworks_levels,
         &fireworks_compat,
+        CompletionsMessageShape::Standard,
     );
     assert!(fireworks_absent.get("reasoning_effort").is_none());
     assert!(fireworks_absent.get("reasoning_history").is_none());
@@ -203,6 +219,7 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
         &[],
         &fireworks_levels,
         &fireworks_compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(fireworks_none["reasoning_effort"], "none");
     assert_eq!(fireworks_none["reasoning_history"], "disabled");
@@ -216,6 +233,7 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
         &[],
         &together_levels,
         &together_compat,
+        CompletionsMessageShape::Standard,
     );
     assert!(together_absent.get("reasoning").is_none());
     assert!(together_absent.get("reasoning_effort").is_none());
@@ -228,13 +246,15 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
         &[],
         &together_levels,
         &together_compat,
+        CompletionsMessageShape::Standard,
     );
     assert_eq!(together_none["reasoning"], json!({"enabled": false}));
     assert!(together_none.get("reasoning_effort").is_none());
 
     let openai_levels = test_resolved(BackendKind::OpenAiResponses, "model").thinking_level_map;
     let openai_absent = openai_responses_request("model", None, &messages, &[], &openai_levels);
-    assert!(openai_absent.get("reasoning").is_none());
+    // Readable reasoning is asked for regardless; only the effort is opt-in.
+    assert_eq!(openai_absent["reasoning"], json!({"summary": "auto"}));
     assert!(openai_absent.get("tools").is_none());
     // OpenAI's uniform path emits the map's wire value for every effort,
     // including `none`.
@@ -255,33 +275,33 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
             parameters: json!({"type": "object"}),
         },
     }];
+    assert!(completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &tools,
+        &fireworks_levels,
+        &fireworks_compat,
+        CompletionsMessageShape::Standard,
+    )
+    .get("tools")
+    .is_some());
+    assert!(completions_chat_request(
+        "model",
+        None,
+        &messages,
+        &tools,
+        &together_levels,
+        &together_compat,
+        CompletionsMessageShape::Standard,
+    )
+    .get("tools")
+    .is_some());
     assert!(
-        completions_chat_request(
-            "model",
-            None,
-            &messages,
-            &tools,
-            &fireworks_levels,
-            &fireworks_compat
-        )
-        .get("tools")
-        .is_some()
+        openai_responses_request("model", None, &messages, &tools, &openai_levels)
+            .get("tools")
+            .is_some()
     );
-    assert!(
-        completions_chat_request(
-            "model",
-            None,
-            &messages,
-            &tools,
-            &together_levels,
-            &together_compat
-        )
-        .get("tools")
-        .is_some()
-    );
-    assert!(openai_responses_request("model", None, &messages, &tools, &openai_levels)
-        .get("tools")
-        .is_some());
 }
 
 #[test]
@@ -308,6 +328,7 @@ fn responses_input_items_expand_reasoning_and_tool_state() {
             }]),
             model_origin: None,
             reasoning_field: None,
+            duration_ms: None,
         },
         Message::Tool {
             tool_call_id: "call_1".to_string(),

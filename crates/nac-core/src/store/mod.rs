@@ -4,23 +4,29 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
 mod schema;
+mod ssh_configurations;
 mod steering;
 mod thread_events;
 mod threads;
 mod time;
 mod transcript;
 mod worksets;
+mod workspace_revisions;
 
+pub use model_configurations::*;
 pub use render::*;
 pub use schema::{default_store_path, initialize};
+pub use ssh_configurations::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
 pub use transcript::*;
 pub use worksets::*;
+pub use workspace_revisions::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};
 #[cfg(test)]
@@ -312,6 +318,7 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                     model_origin: None,
                     reasoning_field: None,
                 },

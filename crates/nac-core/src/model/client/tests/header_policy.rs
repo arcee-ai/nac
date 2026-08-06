@@ -99,7 +99,7 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
     };
 
     let error = client
-        .send_completions_chat(Vec::new(), Vec::new())
+        .send_completions_chat(Vec::new(), Vec::new(), None)
         .await
         .expect_err("Host override must fail before the HTTP client runs");
 
@@ -129,10 +129,9 @@ async fn benign_extra_headers_pass_with_exactly_one_selected_provider_credential
             )]),
         );
 
-        let response =
-            send_provider_test_request(&client, &format!("{}/initial", server.base_url))
-                .await
-                .expect("benign header request should succeed");
+        let response = send_provider_test_request(&client, &format!("{}/initial", server.base_url))
+            .await
+            .expect("benign header request should succeed");
         let requests = server.finish();
 
         assert_eq!(response, json!({"ok": true}));

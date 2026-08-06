@@ -481,8 +481,13 @@ pub(super) fn map_models_dev(
             continue;
         };
         let credential_env_var = map_credential_env_var(models_dev_id, raw_provider, &mut warnings);
-        let default_base_url =
-            map_default_base_url(raw_provider, baseline, provider, models_dev_id, &mut warnings);
+        let default_base_url = map_default_base_url(
+            raw_provider,
+            baseline,
+            provider,
+            models_dev_id,
+            &mut warnings,
+        );
         let raw_models: BTreeMap<String, serde_json::Value> = match raw_provider
             .get("models")
             .cloned()
@@ -750,7 +755,8 @@ fn map_cost(cost: Option<&ModelsDevCost>) -> Result<super::ModelCostRates, Strin
 /// every models.dev-derived seed map; the two anthropic family entries keep
 /// theirs).
 fn seed_thinking_map(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> ThinkingLevelMap {
-    baseline.providers
+    baseline
+        .providers
         .get(&provider)
         .map(|catalog| catalog.resolve_entry(id).thinking_level_map)
         .unwrap_or_default()

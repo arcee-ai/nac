@@ -32,7 +32,8 @@ fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
         assert!(!request.to_string().contains("disabled"));
     }
 
-    let opus_levels = test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").thinking_level_map;
+    let opus_levels =
+        test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").thinking_level_map;
     for (effort, wire_effort) in [
         (ReasoningEffort::Low, "low"),
         (ReasoningEffort::Medium, "medium"),
@@ -155,6 +156,7 @@ fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
             &[],
             &test_resolved(BackendKind::FireworksChat, "model").thinking_level_map,
             &test_resolved(BackendKind::FireworksChat, "model").compat,
+            CompletionsMessageShape::Standard,
         ),
         completions_chat_request(
             "model",
@@ -163,6 +165,7 @@ fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
             &[],
             &test_resolved(BackendKind::TogetherChat, "model").thinking_level_map,
             &test_resolved(BackendKind::TogetherChat, "model").compat,
+            CompletionsMessageShape::Standard,
         ),
         completions_chat_request(
             "deepseek-v4-pro",
@@ -171,6 +174,7 @@ fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
             &[],
             &test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").thinking_level_map,
             &test_resolved(BackendKind::DeepSeekChat, "deepseek-v4-pro").compat,
+            CompletionsMessageShape::Standard,
         ),
     ] {
         assert_eq!(
@@ -275,6 +279,7 @@ fn anthropic_response_tool_thinking_round_trips() {
                 tool_calls: parsed.assistant.tool_calls.clone(),
                 model_origin: None,
                 reasoning_field: None,
+                duration_ms: None,
             },
             Message::Tool {
                 tool_call_id: "toolu_1".to_string(),

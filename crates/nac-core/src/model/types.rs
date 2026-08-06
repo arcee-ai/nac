@@ -133,6 +133,29 @@ pub fn managed_backend_base_url(backend: BackendKind) -> Option<&'static str> {
     }
 }
 
+/// Whether a host may carry model traffic over plaintext HTTP.
+///
+/// Loopback and private-network addresses keep local proxies and LAN gateways
+/// usable. Every public host must use TLS, because the request carries the
+/// resolved API key in an `Authorization` or `x-api-key` header.
+pub(super) fn allows_plaintext_transport(host: &url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(domain) => {
+            let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+            domain == "localhost" || domain.ends_with(".localhost")
+        }
+        url::Host::Ipv4(address) => {
+            address.is_loopback() || address.is_private() || address.is_link_local()
+        }
+        url::Host::Ipv6(address) => {
+            let leading = address.segments()[0];
+            // Unique local (fc00::/7) and link-local unicast (fe80::/10) have
+            // no stable std predicates yet.
+            address.is_loopback() || leading & 0xfe00 == 0xfc00 || leading & 0xffc0 == 0xfe80
+        }
+    }
+}
+
 /// Materialize and validate the base URL after the effective backend has been
 /// selected. A caller-supplied value is always authoritative (and is never
 /// replaced when invalid); genuine absence falls to the provider's catalog
@@ -154,6 +177,19 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(model_configuration_error(format!(
             "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
+            base_url
+        )));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' must not embed userinfo",
+            base_url
+        )));
+    }
+    let host = parsed.host().expect("host presence checked above");
+    if parsed.scheme() == "http" && !allows_plaintext_transport(&host) {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts",
             base_url
         )));
     }
@@ -355,6 +391,30 @@ impl TokenUsage {
 
     pub(crate) fn replace_context(&mut self, context_tokens: u64) {
         self.orchestrator_context_tokens = context_tokens;
+    }
+
+    /// Roll up per-response usage entries. Input/output/cache fields are summed
+    /// across all recorded entries, while `orchestrator_context_tokens` is a
+    /// context-window gauge and therefore takes the last recorded value instead.
+    /// Returns `None` when nothing was ever recorded.
+    pub fn aggregate(entries: &[Option<Self>]) -> Option<Self> {
+        let recorded: Vec<&Self> = entries.iter().flatten().collect();
+        let last = recorded.last()?;
+        let mut cumulative = Self::default();
+        for usage in &recorded {
+            cumulative.add_cost_saturating(usage);
+        }
+        cumulative.orchestrator_context_tokens = last.orchestrator_context_tokens;
+        Some(cumulative)
+    }
+
+    /// Tokens actually billed for the session: everything that was sent to and
+    /// returned by the model, excluding the context-window gauge.
+    pub fn billable_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_read_tokens)
+            .saturating_add(self.cache_write_tokens)
     }
 
     /// Accept a provider context total only when all represented usage fields

@@ -154,6 +154,8 @@ fn assert_current_schema(conn: &Connection) {
         "orchestrator_compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
+        "ssh_port",
+        "ssh_identity_file",
     ] {
         assert!(session_columns.iter().any(|column| column == expected));
     }
@@ -517,6 +519,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         },
@@ -687,6 +690,7 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         },
@@ -858,19 +862,22 @@ fn checkpoint_table_enforces_completed_row_constraints() {
 fn future_schema_version_is_rejected_without_changes() {
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let future_version = STORE_SCHEMA_VERSION + 1;
     let future = Connection::open(&path).unwrap();
-    future.pragma_update(None, "user_version", 5).unwrap();
+    future
+        .pragma_update(None, "user_version", future_version)
+        .unwrap();
     drop(future);
 
     let error = initialize(&path).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("unsupported store schema version 5"));
+    assert!(error.to_string().contains(&format!(
+        "unsupported store schema version {future_version}"
+    )));
     let unchanged = Connection::open(&path).unwrap();
     let version: i64 = unchanged
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, future_version);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
     drop(unchanged);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

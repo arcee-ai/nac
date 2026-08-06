@@ -164,7 +164,12 @@ async fn cross_model_history_strips_foreign_reasoning_on_anthropic() {
     let body = s5_send_and_finish(
         &client,
         server,
-        s5_history(foreign, None, Some("foreign thinking"), Some(s5_reasoning_items())),
+        s5_history(
+            foreign,
+            None,
+            Some("foreign thinking"),
+            Some(s5_reasoning_items()),
+        ),
     )
     .await;
 
@@ -236,7 +241,12 @@ async fn cross_model_history_strips_foreign_reasoning_on_completions() {
     let body = s5_send_and_finish(
         &client,
         server,
-        s5_history(foreign, Some("reasoning_content"), Some("foreign thinking"), None),
+        s5_history(
+            foreign,
+            Some("reasoning_content"),
+            Some("foreign thinking"),
+            None,
+        ),
     )
     .await;
 
@@ -246,7 +256,10 @@ async fn cross_model_history_strips_foreign_reasoning_on_completions() {
         assistant.get("reasoning_content").is_none() && assistant.get("reasoning").is_none(),
         "foreign reasoning text is not replayed: {assistant}"
     );
-    assert!(assistant.get("tool_calls").is_some(), "tool calls preserved");
+    assert!(
+        assistant.get("tool_calls").is_some(),
+        "tool calls preserved"
+    );
 }
 
 #[tokio::test]
@@ -303,6 +316,7 @@ async fn together_reasoning_round_trips_under_the_reasoning_field() {
             tool_calls: None,
             model_origin: Some(client.model_origin()),
             reasoning_field: first.assistant.reasoning_field.clone(),
+            duration_ms: None,
         },
         Message::User {
             content: "continue".to_string(),

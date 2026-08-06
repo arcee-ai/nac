@@ -24,7 +24,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
@@ -55,7 +55,9 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
             .unwrap()
             .as_nanos();
         let store_path = std::env::temp_dir()
-            .join(format!("nac_agent_compaction_below_threshold_{label}_{unique}"))
+            .join(format!(
+                "nac_agent_compaction_below_threshold_{label}_{unique}"
+            ))
             .join("store.db");
         crate::store::initialize(&store_path).unwrap();
         crate::store::insert_test_session(&store_path, "session");
@@ -143,6 +145,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         },
@@ -267,6 +270,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         },

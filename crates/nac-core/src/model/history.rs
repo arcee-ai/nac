@@ -50,6 +50,7 @@ pub(crate) fn normalize_history(messages: Vec<Message>, current: &ModelOrigin) -
                 reasoning_text,
                 reasoning_details,
                 tool_calls,
+                duration_ms,
                 model_origin,
                 reasoning_field,
             } => {
@@ -64,6 +65,7 @@ pub(crate) fn normalize_history(messages: Vec<Message>, current: &ModelOrigin) -
                     reasoning_text: if foreign { None } else { reasoning_text },
                     reasoning_details: if foreign { None } else { reasoning_details },
                     tool_calls,
+                    duration_ms,
                     model_origin,
                     reasoning_field,
                 }
@@ -146,6 +148,7 @@ mod tests {
             reasoning_text: reasoning_text.map(str::to_string),
             reasoning_details,
             tool_calls,
+            duration_ms: None,
             model_origin,
             reasoning_field: None,
         }
@@ -224,7 +227,10 @@ mod tests {
             panic!("assistant message expected");
         };
         assert_eq!(reasoning_text, &None, "foreign reasoning text stripped");
-        assert_eq!(reasoning_details, &None, "foreign reasoning details stripped");
+        assert_eq!(
+            reasoning_details, &None,
+            "foreign reasoning details stripped"
+        );
         assert_eq!(content.as_deref(), Some("answer"), "content preserved");
         assert!(
             matches!(tool_calls, Some(calls) if calls.len() == 1),
@@ -274,7 +280,12 @@ mod tests {
     fn same_model_means_same_backend_and_same_model_id() {
         // A model switch within one provider is still a different origin.
         let other_model = origin(BackendKind::AnthropicMessages, "claude-sonnet-4-6");
-        let messages = vec![assistant(Some(other_model), None, Some(thinking_blocks()), None)];
+        let messages = vec![assistant(
+            Some(other_model),
+            None,
+            Some(thinking_blocks()),
+            None,
+        )];
 
         let normalized = normalize_history(messages, &current());
 
@@ -327,12 +338,7 @@ mod tests {
     fn trailing_cancelled_tool_turn_is_completed_not_dropped() {
         // The cancel-after-push shape: assistant with calls, no results, end
         // of history. The model API needs a result per call to continue.
-        let messages = vec![assistant(
-            None,
-            None,
-            None,
-            Some(vec![tool_call("call-9")]),
-        )];
+        let messages = vec![assistant(None, None, None, Some(vec![tool_call("call-9")]))];
 
         let normalized = normalize_history(messages, &current());
 

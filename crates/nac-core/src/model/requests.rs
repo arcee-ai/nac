@@ -1,3 +1,4 @@
+use super::pseudo_tool_calls::strip_native_tool_format_tags;
 use super::*;
 
 /// Wire value for an effort level that passed catalog validation (S4).
@@ -15,7 +16,10 @@ pub(super) fn validated_wire_effort(
     })
 }
 
-pub(super) fn completions_message_to_value(message: &Message, default_reasoning_field: &str) -> Value {
+pub(super) fn completions_message_to_value(
+    message: &Message,
+    default_reasoning_field: &str,
+) -> Value {
     match message {
         Message::System { content } => json!({
             "role": "system",
@@ -42,7 +46,9 @@ pub(super) fn completions_message_to_value(message: &Message, default_reasoning_
                 // other completions providers "reasoning_content"). Unstamped
                 // (legacy) messages fall back to the provider's catalog
                 // compat field (S6).
-                let field = reasoning_field.as_deref().unwrap_or(default_reasoning_field);
+                let field = reasoning_field
+                    .as_deref()
+                    .unwrap_or(default_reasoning_field);
                 value[field] = Value::String(reasoning_text.clone());
             }
             if let Some(tool_calls) = tool_calls {
@@ -59,6 +65,63 @@ pub(super) fn completions_message_to_value(message: &Message, default_reasoning_
             "tool_call_id": tool_call_id,
             "content": content,
         }),
+    }
+}
+
+/// Which assistant-message shape a completions request writes.
+///
+/// The wire protocol is otherwise the same for every provider on the
+/// completions axis, so the Arcee/Trinity deviation is carried here rather
+/// than in the catalog `Compat` data, which describes the protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompletionsMessageShape {
+    Standard,
+    Arcee,
+}
+
+/// Arcee/Trinity wire shape: strip leaked Hermes tool XML from history and
+/// always send `reasoning_content` on tool-call turns (even empty).
+///
+/// Kept off the generic OpenAI-compatible path so Fireworks / Together /
+/// DeepSeek keep a plain client. The empty-field inject is specifically for
+/// vLLM's deepseek_r1 template used in front of Trinity — omitting it is what
+/// routes the next tool call into reasoning as raw XML.
+pub(super) fn arcee_message_to_value(message: &Message) -> Value {
+    match message {
+        Message::Assistant {
+            content,
+            reasoning_text,
+            tool_calls,
+            ..
+        } => {
+            let content = content
+                .as_ref()
+                .map(|text| strip_native_tool_format_tags(text));
+            let reasoning = reasoning_text
+                .as_deref()
+                .map(strip_native_tool_format_tags)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty());
+            let has_tool_calls = tool_calls
+                .as_ref()
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
+
+            let mut value = json!({
+                "role": "assistant",
+                "content": content,
+            });
+            if has_tool_calls {
+                value["reasoning_content"] = Value::String(reasoning.unwrap_or_default());
+            } else if let Some(reasoning) = reasoning {
+                value["reasoning_content"] = Value::String(reasoning);
+            }
+            if let Some(tool_calls) = tool_calls {
+                value["tool_calls"] =
+                    serde_json::to_value(tool_calls).unwrap_or_else(|_| Value::Array(Vec::new()));
+            }
+            value
+        }
+        other => completions_message_to_value(other, "reasoning_content"),
     }
 }
 
@@ -84,6 +147,7 @@ pub(super) fn completions_chat_request(
     tools: &[ToolDefinition],
     thinking_levels: &ThinkingLevelMap,
     compat: &Compat,
+    message_shape: CompletionsMessageShape,
 ) -> Value {
     let default_reasoning_field = compat
         .completions_reasoning_field
@@ -93,7 +157,11 @@ pub(super) fn completions_chat_request(
         "model": model,
         "messages": messages
             .iter()
-            .map(|message| completions_message_to_value(message, default_reasoning_field))
+            .map(|message| match message_shape {
+                CompletionsMessageShape::Standard =>
+                    completions_message_to_value(message, default_reasoning_field),
+                CompletionsMessageShape::Arcee => arcee_message_to_value(message),
+            })
             .collect::<Vec<_>>(),
     });
     if let Some(temperature) = compat.completions_temperature {
@@ -164,10 +232,16 @@ pub(super) fn openai_responses_request(
         request["tool_choice"] = json!("auto");
         request["parallel_tool_calls"] = json!(true);
     }
+    // A summary is the only readable form of reasoning this API returns — the
+    // encrypted content exists to hand state back on the next turn, not to be
+    // shown — and it is requested even without an effort so the UI has thinking
+    // to display while the model works.
+    let mut reasoning = json!({"summary": "auto"});
     if let Some(effort) = reasoning_effort {
-        request["reasoning"] = json!({"effort": validated_wire_effort(thinking_levels, effort)});
-        request["include"] = json!(["reasoning.encrypted_content"]);
+        reasoning["effort"] = json!(validated_wire_effort(thinking_levels, effort));
     }
+    request["reasoning"] = reasoning;
+    request["include"] = json!(["reasoning.encrypted_content"]);
     request
 }
 

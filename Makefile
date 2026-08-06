@@ -3,6 +3,7 @@
 CARGO ?= cargo
 PKG := nac-server
 BIN := nac-web
+WEB_DIR := crates/$(PKG)/web
 
 DEV_BIND ?= 127.0.0.1:3210
 DEV_URL ?= http://$(DEV_BIND)/
@@ -71,9 +72,17 @@ test: test-rust test-assets
 test-rust:
 	$(CARGO) test --workspace --locked
 
+# Mirrors the release workflow: the bundle under assets/dist is committed, so a
+# stale one has to fail here rather than in CI.
 test-assets:
-	node --check crates/nac-server/assets/app.js
-	node --test crates/nac-server/assets/app.test.js
+	npm --prefix $(WEB_DIR) run lint
+	npm --prefix $(WEB_DIR) run typecheck
+	npm --prefix $(WEB_DIR) run build
+	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist)" ]; then \
+		printf '%s\n' "error: crates/$(PKG)/assets/dist is stale; commit the rebuilt bundle"; \
+		git status --porcelain -- crates/$(PKG)/assets/dist; \
+		exit 1; \
+	fi
 
 ## Type-check the workspace without producing binaries
 check:
@@ -103,7 +112,7 @@ help:
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  test         Run Rust tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
-		'  test-assets  Check/run Node web asset tests' \
+		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  check        Run cargo check --workspace --locked' \
 		'  fmt          Run rustfmt' \
 		'  clippy       Run clippy (CLIPPY_ARGS=-D warnings to fail on lints)' \

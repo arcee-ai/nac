@@ -125,7 +125,6 @@ fn empty_and_whitespace_env_vars_do_not_count_as_credentials() {
             "value {value:?}"
         );
     }
-
 }
 
 #[test]

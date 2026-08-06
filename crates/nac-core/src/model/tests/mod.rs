@@ -42,8 +42,7 @@ fn backoff_duration_stays_within_jitter_bounds() {
         for _ in 0..200 {
             let delay = backoff_duration(attempt);
             assert!(
-                delay >= Duration::from_millis(lower)
-                    && delay <= Duration::from_millis(upper),
+                delay >= Duration::from_millis(lower) && delay <= Duration::from_millis(upper),
                 "attempt {attempt} produced {delay:?} outside [{lower}ms, {upper}ms]"
             );
         }

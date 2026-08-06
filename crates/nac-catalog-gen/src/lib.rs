@@ -292,7 +292,9 @@ fn provider_default_base_url(
         return Ok(None);
     };
     normalize_base_url(raw)
-        .with_context(|| format!("models.dev provider '{models_dev_id}': invalid api base URL '{raw}'"))
+        .with_context(|| {
+            format!("models.dev provider '{models_dev_id}': invalid api base URL '{raw}'")
+        })
         .map(Some)
 }
 

@@ -38,7 +38,7 @@ fn transcript_test_agent(
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
@@ -116,6 +116,7 @@ fn plain_assistant(content: &str) -> Message {
         reasoning_text: None,
         reasoning_details: None,
         tool_calls: None,
+        duration_ms: None,
         model_origin: None,
         reasoning_field: None,
     }
@@ -139,6 +140,7 @@ fn tool_call_assistant(call_ids: &[&str]) -> Message {
                 })
                 .collect(),
         ),
+        duration_ms: None,
         model_origin: None,
         reasoning_field: None,
     }
@@ -786,7 +788,6 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-
 }
 
 #[tokio::test]
@@ -809,7 +810,8 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         })
         .to_string(),
     )]);
-    let mut agent = orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
 
     assert_eq!(agent.send("current").await.unwrap(), "stamped answer");
     server.finish();
@@ -824,7 +826,9 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         panic!("last message should be the assistant turn");
     };
     assert_eq!(
-        model_origin.as_ref().map(|origin| (origin.backend, origin.model.as_str())),
+        model_origin
+            .as_ref()
+            .map(|origin| (origin.backend, origin.model.as_str())),
         Some((crate::model::BackendKind::OpenAiResponses, "gpt-5.5")),
         "the push site stamps the client identity"
     );
@@ -842,7 +846,10 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
     else {
         panic!("last log row should be the assistant turn");
     };
-    assert_eq!(logged_origin, model_origin, "the durable row carries the stamp");
+    assert_eq!(
+        logged_origin, model_origin,
+        "the durable row carries the stamp"
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -862,7 +869,8 @@ async fn errored_turns_never_enter_the_transcript() {
         "400 Bad Request",
         serde_json::json!({"error": {"message": "bad request"}}).to_string(),
     )]);
-    let mut agent = orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
 
     let error = agent
         .send("current")

@@ -178,9 +178,12 @@ mod tests {
         .unwrap();
 
         let repo = root.join("repo");
-        let registry =
-            SkillRegistry::load(Some(&repo), SkillPathVisibility::Visible, &PathContext::new(&repo))
-                .unwrap();
+        let registry = SkillRegistry::load(
+            Some(&repo),
+            SkillPathVisibility::Visible,
+            &PathContext::new(&repo),
+        )
+        .unwrap();
         assert!(registry.is_none());
     }
 

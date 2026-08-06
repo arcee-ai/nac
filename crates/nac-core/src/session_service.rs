@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,7 @@ use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
     WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
 };
+use crate::workspace::GitTarget;
 
 mod manual_compaction;
 
@@ -169,6 +170,11 @@ pub struct SessionServiceInit {
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
     pub messages: Vec<Message>,
+    /// When each message was written to the transcript log, aligned with
+    /// `messages`. `None` for messages carried by the snapshot blob, which
+    /// predates the log and stores no per-message time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub message_created_at: Vec<Option<String>>,
     pub response_timing: ResponseTimingSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
@@ -247,6 +253,10 @@ pub struct MessageCycleMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
     pub messages: Vec<Message>,
+    /// Transcript-log row times, one per message. `None` where the message
+    /// predates the log (the snapshot blob carries no per-message time).
+    #[serde(default)]
+    pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -470,6 +480,11 @@ impl FrontendSnapshotAfterWorkspaceGate {
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     metadata: Arc<SessionMetadata>,
+    /// Where git runs for this session's checkout — locally, or on the ssh host
+    /// the session is working on. `None` for a sandbox with no mounted working
+    /// directory, which is why such a session gets no revisions: its files do
+    /// not outlive the container.
+    workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
@@ -621,9 +636,13 @@ impl SessionService {
             .agent
             .set_event_sink(EventSink::bus(event_bus.clone()));
 
+        let workspace_git = run_config.workspace_git;
         let metadata = SessionMetadata {
             cwd: run_config.workspace_display,
-            workspace_host_path: run_config.workspace_host_path,
+            workspace_host_path: workspace_git
+                .as_ref()
+                .and_then(|target| target.local_path())
+                .map(Path::to_path_buf),
             store_path,
             model: run_config.client.model.clone(),
             backend: run_config.client.backend().as_str().to_string(),
@@ -652,6 +671,7 @@ impl SessionService {
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
+            workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             transcript_log,
@@ -922,10 +942,7 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<FrontendSnapshotBlockingLoad> {
-        let workspace = view::workspace_snapshot(
-            &self.metadata.cwd,
-            self.metadata.workspace_host_path.as_deref(),
-        );
+        let workspace = self.workspace_snapshot();
         #[cfg(test)]
         if let Some(gate) = &self.frontend_snapshot_after_workspace_gate {
             gate.pause();
@@ -1080,10 +1097,7 @@ impl SessionService {
     }
 
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
-        view::workspace_snapshot(
-            &self.metadata.cwd,
-            self.metadata.workspace_host_path.as_deref(),
-        )
+        view::workspace_snapshot(&self.metadata.cwd, self.workspace_git.as_ref())
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
@@ -1133,16 +1147,22 @@ impl SessionService {
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
         };
         let loaded_messages = match options.messages {
-            FrontendSnapshotMessages::All => LoadedFrontendMessages {
-                messages: self.store_backed_transcript().await?,
-                page: None,
-                cycle: None,
-            },
+            FrontendSnapshotMessages::All => {
+                let messages = self.store_backed_transcript().await?;
+                let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                LoadedFrontendMessages {
+                    messages,
+                    created_at,
+                    page: None,
+                    cycle: None,
+                }
+            }
             FrontendSnapshotMessages::Page(request) => {
                 let page = self.page_store_transcript(request).await?;
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
                     messages: page.messages,
+                    created_at: page.created_at,
                     page: Some(page.page),
                     cycle: Some(cycle),
                 }
@@ -1158,6 +1178,7 @@ impl SessionService {
         let snapshot = SessionFrontendSnapshot {
             metadata,
             messages: loaded_messages.messages,
+            message_created_at: loaded_messages.created_at,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -1208,6 +1229,27 @@ impl SessionService {
         .await
         .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
         .map(|(tail_len, rows)| (tail_len as usize, rows))
+    }
+
+    /// Row creation times for the window [`Self::read_log_tail_window`]
+    /// returns. Empty for services without a transcript log (pickers).
+    async fn read_log_tail_window_times(
+        &self,
+        blob_len: usize,
+        tail_start: usize,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(Vec::new());
+        };
+        tokio::task::spawn_blocking(move || {
+            writer.read_tail_window_times(&session_id, blob_len as u64, tail_start as u64, limit)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail time read task failed: {error}"))?
     }
 
     /// Read the full transcript log tail relative to a snapshot blob of
@@ -1287,19 +1329,30 @@ impl SessionService {
         } else {
             Vec::new()
         };
-        let log_part: Vec<Message> = if end > blob_visible {
+        let (log_part, log_times): (Vec<Message>, Vec<String>) = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
+            let count = end - blob_visible - tail_start;
             let (_, rows) = self
-                .read_log_tail_window(blob_len, tail_start, end - blob_visible - tail_start)
+                .read_log_tail_window(blob_len, tail_start, count)
                 .await?;
-            rows.into_iter().map(|(_, message)| message).collect()
+            let times = self
+                .read_log_tail_window_times(blob_len, tail_start, count)
+                .await?;
+            (
+                rows.into_iter().map(|(_, message)| message).collect(),
+                times,
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
+        let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
+        created_at.extend(log_times.into_iter().map(Some));
         let mut messages = blob_part;
         messages.extend(log_part);
+        created_at.resize(messages.len(), None);
         Ok(MessagesPageSnapshot {
             messages,
+            created_at,
             page: MessagePageMetadata {
                 start,
                 end,
@@ -1307,6 +1360,260 @@ impl SessionService {
                 has_older: start > 0,
             },
         })
+    }
+
+    /// Length of the merged store transcript without decoding any of it.
+    async fn transcript_len(&self) -> Result<u64> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        let (tail_len, _) = self.read_log_tail_window(blob_len, 0, 0).await?;
+        Ok((blob_len + tail_len) as u64)
+    }
+
+    /// What the user typed to produce the message at `message_idx`, rather
+    /// than the expanded prompt the agent was handed: sending it again has to
+    /// go back through the same expansion, or a `/plan` would reach the model
+    /// as its own instruction sheet.
+    pub async fn user_input_at(&self, message_idx: usize) -> Result<String> {
+        let messages = self.store_backed_transcript().await?;
+        match messages.get(message_idx) {
+            Some(Message::User { content }) => Ok(commands::display_prompt_from_message(content)),
+            Some(_) => Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message can be sent again"
+            )),
+            None => Err(anyhow::anyhow!(
+                "message {message_idx} is not in this session's transcript"
+            )),
+        }
+    }
+
+    /// Take the session back to just before the user message at `message_idx`:
+    /// that message and everything after it leave the transcript, and the
+    /// checkout returns to the revision that was current when it was sent.
+    ///
+    /// Order matters. The checkout is restored first, because a git failure
+    /// there is recoverable — nothing has been forgotten yet — whereas a
+    /// transcript truncated against a checkout that then refuses to move would
+    /// leave the two describing different moments with no way back. Everything
+    /// after the truncation is bookkeeping that follows from it.
+    ///
+    /// This is destructive by design and has no undo: the callers above it are
+    /// responsible for holding the session's operation lease, so that no run is
+    /// writing to the transcript or the checkout while it happens.
+    pub async fn revert_to_message(&self, message_idx: usize) -> Result<RevertOutcome> {
+        let session_id =
+            self.metadata.session_id.clone().ok_or_else(|| {
+                anyhow::anyhow!("this session is not persisted, so it cannot revert")
+            })?;
+        let writer = self
+            .transcript_log
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| anyhow::anyhow!("this session has no transcript log to revert"))?;
+
+        let messages = self.store_backed_transcript().await?;
+        let target = messages.get(message_idx).ok_or_else(|| {
+            anyhow::anyhow!("message {message_idx} is not in this session's transcript")
+        })?;
+        if !matches!(target, Message::User { .. }) {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message marks a point to revert to"
+            ));
+        }
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        if message_idx < blob_len {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} predates this session's transcript log and cannot be reverted to"
+            ));
+        }
+
+        let store_path = self.metadata.store_path.clone();
+        let workspace_git = self.workspace_git.clone();
+        let revision = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::store::workspace_revision_at_transcript_len(
+                    &store_path,
+                    &session_id,
+                    message_idx as u64,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision lookup task failed: {error}"))??
+        };
+
+        let workspace_restored = match (&workspace_git, &revision) {
+            (Some(target), Some(revision)) => {
+                let target = target.clone();
+                let session_id = session_id.clone();
+                let commit = revision.commit_sha.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::workspace::restore(&target, &session_id, &commit)?;
+                    crate::workspace::rewind_ref(&target, &session_id, &commit)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("workspace restore task failed: {error}"))??;
+                true
+            }
+            _ => false,
+        };
+
+        {
+            let writer = Arc::clone(&writer);
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                writer.delete_from(&session_id, message_idx as u64)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+        }
+
+        let kept = &messages[..message_idx];
+        {
+            let mut agent = self.agent.lock().await;
+            agent.messages.truncate(message_idx);
+        }
+        {
+            let mut scan = self
+                .transcript_scan
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *scan = TranscriptScanCache::from_transcript(kept);
+        }
+
+        // The timing history is indexed by visible response, so it has to lose
+        // exactly the responses the transcript just lost, or every later run
+        // would attribute its duration to the wrong message.
+        let kept_responses = kept
+            .iter()
+            .filter(|message| is_visible_response(message))
+            .count();
+        let run_state_update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            snapshot.as_mut().map(|snapshot| {
+                let mut durations =
+                    response_duration_history_from_snapshot(snapshot, kept_responses);
+                durations.truncate(kept_responses);
+                let mut token_usages = snapshot.token_usages.clone();
+                token_usages.truncate(kept_responses);
+                // Not response-indexed, so a truncation has nothing to drop
+                // from it: the failed runs it accounts for stay accounted for.
+                let unattributed_token_usage = snapshot.unattributed_token_usage.clone();
+                let last = durations.last().copied().flatten();
+                let previous = durations
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|idx| durations.get(idx).copied().flatten());
+                snapshot.apply_run_state(sessions::SessionRunState {
+                    last_response_duration_ms: last,
+                    previous_response_duration_ms: previous,
+                    response_durations_ms: Some(durations),
+                    token_usages,
+                    unattributed_token_usage,
+                })
+            })
+        };
+        if let Some(update) = run_state_update {
+            let store_path = store_path.clone();
+            tokio::task::spawn_blocking(move || {
+                sessions::save_session_run_state(&store_path, &update)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("session run state task failed: {error}"))??;
+        }
+
+        let revisions_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            let keep_through_id = revision.as_ref().map(|revision| revision.id);
+            tokio::task::spawn_blocking(move || {
+                crate::store::delete_workspace_revisions_after(
+                    &store_path,
+                    &session_id,
+                    keep_through_id,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision prune task failed: {error}"))??
+        };
+
+        // Threads the discarded messages dispatched are work nothing can reach
+        // any more: the tool calls that named them are gone. A name the kept
+        // messages also dispatched stays whole, because the same rows carry the
+        // episodes of those earlier dispatches, which the transcript still
+        // refers to.
+        let orphaned_threads: Vec<String> = {
+            let kept_names = thread_tool_call_names(kept);
+            thread_tool_call_names(&messages[message_idx..])
+                .into_iter()
+                .filter(|name| {
+                    name != crate::store::ORCHESTRATOR_STEERING_TARGET && !kept_names.contains(name)
+                })
+                .collect()
+        };
+        let threads_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut removed = 0usize;
+                for name in orphaned_threads {
+                    if crate::store::delete_thread(&store_path, &session_id, &name)? {
+                        removed += 1;
+                    }
+                }
+                anyhow::Ok(removed)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
+        };
+
+        self.event_bus.emit(SessionEvent::TranscriptReverted {
+            transcript_len: message_idx as u64,
+        });
+
+        Ok(RevertOutcome {
+            transcript_len: message_idx,
+            messages_removed: messages.len() - message_idx,
+            workspace_restored,
+            revisions_removed,
+            threads_removed,
+        })
+    }
+
+    /// Per-message creation times aligned with [`Self::store_backed_transcript`],
+    /// which is why the caller passes the transcript length it already read:
+    /// an append landing between the two reads must not shift the alignment.
+    /// Blob messages predate the log and report `None`.
+    async fn store_backed_transcript_times(&self, total: usize) -> Result<Vec<Option<String>>> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        }
+        .min(total);
+        let mut times: Vec<Option<String>> = vec![None; blob_len];
+        if total > blob_len {
+            let tail = self
+                .read_log_tail_window_times(blob_len, 0, total - blob_len)
+                .await?;
+            times.extend(tail.into_iter().map(Some));
+        }
+        times.resize(total, None);
+        Ok(times)
     }
 
     /// Advance the incremental transcript scan over newly appended rows.
@@ -1567,7 +1874,6 @@ impl SessionService {
         // the following ordinary call completed.
         let cancel_usage = self.append_cancellation_message().await;
 
-        let message = "run cancelled by user".to_string();
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
@@ -1587,16 +1893,19 @@ impl SessionService {
             }
         };
 
-        let terminal_message = match persistence_error {
-            Some(error) => {
-                format!("{message}\nAdditionally, failed to persist session snapshot: {error}")
-            }
-            None => message,
+        // Cancellation is not a failure, so it gets its own terminal event and
+        // the UI keeps the "stopped by user" story it already told. A snapshot
+        // that could not be persisted is a real fault and still says so.
+        let terminal_event = match persistence_error {
+            Some(error) => SessionEvent::RunFailed {
+                message: format!(
+                    "run cancelled by user\nAdditionally, failed to persist session snapshot: {error}"
+                ),
+            },
+            None => SessionEvent::RunCancelled,
         };
         self.event_bus.emit_with_context(
-            SessionEvent::RunFailed {
-                message: terminal_message,
-            },
+            terminal_event,
             Some(cancelling_run.snapshot.run_id.clone()),
             cancelling_run.snapshot.client_id.clone(),
         );
@@ -1657,6 +1966,10 @@ impl SessionService {
                         .await;
                 }
                 Err(message) => {
+                    // The published event is deliberately reduced to "run
+                    // failed", so the operator's log is the only place the real
+                    // reason can be read.
+                    eprintln!("nac: run failed: {message}");
                     service
                         .finish_run_once(&task_run_id, RunOutcome::Failed(message, usage))
                         .await;
@@ -1783,6 +2096,13 @@ impl SessionService {
         }));
         drop(guard);
 
+        if let Some(session_id) = self.metadata.session_id.as_deref() {
+            if let Err(error) = sessions::increment_run_count(&self.metadata.store_path, session_id)
+            {
+                eprintln!("nac: failed to record run count: {error:#}");
+            }
+        }
+
         self.event_bus.emit_with_context(
             SessionEvent::RunStarted {
                 prompt_preview: active_run.prompt_preview.clone(),
@@ -1827,6 +2147,9 @@ impl SessionService {
             }
         };
 
+        self.capture_workspace_revision(&finishing_run.snapshot)
+            .await;
+
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
@@ -1848,6 +2171,59 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    /// Freeze the checkout as it stands now, so the run can be revisited later.
+    ///
+    /// A revision is a convenience, never a precondition for anything, so every
+    /// failure here is reported and swallowed: a repository nac cannot capture
+    /// still gets its run finished normally.
+    async fn capture_workspace_revision(&self, run: &ActiveRunSnapshot) {
+        let (Some(session_id), Some(target)) =
+            (self.metadata.session_id.clone(), self.workspace_git.clone())
+        else {
+            return;
+        };
+        let store_path = self.metadata.store_path.clone();
+        let run_id = run.run_id.to_string();
+        let label = run.prompt_preview.clone();
+        // Recorded now rather than derived later: this is the only moment we
+        // can say for certain which transcript prefix the captured files go
+        // with, and a revert has nothing else to key off.
+        let transcript_len = self.transcript_len().await.ok();
+
+        let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
+            let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
+                .map(|revision| revision.commit_sha);
+            let captured = crate::workspace::capture(&target, &session_id, previous.as_deref())?;
+            crate::store::append_workspace_revision(
+                &store_path,
+                &session_id,
+                crate::store::NewWorkspaceRevision {
+                    run_id,
+                    commit_sha: captured.commit,
+                    base_sha: captured.base,
+                    branch: captured.branch,
+                    label,
+                    additions: captured.additions,
+                    deletions: captured.deletions,
+                    changed_files: captured.changed_files,
+                    transcript_len,
+                },
+            )?;
+            Ok(())
+        })
+        .await;
+
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("nac: failed to capture workspace revision: {error:#}");
+            }
+            Err(error) => {
+                eprintln!("nac: workspace revision task failed: {error}");
+            }
+        }
     }
 
     /// Run-failure transcript normalization: a run that fails at the
@@ -2098,8 +2474,20 @@ impl SessionService {
     }
 }
 
+/// What a revert left behind, so the caller can report it without re-reading
+/// everything the revert just changed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevertOutcome {
+    pub transcript_len: usize,
+    pub messages_removed: usize,
+    pub workspace_restored: bool,
+    pub revisions_removed: usize,
+    pub threads_removed: usize,
+}
+
 struct LoadedFrontendMessages {
     messages: Vec<Message>,
+    created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
 }
@@ -2195,6 +2583,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
         .collect();
     MessagesPageSnapshot {
         messages,
+        created_at: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,
@@ -2455,6 +2844,7 @@ pub(super) mod tests {
                 reasoning_text: Some("reasoning without visible content".to_string()),
                 reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
                 tool_calls: None,
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2480,6 +2870,7 @@ pub(super) mod tests {
                     thread_call("thread-malformed", r#"{"name":"broken"#),
                     thread_call("thread-empty", r#"{"name":"   "}"#),
                 ]),
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2492,6 +2883,7 @@ pub(super) mod tests {
                 reasoning_text: Some("new reasoning".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2506,6 +2898,7 @@ pub(super) mod tests {
                     "thread-alpha",
                     r#"{"name":"alpha","action":"inside the cycle"}"#,
                 )]),
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2518,6 +2911,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2538,6 +2932,7 @@ pub(super) mod tests {
         let start = end.saturating_sub(request.limit.max(1));
         MessagesPageSnapshot {
             messages: visible[start..end].to_vec(),
+            created_at: Vec::new(),
             page: MessagePageMetadata {
                 start,
                 end,
@@ -2640,7 +3035,7 @@ pub(super) mod tests {
                 working_directory: "/repo".to_string(),
                 worker_executable: None,
                 sandbox: None,
-                ssh_host: None,
+                ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -2662,7 +3057,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         })
     }
@@ -2703,7 +3098,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
@@ -2762,6 +3157,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             },
@@ -2843,7 +3239,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
@@ -3170,6 +3566,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                     model_origin: None,
                     reasoning_field: None,
                 },
@@ -3185,6 +3582,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         });
@@ -3292,7 +3690,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -3643,6 +4041,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         };
@@ -3930,7 +4329,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "loaded".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -3980,7 +4379,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4004,6 +4403,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                     model_origin: None,
                     reasoning_field: None,
                 })
@@ -4126,6 +4526,7 @@ pub(super) mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
                         model_origin: None,
                         reasoning_field: None,
                     })
@@ -4213,6 +4614,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         });
@@ -4252,7 +4654,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4338,7 +4740,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4358,6 +4760,7 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
                     model_origin: None,
                     reasoning_field: None,
                 })
@@ -4454,7 +4857,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4718,7 +5121,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         // Inject the log failure precisely at the tool-result commit point:
@@ -4881,7 +5284,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4902,6 +5305,7 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
                 model_origin: None,
                 reasoning_field: None,
             });
@@ -4969,7 +5373,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut agent_events = parts.service.subscribe_agent_events();
@@ -5079,7 +5483,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5273,6 +5677,7 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
             model_origin: None,
             reasoning_field: None,
         });
@@ -5303,7 +5708,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5395,7 +5800,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -5474,14 +5879,9 @@ pub(super) mod tests {
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
-        let failed = events.recv().await.unwrap();
-        assert_eq!(failed.run_id.as_ref(), Some(&active.run_id));
-        assert_eq!(
-            failed.event,
-            SessionEvent::RunFailed {
-                message: "run failed".to_string()
-            }
-        );
+        let cancelled = events.recv().await.unwrap();
+        assert_eq!(cancelled.run_id.as_ref(), Some(&active.run_id));
+        assert_eq!(cancelled.event, SessionEvent::RunCancelled);
         assert!(parts.service.active_run().is_none());
         assert!(parts.service.active_thread_names().await.is_empty());
         assert!(crate::store::list_thread_steering(&store_path, &session_id)
@@ -5530,7 +5930,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();

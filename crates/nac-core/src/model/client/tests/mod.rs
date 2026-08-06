@@ -131,6 +131,7 @@ fn s5_history(
             tool_calls: Some(vec![s5_tool_call("call-1")]),
             model_origin: origin,
             reasoning_field: reasoning_field.map(str::to_string),
+            duration_ms: None,
         },
         Message::Tool {
             tool_call_id: "call-1".to_string(),
