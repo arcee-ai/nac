@@ -919,7 +919,14 @@ async fn post_codex_json_with_retry(
         if status.is_success() {
             // Reading the body incrementally forfeits the retry: by the time a
             // read fails the caller has already seen part of the answer.
-            if let Some(on_delta) = on_delta.filter(|_| is_event_stream(content_type.as_deref())) {
+            //
+            // Codex often omits Content-Type on streamed responses. We already
+            // asked for an event stream (`Accept` + `stream: true`), and the
+            // buffered fallback detects SSE from `data:` lines — so a missing
+            // header must not force the non-streaming path and drop live deltas.
+            if let Some(on_delta) = on_delta.filter(|_| {
+                content_type.is_none() || is_event_stream(content_type.as_deref())
+            }) {
                 return stream_codex_responses(response, url, status, on_delta).await;
             }
             let response_body = read_codex_body(response, url, status).await?;

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -29,7 +29,11 @@ import {
   routes,
   type SessionPanel,
 } from "@/app/lib/routes";
-import { useSessionSnapshot, useSessionSummary } from "@/app/services/queries";
+import {
+  useSessionSnapshot,
+  useSessionSummary,
+  useSshConnect,
+} from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
   resetSessionSelection,
@@ -39,6 +43,54 @@ import {
   useSidePanelCollapsed,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
+import {
+  markSshConnected,
+  markSshDisconnected,
+  sshTargetFromSummary,
+  sshTargetKey,
+  useSshConnectionStatus,
+} from "@/app/store/sshConnectionStore";
+
+/**
+ * Opens an SSH browse handshake once when landing on a remote session that is
+ * not already marked connected. A failed attempt stays disconnected so the
+ * chat badge can offer a manual reconnect.
+ */
+function useAutoSshConnect(
+  sessionId: string | null,
+  summary:
+    | {
+        ssh_host: string | null;
+        ssh_port?: number;
+        ssh_identity_file?: string;
+      }
+    | null
+    | undefined,
+) {
+  const target = useMemo(() => sshTargetFromSummary(summary), [summary]);
+  const status = useSshConnectionStatus(target);
+  const connect = useSshConnect();
+  const attemptedKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    attemptedKey.current = null;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!target) return;
+    const key = sshTargetKey(target);
+    if (status === "connected") {
+      attemptedKey.current = key;
+      return;
+    }
+    if (attemptedKey.current === key || connect.isPending) return;
+    attemptedKey.current = key;
+    void connect
+      .mutateAsync(target)
+      .then(() => markSshConnected(target))
+      .catch(() => markSshDisconnected(target));
+  }, [target, status, connect]);
+}
 
 /** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
@@ -58,6 +110,7 @@ export default function SessionPage() {
   const expanded = useSidePanelExpanded();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
+  useAutoSshConnect(id, entry?.summary);
 
   useEffect(() => {
     if (id) clearAttention(id);

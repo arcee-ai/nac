@@ -70,6 +70,12 @@ interface RuntimeState {
    * the renderer drops whichever part the snapshot already covers.
    */
   streamSettled: boolean;
+  /**
+   * Prompt shown in the chat from the moment Send is pressed until the
+   * snapshot (or active_run) catches up. Without this the model pill appears
+   * first and jumps down when the user bubble finally lands.
+   */
+  optimisticUserPrompt: string | null;
 }
 
 export const runtimeStore = createStore<RuntimeState>(
@@ -85,6 +91,7 @@ export const runtimeStore = createStore<RuntimeState>(
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
+    optimisticUserPrompt: null,
   },
   "runtime",
 );
@@ -106,7 +113,13 @@ export function resetRuntime(sessionId: string | null): void {
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
+    optimisticUserPrompt: null,
   });
+}
+
+/** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
+export function setOptimisticUserPrompt(prompt: string | null): void {
+  setState({ optimisticUserPrompt: prompt });
 }
 
 /**
@@ -450,4 +463,6 @@ export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
 export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);
+export const useOptimisticUserPrompt = () =>
+  useStore((s) => s.optimisticUserPrompt);
 export { getState as getRuntimeState };

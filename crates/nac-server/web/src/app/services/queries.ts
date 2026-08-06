@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
+import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   BackendKind,
   BranchList,
@@ -27,6 +28,9 @@ import type {
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  SshConfigurationList,
+  CreateSshConfigurationRequest,
+  UpdateSshConfigurationRequest,
   SshTarget,
   StoredCredentialList,
   StoreInfo,
@@ -49,6 +53,7 @@ export const queryKeys = {
   credentials: ["credentials"] as const,
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
+  sshConfigs: ["ssh-configs"] as const,
   browse: (path: string, kind: BrowseKind) => ["fs-browse", { path, kind }] as const,
   sshBrowse: (target: SshTarget, path: string) =>
     [
@@ -235,6 +240,52 @@ export function useSshConnect() {
       // Seeding the home listing means the picker opens without a second round
       // trip over a connection that was just paid for.
       client.setQueryData(queryKeys.sshBrowse(target, ""), listing);
+    },
+  });
+}
+
+export function useSshConfigs() {
+  return useQuery<SshConfigurationList>({
+    queryKey: queryKeys.sshConfigs,
+    queryFn: ({ signal }) => api.listSshConfigs(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useCreateSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateSshConfigurationRequest) =>
+      api.createSshConfig(payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
+    },
+  });
+}
+
+export function useUpdateSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      configId,
+      payload,
+    }: {
+      configId: string;
+      payload: UpdateSshConfigurationRequest;
+    }) => api.updateSshConfig(configId, payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
+    },
+  });
+}
+
+export function useDeleteSshConfig() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (configId: string) => api.deleteSshConfig(configId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
     },
   });
 }
@@ -654,6 +705,12 @@ export function useSubmitRun() {
   return useMutation({
     mutationFn: ({ id, prompt }: { id: string; prompt: string }) =>
       api.submitRun(id, prompt),
+    onMutate: ({ prompt }) => {
+      setOptimisticUserPrompt(prompt);
+    },
+    onError: () => {
+      setOptimisticUserPrompt(null);
+    },
     onSuccess: (_data, { id }) => invalidate.session(id),
   });
 }

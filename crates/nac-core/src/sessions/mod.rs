@@ -152,6 +152,9 @@ pub struct SessionSummary {
     /// Billable tokens accumulated over the whole session, or `None` when no
     /// response ever reported usage.
     pub total_tokens: Option<u64>,
+    /// Micro-USD spend accumulated over the session, or `None` when no response
+    /// ever reported usage. Zero means the catalog had no rates for the model.
+    pub total_cost_micros: Option<u64>,
     /// Number of runs ever started in this session.
     pub run_count: u64,
 }

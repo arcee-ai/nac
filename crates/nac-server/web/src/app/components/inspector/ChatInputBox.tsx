@@ -13,23 +13,36 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
+import { SshBadge } from "@/app/components/SshBadge";
 import {
   resolveCatalogModel,
   type ResolvedCatalogModel,
 } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
+  ENV_SSH,
   formatClock,
   formatCostMicros,
   formatTokensCompact,
   runMetrics,
+  sessionEnvLabel,
 } from "@/app/lib/format";
 import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { useModelCatalog, useSubmitRun } from "@/app/services/queries";
+import {
+  useModelCatalog,
+  useSshConnect,
+  useSubmitRun,
+} from "@/app/services/queries";
 import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
+import {
+  markSshConnected,
+  markSshDisconnected,
+  sshTargetFromSummary,
+  useSshConnectionStatus,
+} from "@/app/store/sshConnectionStore";
 import type {
   ManagedSessionSummary,
   SessionSnapshotResponse,
@@ -46,18 +59,20 @@ interface ChatInputBoxProps {
 function StatBadge({
   iconName,
   value,
+  iconSize = 14,
   className,
   title,
 }: {
   iconName: IconName;
   value: string;
+  iconSize?: 14 | 16;
   className?: string;
   title: string;
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
       <div className={cn("flex items-center gap-[2px] py-1", className)}>
-        <Icon iconName={iconName} size={16} />
+        <Icon iconName={iconName} size={iconSize} />
         <span className="label-micro">{value}</span>
       </div>
     </Tooltip>
@@ -123,8 +138,24 @@ export function ChatInputBox({
     ? now - metrics.startedAt
     : metrics.lastResponseMs;
 
+  const sshTarget = sshTargetFromSummary(entry?.summary);
+  const sshStatus = useSshConnectionStatus(sshTarget);
+  const connectSsh = useSshConnect();
+  const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
+
   const busy = submitRun.isPending || running;
   const canSend = Boolean(value.trim()) && !busy;
+
+  const reconnectSsh = useCallback(async () => {
+    if (!sshTarget || connectSsh.isPending) return;
+    try {
+      await connectSsh.mutateAsync(sshTarget);
+      markSshConnected(sshTarget);
+    } catch (error) {
+      markSshDisconnected(sshTarget);
+      toast.error(`SSH reconnect failed: ${errorMessage(error)}`);
+    }
+  }, [sshTarget, connectSsh, toast]);
 
   const submit = useCallback(async () => {
     const prompt = value.trim();
@@ -218,12 +249,19 @@ export function ChatInputBox({
             disabled={busy}
           />
 
-          <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
-            {metrics.env}
-          </span>
+          {isSsh ? (
+            <SshBadge
+              state={sshStatus === "connected" ? "connected" : "reconnect"}
+              onReconnect={() => void reconnectSsh()}
+            />
+          ) : (
+            <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
+              {metrics.env}
+            </span>
+          )}
 
           {metrics.usage ? (
-            <div className="flex items-center gap-1 min-w-0">
+            <div className="flex items-center gap-[2px] min-w-0">
               {/* The backend reports the live context window here, not a sum
                   of the columns beside it. */}
               <StatBadge
@@ -244,38 +282,44 @@ export function ChatInputBox({
                 className="text-info-secondary opacity-75"
                 title="Output tokens"
               />
-              {/* Priced from the model catalog, so a model the catalog has no
-                  rates for shows "--" rather than a misleading zero. */}
-              <StatBadge
-                iconName={IconName.Money}
-                value={formatCostMicros(metrics.usage.cost?.total)}
-                className="text-info-secondary opacity-75"
-                title="Session cost"
-              />
             </div>
           ) : null}
         </div>
 
-        <Tooltip
-          title={running ? "Run elapsed" : "Last response time"}
-          position={TooltipPosition.TopRight}
-        >
-          <div
-            className={cn(
-              "flex items-center gap-1 p-1 shrink-0 label-micro",
-              running ? "text-basic-primary" : "text-basic-tertiary",
-            )}
+        <div className="flex items-center gap-2.5 shrink-0">
+          {/* Priced from the model catalog, so a model the catalog has no
+              rates for shows "--" rather than a misleading zero. */}
+          {metrics.usage ? (
+            <StatBadge
+              iconName={IconName.Price}
+              iconSize={16}
+              value={formatCostMicros(metrics.usage.cost?.total)}
+              className="text-basic-primary"
+              title="Session cost"
+            />
+          ) : null}
+
+          <Tooltip
+            title={running ? "Run elapsed" : "Last response time"}
+            position={TooltipPosition.TopRight}
           >
-            {running ? (
-              <Loader size={LoaderSize.Small} />
-            ) : (
-              <Icon iconName={IconName.History} size={16} />
-            )}
-            <span className="block w-[36px] text-center">
-              {formatClock(elapsedMs)}
-            </span>
-          </div>
-        </Tooltip>
+            <div
+              className={cn(
+                "flex items-center gap-1 p-1 shrink-0 label-micro",
+                running ? "text-basic-primary" : "text-basic-tertiary",
+              )}
+            >
+              {running ? (
+                <Loader size={LoaderSize.Small} />
+              ) : (
+                <Icon iconName={IconName.History} size={16} />
+              )}
+              <span className="block w-[40px] text-center">
+                {formatClock(elapsedMs)}
+              </span>
+            </div>
+          </Tooltip>
+        </div>
       </div>
     </form>
   );

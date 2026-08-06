@@ -3,6 +3,8 @@ import { useState } from "react";
 import {
   Icon,
   IconName,
+  Loader,
+  LoaderSize,
   SessionAvatar,
   Tooltip,
   TooltipPosition,
@@ -11,6 +13,7 @@ import { cn } from "@/app/lib/cn";
 import {
   displaySessionTitle,
   formatClock,
+  formatCostMicros,
   isActiveRun,
   sessionEnvLabel,
 } from "@/app/lib/format";
@@ -52,11 +55,22 @@ function surfaceToken({
   return selected ? SURFACE_TOKENS.selected : SURFACE_TOKENS.default;
 }
 
-function RunCount({ runs }: { runs: number }) {
+function Metrics({ summary }: { summary: SessionSummarySnapshot }) {
+  const costLabel =
+    summary.total_cost_micros != null && summary.total_cost_micros > 0
+      ? formatCostMicros(summary.total_cost_micros)
+      : null;
   return (
-    <span className="text-micro text-info-primary whitespace-nowrap">
-      {runs} {runs === 1 ? "Run" : "Runs"}
-    </span>
+    <div className="flex items-center gap-2.5 shrink-0 min-w-0">
+      {costLabel ? (
+        <span className="text-micro text-basic-primary whitespace-nowrap">
+          {costLabel}
+        </span>
+      ) : null}
+      <span className="text-micro text-info-primary whitespace-nowrap truncate">
+        {summary.run_count} {summary.run_count === 1 ? "Run" : "Runs"}
+      </span>
+    </div>
   );
 }
 
@@ -64,14 +78,14 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
   const provider = providerLabel(summary.backend);
   return (
     <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
+      <span className="label-micro text-basic-tertiary">
+        {sessionEnvLabel(summary)}
+      </span>
       {provider ? (
         <span className="text-micro text-basic-muted truncate max-w-[128px]">
           {provider}
         </span>
       ) : null}
-      <span className="label-micro text-basic-tertiary">
-        {sessionEnvLabel(summary)}
-      </span>
     </div>
   );
 }
@@ -115,8 +129,8 @@ export function SessionCard({
   const [focused, setFocused] = useState(false);
   const [pressed, setPressed] = useState(false);
 
-  // The bottom row swaps metrics for the id and actions as soon as the card is
-  // the user's focus, which is also how the design shows the Focused state.
+  // The bottom row swaps provenance for actions as soon as the card is the
+  // user's focus, which is also how the design shows the Focused state.
   const showActions = hover || focused || selected;
 
   const activate = () => onOpen(id);
@@ -170,6 +184,16 @@ export function SessionCard({
           style={{ borderColor: "var(--blue-500)" }}
         />
       ) : null}
+      {attention ? (
+        <Tooltip
+          title="Run finished"
+          position={TooltipPosition.BottomLeft}
+          sticky
+          className="absolute left-2 top-2 z-1"
+        >
+          <span className="block size-2 rounded-full bg-accent-primary" />
+        </Tooltip>
+      ) : null}
 
       <div className="relative flex items-center gap-4 w-full">
         <SessionAvatar id={id} size={40} isRunning={running} />
@@ -180,15 +204,6 @@ export function SessionCard({
                 iconName={IconName.Pin}
                 className="text-basic-secondary shrink-0"
               />
-            ) : null}
-            {attention ? (
-              <Tooltip
-                title="Run finished"
-                position={TooltipPosition.BottomLeft}
-                sticky
-              >
-                <span className="block w-2 h-2 rounded-full bg-accent-primary shrink-0" />
-              </Tooltip>
             ) : null}
             <div
               className={cn(
@@ -211,10 +226,11 @@ export function SessionCard({
               </Tooltip>
             ) : null}
             {running ? (
-              <div className="flex items-center gap-1 shrink-0 w-[48px] justify-center">
+              <div className="flex items-center gap-1 shrink-0">
                 <span className="text-basic-primary text-sm leading-5">
                   {clock}
                 </span>
+                <Loader size={LoaderSize.Small} />
               </div>
             ) : null}
           </div>
@@ -225,7 +241,7 @@ export function SessionCard({
       </div>
 
       <div className="relative flex items-center justify-between w-full h-6 gap-2">
-        <RunCount runs={summary.run_count} />
+        <Metrics summary={summary} />
         {showActions ? (
           <SessionCardActions
             pinned={Boolean(summary.pinned)}

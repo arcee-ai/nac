@@ -51,6 +51,7 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
@@ -446,6 +447,33 @@ pub struct UpdateModelConfigurationRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelConfigurationList {
     pub configurations: Vec<ModelConfigurationRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateSshConfigurationRequest {
+    pub name: String,
+    pub ssh_host: String,
+    pub ssh_port: Option<u16>,
+    pub ssh_identity_file: Option<String>,
+}
+
+/// Edits a saved SSH setup in place. Every field is tri-state: omit it to keep
+/// what is stored, send null to clear it, send a value to replace it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateSshConfigurationRequest {
+    #[serde(default)]
+    pub name: RequestField<String>,
+    #[serde(default)]
+    pub ssh_host: RequestField<String>,
+    #[serde(default)]
+    pub ssh_port: RequestField<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: RequestField<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SshConfigurationList {
+    pub configurations: Vec<SshConfigurationRecord>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1968,6 +1996,14 @@ fn api_router(manager: SessionManager) -> Router {
             "/model-configs/{config_id}/models",
             post(saved_model_config_models_handler),
         )
+        .route(
+            "/ssh-configs",
+            get(list_ssh_configs_handler).post(create_ssh_config_handler),
+        )
+        .route(
+            "/ssh-configs/{config_id}",
+            patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
+        )
         .route("/auth", get(managed_auth::list_handler))
         .route("/auth/{provider}", delete(managed_auth::logout_handler))
         .route(
@@ -2646,6 +2682,76 @@ async fn delete_model_config_handler(
     {
         let _ = remove_api_key(name);
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_ssh_configs_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<SshConfigurationList>, ApiError> {
+    let configurations = ssh_configurations::list_ssh_configurations(&manager.inner.store_path)?;
+    Ok(Json(SshConfigurationList { configurations }))
+}
+
+/// Save a named SSH connection under a reusable setup.
+async fn create_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<CreateSshConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<SshConfigurationRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let id = uuid::Uuid::new_v4();
+    let configuration = ssh_configurations::NewSshConfiguration {
+        name: request.name,
+        ssh_host: request.ssh_host,
+        ssh_port: request.ssh_port,
+        ssh_identity_file: request.ssh_identity_file,
+    };
+    let record = ssh_configurations::insert_ssh_configuration(
+        &manager.inner.store_path,
+        &id.to_string(),
+        configuration,
+    )?;
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+/// Edit a saved SSH setup, keeping whatever the request leaves out.
+async fn update_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateSshConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<Json<SshConfigurationRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let existing =
+        ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
+
+    let configuration = ssh_configurations::NewSshConfiguration {
+        name: replaceable_text(request.name, &existing.name),
+        ssh_host: replaceable_text(request.ssh_host, &existing.ssh_host),
+        ssh_port: match request.ssh_port {
+            RequestField::Value(port) => Some(port),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.ssh_port,
+        },
+        ssh_identity_file: match request.ssh_identity_file {
+            RequestField::Value(path) => Some(path),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.ssh_identity_file.clone(),
+        },
+    };
+
+    let record = ssh_configurations::update_ssh_configuration(
+        &manager.inner.store_path,
+        &config_id,
+        configuration,
+    )?;
+    Ok(Json(record))
+}
+
+async fn delete_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
+    ssh_configurations::delete_ssh_configuration(&manager.inner.store_path, &config_id)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3525,6 +3631,21 @@ impl From<ModelConfigurationStoreError> for ApiError {
             ModelConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
             ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<SshConfigurationStoreError> for ApiError {
+    fn from(error: SshConfigurationStoreError) -> Self {
+        let status = match &error {
+            SshConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            SshConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            SshConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            SshConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
             status,

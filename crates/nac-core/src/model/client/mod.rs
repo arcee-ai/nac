@@ -414,10 +414,10 @@ impl ModelClient {
             .as_deref()
             .unwrap_or("reasoning_content");
         let value = match self.backend {
-            // The stored-login flow needs a token refresh around the request, so
-            // it keeps the buffered path regardless of who is watching.
+            // Stored-login still refreshes the token around the request; once we
+            // have a Bearer it can take the same streaming path as arcee-api.
             BackendKind::ArceeAuth => {
-                self.post_arcee_auth_with_refresh(url.as_str(), &request)
+                self.post_arcee_auth_with_refresh(url.as_str(), request, reasoning_field, on_delta)
                     .await?
             }
             _ => {
@@ -534,18 +534,32 @@ impl ModelClient {
 
     /// Sends an `arcee-auth` inference request using a device-flow access token,
     /// refreshing proactively before the request and once more on a 401 fallback.
-    async fn post_arcee_auth_with_refresh(&self, url: &str, body: &Value) -> Result<Value> {
+    async fn post_arcee_auth_with_refresh(
+        &self,
+        url: &str,
+        mut body: Value,
+        reasoning_field: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<Value> {
         debug_assert!(matches!(
             self.arcee_credential_source,
             Some(ArceeCredentialSource::StoredLogin)
         ));
+        let stream = on_delta.is_some();
+        if stream {
+            body["stream"] = Value::Bool(true);
+            body["stream_options"] = json!({"include_usage": true});
+        }
         let token = arcee::fresh_access_token(&self.client, &self.base_url).await?;
-        match self.try_post_arcee_auth(url, body, &token).await {
+        match self
+            .try_post_arcee_auth(url, &body, &token, reasoning_field, on_delta)
+            .await
+        {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
                 let refreshed =
                     arcee::force_refresh_access_token(&self.client, &self.base_url, &token).await?;
-                self.try_post_arcee_auth(url, body, &refreshed)
+                self.try_post_arcee_auth(url, &body, &refreshed, reasoning_field, on_delta)
                     .await
                     .map_err(|error| anyhow!(error.message))
             }
@@ -558,7 +572,24 @@ impl ModelClient {
         url: &str,
         body: &Value,
         token: &str,
+        reasoning_field: &str,
+        on_delta: DeltaSink<'_>,
     ) -> std::result::Result<Value, ModelHttpError> {
+        if let Some(on_delta) = on_delta {
+            // Same forfeit-retry rule as the other SSE adapters: once chunks
+            // have been forwarded, a mid-stream failure cannot be retried.
+            let response = self
+                .send_with_retry_headers(url, body, |request| {
+                    request.header("Authorization", format!("Bearer {token}"))
+                })
+                .await?;
+            return read_sse_response(url, response, ChatStreamFold::new(Some(on_delta), reasoning_field))
+                .await
+                .map_err(|error| ModelHttpError {
+                    status: None,
+                    message: error.to_string(),
+                });
+        }
         self.try_post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {token}"))
         })

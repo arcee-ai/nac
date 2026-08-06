@@ -316,56 +316,68 @@ export function ThreadsView({
   }, [threads, runningNames, sessionId]);
 
   if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
-  if (ordered.length === 0) {
-    return <PanelEmpty>No threads yet for this session.</PanelEmpty>;
-  }
 
   const current =
-    ordered.find((thread) => thread.name === selected) ?? ordered[0];
-  const live = liveThreads[current.name];
+    ordered.find((thread) => thread.name === selected) ?? ordered[0] ?? null;
+  const live = current ? liveThreads[current.name] : undefined;
 
   return (
     <PanelSplit
-      list={ordered.map((thread) => {
-        const running = runningNames.has(thread.name);
-        const errored = liveThreads[thread.name]?.isError;
-        return (
-          <PanelRow
-            key={thread.name}
-            label={thread.name}
-            active={thread.name === current.name}
-            icon={
-              running ? (
-                <Loader
-                  size={LoaderSize.Micro}
-                  variant={LoaderVariant.Neutral}
-                />
-              ) : (
-                <Icon
-                  iconName={errored ? IconName.Danger : IconName.CheckCircle}
-                  size={16}
-                  className={cn("shrink-0", errored && "text-error-primary")}
-                />
-              )
-            }
-            trailing={
-              <span className="code code-micro text-basic-muted shrink-0">
-                {thread.episode_count}
-              </span>
-            }
-            onClick={() => onSelect(thread.name)}
-          />
-        );
-      })}
+      list={
+        ordered.length === 0 ? (
+          <div className="p-1 label-micro text-basic-muted">
+            No threads yet for this session.
+          </div>
+        ) : (
+          ordered.map((thread) => {
+            const running = runningNames.has(thread.name);
+            const errored = liveThreads[thread.name]?.isError;
+            return (
+              <PanelRow
+                key={thread.name}
+                label={thread.name}
+                active={thread.name === current?.name}
+                icon={
+                  running ? (
+                    <Loader
+                      size={LoaderSize.Micro}
+                      variant={LoaderVariant.Neutral}
+                    />
+                  ) : (
+                    <Icon
+                      iconName={errored ? IconName.Danger : IconName.CheckCircle}
+                      size={16}
+                      className={cn(
+                        "shrink-0",
+                        errored && "text-error-primary",
+                      )}
+                    />
+                  )
+                }
+                trailing={
+                  <span className="code code-micro text-basic-muted shrink-0">
+                    {thread.episode_count}
+                  </span>
+                }
+                onClick={() => onSelect(thread.name)}
+              />
+            );
+          })
+        )
+      }
     >
-      <Detail
-        thread={current}
-        episodes={snapshot.thread_episodes?.[current.name] ?? []}
-        events={snapshot.thread_events?.[current.name]}
-        liveLog={live?.log ?? []}
-        running={runningNames.has(current.name)}
-        currentAction={live?.action || current.latest_action || ""}
-      />
+      {current ? (
+        <Detail
+          thread={current}
+          episodes={snapshot.thread_episodes?.[current.name] ?? []}
+          events={snapshot.thread_events?.[current.name]}
+          liveLog={live?.log ?? []}
+          running={runningNames.has(current.name)}
+          currentAction={live?.action || current.latest_action || ""}
+        />
+      ) : (
+        <PanelEmpty>No threads yet for this session.</PanelEmpty>
+      )}
     </PanelSplit>
   );
 }

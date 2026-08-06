@@ -45,7 +45,7 @@ function findProvider(
   catalog: ModelCatalog | undefined,
   backend: string,
 ): CatalogProvider | null {
-  return catalog?.providers.find((provider) => provider.id === backend) ?? null;
+  return catalog?.providers?.find((provider) => provider.id === backend) ?? null;
 }
 
 function findEntry(

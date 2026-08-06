@@ -142,30 +142,41 @@ export function WorksetsView({
       <div className="p-6 label-small text-error-primary">{worksets.error}</div>
     );
   }
-  if (worksets.items.length === 0) {
-    return <PanelEmpty>No worksets defined for this session.</PanelEmpty>;
-  }
 
   const current =
-    worksets.items.find((item) => item.id === selected) ?? worksets.items[0];
+    worksets.items.find((item) => item.id === selected) ??
+    worksets.items[0] ??
+    null;
 
   return (
     <PanelSplit
-      list={worksets.items.map((workset) => (
-        <PanelRow
-          key={workset.id}
-          label={workset.id}
-          active={workset.id === current.id}
-          trailing={
-            <span className="code code-micro text-basic-muted shrink-0">
-              {workset.items.length}
-            </span>
-          }
-          onClick={() => onSelect(workset.id)}
-        />
-      ))}
+      list={
+        worksets.items.length === 0 ? (
+          <div className="p-1 label-micro text-basic-muted">
+            No worksets defined for this session.
+          </div>
+        ) : (
+          worksets.items.map((workset) => (
+            <PanelRow
+              key={workset.id}
+              label={workset.id}
+              active={workset.id === current?.id}
+              trailing={
+                <span className="code code-micro text-basic-muted shrink-0">
+                  {workset.items.length}
+                </span>
+              }
+              onClick={() => onSelect(workset.id)}
+            />
+          ))
+        )
+      }
     >
-      <Detail workset={current} />
+      {current ? (
+        <Detail workset={current} />
+      ) : (
+        <PanelEmpty>No worksets defined for this session.</PanelEmpty>
+      )}
     </PanelSplit>
   );
 }

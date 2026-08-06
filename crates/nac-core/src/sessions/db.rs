@@ -764,8 +764,9 @@ impl SessionSummaryRow {
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
         let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
-        let total_tokens = crate::model::TokenUsage::aggregate(&response_usages)
-            .map(|usage| usage.billable_tokens());
+        let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
+        let total_tokens = aggregated.as_ref().map(|usage| usage.billable_tokens());
+        let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {
             session_id: self.session_id,
             cwd,
@@ -784,6 +785,7 @@ impl SessionSummaryRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             total_tokens,
+            total_cost_micros,
             run_count: self.run_count.max(0) as u64,
         })
     }

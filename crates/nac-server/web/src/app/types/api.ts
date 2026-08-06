@@ -98,6 +98,8 @@ export interface SessionSummarySnapshot {
   created_at: string;
   updated_at: string;
   total_tokens?: number;
+  /** Micro-USD spend for the session; zero means unknown catalog rates. */
+  total_cost_micros?: number;
   run_count: number;
 }
 
@@ -741,6 +743,36 @@ export interface SshTarget {
 export interface SshBrowseRequest extends SshTarget {
   /** Absent or empty opens on the login home on the remote host. */
   path?: string | null;
+}
+
+/** A named, reusable SSH connection offered by the launch and settings forms. */
+export interface SshConfigurationRecord {
+  config_id: string;
+  name: string;
+  ssh_host: string;
+  ssh_port: number | null;
+  ssh_identity_file: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SshConfigurationList {
+  configurations: SshConfigurationRecord[];
+}
+
+export interface CreateSshConfigurationRequest {
+  name: string;
+  ssh_host: string;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
+}
+
+/** Tri-state fields: omit to keep, null to clear, value to replace. */
+export interface UpdateSshConfigurationRequest {
+  name?: RequestField<string>;
+  ssh_host?: RequestField<string>;
+  ssh_port?: RequestField<number>;
+  ssh_identity_file?: RequestField<string>;
 }
 
 export interface ProviderModel {

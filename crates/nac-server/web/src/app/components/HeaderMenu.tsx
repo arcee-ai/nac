@@ -26,8 +26,10 @@ const DOCS_URL = "https://github.com/arcee-ai/nac#readme";
  */
 export function HeaderMenu({
   onConfigurations,
+  onSshConfigs,
 }: {
   onConfigurations: () => void;
+  onSshConfigs: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { data: storeInfo } = useStoreInfo();
@@ -72,6 +74,10 @@ export function HeaderMenu({
           >
             <Icon iconName={IconName.Gear} />
             <span className="text-left flex-grow">Configurations</span>
+          </TabButton>
+          <TabButton size={TabButtonSize.Medium} onClick={act(onSshConfigs)}>
+            <Icon iconName={IconName.Globe} />
+            <span className="text-left flex-grow">SSH configs</span>
           </TabButton>
           <Separator />
           <TabButton

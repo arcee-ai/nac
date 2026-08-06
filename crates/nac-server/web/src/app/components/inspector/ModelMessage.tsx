@@ -15,7 +15,10 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { ChatBadge } from "@/app/components/inspector/ChatBadge";
+import {
+  ChatBadge,
+  CodeChangesBadge,
+} from "@/app/components/inspector/ChatBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
@@ -82,6 +85,16 @@ interface ModelMessageProps {
   onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
+  /**
+   * Workspace-level diff for the latest finished turn. The backend keeps one
+   * running total rather than a snapshot per turn, so only the newest model
+   * message carries it.
+   */
+  snapshotChanges?: {
+    additions: number;
+    deletions: number;
+    onClick: () => void;
+  } | null;
 }
 
 /**
@@ -103,6 +116,7 @@ export const ModelMessage = memo(function ModelMessage({
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
+  snapshotChanges = null,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
   const canRefresh = onRefresh != null && userMessageIndex != null;
@@ -210,6 +224,18 @@ export const ModelMessage = memo(function ModelMessage({
                 return null;
             }
           })}
+          {snapshotChanges ? (
+            <ChatBadge
+              label="Snapshot"
+              trailing={
+                <CodeChangesBadge
+                  additions={snapshotChanges.additions}
+                  deletions={snapshotChanges.deletions}
+                />
+              }
+              onClick={snapshotChanges.onClick}
+            />
+          ) : null}
         </div>
 
         {/* Same resend / revert endpoints as the user bubble above — they always
