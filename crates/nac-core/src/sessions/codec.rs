@@ -65,7 +65,7 @@ pub(super) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
     serde_json::to_string(&persisted).context("failed to serialize sandbox spec")
 }
 
-pub(super) fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxSpec>> {
+pub(crate) fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxSpec>> {
     let Some(raw) = raw else {
         return Ok(None);
     };

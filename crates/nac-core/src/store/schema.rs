@@ -1,10 +1,9 @@
 use super::*;
 
-// 10 rather than 9: a store already at 9 would otherwise skip creating the
-// ssh_configurations table — `open_runtime_connection` returns early whenever
-// the stored version already equals this one. (9 itself added the per-session
-// ssh port and key columns after this branch and main advanced independently.)
-const STORE_SCHEMA_VERSION: i64 = 10;
+// Version 11 adds immutable session-lineage audit rows. Version 10 remains the
+// branch's SSH/schema-reconciliation milestone; do not reuse historical PR #60
+// version literals for lineage.
+const STORE_SCHEMA_VERSION: i64 = 11;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -92,6 +91,7 @@ fn inspect_schema_shape(conn: &Connection) -> Result<SchemaShape> {
         "workspace_revisions",
         "model_configurations",
         "ssh_configurations",
+        "session_lineage",
     ];
     let has_run_count = column_exists(conn, "sessions", "run_count")?;
     let has_visible_message_count = column_exists(conn, "sessions", "visible_message_count")?;
@@ -227,10 +227,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -288,6 +288,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     )?;
     create_model_configurations_table(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
+    create_session_lineage_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -828,6 +829,30 @@ fn restore_autoincrement_sequence(
             params![table, prior_sequence],
         )?;
     }
+    Ok(())
+}
+
+fn create_session_lineage_table(conn: &Connection) -> Result<()> {
+    // source_session_id deliberately has no FK: deleting an ancestor must not
+    // erase a child's immutable provenance. Child deletion removes only its
+    // own audit row.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_lineage (
+             child_session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             source_session_id TEXT NOT NULL,
+             source_raw_end_exclusive INTEGER NOT NULL
+                 CHECK (source_raw_end_exclusive > 0),
+             source_prefix_sha256 TEXT NOT NULL
+                 CHECK (length(source_prefix_sha256) = 64),
+             source_boundary_event_id INTEGER,
+             source_config_version INTEGER NOT NULL
+                 CHECK (source_config_version >= 0),
+             created_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_lineage_source
+             ON session_lineage(source_session_id, created_at);",
+    )?;
     Ok(())
 }
 

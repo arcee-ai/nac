@@ -10,7 +10,7 @@ use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
 
-mod codec;
+pub(crate) mod codec;
 mod db;
 mod operation_lease;
 mod snapshot;

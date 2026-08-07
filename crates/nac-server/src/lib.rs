@@ -51,7 +51,6 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
-    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
@@ -63,6 +62,7 @@ use nac_core::{
         SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -2362,7 +2362,7 @@ async fn create_model_config_handler(
             // The row is what makes the credential reachable, so a failed
             // insert must not leave the secret behind.
             if let Some(name) = credential_name.as_deref() {
-                let _ = remove_api_key(name);
+                let _ = remove_api_key(&manager.inner.store_path, name);
             }
             Err(error.into())
         }
@@ -2503,14 +2503,14 @@ async fn update_model_config_handler(
                 .as_deref()
                 .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
             {
-                let _ = remove_api_key(name);
+                let _ = remove_api_key(&manager.inner.store_path, name);
             }
             Ok(Json(record))
         }
         Err(error) => {
             if api_key_env != existing.api_key_env {
                 if let Some(name) = api_key_env.as_deref() {
-                    let _ = remove_api_key(name);
+                    let _ = remove_api_key(&manager.inner.store_path, name);
                 }
             }
             Err(error.into())
@@ -2690,7 +2690,7 @@ async fn delete_model_config_handler(
         .as_deref()
         .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
     {
-        let _ = remove_api_key(name);
+        let _ = remove_api_key(&manager.inner.store_path, name);
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -2804,9 +2804,10 @@ async fn store_generated_credential_handler(
 }
 
 async fn delete_credential_handler(
+    State(manager): State<SessionManager>,
     AxumPath(name): AxumPath<String>,
 ) -> std::result::Result<StatusCode, ApiError> {
-    if remove_api_key(&name)? {
+    if remove_api_key(&manager.inner.store_path, &name)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError {

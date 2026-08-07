@@ -132,8 +132,13 @@ pub fn store_api_key(name: &str, value: &str) -> Result<()> {
 }
 
 /// Returns whether a key was actually removed.
-pub fn remove_api_key(name: &str) -> Result<bool> {
+pub fn remove_api_key(database_path: &Path, name: &str) -> Result<bool> {
     validate_name(name)?;
+    if crate::store::credential_selector_is_referenced(database_path, name)? {
+        return Err(anyhow!(
+            "credential '{name}' is still referenced by a session or model configuration"
+        ));
+    }
     let path = store_path()?;
     with_credential_lock(&lock_path()?, || {
         let mut keys = load(&path)?;

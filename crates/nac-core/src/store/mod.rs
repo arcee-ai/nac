@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod backup;
+mod lineage;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
@@ -19,6 +20,7 @@ mod worksets;
 mod workspace_revisions;
 
 pub use backup::pinned_backup_paths;
+pub use lineage::*;
 pub use model_configurations::*;
 pub use render::*;
 pub use schema::{default_store_path, initialize};

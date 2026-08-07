@@ -536,6 +536,44 @@ fn load_fork_transcript_rows(
     Ok(rows)
 }
 
+pub(crate) fn validate_fork_boundary_in_connection(
+    connection: &Connection,
+    source_session_id: &str,
+    token: &str,
+    active_run: bool,
+) -> std::result::Result<(ValidatedForkBoundary, Vec<Message>), ForkBoundaryValidationError> {
+    let payload = decode_fork_boundary_token(token)?;
+    if payload.source_session_id != source_session_id {
+        return Err(ForkBoundaryValidationError::WrongSession);
+    }
+    let rows = load_fork_transcript_rows(connection, source_session_id)
+        .map_err(|_| ForkBoundaryValidationError::Stale)?;
+    let end = usize::try_from(payload.raw_end_exclusive)
+        .map_err(|_| ForkBoundaryValidationError::Stale)?;
+    if end == 0 || end > rows.len() {
+        return Err(ForkBoundaryValidationError::Stale);
+    }
+    let boundary = end - 1;
+    let messages: Vec<Message> = rows.iter().map(|row| row.message.clone()).collect();
+    if !complete_assistant_boundaries(&messages)[boundary]
+        || rows[boundary].event_id != payload.boundary_event_id
+        || prefix_digest(&rows, end) != payload.prefix_sha256
+    {
+        return Err(ForkBoundaryValidationError::Stale);
+    }
+    if boundary_is_mutable(&messages, boundary, active_run) {
+        return Err(ForkBoundaryValidationError::Mutable);
+    }
+    Ok((
+        ValidatedForkBoundary {
+            raw_end_exclusive: payload.raw_end_exclusive,
+            prefix_sha256: payload.prefix_sha256,
+            boundary_event_id: payload.boundary_event_id,
+        },
+        messages.into_iter().take(end).collect(),
+    ))
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -609,32 +647,16 @@ impl TranscriptLogWriter {
         let transaction = connection
             .transaction()
             .map_err(|_| ForkBoundaryValidationError::Stale)?;
-        let rows = load_fork_transcript_rows(&transaction, source_session_id)
-            .map_err(|_| ForkBoundaryValidationError::Stale)?;
+        let (validated, _) = validate_fork_boundary_in_connection(
+            &transaction,
+            source_session_id,
+            token,
+            active_run,
+        )?;
         transaction
             .commit()
             .map_err(|_| ForkBoundaryValidationError::Stale)?;
-        let end = usize::try_from(payload.raw_end_exclusive)
-            .map_err(|_| ForkBoundaryValidationError::Stale)?;
-        if end == 0 || end > rows.len() {
-            return Err(ForkBoundaryValidationError::Stale);
-        }
-        let boundary = end - 1;
-        let messages: Vec<Message> = rows.iter().map(|row| row.message.clone()).collect();
-        if !complete_assistant_boundaries(&messages)[boundary]
-            || rows[boundary].event_id != payload.boundary_event_id
-            || prefix_digest(&rows, end) != payload.prefix_sha256
-        {
-            return Err(ForkBoundaryValidationError::Stale);
-        }
-        if boundary_is_mutable(&messages, boundary, active_run) {
-            return Err(ForkBoundaryValidationError::Mutable);
-        }
-        Ok(ValidatedForkBoundary {
-            raw_end_exclusive: payload.raw_end_exclusive,
-            prefix_sha256: payload.prefix_sha256,
-            boundary_event_id: payload.boundary_event_id,
-        })
+        Ok(validated)
     }
 
     /// Append `message` at absolute transcript position `idx`.

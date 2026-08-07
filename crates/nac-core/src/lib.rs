@@ -28,6 +28,10 @@ pub mod ssh_configurations {
     };
 }
 
+pub mod lineage {
+    pub use crate::store::{create_session_fork, load_session_lineage, SessionLineageRecord};
+}
+
 mod paths;
 mod process;
 pub mod runtime;
