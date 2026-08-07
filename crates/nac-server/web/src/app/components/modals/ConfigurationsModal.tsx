@@ -322,7 +322,7 @@ function ConfigurationForm({
     }
 
     if (mixed.mode === "mixed" && !mixed.mixed) {
-      setError("Pick a model for each of the easy, medium and hard tiers.");
+      setError("Complete the easy, medium and hard tiers before saving.");
       return;
     }
     const mixedModels = mixed.mode === "mixed" ? mixed.mixed : null;
@@ -515,6 +515,7 @@ function ConfigurationForm({
           <Separator />
           <MixedModelsSection
             initial={record?.mixed_models ?? null}
+            primary={{ backend, model: chosenModel }}
             onChange={setMixed}
           />
           <Separator />

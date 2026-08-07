@@ -243,7 +243,8 @@ function LaunchForm({
     if (mixed.mode === "mixed" && !mixed.mixed) {
       setError({
         field: "config",
-        message: "Pick a model for each of the easy, medium and hard tiers.",
+        message:
+          "Complete the easy, medium and hard tiers before creating a session.",
       });
       return;
     }
@@ -500,6 +501,7 @@ function LaunchForm({
             <MixedModelsSection
               key={savedMixedKey}
               initial={savedMixed}
+              primary={chosen}
               onChange={onMixed}
             />
             <Separator />

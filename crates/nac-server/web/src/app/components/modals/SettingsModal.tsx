@@ -403,7 +403,7 @@ function SettingsForm({
 
     if (mixed.mode === "mixed") {
       if (!mixed.mixed) {
-        setError("Pick a model for each of the easy, medium and hard tiers.");
+        setError("Complete the easy, medium and hard tiers before saving.");
         return;
       }
       if (JSON.stringify(mixed.mixed) !== JSON.stringify(initialMixed)) {
@@ -563,7 +563,11 @@ function SettingsForm({
 
         <Separator />
 
-        <MixedModelsSection initial={initialMixed} onChange={setMixed} />
+        <MixedModelsSection
+          initial={initialMixed}
+          primary={{ backend, model }}
+          onChange={setMixed}
+        />
 
         <Separator />
 

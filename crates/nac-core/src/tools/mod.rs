@@ -169,49 +169,23 @@ impl MixedDispatchClients {
         ]
     }
 
-    /// One "- easy: model (default effort: …; supported efforts: …)" line
-    /// per tier, shared by the dispatch tool schema and the orchestrator
-    /// system prompt.
+    /// One "- easy: model (effort: low)" line per tier, shared by the
+    /// dispatch tool schema and the orchestrator system prompt.
     pub fn describe_tiers(&self) -> String {
         let mut description = String::new();
         for (complexity, client) in self.tiers() {
-            let supported = client.supported_reasoning_efforts();
-            let efforts = if supported.is_empty() {
-                "no adjustable reasoning effort".to_string()
-            } else {
-                format!(
-                    "supported efforts: {}",
-                    supported
-                        .iter()
-                        .map(|effort| effort.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            let default = client
+            let effort = client
                 .reasoning_effort()
-                .map(|effort| format!("default effort: {effort}; "))
+                .map(|effort| format!(" (effort: {effort})"))
                 .unwrap_or_default();
             description.push_str(&format!(
-                "\n- {}: {} ({}{})",
+                "\n- {}: {}{}",
                 complexity.as_str(),
                 client.model,
-                default,
-                efforts
+                effort
             ));
         }
         description
-    }
-
-    /// Union of the catalog-supported efforts across the three tiers, in
-    /// canonical order.
-    pub fn supported_effort_union(&self) -> Vec<crate::model::ReasoningEffort> {
-        self.tiers()
-            .iter()
-            .flat_map(|(_, client)| client.supported_reasoning_efforts())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
     }
 }
 

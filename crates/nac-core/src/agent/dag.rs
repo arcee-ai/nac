@@ -682,7 +682,6 @@ mod tests {
                 session_id: "test-session".to_string(),
                 timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
                 complexity: None,
-                effort: None,
             },
         }
     }

@@ -347,12 +347,21 @@ pub struct MixedTierRequest {
     pub reasoning_effort: Option<String>,
 }
 
-/// Mixed-mode worker routing: easy, medium, and hard tier models.
+/// Mixed-mode dispatch routing: the classification selects either a worker
+/// model or a reasoning effort per tier — never both.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct MixedModelsRequest {
-    pub easy: MixedTierRequest,
-    pub medium: MixedTierRequest,
-    pub hard: MixedTierRequest,
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum MixedModelsRequest {
+    Models {
+        easy: MixedTierRequest,
+        medium: MixedTierRequest,
+        hard: MixedTierRequest,
+    },
+    Efforts {
+        easy: String,
+        medium: String,
+        hard: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1848,14 +1857,10 @@ impl SessionManager {
             RequestField::Omitted => {}
             RequestField::Null => prospective.mixed_models = None,
             RequestField::Value(mixed) => {
-                let mixed = mixed_models_config(
+                prospective.mixed_models = Some(mixed_models_config(
                     mixed,
                     &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
-                )?;
-                // Fail a broken tier here, not at the session's next launch.
-                runtime::resolve_mixed_dispatch_clients(&mixed)
-                    .map_err(|error| request_configuration_error(format!("{error:#}")))?;
-                prospective.mixed_models = Some(mixed);
+                )?);
             }
         }
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
@@ -1875,7 +1880,7 @@ impl SessionManager {
             )?;
         }
 
-        let _settings = EffectiveModelSettings::new(
+        let settings = EffectiveModelSettings::new(
             backend,
             prospective.model.clone(),
             prospective.base_url.clone(),
@@ -1883,6 +1888,12 @@ impl SessionManager {
             prospective.api_key_env.clone(),
             extra_headers.clone(),
         )?;
+        // Fail a broken mixed tier here, not at the session's next launch.
+        // The efforts variant validates against the prospective session model.
+        if let Some(mixed) = prospective.mixed_models.as_ref() {
+            runtime::validate_mixed_models(mixed, &settings)
+                .map_err(|error| request_configuration_error(format!("{error:#}")))?;
+        }
         validate_model_configuration(
             backend,
             &prospective.model,
@@ -3348,15 +3359,35 @@ fn mixed_tier_settings(
     })
 }
 
+/// Validate one efforts-variant tier: nonblank and a recognized level. Model
+/// support is checked at launch/resume against the session model's catalog
+/// metadata.
+fn mixed_tier_effort(value: String, label: &str) -> Result<String> {
+    let value = nonblank_request_string(value, &format!("mixed_models.{label}"))?;
+    parse_request_enum::<ReasoningEffort>(&value, &format!("mixed_models.{label}"))
+        .map(|_: ReasoningEffort| value)
+}
+
 fn mixed_models_config(
     request: MixedModelsRequest,
     policy: &CredentialDestinationPolicy,
 ) -> Result<sessions::MixedModeConfig> {
-    Ok(sessions::MixedModeConfig {
-        easy: mixed_tier_settings(request.easy, "easy", policy)?,
-        medium: mixed_tier_settings(request.medium, "medium", policy)?,
-        hard: mixed_tier_settings(request.hard, "hard", policy)?,
-    })
+    match request {
+        MixedModelsRequest::Models { easy, medium, hard } => Ok(sessions::MixedModeConfig::Models(
+            Box::new(sessions::MixedTierModels {
+                easy: mixed_tier_settings(easy, "easy", policy)?,
+                medium: mixed_tier_settings(medium, "medium", policy)?,
+                hard: mixed_tier_settings(hard, "hard", policy)?,
+            }),
+        )),
+        MixedModelsRequest::Efforts { easy, medium, hard } => {
+            Ok(sessions::MixedModeConfig::Efforts {
+                easy: mixed_tier_effort(easy, "easy")?,
+                medium: mixed_tier_effort(medium, "medium")?,
+                hard: mixed_tier_effort(hard, "hard")?,
+            })
+        }
+    }
 }
 
 fn model_options(

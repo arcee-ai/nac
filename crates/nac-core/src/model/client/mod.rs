@@ -357,17 +357,10 @@ impl ModelClient {
         &self.extra_headers
     }
 
-    /// The effort levels the resolved model accepts, per catalog metadata,
-    /// in canonical order.
-    pub fn supported_reasoning_efforts(&self) -> Vec<ReasoningEffort> {
-        self.resolved_model.thinking_level_map.supported_efforts()
-    }
-
     /// Clone this client with a different reasoning effort, preserving the
     /// full credential, endpoint, header, cache, and catalog identity.
     /// Returns `None` when the resolved model does not accept `effort`, so
-    /// callers fall back to the client's configured default instead of
-    /// sending an unsupported level to the provider.
+    /// an unsupported level is never sent to the provider.
     pub fn with_reasoning_effort_override(&self, effort: ReasoningEffort) -> Option<Self> {
         if !self.resolved_model.thinking_level_map.is_supported(effort) {
             return None;

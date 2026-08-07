@@ -124,18 +124,14 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 }
 
 /// Mixed-mode addendum to the orchestrator system prompt: names each tier's
-/// configured model, its default effort, and the effort levels it accepts.
+/// configured model and reasoning effort.
 fn mixed_mode_prompt_guidance(mixed: &tools::MixedDispatchClients) -> String {
     format!(
         "\n\nMixed mode is enabled. Every thread dispatch requires a complexity \
          classification — easy, medium, or hard — and the matching user-configured \
-         worker model runs that dispatch. Classify by the genuine difficulty of the \
+         tier runs that dispatch. Classify by the genuine difficulty of the \
          bounded action: easy for mechanical or well-scoped work, medium for typical \
-         implementation work, hard for work needing deep reasoning or broad context. \
-         You may also pass effort to raise or lower the selected tier model's \
-         reasoning effort for a single dispatch; do so only when the work genuinely \
-         needs it, and only with an effort level the selected tier model supports. \
-         Unsupported effort requests fall back to the tier's configured default.\n\
+         implementation work, hard for work needing deep reasoning or broad context.\n\
          Configured tiers:{}",
         mixed.describe_tiers()
     )
