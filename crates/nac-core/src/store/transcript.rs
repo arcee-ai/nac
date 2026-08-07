@@ -131,6 +131,8 @@ pub fn is_transcript_log_payload(event_json: &str) -> bool {
 }
 
 use crate::types::Message;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 /// Role tag stored beside the canonical message bytes so future prefix-digest
@@ -269,6 +271,175 @@ pub struct TranscriptLogWriter {
     connection: Mutex<Connection>,
 }
 
+const FORK_BOUNDARY_TOKEN_PREFIX: &str = "fb1.";
+const FORK_BOUNDARY_DIGEST_DOMAIN: &[u8] = b"nac:fork-boundary:v1\0";
+
+#[derive(Debug, Clone)]
+pub struct ForkBoundaryProjection {
+    pub messages: Vec<Message>,
+    pub created_at: Vec<Option<String>>,
+    /// Opaque tokens aligned position-for-position with `messages`.
+    pub fork_boundary_tokens: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedForkBoundary {
+    pub raw_end_exclusive: u64,
+    pub prefix_sha256: String,
+    pub boundary_event_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForkBoundaryValidationError {
+    InvalidToken,
+    WrongSession,
+    Stale,
+    Mutable,
+}
+
+impl std::fmt::Display for ForkBoundaryValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidToken => "invalid fork boundary token",
+            Self::WrongSession => "fork boundary token belongs to another session",
+            Self::Stale => "fork boundary is stale",
+            Self::Mutable => "fork boundary is still mutable",
+        })
+    }
+}
+
+impl std::error::Error for ForkBoundaryValidationError {}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct ForkBoundaryTokenV1 {
+    format_version: u8,
+    source_session_id: String,
+    raw_end_exclusive: u64,
+    prefix_sha256: String,
+    boundary_event_id: Option<i64>,
+}
+
+#[derive(Debug)]
+struct ForkTranscriptRow {
+    message: Message,
+    canonical: Vec<u8>,
+    created_at: Option<String>,
+    event_id: Option<i64>,
+}
+
+fn prefix_hasher(rows: &[ForkTranscriptRow], end: usize) -> Sha256 {
+    let mut hasher = Sha256::new();
+    hasher.update(FORK_BOUNDARY_DIGEST_DOMAIN);
+    for row in &rows[..end] {
+        hasher.update((row.canonical.len() as u64).to_be_bytes());
+        hasher.update(&row.canonical);
+    }
+    hasher
+}
+
+fn finish_prefix_digest(mut hasher: Sha256, end: usize) -> String {
+    hasher.update((end as u64).to_be_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn prefix_digest(rows: &[ForkTranscriptRow], end: usize) -> String {
+    finish_prefix_digest(prefix_hasher(rows, end), end)
+}
+
+fn encode_fork_boundary_token(payload: &ForkBoundaryTokenV1) -> Result<String> {
+    let json = serde_json::to_vec(payload).context("failed to encode fork boundary token")?;
+    Ok(format!(
+        "{FORK_BOUNDARY_TOKEN_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(json)
+    ))
+}
+
+fn decode_fork_boundary_token(
+    token: &str,
+) -> std::result::Result<ForkBoundaryTokenV1, ForkBoundaryValidationError> {
+    let encoded = token
+        .strip_prefix(FORK_BOUNDARY_TOKEN_PREFIX)
+        .ok_or(ForkBoundaryValidationError::InvalidToken)?;
+    if encoded.is_empty() || encoded.len() > 16 * 1024 {
+        return Err(ForkBoundaryValidationError::InvalidToken);
+    }
+    let bytes = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| ForkBoundaryValidationError::InvalidToken)?;
+    let payload: ForkBoundaryTokenV1 =
+        serde_json::from_slice(&bytes).map_err(|_| ForkBoundaryValidationError::InvalidToken)?;
+    if payload.format_version != 1
+        || payload.raw_end_exclusive == 0
+        || payload.prefix_sha256.len() != 64
+        || !payload
+            .prefix_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(ForkBoundaryValidationError::InvalidToken);
+    }
+    Ok(payload)
+}
+
+fn complete_assistant_boundaries(messages: &[Message]) -> Vec<bool> {
+    let mut complete = Vec::with_capacity(messages.len());
+    let mut pending: Vec<&str> = Vec::new();
+    let mut protocol_valid = true;
+    for message in messages {
+        match message {
+            Message::Assistant { tool_calls, .. }
+                if tool_calls.as_ref().is_some_and(|calls| !calls.is_empty()) =>
+            {
+                if !pending.is_empty() {
+                    protocol_valid = false;
+                }
+                let calls = tool_calls.as_ref().expect("checked non-empty");
+                if calls
+                    .iter()
+                    .enumerate()
+                    .any(|(idx, call)| calls[..idx].iter().any(|prior| prior.id == call.id))
+                {
+                    protocol_valid = false;
+                }
+                pending = calls.iter().map(|call| call.id.as_str()).collect();
+            }
+            Message::Tool { tool_call_id, .. } => {
+                if let Some(position) = pending.iter().position(|id| *id == tool_call_id) {
+                    pending.remove(position);
+                } else {
+                    protocol_valid = false;
+                }
+            }
+            Message::System { .. } | Message::User { .. } | Message::Assistant { .. }
+                if !pending.is_empty() =>
+            {
+                protocol_valid = false;
+            }
+            _ => {}
+        }
+        complete.push(
+            protocol_valid
+                && pending.is_empty()
+                && matches!(
+                    message,
+                    Message::Assistant {
+                        content: Some(_),
+                        tool_calls,
+                        ..
+                    } if !tool_calls.as_ref().is_some_and(|calls| !calls.is_empty())
+                ),
+        );
+    }
+    complete
+}
+
+fn boundary_is_mutable(messages: &[Message], boundary: usize, active_run: bool) -> bool {
+    active_run
+        && !messages[boundary + 1..]
+            .iter()
+            .any(|message| matches!(message, Message::User { .. }))
+}
+
 /// Length of the log tail relative to a snapshot blob of `blob_len` messages,
 /// read from the newest row's `idx`. Callers hold the connection lock, so the
 /// extent cannot shift under a window read taken with it.
@@ -298,10 +469,171 @@ fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Resu
     }
 }
 
+fn load_fork_transcript_rows(
+    connection: &Connection,
+    session_id: &str,
+) -> Result<Vec<ForkTranscriptRow>> {
+    let messages_json: String = connection
+        .query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .with_context(|| format!("failed to load source session '{session_id}'"))?;
+    let blob: Vec<Message> =
+        serde_json::from_str(&messages_json).context("failed to decode source transcript blob")?;
+    let mut rows = Vec::with_capacity(blob.len());
+    for message in blob {
+        let canonical =
+            serde_json::to_vec(&message).context("failed to serialize canonical blob message")?;
+        rows.push(ForkTranscriptRow {
+            message,
+            canonical,
+            created_at: None,
+            event_id: None,
+        });
+    }
+    let blob_len = rows.len() as u64;
+    let mut statement = connection.prepare(
+        "SELECT id, event_json, created_at
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+         ORDER BY id ASC",
+    )?;
+    let stored = statement.query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for stored_row in stored {
+        let (id, event_json, created_at) = stored_row?;
+        let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+            anyhow!("thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry")
+        })?;
+        if entry.idx < blob_len {
+            continue;
+        }
+        let expected = rows.len() as u64;
+        if entry.idx != expected {
+            return Err(anyhow!(
+                "transcript log is not contiguous: expected idx {expected}, found {}",
+                entry.idx
+            ));
+        }
+        let canonical = entry.message_json.into_bytes();
+        let message = serde_json::from_slice(&canonical).with_context(|| {
+            format!("thread_events row {id} holds an undecodable transcript message")
+        })?;
+        rows.push(ForkTranscriptRow {
+            message,
+            canonical,
+            created_at: Some(created_at),
+            event_id: Some(id),
+        });
+    }
+    Ok(rows)
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
             connection: Mutex::new(open_runtime_connection(path)?),
+        })
+    }
+
+    /// Read the immutable blob and append-only log under one SQLite read
+    /// transaction, then issue v1 tokens for complete assistant boundaries.
+    /// `active_run` suppresses the current cycle's mutable tail boundaries.
+    pub fn fork_boundary_projection(
+        &self,
+        session_id: &str,
+        active_run: bool,
+    ) -> Result<ForkBoundaryProjection> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection.transaction()?;
+        let rows = load_fork_transcript_rows(&transaction, session_id)?;
+        transaction.commit()?;
+        let messages: Vec<Message> = rows.iter().map(|row| row.message.clone()).collect();
+        let complete_boundaries = complete_assistant_boundaries(&messages);
+        let mut tokens = Vec::with_capacity(rows.len());
+        let mut hasher = Sha256::new();
+        hasher.update(FORK_BOUNDARY_DIGEST_DOMAIN);
+        for (boundary, row) in rows.iter().enumerate() {
+            hasher.update((row.canonical.len() as u64).to_be_bytes());
+            hasher.update(&row.canonical);
+            if !complete_boundaries[boundary]
+                || boundary_is_mutable(&messages, boundary, active_run)
+            {
+                tokens.push(None);
+                continue;
+            }
+            let raw_end_exclusive = (boundary + 1) as u64;
+            let payload = ForkBoundaryTokenV1 {
+                format_version: 1,
+                source_session_id: session_id.to_string(),
+                raw_end_exclusive,
+                prefix_sha256: finish_prefix_digest(hasher.clone(), boundary + 1),
+                boundary_event_id: row.event_id,
+            };
+            tokens.push(Some(encode_fork_boundary_token(&payload)?));
+        }
+        Ok(ForkBoundaryProjection {
+            messages,
+            created_at: rows.iter().map(|row| row.created_at.clone()).collect(),
+            fork_boundary_tokens: tokens,
+        })
+    }
+
+    /// Revalidate every untrusted v1 token field against one current store
+    /// snapshot. Tail appends do not matter; replacement of the boundary row
+    /// does, even when regeneration produces byte-identical content.
+    pub fn validate_fork_boundary(
+        &self,
+        source_session_id: &str,
+        token: &str,
+        active_run: bool,
+    ) -> std::result::Result<ValidatedForkBoundary, ForkBoundaryValidationError> {
+        let payload = decode_fork_boundary_token(token)?;
+        if payload.source_session_id != source_session_id {
+            return Err(ForkBoundaryValidationError::WrongSession);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection
+            .transaction()
+            .map_err(|_| ForkBoundaryValidationError::Stale)?;
+        let rows = load_fork_transcript_rows(&transaction, source_session_id)
+            .map_err(|_| ForkBoundaryValidationError::Stale)?;
+        transaction
+            .commit()
+            .map_err(|_| ForkBoundaryValidationError::Stale)?;
+        let end = usize::try_from(payload.raw_end_exclusive)
+            .map_err(|_| ForkBoundaryValidationError::Stale)?;
+        if end == 0 || end > rows.len() {
+            return Err(ForkBoundaryValidationError::Stale);
+        }
+        let boundary = end - 1;
+        let messages: Vec<Message> = rows.iter().map(|row| row.message.clone()).collect();
+        if !complete_assistant_boundaries(&messages)[boundary]
+            || rows[boundary].event_id != payload.boundary_event_id
+            || prefix_digest(&rows, end) != payload.prefix_sha256
+        {
+            return Err(ForkBoundaryValidationError::Stale);
+        }
+        if boundary_is_mutable(&messages, boundary, active_run) {
+            return Err(ForkBoundaryValidationError::Mutable);
+        }
+        Ok(ValidatedForkBoundary {
+            raw_end_exclusive: payload.raw_end_exclusive,
+            prefix_sha256: payload.prefix_sha256,
+            boundary_event_id: payload.boundary_event_id,
         })
     }
 
@@ -447,52 +779,6 @@ impl TranscriptLogWriter {
             expected_idx += 1;
         }
         Ok((tail_len, entries))
-    }
-
-    /// Row creation times for the same window [`TranscriptLogWriter::read_tail_window`]
-    /// returns, aligned with it position by position.
-    ///
-    /// The canonical message bytes carry no timestamp — adding one would change
-    /// the digest the compaction planner hashes — so the closest thing to "when
-    /// this message entered the transcript" is the log row's own `created_at`.
-    /// Messages carried by the snapshot blob predate the log and have none.
-    pub fn read_tail_window_times(
-        &self,
-        session_id: &str,
-        blob_len: u64,
-        tail_start: u64,
-        limit: usize,
-    ) -> Result<Vec<String>> {
-        let connection = self
-            .connection
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let tail_len = tail_len_of(&connection, session_id, blob_len)?;
-        if tail_start >= tail_len || limit == 0 {
-            return Ok(Vec::new());
-        }
-        let end = tail_start.saturating_add(limit as u64).min(tail_len);
-        let count = end - tail_start;
-        let skip_from_end = tail_len - end;
-        let mut statement = connection.prepare(
-            "SELECT created_at
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2
-             ORDER BY id DESC
-             LIMIT ?3 OFFSET ?4",
-        )?;
-        let rows = statement.query_map(
-            params![
-                session_id,
-                ORCHESTRATOR_STEERING_TARGET,
-                count as i64,
-                skip_from_end as i64
-            ],
-            |row| row.get::<_, String>(0),
-        )?;
-        let mut times = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        times.reverse();
-        Ok(times)
     }
 
     /// Read committed entries with `idx >= from_idx`, in log (append) order.
@@ -1197,6 +1483,203 @@ mod tests {
             None
         );
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    fn final_assistant(content: &str) -> Message {
+        Message::Assistant {
+            content: Some(content.to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        }
+    }
+
+    #[test]
+    fn fork_boundary_tokens_survive_appends_and_use_event_ids_for_aba_safety() {
+        let path = temp_store_path("fork_boundary_aba");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_batch(
+                "session-a",
+                0,
+                &[
+                    Message::User {
+                        content: "prompt".to_string(),
+                    },
+                    final_assistant("answer"),
+                ],
+            )
+            .unwrap();
+        let token = writer
+            .fork_boundary_projection("session-a", false)
+            .unwrap()
+            .fork_boundary_tokens[1]
+            .clone()
+            .unwrap();
+        let validated = writer
+            .validate_fork_boundary("session-a", &token, false)
+            .unwrap();
+        assert_eq!(validated.raw_end_exclusive, 2);
+        assert!(validated.boundary_event_id.is_some());
+
+        writer
+            .append(
+                "session-a",
+                2,
+                &Message::User {
+                    content: "later".into(),
+                },
+            )
+            .unwrap();
+        assert!(writer
+            .validate_fork_boundary("session-a", &token, true)
+            .is_ok());
+
+        writer.delete_from("session-a", 1).unwrap();
+        writer
+            .append("session-a", 1, &final_assistant("answer"))
+            .unwrap();
+        assert_eq!(
+            writer.validate_fork_boundary("session-a", &token, false),
+            Err(ForkBoundaryValidationError::Stale),
+            "byte-identical regeneration must not recreate the row occurrence"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn fork_boundaries_reject_untrusted_tokens_and_active_mutable_tail() {
+        let path = temp_store_path("fork_boundary_validation");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        crate::store::insert_test_session(&path, "session-b");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_batch(
+                "session-a",
+                0,
+                &[
+                    Message::User {
+                        content: "one".into(),
+                    },
+                    final_assistant("first"),
+                    Message::User {
+                        content: "two".into(),
+                    },
+                    final_assistant("second"),
+                ],
+            )
+            .unwrap();
+        let inactive = writer.fork_boundary_projection("session-a", false).unwrap();
+        let historical = inactive.fork_boundary_tokens[1].clone().unwrap();
+        let latest = inactive.fork_boundary_tokens[3].clone().unwrap();
+        let active = writer.fork_boundary_projection("session-a", true).unwrap();
+        assert!(active.fork_boundary_tokens[1].is_some());
+        assert!(active.fork_boundary_tokens[3].is_none());
+        assert!(writer
+            .validate_fork_boundary("session-a", &historical, true)
+            .is_ok());
+        assert_eq!(
+            writer.validate_fork_boundary("session-a", &latest, true),
+            Err(ForkBoundaryValidationError::Mutable)
+        );
+        assert_eq!(
+            writer.validate_fork_boundary("session-b", &historical, false),
+            Err(ForkBoundaryValidationError::WrongSession)
+        );
+        assert_eq!(
+            writer.validate_fork_boundary("session-a", "garbage", false),
+            Err(ForkBoundaryValidationError::InvalidToken)
+        );
+
+        let mut tampered = decode_fork_boundary_token(&historical).unwrap();
+        let replacement = if tampered.prefix_sha256.starts_with('0') {
+            "1"
+        } else {
+            "0"
+        };
+        tampered.prefix_sha256.replace_range(0..1, replacement);
+        let tampered = encode_fork_boundary_token(&tampered).unwrap();
+        assert_eq!(
+            writer.validate_fork_boundary("session-a", &tampered, false),
+            Err(ForkBoundaryValidationError::Stale)
+        );
+        let mut unsupported = decode_fork_boundary_token(&historical).unwrap();
+        unsupported.format_version = 2;
+        let unsupported = encode_fork_boundary_token(&unsupported).unwrap();
+        assert_eq!(
+            writer.validate_fork_boundary("session-a", &unsupported, false),
+            Err(ForkBoundaryValidationError::InvalidToken)
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn fork_boundary_projection_supports_legacy_blob_and_protocol_completeness() {
+        let path = temp_store_path("fork_boundary_blob");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        let blob = vec![
+            Message::System {
+                content: "system".into(),
+            },
+            Message::User {
+                content: "legacy".into(),
+            },
+            final_assistant("legacy answer"),
+        ];
+        open_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET messages_json = ?1 WHERE session_id = 'session-a'",
+                params![serde_json::to_string(&blob).unwrap()],
+            )
+            .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let projection = writer.fork_boundary_projection("session-a", false).unwrap();
+        let token = projection.fork_boundary_tokens[2].clone().unwrap();
+        assert_eq!(projection.created_at, vec![None, None, None]);
+        assert_eq!(
+            writer
+                .validate_fork_boundary("session-a", &token, false)
+                .unwrap()
+                .boundary_event_id,
+            None
+        );
+
+        writer
+            .append_batch(
+                "session-a",
+                3,
+                &[
+                    Message::Assistant {
+                        content: None,
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: Some(vec![crate::types::ToolCall {
+                            id: "call-1".into(),
+                            call_type: "function".into(),
+                            function: crate::types::FunctionCall {
+                                name: "read".into(),
+                                arguments: "{}".into(),
+                            },
+                        }]),
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
+                    },
+                    final_assistant("invalid adjacency"),
+                ],
+            )
+            .unwrap();
+        let projection = writer.fork_boundary_projection("session-a", false).unwrap();
+        assert!(projection.fork_boundary_tokens[4].is_none());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

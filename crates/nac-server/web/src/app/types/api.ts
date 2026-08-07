@@ -588,6 +588,8 @@ export interface MessageCycleMetadata {
 export interface MessagesPageResponse {
   messages: Message[];
   created_at?: (string | null)[];
+  /** Opaque tokens aligned with messages; null entries are not forkable. */
+  fork_boundary_tokens: (string | null)[];
   page: MessagePageMetadata;
 }
 
@@ -599,6 +601,8 @@ export interface SessionFrontendSnapshot {
    * transcript log. `null` where the message predates the log.
    */
   message_created_at?: (string | null)[];
+  /** Opaque tokens aligned with messages; null entries are not forkable. */
+  fork_boundary_tokens?: (string | null)[];
   response_timing: ResponseTimingSnapshot;
   active_run?: ActiveRunSnapshot;
   active_compaction?: ActiveCompactionSnapshot;

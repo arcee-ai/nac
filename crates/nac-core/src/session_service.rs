@@ -23,6 +23,7 @@ pub use crate::events::{
 };
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
+pub use crate::store::{ForkBoundaryValidationError, ValidatedForkBoundary};
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -175,6 +176,10 @@ pub struct SessionFrontendSnapshot {
     /// predates the log and stores no per-message time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub message_created_at: Vec<Option<String>>,
+    /// Opaque fork boundary tokens aligned with `messages`; `None` means the
+    /// corresponding message is not a validated forkable boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fork_boundary_tokens: Vec<Option<String>>,
     pub response_timing: ResponseTimingSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
@@ -257,6 +262,9 @@ pub struct MessagesPageSnapshot {
     /// predates the log (the snapshot blob carries no per-message time).
     #[serde(default)]
     pub created_at: Vec<Option<String>>,
+    /// Opaque tokens aligned with `messages`; null entries are not forkable.
+    #[serde(default)]
+    pub fork_boundary_tokens: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -1148,11 +1156,11 @@ impl SessionService {
         };
         let loaded_messages = match options.messages {
             FrontendSnapshotMessages::All => {
-                let messages = self.store_backed_transcript().await?;
-                let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                let projection = self.store_fork_boundary_projection().await?;
                 LoadedFrontendMessages {
-                    messages,
-                    created_at,
+                    messages: projection.messages,
+                    created_at: projection.created_at,
+                    fork_boundary_tokens: projection.fork_boundary_tokens,
                     page: None,
                     cycle: None,
                 }
@@ -1163,6 +1171,7 @@ impl SessionService {
                 LoadedFrontendMessages {
                     messages: page.messages,
                     created_at: page.created_at,
+                    fork_boundary_tokens: page.fork_boundary_tokens,
                     page: Some(page.page),
                     cycle: Some(cycle),
                 }
@@ -1179,6 +1188,7 @@ impl SessionService {
             metadata,
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
+            fork_boundary_tokens: loaded_messages.fork_boundary_tokens,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -1231,27 +1241,6 @@ impl SessionService {
         .map(|(tail_len, rows)| (tail_len as usize, rows))
     }
 
-    /// Row creation times for the window [`Self::read_log_tail_window`]
-    /// returns. Empty for services without a transcript log (pickers).
-    async fn read_log_tail_window_times(
-        &self,
-        blob_len: usize,
-        tail_start: usize,
-        limit: usize,
-    ) -> Result<Vec<String>> {
-        let (Some(writer), Some(session_id)) = (
-            self.transcript_log.as_ref().map(Arc::clone),
-            self.metadata.session_id.clone(),
-        ) else {
-            return Ok(Vec::new());
-        };
-        tokio::task::spawn_blocking(move || {
-            writer.read_tail_window_times(&session_id, blob_len as u64, tail_start as u64, limit)
-        })
-        .await
-        .map_err(|error| anyhow::anyhow!("transcript log tail time read task failed: {error}"))?
-    }
-
     /// Read the full transcript log tail relative to a snapshot blob of
     /// `blob_len` messages via the shared writer. `[]` for services without
     /// a transcript log (pickers).
@@ -1265,6 +1254,34 @@ impl SessionService {
         tokio::task::spawn_blocking(move || writer.read_tail_from(&session_id, blob_len as u64))
             .await
             .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
+    }
+
+    /// Load canonical messages, log timestamps, event-row anchors, and fork
+    /// tokens from one SQLite snapshot. Services without a persisted session
+    /// retain their in-memory transcript and expose no fork boundaries.
+    async fn store_fork_boundary_projection(&self) -> Result<crate::store::ForkBoundaryProjection> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(crate::store::ForkBoundaryProjection {
+                messages: self.store_backed_transcript().await?,
+                created_at: Vec::new(),
+                fork_boundary_tokens: Vec::new(),
+            });
+        };
+        let active_operation = Arc::clone(&self.active_operation);
+        tokio::task::spawn_blocking(move || {
+            // Hold operation state stable while reading the SQLite snapshot so
+            // run admission cannot race token eligibility projection.
+            let operation = active_operation
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let active_run = matches!(operation.as_ref(), Some(ActiveSessionOperation::Run(_)));
+            writer.fork_boundary_projection(&session_id, active_run)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("fork boundary projection task failed: {error}"))?
     }
 
     /// The merged store transcript: the snapshot blob (authoritative legacy
@@ -1296,63 +1313,39 @@ impl SessionService {
         &self,
         request: MessagePageRequest,
     ) -> Result<MessagesPageSnapshot> {
-        let include_system = request.include_system;
-        let is_visible =
-            |message: &&Message| include_system || !matches!(message, Message::System { .. });
-        let (blob_len, blob_visible) = {
-            let snapshot = self.session_snapshot.lock().await;
-            let blob = snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.messages.as_slice())
-                .unwrap_or_default();
-            (blob.len(), blob.iter().filter(is_visible).count())
-        };
-        let (tail_len, _) = self.read_log_tail_window(blob_len, 0, 0).await?;
-        let total = blob_visible + tail_len;
+        let projection = self.store_fork_boundary_projection().await?;
+        let visible_indices: Vec<usize> = projection
+            .messages
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, message)| {
+                (request.include_system || !matches!(message, Message::System { .. }))
+                    .then_some(idx)
+            })
+            .collect();
+        let total = visible_indices.len();
         let end = request.before.unwrap_or(total).min(total);
-        let limit = request.limit.max(1);
-        let start = end.saturating_sub(limit);
-
-        let blob_end = end.min(blob_visible);
-        let blob_part: Vec<Message> = if start < blob_end {
-            let snapshot = self.session_snapshot.lock().await;
-            let blob = snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.messages.as_slice())
-                .unwrap_or_default();
-            blob.iter()
-                .filter(is_visible)
-                .skip(start)
-                .take(blob_end - start)
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let (log_part, log_times): (Vec<Message>, Vec<String>) = if end > blob_visible {
-            let tail_start = start.saturating_sub(blob_visible);
-            let count = end - blob_visible - tail_start;
-            let (_, rows) = self
-                .read_log_tail_window(blob_len, tail_start, count)
-                .await?;
-            let times = self
-                .read_log_tail_window_times(blob_len, tail_start, count)
-                .await?;
-            (
-                rows.into_iter().map(|(_, message)| message).collect(),
-                times,
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
-        created_at.extend(log_times.into_iter().map(Some));
-        let mut messages = blob_part;
-        messages.extend(log_part);
-        created_at.resize(messages.len(), None);
+        let start = end.saturating_sub(request.limit.max(1));
+        let selected = &visible_indices[start..end];
         Ok(MessagesPageSnapshot {
-            messages,
-            created_at,
+            messages: selected
+                .iter()
+                .map(|idx| projection.messages[*idx].clone())
+                .collect(),
+            created_at: selected
+                .iter()
+                .map(|idx| projection.created_at.get(*idx).cloned().unwrap_or(None))
+                .collect(),
+            fork_boundary_tokens: selected
+                .iter()
+                .map(|idx| {
+                    projection
+                        .fork_boundary_tokens
+                        .get(*idx)
+                        .cloned()
+                        .unwrap_or(None)
+                })
+                .collect(),
             page: MessagePageMetadata {
                 start,
                 end,
@@ -1592,30 +1585,6 @@ impl SessionService {
         })
     }
 
-    /// Per-message creation times aligned with [`Self::store_backed_transcript`],
-    /// which is why the caller passes the transcript length it already read:
-    /// an append landing between the two reads must not shift the alignment.
-    /// Blob messages predate the log and report `None`.
-    async fn store_backed_transcript_times(&self, total: usize) -> Result<Vec<Option<String>>> {
-        let blob_len = {
-            let snapshot = self.session_snapshot.lock().await;
-            snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.messages.len())
-                .unwrap_or_default()
-        }
-        .min(total);
-        let mut times: Vec<Option<String>> = vec![None; blob_len];
-        if total > blob_len {
-            let tail = self
-                .read_log_tail_window_times(blob_len, 0, total - blob_len)
-                .await?;
-            times.extend(tail.into_iter().map(Some));
-        }
-        times.resize(total, None);
-        Ok(times)
-    }
-
     /// Advance the incremental transcript scan over newly appended rows.
     /// The delta is read from the store: the log window past the scanned
     /// cursor, plus the blob part when the blob grew past it — dead in
@@ -1718,6 +1687,35 @@ impl SessionService {
     /// the web API's minimum page size of one.
     pub async fn messages_page(&self, request: MessagePageRequest) -> Result<MessagesPageSnapshot> {
         self.page_store_transcript(request).await
+    }
+
+    /// Revalidate an opaque boundary token against a stable operation-state
+    /// view and one SQLite transcript snapshot. This is read-only foundation;
+    /// child creation is intentionally not implemented here.
+    pub async fn validate_fork_boundary(
+        &self,
+        token: String,
+    ) -> std::result::Result<ValidatedForkBoundary, ForkBoundaryValidationError> {
+        let writer = self
+            .transcript_log
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(ForkBoundaryValidationError::Stale)?;
+        let session_id = self
+            .metadata
+            .session_id
+            .clone()
+            .ok_or(ForkBoundaryValidationError::Stale)?;
+        let active_operation = Arc::clone(&self.active_operation);
+        tokio::task::spawn_blocking(move || {
+            let operation = active_operation
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let active_run = matches!(operation.as_ref(), Some(ActiveSessionOperation::Run(_)));
+            writer.validate_fork_boundary(&session_id, &token, active_run)
+        })
+        .await
+        .map_err(|_| ForkBoundaryValidationError::Stale)?
     }
 
     fn prepare_operation_admission(
@@ -2488,6 +2486,7 @@ pub struct RevertOutcome {
 struct LoadedFrontendMessages {
     messages: Vec<Message>,
     created_at: Vec<Option<String>>,
+    fork_boundary_tokens: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
 }
@@ -2584,6 +2583,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     MessagesPageSnapshot {
         messages,
         created_at: Vec::new(),
+        fork_boundary_tokens: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,
@@ -2933,6 +2933,7 @@ pub(super) mod tests {
         MessagesPageSnapshot {
             messages: visible[start..end].to_vec(),
             created_at: Vec::new(),
+            fork_boundary_tokens: Vec::new(),
             page: MessagePageMetadata {
                 start,
                 end,
@@ -3108,6 +3109,17 @@ pub(super) mod tests {
     /// store-backed read paths serve) plus the agent vec, so later log
     /// appends land at the right absolute idx.
     pub(super) async fn seed_store_transcript(parts: &SessionServiceParts, messages: Vec<Message>) {
+        let messages_json = serde_json::to_string(&messages).unwrap();
+        let connection = crate::store::open_connection(&parts.service.metadata.store_path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET messages_json = ?1 WHERE session_id = ?2",
+                rusqlite::params![
+                    messages_json,
+                    parts.service.metadata.session_id.as_deref().unwrap()
+                ],
+            )
+            .unwrap();
         parts
             .service
             .session_snapshot
@@ -3491,6 +3503,10 @@ pub(super) mod tests {
             serde_json::to_value(&loaded.snapshot.messages).unwrap(),
             serde_json::to_value(&expected_page.messages).unwrap()
         );
+        assert_eq!(
+            loaded.snapshot.fork_boundary_tokens.len(),
+            loaded.snapshot.messages.len()
+        );
 
         let full = parts
             .service
@@ -3502,6 +3518,7 @@ pub(super) mod tests {
             serde_json::to_value(&full.messages).unwrap(),
             serde_json::to_value(&messages).unwrap()
         );
+        assert_eq!(full.fork_boundary_tokens.len(), full.messages.len());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

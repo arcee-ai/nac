@@ -674,6 +674,8 @@ pub struct MessagePageMetadata {
 #[derive(Debug, Clone, Serialize)]
 pub struct MessagesPageResponse {
     pub messages: Vec<Message>,
+    /// Opaque fork boundary tokens aligned with `messages`.
+    pub fork_boundary_tokens: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -717,6 +719,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
             messages: page.messages,
+            fork_boundary_tokens: page.fork_boundary_tokens,
             page: page.page.into(),
         }
     }
