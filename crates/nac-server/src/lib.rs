@@ -81,8 +81,6 @@ pub struct ForkedSession {
 
 #[derive(Debug)]
 pub enum ForkSessionLifecycleError {
-    ActiveOperation(String),
-    Lease(sessions::SessionOperationLeaseError),
     Fork(sessions::SessionForkError),
     Attachment {
         fork: sessions::SessionForkResult,
@@ -93,11 +91,6 @@ pub enum ForkSessionLifecycleError {
 impl fmt::Display for ForkSessionLifecycleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ActiveOperation(session_id) => write!(
-                formatter,
-                "session '{session_id}' is busy with an active operation"
-            ),
-            Self::Lease(error) => error.fmt(formatter),
             Self::Fork(error) => error.fmt(formatter),
             Self::Attachment { fork, .. } => write!(
                 formatter,
@@ -111,10 +104,8 @@ impl fmt::Display for ForkSessionLifecycleError {
 impl std::error::Error for ForkSessionLifecycleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Lease(error) => Some(error),
             Self::Fork(error) => Some(error),
             Self::Attachment { source, .. } => Some(source.as_ref()),
-            Self::ActiveOperation(_) => None,
         }
     }
 }
@@ -856,10 +847,12 @@ impl SessionManager {
         self.attach_session_locked(session_id).await
     }
 
-    /// Creates a durable child while the source is quiescent, then releases all
-    /// source coordination before attaching the child through the normal resume
-    /// path. An attachment error retains the successful fork result so callers
-    /// can recover the independently resumable child.
+    /// Creates a durable child at an explicit historical assistant boundary,
+    /// then releases the source lifecycle gate before attaching the child through
+    /// the normal resume path. The core IMMEDIATE transaction provides the
+    /// consistent snapshot while source runs, compactions, or workers continue.
+    /// An attachment error retains the successful fork result so callers can
+    /// recover the independently resumable child.
     pub async fn fork_session(
         &self,
         source_session_id: &str,
@@ -869,25 +862,6 @@ impl SessionManager {
         let gate = self.lifecycle_gate(source_session_id);
         let lifecycle = gate.lock().await;
 
-        if self
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .get(source_session_id)
-            .is_some_and(|service| service.has_active_operation())
-        {
-            return Err(ForkSessionLifecycleError::ActiveOperation(
-                source_session_id.to_string(),
-            ));
-        }
-
-        // Acquisition is deliberately nonblocking. The lease closes the
-        // cross-process gap between local lifecycle admission and the core
-        // transaction's transcript snapshot.
-        let operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, source_session_id)
-                .map_err(ForkSessionLifecycleError::Lease)?;
         let store_path = self.inner.store_path.clone();
         let source = source_session_id.to_string();
         let child = child_session_id.to_string();
@@ -904,7 +878,6 @@ impl SessionManager {
 
         // Never resume while holding source coordination: the child receives a
         // fresh service/agent/sandbox through the ordinary attachment path.
-        drop(operation_lease);
         drop(lifecycle);
 
         let service = self
@@ -2273,10 +2246,6 @@ impl From<JsonRejection> for ApiError {
 impl From<ForkSessionLifecycleError> for ApiError {
     fn from(error: ForkSessionLifecycleError) -> Self {
         let status = match &error {
-            ForkSessionLifecycleError::ActiveOperation(_) => StatusCode::CONFLICT,
-            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Busy(_)) => {
-                StatusCode::CONFLICT
-            }
             ForkSessionLifecycleError::Fork(sessions::SessionForkError::InvalidInput(_)) => {
                 StatusCode::BAD_REQUEST
             }
@@ -2286,8 +2255,7 @@ impl From<ForkSessionLifecycleError> for ApiError {
             ForkSessionLifecycleError::Fork(sessions::SessionForkError::Conflict(_)) => {
                 StatusCode::CONFLICT
             }
-            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Store(_))
-            | ForkSessionLifecycleError::Fork(sessions::SessionForkError::Store(_))
+            ForkSessionLifecycleError::Fork(sessions::SessionForkError::Store(_))
             | ForkSessionLifecycleError::Attachment { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
@@ -2417,6 +2385,7 @@ mod tests {
         http::Request,
     };
     use flate2::read::GzDecoder;
+    use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
 
     #[path = "compaction.rs"]
@@ -3004,7 +2973,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fork_http_api_maps_request_source_boundary_and_lease_failures_without_children() {
+    async fn fork_http_api_maps_request_and_source_failures_and_ignores_source_lease() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("fork_http_errors");
         let nac_home = root.join("nac-home");
@@ -3074,20 +3043,16 @@ mod tests {
 
         let _lease =
             sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source").unwrap();
-        let busy = post_json_response(
+        let forked = post_json_response(
             router(manager),
             "/sessions/source/fork",
             Some(r#"{"through_message_index":1}"#),
         )
         .await;
-        assert_eq!(busy.status(), StatusCode::CONFLICT);
+        assert_eq!(forked.status(), StatusCode::CREATED);
 
         let summaries = sessions::list_sessions(&root.join("store.db")).unwrap();
-        assert_eq!(
-            summaries.len(),
-            initial_count,
-            "failed forks must not create children"
-        );
+        assert_eq!(summaries.len(), initial_count + 1);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3134,7 +3099,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fork_lifecycle_waits_for_source_gate_and_rejects_external_lease_without_writes() {
+    async fn fork_lifecycle_waits_for_source_gate_and_allows_external_lease() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("fork_lifecycle_coordination");
         let nac_home = root.join("nac-home");
@@ -3168,28 +3133,24 @@ mod tests {
 
         let _lease =
             sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source").unwrap();
-        let error = tokio::time::timeout(
+        let fork = tokio::time::timeout(
             Duration::from_secs(2),
             manager.fork_session(
                 "source",
-                "blocked-child",
+                "lease-independent-child",
                 sessions::SessionForkBoundary::AfterAssistant(1),
             ),
         )
         .await
-        .expect("operation lease acquisition is nonblocking")
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            ForkSessionLifecycleError::Lease(sessions::SessionOperationLeaseError::Busy(_))
-        ));
-        assert!(!sessions::session_exists(&root.join("store.db"), "blocked-child").unwrap());
+        .expect("historical fork does not wait for the source operation lease")
+        .unwrap();
+        assert_eq!(fork.fork.session_id, "lease-independent-child");
         drop(_lease);
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
-    async fn fork_lifecycle_rejects_local_active_operation_without_creating_child() {
+    async fn fork_lifecycle_allows_local_active_run_and_keeps_child_inactive() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("fork_lifecycle_active");
         let nac_home = root.join("nac-home");
@@ -3208,22 +3169,72 @@ mod tests {
             .await
             .unwrap();
 
-        let error = manager
+        let fork = manager
             .fork_session(
                 "source",
                 "child",
                 sessions::SessionForkBoundary::AfterAssistant(1),
             )
             .await
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            ForkSessionLifecycleError::ActiveOperation(ref id) if id == "source"
-        ));
-        assert!(!sessions::session_exists(&root.join("store.db"), "child").unwrap());
+            .unwrap();
+        assert_eq!(fork.fork.copied_message_count, 2);
+        assert_eq!(fork.fork.source_message_count, 4);
+        assert_eq!(fork.snapshot.messages.len(), 2);
+        assert!(fork.snapshot.active_run.is_none());
+        assert!(fork.snapshot.active_compaction.is_none());
+        assert!(fork.snapshot.active_threads.is_empty());
+
+        let source = manager.snapshot("source").await.unwrap();
+        assert!(source.active_run.is_some(), "source run remains active");
+        assert_eq!(source.messages.len(), 4);
+        assert!(matches!(source.messages[0], Message::User { .. }));
+        assert!(matches!(source.messages[1], Message::Assistant { .. }));
+        assert!(matches!(source.messages[2], Message::User { .. }));
+        assert!(matches!(source.messages[3], Message::User { .. }));
 
         manager.cancel_active_run("source").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_lifecycle_allows_active_manual_compaction() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_lifecycle_compaction");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_forkable_session(&root, "source");
+        let (release_endpoint, endpoint) =
+            point_session_at_releasable_compaction_endpoint(&root, "source").await;
+        let manager = test_manager(&root);
+        let source_service = manager.attach_session("source").await.unwrap();
+        let compaction = source_service.try_compact().unwrap();
+        assert!(source_service.active_compaction().is_some());
+
+        let fork = manager
+            .fork_session(
+                "source",
+                "child",
+                sessions::SessionForkBoundary::AfterAssistant(1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fork.fork.copied_message_count, 2);
+        assert_eq!(fork.fork.source_message_count, 3);
+        assert!(source_service.active_compaction().is_some());
+        assert!(fork.snapshot.active_run.is_none());
+        assert!(fork.snapshot.active_compaction.is_none());
+        assert!(fork.snapshot.active_threads.is_empty());
+
+        let _ = release_endpoint.send(());
+        let _ = tokio::time::timeout(Duration::from_secs(2), compaction.wait())
+            .await
+            .expect("compaction completes after its endpoint responds");
+        endpoint.await.unwrap();
+        assert!(source_service.active_compaction().is_none());
+        let source = manager.snapshot("source").await.unwrap();
+        assert_eq!(source.messages.len(), 3);
+        assert!(sessions::session_exists(&root.join("store.db"), "child").unwrap());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4229,6 +4240,48 @@ thread_timeout_secs = 7200
             Some("{\"X-Repaired\":\"yes\"}")
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    async fn point_session_at_releasable_compaction_endpoint(
+        root: &std::path::Path,
+        session_id: &str,
+    ) -> (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
+        snapshot.base_url = format!("http://{address}/v1");
+        sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
+        let (release, released) = tokio::sync::oneshot::channel();
+
+        let endpoint = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let _ = released.await;
+                let body = serde_json::json!({
+                    "status": "completed",
+                    "output": [{
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "historical summary"}]
+                    }],
+                    "usage": {
+                        "input_tokens": 30,
+                        "input_tokens_details": {"cached_tokens": 4},
+                        "output_tokens": 5,
+                        "total_tokens": 39
+                    }
+                })
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        (release, endpoint)
     }
 
     async fn point_session_at_hanging_endpoint(
