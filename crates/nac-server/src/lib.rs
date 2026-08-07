@@ -52,6 +52,9 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    queued_runs::{
+        MessageReceiptDisposition, QueuedRunRecord, QueuedRunStoreError, MAX_QUEUED_ID_BYTES,
+    },
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
@@ -59,8 +62,8 @@ use nac_core::{
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
-        SessionSubmitError, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionQueueOutcome,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
@@ -588,6 +591,19 @@ pub struct ReorderSessionsResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
+    #[serde(default)]
+    pub client_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EditQueuedRunRequest {
+    pub prompt: String,
+    pub expected_version: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeleteQueuedRunQuery {
+    pub expected_version: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -604,10 +620,25 @@ pub struct CommitWorkspaceRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SubmitPromptResponse {
-    pub run_id: String,
-    pub client_id: Option<String>,
-    pub display_prompt: String,
+#[serde(tag = "disposition", rename_all = "snake_case")]
+pub enum SubmitPromptResponse {
+    Started {
+        run_id: String,
+        client_id: Option<String>,
+        display_prompt: String,
+    },
+    Queued {
+        queued_message: QueuedRunRecord,
+    },
+}
+
+impl SubmitPromptResponse {
+    pub fn run_id(&self) -> Option<&str> {
+        match self {
+            Self::Started { run_id, .. } => Some(run_id),
+            Self::Queued { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1351,7 +1382,53 @@ impl SessionManager {
             return Ok(Arc::clone(service));
         }
 
-        let service = Arc::new(self.resume_session(session_id).await?);
+        // An `admitting` row is a crash marker for a successful handoff whose
+        // canonical User append did not commit. Only its lease owner may resume
+        // or roll it back.
+        let admitting = nac_core::queued_runs::load_queued_run(&self.inner.store_path, session_id)?
+            .filter(|queued| queued.state == nac_core::queued_runs::QueuedRunState::Admitting);
+        let recovery_lease = if admitting.is_some() {
+            match sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id) {
+                Ok(lease) => Some(lease),
+                Err(error @ sessions::SessionOperationLeaseError::Busy(_)) => {
+                    let _ = error; // another process remains authoritative
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            None
+        };
+        let resumed = self.resume_session(session_id).await;
+        let service = match resumed {
+            Ok(service) => Arc::new(service),
+            Err(error) => {
+                if let (Some(queued), Some(_lease)) = (&admitting, recovery_lease) {
+                    if let Some(run_id) = queued.admitted_run_id.as_deref() {
+                        nac_core::queued_runs::rollback_queued_run_admission(
+                            &self.inner.store_path,
+                            session_id,
+                            &queued.queued_run_id,
+                            run_id,
+                        )?;
+                    }
+                }
+                return Err(error);
+            }
+        };
+        if let (Some(queued), Some(lease)) = (admitting, recovery_lease) {
+            if let Err(error) = service.resume_admitting_queued(queued.clone(), lease) {
+                if let Some(run_id) = queued.admitted_run_id.as_deref() {
+                    nac_core::queued_runs::rollback_queued_run_admission(
+                        &self.inner.store_path,
+                        session_id,
+                        &queued.queued_run_id,
+                        run_id,
+                    )?;
+                }
+                return Err(error);
+            }
+        }
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));
@@ -1656,10 +1733,79 @@ impl SessionManager {
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
         self.require_persisted_operation_session(session_id)?;
+        if let Some(id) = request.client_message_id.as_deref() {
+            if id.trim().is_empty() || id.len() > MAX_QUEUED_ID_BYTES {
+                return Err(anyhow!("invalid client_message_id"));
+            }
+        }
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        // The OS lease closes the cross-process gap between checking durable
-        // state and synchronously establishing active-run state.
+
+        // A locally active run is the only operation whose identity is known
+        // well enough to accept a next turn. Do not acquire a second OS lease.
+        if let Some(service) = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+        {
+            if service.active_run().is_some() {
+                let client = service.connect_client();
+                let prompt = match client.prepare_user_input(&request.prompt) {
+                    PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
+                    PreparedUserInput::InvalidSlashCommand { message } => {
+                        return Err(anyhow!(message))
+                    }
+                    PreparedUserInput::FrontendCommand(command) => {
+                        return Err(anyhow!(
+                            "frontend command '{}' is not supported by the server API",
+                            frontend_command_name(command)
+                        ))
+                    }
+                    PreparedUserInput::SubmitPrompt(prompt) => prompt,
+                };
+                let outcome = service.queue_prepared_next_turn(
+                    request
+                        .client_message_id
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    prompt.display_prompt,
+                    prompt.agent_prompt,
+                )?;
+                return match outcome {
+                    SessionQueueOutcome::Queued(record) => Ok(SubmitPromptResponse::Queued {
+                        queued_message: record,
+                    }),
+                    SessionQueueOutcome::Replay(receipt) => match receipt.disposition {
+                        MessageReceiptDisposition::Queued
+                        | MessageReceiptDisposition::Admitting => {
+                            let record = nac_core::queued_runs::load_queued_run(
+                                &self.inner.store_path,
+                                session_id,
+                            )?
+                            .ok_or_else(|| anyhow!("queued message receipt has no queue row"))?;
+                            Ok(SubmitPromptResponse::Queued {
+                                queued_message: record,
+                            })
+                        }
+                        MessageReceiptDisposition::Admitted => Ok(SubmitPromptResponse::Started {
+                            run_id: receipt
+                                .run_id
+                                .ok_or_else(|| anyhow!("admitted receipt has no run id"))?,
+                            client_id: None,
+                            display_prompt: request.prompt,
+                        }),
+                        MessageReceiptDisposition::Deleted => {
+                            Err(anyhow!(QueuedRunStoreError::Conflict))
+                        }
+                    },
+                };
+            }
+        }
+
+        // Idle admission preserves the established path. An external holder,
+        // manual compaction, or finishing local run remains a conflict.
         let operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
@@ -1676,11 +1822,128 @@ impl SessionManager {
             )),
             PreparedUserInput::SubmitPrompt(prompt) => {
                 let display_prompt = prompt.display_prompt.clone();
+                if let Some(client_message_id) = request.client_message_id.as_deref() {
+                    if let Some(receipt) = nac_core::queued_runs::load_message_receipt(
+                        &self.inner.store_path,
+                        session_id,
+                        client_message_id,
+                    )? {
+                        if !nac_core::queued_runs::message_receipt_matches_prompt(
+                            &receipt,
+                            &prompt.display_prompt,
+                            &prompt.agent_prompt,
+                        ) {
+                            return Err(anyhow!(QueuedRunStoreError::IdempotencyMismatch));
+                        }
+                        return match receipt.disposition {
+                            MessageReceiptDisposition::Admitted => {
+                                Ok(SubmitPromptResponse::Started {
+                                    run_id: receipt
+                                        .run_id
+                                        .ok_or_else(|| anyhow!("admitted receipt has no run id"))?,
+                                    client_id: None,
+                                    display_prompt,
+                                })
+                            }
+                            MessageReceiptDisposition::Deleted => {
+                                Err(anyhow!(QueuedRunStoreError::Conflict))
+                            }
+                            MessageReceiptDisposition::Queued
+                            | MessageReceiptDisposition::Admitting => {
+                                let record = nac_core::queued_runs::load_queued_run(
+                                    &self.inner.store_path,
+                                    session_id,
+                                )?
+                                .ok_or_else(|| anyhow!("queued receipt has no queue row"))?;
+                                Ok(SubmitPromptResponse::Queued {
+                                    queued_message: record,
+                                })
+                            }
+                        };
+                    }
+                }
                 let handle = client
                     .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
                     .map_err(anyhow::Error::new)?;
                 Ok(submit_response(handle, display_prompt))
             }
+        }
+    }
+
+    pub async fn edit_queued_run(
+        &self,
+        session_id: &str,
+        queued_run_id: &str,
+        request: EditQueuedRunRequest,
+    ) -> Result<QueuedRunRecord> {
+        self.require_persisted_operation_session(session_id)?;
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let service = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        // Slash-command preparation is pure and deliberately does not attach a
+        // model, so a broken configuration cannot strand an editable queue.
+        let prepared = nac_core::commands::prepare_user_input(&request.prompt);
+        let prompt = match prepared {
+            PreparedUserInput::SubmitPrompt(prompt) => prompt,
+            PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
+            PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
+            PreparedUserInput::FrontendCommand(command) => {
+                return Err(anyhow!(
+                    "frontend command '{}' is not supported by the server API",
+                    frontend_command_name(command)
+                ))
+            }
+        };
+        if let Some(service) = service {
+            service.edit_queued_next_turn(
+                queued_run_id,
+                request.expected_version,
+                &prompt.display_prompt,
+                &prompt.agent_prompt,
+            )
+        } else {
+            nac_core::queued_runs::edit_queued_run(
+                &self.inner.store_path,
+                session_id,
+                queued_run_id,
+                request.expected_version,
+                &prompt.display_prompt,
+                &prompt.agent_prompt,
+            )
+        }
+    }
+
+    pub async fn delete_queued_run(
+        &self,
+        session_id: &str,
+        queued_run_id: &str,
+        expected_version: u64,
+    ) -> Result<()> {
+        self.require_persisted_operation_session(session_id)?;
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        if let Some(service) = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+        {
+            service.delete_queued_next_turn(queued_run_id, expected_version)
+        } else {
+            nac_core::queued_runs::delete_queued_run(
+                &self.inner.store_path,
+                session_id,
+                queued_run_id,
+                expected_version,
+            )
         }
     }
 
@@ -2169,6 +2432,10 @@ fn api_router(manager: SessionManager) -> Router {
             get(session_config_handler).patch(update_config_handler),
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
+        .route(
+            "/sessions/{session_id}/queued-runs/{queued_run_id}",
+            patch(edit_queued_run_handler).delete(delete_queued_run_handler),
+        )
         .route("/sessions/{session_id}/compact", post(compaction::handler))
         .route("/sessions/{session_id}/revert", post(revert::handler))
         .route(
@@ -3153,6 +3420,29 @@ async fn submit_prompt(
     ))
 }
 
+async fn edit_queued_run_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, queued_run_id)): AxumPath<(String, String)>,
+    Json(request): Json<EditQueuedRunRequest>,
+) -> std::result::Result<Json<QueuedRunRecord>, ApiError> {
+    Ok(Json(
+        manager
+            .edit_queued_run(&session_id, &queued_run_id, request)
+            .await?,
+    ))
+}
+
+async fn delete_queued_run_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, queued_run_id)): AxumPath<(String, String)>,
+    Query(query): Query<DeleteQueuedRunQuery>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager
+        .delete_queued_run(&session_id, &queued_run_id, query.expected_version)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn queue_orchestrator_steering_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3584,12 +3874,9 @@ fn sandbox_requested(request: &SandboxRequest) -> bool {
 }
 
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {
-    SubmitPromptResponse {
+    SubmitPromptResponse::Started {
         run_id: handle.run_id.to_string(),
-        client_id: handle
-            .client_id
-            .as_ref()
-            .map(|client_id| client_id.to_string()),
+        client_id: handle.client_id.as_ref().map(ToString::to_string),
         display_prompt,
     }
 }
@@ -3901,6 +4188,14 @@ impl From<anyhow::Error> for ApiError {
                 sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<QueuedRunStoreError>() {
+            match error {
+                QueuedRunStoreError::Invalid(_) => StatusCode::BAD_REQUEST,
+                QueuedRunStoreError::NotFound => StatusCode::NOT_FOUND,
+                QueuedRunStoreError::IdempotencyMismatch
+                | QueuedRunStoreError::Occupied
+                | QueuedRunStoreError::Conflict => StatusCode::CONFLICT,
             }
         } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
             match error {
@@ -5994,6 +6289,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "begin the original task".to_string(),
+                    client_message_id: None,
                 },
             )
             .await
@@ -6042,6 +6338,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "must not revive deleted state".to_string(),
+                        client_message_id: None,
                     },
                 )
                 .await
@@ -6088,6 +6385,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "hold this run open".to_string(),
+                        client_message_id: None,
                     },
                 )
                 .await
@@ -6146,7 +6444,7 @@ thread_timeout_secs = 7200
         assert!(Arc::ptr_eq(&mapped, &original_service));
         assert_eq!(
             mapped.active_run().unwrap().run_id.as_str(),
-            submitted.run_id
+            submitted.run_id().unwrap()
         );
 
         manager.cancel_active_run("session").await.unwrap();
@@ -6193,6 +6491,7 @@ thread_timeout_secs = 7200
                     "session",
                     SubmitPromptRequest {
                         prompt: "use committed settings".to_string(),
+                        client_message_id: None,
                     },
                 )
                 .await
@@ -6226,7 +6525,7 @@ thread_timeout_secs = 7200
         assert!(stale_service.active_run().is_none());
         assert_eq!(
             mapped.active_run().unwrap().run_id.as_str(),
-            submitted.run_id
+            submitted.run_id().unwrap()
         );
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -6256,6 +6555,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "hold cross-process lease".to_string(),
+                    client_message_id: None,
                 },
             )
             .await
@@ -6336,6 +6636,7 @@ thread_timeout_secs = 7200
                 "session",
                 SubmitPromptRequest {
                     prompt: "must use externally committed authority".to_string(),
+                    client_message_id: None,
                 },
             )
             .await
@@ -6359,7 +6660,7 @@ thread_timeout_secs = 7200
         assert_eq!(metadata.extra_headers, new_headers);
         assert_eq!(
             current_service.active_run().unwrap().run_id.as_str(),
-            submitted.run_id
+            submitted.run_id().unwrap()
         );
         assert!(stale_service.active_run().is_none());
 
@@ -8364,5 +8665,33 @@ model = "gpt-5.2"
         );
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn submit_prompt_http_contract_is_tagged_and_client_id_is_optional() {
+        let omitted: SubmitPromptRequest =
+            serde_json::from_value(serde_json::json!({"prompt":"hello"})).unwrap();
+        assert!(omitted.client_message_id.is_none());
+        let response = submit_response(
+            SessionRunHandle {
+                run_id: nac_core::events::SessionRunId::from_string("run-1".to_string()),
+                client_id: None,
+            },
+            "hello".to_string(),
+        );
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "disposition": "started", "run_id": "run-1", "client_id": null, "display_prompt": "hello"
+            })
+        );
+        assert_eq!(
+            ApiError::from(anyhow!(QueuedRunStoreError::Occupied)).status,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            ApiError::from(anyhow!(QueuedRunStoreError::NotFound)).status,
+            StatusCode::NOT_FOUND
+        );
     }
 }

@@ -82,6 +82,10 @@ impl SessionRunId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn from_string(value: String) -> Self {
+        Self(value)
+    }
 }
 
 impl Default for SessionRunId {
@@ -288,6 +292,19 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         submitted_user_message: Option<SubmittedUserMessageSnapshot>,
         started_at_epoch_ms: u64,
+    },
+    QueuedRunCreated {
+        queued_message: crate::store::QueuedRunRecord,
+    },
+    QueuedRunUpdated {
+        queued_message: crate::store::QueuedRunRecord,
+    },
+    QueuedRunDeleted {
+        queued_run_id: String,
+    },
+    QueuedRunAdmitted {
+        queued_run_id: String,
+        run_id: SessionRunId,
     },
     RunCompleted {
         response: String,

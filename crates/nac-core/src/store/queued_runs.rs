@@ -120,14 +120,22 @@ fn validate_create(request: &CreateQueuedRun) -> Result<()> {
     Ok(())
 }
 
-fn payload_hash(display_prompt: &str, agent_prompt: &str, after_run_id: &str) -> String {
+fn payload_hash(display_prompt: &str, agent_prompt: &str, _after_run_id: &str) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"nac:queued-run-payload:v1\0");
-    for field in [display_prompt, agent_prompt, after_run_id] {
+    digest.update(b"nac:queued-run-payload:v2\0");
+    for field in [display_prompt, agent_prompt] {
         digest.update((field.len() as u64).to_be_bytes());
         digest.update(field.as_bytes());
     }
     format!("{:x}", digest.finalize())
+}
+
+pub fn message_receipt_matches_prompt(
+    receipt: &MessageReceiptRecord,
+    display_prompt: &str,
+    agent_prompt: &str,
+) -> bool {
+    receipt.payload_sha256 == payload_hash(display_prompt, agent_prompt, "")
 }
 
 fn parse_state(value: String) -> rusqlite::Result<QueuedRunState> {
@@ -187,9 +195,11 @@ const RECEIPT_SELECT: &str = "SELECT session_id, client_message_id, payload_sha2
     disposition, queued_run_id, run_id, created_at, updated_at
     FROM session_message_receipts";
 
-pub fn load_queued_run(path: &Path, session_id: &str) -> Result<Option<QueuedRunRecord>> {
+pub(crate) fn load_queued_run_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<QueuedRunRecord>> {
     validate_nonempty(session_id, MAX_QUEUED_ID_BYTES, "session id")?;
-    let conn = open_runtime_connection(path)?;
     conn.query_row(
         &format!("{QUEUED_SELECT} WHERE session_id = ?1"),
         params![session_id],
@@ -197,6 +207,11 @@ pub fn load_queued_run(path: &Path, session_id: &str) -> Result<Option<QueuedRun
     )
     .optional()
     .map_err(Into::into)
+}
+
+pub fn load_queued_run(path: &Path, session_id: &str) -> Result<Option<QueuedRunRecord>> {
+    let conn = open_runtime_connection(path)?;
+    load_queued_run_with_connection(&conn, session_id)
 }
 
 pub fn load_message_receipt(

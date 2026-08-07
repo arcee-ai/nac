@@ -455,6 +455,42 @@ impl Agent {
             return Err(error);
         }
 
+        self.run_after_admitted_prompt().await
+    }
+
+    /// Continue a run whose queued User prompt was committed by the specialized
+    /// queue/transcript transaction rather than ordinary `send`.
+    pub async fn send_admitting_queued(
+        &mut self,
+        prompt: &str,
+        queued_run_id: &str,
+        admitted_run_id: &str,
+    ) -> Result<String> {
+        self.emit(AgentEvent::RunStarted {
+            thread_name: self.thread_name.clone(),
+            prompt_preview: preview(prompt, 160),
+        });
+        self.last_usage = None;
+        let sink = self
+            .transcript_log
+            .as_ref()
+            .ok_or_else(|| anyhow!("queued admission requires a transcript log"))?;
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let queue_id = queued_run_id.to_string();
+        let run_id = admitted_run_id.to_string();
+        let idx = self.messages.len() as u64;
+        let message = tokio::task::spawn_blocking(move || {
+            writer.append_admitting_queued_user(&session_id, &queue_id, &run_id, idx)
+        })
+        .await
+        .map_err(|error| anyhow!("queued prompt admission task failed: {error}"))??;
+        self.messages.push(message);
+        self.event_sink.emit_transcript_appended(idx + 1);
+        self.run_after_admitted_prompt().await
+    }
+
+    async fn run_after_admitted_prompt(&mut self) -> Result<String> {
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),

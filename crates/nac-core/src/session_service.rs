@@ -184,6 +184,8 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_message: Option<crate::store::QueuedRunRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_compaction: Option<ActiveCompactionSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
@@ -318,6 +320,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    queued_message: Option<crate::store::QueuedRunRecord>,
     worksets: WorksetsSnapshot,
     workspace: WorkspaceSnapshot,
 }
@@ -337,6 +340,12 @@ pub struct SessionClientAttachment {
 pub struct SessionRunHandle {
     pub run_id: SessionRunId,
     pub client_id: Option<SessionClientId>,
+}
+
+#[derive(Debug, Clone)]
+pub enum SessionQueueOutcome {
+    Queued(crate::store::QueuedRunRecord),
+    Replay(crate::store::MessageReceiptRecord),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,13 +551,14 @@ struct ActiveRunState {
     /// `None` until the task captures it — an early cancel then diffs
     /// against the run-end count, which is exact when nothing was appended.
     transcript_baseline: Option<usize>,
-    _operation_lease: Option<sessions::SessionOperationLease>,
+    operation_lease: Option<sessions::SessionOperationLease>,
 }
 
 struct FinishingRun {
     snapshot: ActiveRunSnapshot,
     duration_ms: u64,
     transcript_baseline: Option<usize>,
+    operation_lease: Option<sessions::SessionOperationLease>,
 }
 
 struct CancellingRun {
@@ -963,6 +973,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
+            queued_message,
             worksets,
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
@@ -989,6 +1000,10 @@ impl SessionService {
                 })
                 .transpose()?
                 .unwrap_or_default();
+            let queued_message = session_id
+                .map(|id| crate::store::queued_runs::load_queued_run_with_connection(&conn, id))
+                .transpose()?
+                .flatten();
             (
                 sessions,
                 threads,
@@ -996,6 +1011,7 @@ impl SessionService {
                 thread_events,
                 thread_event_boundary,
                 thread_steering,
+                queued_message,
                 worksets,
             )
         };
@@ -1006,6 +1022,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
+            queued_message,
             worksets,
             workspace,
         })
@@ -1191,6 +1208,7 @@ impl SessionService {
             fork_boundary_tokens: loaded_messages.fork_boundary_tokens,
             response_timing,
             active_run: self.active_run(),
+            queued_message: blocking.queued_message,
             active_compaction: self.active_compaction(),
             sessions: blocking.sessions,
             active_threads,
@@ -1834,6 +1852,160 @@ impl SessionService {
         self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease))
     }
 
+    /// Queue exactly one prepared next turn while a non-finishing run is active.
+    /// The active-operation mutex stays held through the IMMEDIATE transaction,
+    /// making the predecessor identity and durable insert one decision.
+    pub fn queue_prepared_next_turn(
+        &self,
+        client_message_id: String,
+        display_prompt: String,
+        agent_prompt: String,
+    ) -> Result<SessionQueueOutcome> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("queued runs require a persisted session"))?;
+        let guard = self.lock_active_operation();
+        let active = match guard.as_ref() {
+            Some(ActiveSessionOperation::Run(run)) if !run.finishing => &run.snapshot,
+            Some(ActiveSessionOperation::Run(_)) => {
+                return Err(crate::store::QueuedRunStoreError::Conflict.into())
+            }
+            Some(ActiveSessionOperation::ManualCompaction(_)) => {
+                return Err(crate::store::QueuedRunStoreError::Conflict.into())
+            }
+            None => return Err(crate::store::QueuedRunStoreError::Conflict.into()),
+        };
+        let request = crate::store::CreateQueuedRun {
+            session_id: session_id.to_string(),
+            queued_run_id: Uuid::new_v4().to_string(),
+            client_message_id,
+            display_prompt,
+            agent_prompt,
+            after_run_id: active.run_id.to_string(),
+        };
+        let outcome = crate::store::create_queued_run(&self.metadata.store_path, &request)?;
+        drop(guard);
+        Ok(match outcome {
+            crate::store::CreateQueuedRunOutcome::Created(record) => {
+                self.event_bus.emit(SessionEvent::QueuedRunCreated {
+                    queued_message: record.clone(),
+                });
+                SessionQueueOutcome::Queued(record)
+            }
+            crate::store::CreateQueuedRunOutcome::IdempotentReplay(receipt) => {
+                SessionQueueOutcome::Replay(receipt)
+            }
+        })
+    }
+
+    pub fn edit_queued_next_turn(
+        &self,
+        queued_run_id: &str,
+        expected_version: u64,
+        display_prompt: &str,
+        agent_prompt: &str,
+    ) -> Result<crate::store::QueuedRunRecord> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("queued runs require a persisted session"))?;
+        let record = crate::store::edit_queued_run(
+            &self.metadata.store_path,
+            session_id,
+            queued_run_id,
+            expected_version,
+            display_prompt,
+            agent_prompt,
+        )?;
+        self.event_bus.emit(SessionEvent::QueuedRunUpdated {
+            queued_message: record.clone(),
+        });
+        Ok(record)
+    }
+
+    pub fn delete_queued_next_turn(
+        &self,
+        queued_run_id: &str,
+        expected_version: u64,
+    ) -> Result<()> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("queued runs require a persisted session"))?;
+        crate::store::delete_queued_run(
+            &self.metadata.store_path,
+            session_id,
+            queued_run_id,
+            expected_version,
+        )?;
+        self.event_bus.emit(SessionEvent::QueuedRunDeleted {
+            queued_run_id: queued_run_id.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Recover a durable `admitting` handoff after restart, preserving its
+    /// recorded run identity and the newly acquired operation lease.
+    pub fn resume_admitting_queued(
+        &self,
+        queued: crate::store::QueuedRunRecord,
+        operation_lease: sessions::SessionOperationLease,
+    ) -> Result<SessionRunHandle> {
+        if queued.state != crate::store::QueuedRunState::Admitting {
+            return Err(anyhow::anyhow!("queued run is not admitting"));
+        }
+        let run_id = SessionRunId::from_string(
+            queued
+                .admitted_run_id
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("admitting queued run has no run id"))?,
+        );
+        let now = now_epoch_ms();
+        let active = ActiveRunSnapshot {
+            run_id: run_id.clone(),
+            client_id: None,
+            prompt_preview: prompt_preview(&queued.display_prompt, 160),
+            submitted_user_message: Some(SubmittedUserMessageSnapshot {
+                run_id: run_id.clone(),
+                client_id: None,
+                content: queued.display_prompt.clone(),
+                submitted_at_epoch_ms: now,
+            }),
+            started_at_epoch_ms: now,
+        };
+        let mut guard = self.lock_active_operation();
+        if guard.is_some() {
+            return Err(anyhow::anyhow!("session already has an active operation"));
+        }
+        *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
+            snapshot: active.clone(),
+            started_at: Instant::now(),
+            finishing: false,
+            task: None,
+            transcript_baseline: None,
+            operation_lease: Some(operation_lease),
+        }));
+        drop(guard);
+        self.event_bus.emit_with_context(
+            SessionEvent::RunStarted {
+                prompt_preview: active.prompt_preview.clone(),
+                submitted_user_message: active.submitted_user_message.clone(),
+                started_at_epoch_ms: now,
+            },
+            Some(run_id.clone()),
+            None,
+        );
+        self.spawn_admitted_queued_run(active, queued);
+        Ok(SessionRunHandle {
+            run_id,
+            client_id: None,
+        })
+    }
+
     pub async fn request_cancel(
         &self,
         run_id: &SessionRunId,
@@ -2090,7 +2262,7 @@ impl SessionService {
             finishing: false,
             task: None,
             transcript_baseline: None,
-            _operation_lease: operation_lease,
+            operation_lease: operation_lease,
         }));
         drop(guard);
 
@@ -2115,7 +2287,7 @@ impl SessionService {
     }
 
     async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
-        let Some(finishing_run) = self.mark_run_finishing(run_id) else {
+        let Some(mut finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
         self.expire_orchestrator_steering(run_id);
@@ -2148,6 +2320,13 @@ impl SessionService {
         self.capture_workspace_revision(&finishing_run.snapshot)
             .await;
 
+        let fully_successful =
+            matches!(outcome, RunOutcome::Completed(..)) && persistence_error.is_none();
+        let handoff = if fully_successful {
+            self.try_handoff_queued_run(&mut finishing_run)
+        } else {
+            None
+        };
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
@@ -2167,8 +2346,160 @@ impl SessionService {
         };
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
-        self.clear_finished_run(&run_id);
+        if let Some((queued, active)) = handoff {
+            self.event_bus.emit_with_context(
+                SessionEvent::QueuedRunAdmitted {
+                    queued_run_id: queued.queued_run_id.clone(),
+                    run_id: active.run_id.clone(),
+                },
+                Some(active.run_id.clone()),
+                active.client_id.clone(),
+            );
+            self.event_bus.emit_with_context(
+                SessionEvent::RunStarted {
+                    prompt_preview: active.prompt_preview.clone(),
+                    submitted_user_message: active.submitted_user_message.clone(),
+                    started_at_epoch_ms: active.started_at_epoch_ms,
+                },
+                Some(active.run_id.clone()),
+                active.client_id.clone(),
+            );
+            self.spawn_admitted_queued_run(active, queued);
+        } else {
+            self.clear_finished_run(&run_id);
+        }
         true
+    }
+
+    /// Replace the successful predecessor with its admitted successor while
+    /// retaining the same operation lease. The active mutex is held across the
+    /// short IMMEDIATE transaction, so observers never see an idle gap.
+    fn try_handoff_queued_run(
+        &self,
+        finishing: &mut FinishingRun,
+    ) -> Option<(crate::store::QueuedRunRecord, ActiveRunSnapshot)> {
+        let session_id = self.metadata.session_id.as_deref()?;
+        let queued =
+            crate::store::load_queued_run(&self.metadata.store_path, session_id).ok()??;
+        if queued.state != crate::store::QueuedRunState::Pending
+            || queued.after_run_id != finishing.snapshot.run_id.to_string()
+        {
+            return None;
+        }
+        let mut guard = self.lock_active_operation();
+        let old_matches = matches!(guard.as_ref(), Some(ActiveSessionOperation::Run(run)) if run.finishing && run.snapshot.run_id == finishing.snapshot.run_id);
+        if !old_matches {
+            return None;
+        }
+        let new_run_id = SessionRunId::new();
+        let admitted = match crate::store::begin_queued_run_admission(
+            &self.metadata.store_path,
+            session_id,
+            &queued.queued_run_id,
+            &queued.after_run_id,
+            queued.version,
+            new_run_id.as_str(),
+        ) {
+            Ok(record) => record,
+            Err(error) => {
+                eprintln!("nac: queued-run handoff lost its CAS: {error:#}");
+                return None;
+            }
+        };
+        let now = now_epoch_ms();
+        let active = ActiveRunSnapshot {
+            run_id: new_run_id,
+            client_id: None,
+            prompt_preview: prompt_preview(&admitted.display_prompt, 160),
+            submitted_user_message: Some(SubmittedUserMessageSnapshot {
+                run_id: SessionRunId::new(), // replaced below to keep one identity
+                client_id: None,
+                content: admitted.display_prompt.clone(),
+                submitted_at_epoch_ms: now,
+            }),
+            started_at_epoch_ms: now,
+        };
+        let mut active = active;
+        active.submitted_user_message.as_mut().unwrap().run_id = active.run_id.clone();
+        *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
+            snapshot: active.clone(),
+            started_at: Instant::now(),
+            finishing: false,
+            task: None,
+            transcript_baseline: None,
+            operation_lease: finishing.operation_lease.take(),
+        }));
+        Some((admitted, active))
+    }
+
+    fn spawn_admitted_queued_run(
+        &self,
+        active: ActiveRunSnapshot,
+        queued: crate::store::QueuedRunRecord,
+    ) {
+        let service = self.clone();
+        let event_bus = self.event_bus.clone();
+        let task_run_id = active.run_id.clone();
+        let run_client_id = active.client_id.clone();
+        let task_id = task_run_id.clone();
+        let task = tokio::spawn(async move {
+            if let Err(error) = service.update_transcript_scan().await {
+                eprintln!("nac: failed to capture queued run transcript baseline: {error:#}");
+            }
+            let baseline = service.lock_transcript_scan().visible_response_count;
+            service.set_run_transcript_baseline(&task_run_id, baseline);
+            let (result, usage) = {
+                let mut agent = service.agent.lock().await;
+                agent.set_event_sink(EventSink::bus_with_context(
+                    event_bus.clone(),
+                    Some(task_run_id.clone()),
+                    run_client_id.clone(),
+                ));
+                agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
+                let result = agent
+                    .send_admitting_queued(
+                        &queued.agent_prompt,
+                        &queued.queued_run_id,
+                        task_run_id.as_str(),
+                    )
+                    .await
+                    .map_err(|e| e.to_string());
+                agent.set_event_sink(EventSink::bus(event_bus));
+                let usage = agent.last_usage.clone();
+                (result, usage)
+            };
+            let outcome = match result {
+                Ok(response) => RunOutcome::Completed(response, usage),
+                Err(message) => {
+                    // If the specialized canonical append itself failed, the
+                    // admitting row still exists and is conclusive proof that
+                    // no User message committed. Restore editability and undo
+                    // the admission run-count increment.
+                    if let Some(session_id) = service.metadata.session_id.as_deref() {
+                        if let Ok(Some(still_queued)) =
+                            crate::store::load_queued_run(&service.metadata.store_path, session_id)
+                        {
+                            if still_queued.state == crate::store::QueuedRunState::Admitting
+                                && still_queued.admitted_run_id.as_deref()
+                                    == Some(task_run_id.as_str())
+                            {
+                                if let Err(error) = crate::store::rollback_queued_run_admission(
+                                    &service.metadata.store_path,
+                                    session_id,
+                                    &still_queued.queued_run_id,
+                                    task_run_id.as_str(),
+                                ) {
+                                    eprintln!("nac: failed to roll back uncommitted queued prompt: {error:#}");
+                                }
+                            }
+                        }
+                    }
+                    RunOutcome::Failed(message, usage)
+                }
+            };
+            service.finish_run_once(&task_run_id, outcome).await;
+        });
+        self.set_run_task(&task_id, task);
     }
 
     /// Freeze the checkout as it stands now, so the run can be revisited later.
@@ -2310,6 +2641,7 @@ impl SessionService {
             snapshot: active_run.snapshot.clone(),
             duration_ms: duration_ms(active_run.started_at.elapsed()),
             transcript_baseline: active_run.transcript_baseline,
+            operation_lease: active_run.operation_lease.take(),
         })
     }
 
@@ -3930,7 +4262,7 @@ pub(super) mod tests {
                 finishing: false,
                 task: None,
                 transcript_baseline: None,
-                _operation_lease: None,
+                operation_lease: None,
             }));
         let inactive = service
             .queue_thread_steering("impl/ui", "make the layout denser")
@@ -5975,5 +6307,94 @@ pub(super) mod tests {
         ));
         assert!(events.try_recv().is_err());
         assert!(!store_path.exists());
+    }
+
+    #[tokio::test]
+    async fn queued_next_turn_is_atomic_idempotent_and_failure_retains_pending() {
+        let (parts, store_path) = test_active_service("queued_lifecycle_failure", "queued-session");
+        let active = parts.service.try_begin_run(None, "current").unwrap();
+        let first = parts
+            .service
+            .queue_prepared_next_turn(
+                "client-message-1".to_string(),
+                "next display".to_string(),
+                "next agent".to_string(),
+            )
+            .unwrap();
+        let queued = match first {
+            SessionQueueOutcome::Queued(record) => record,
+            _ => panic!("first create"),
+        };
+        assert_eq!(queued.after_run_id, active.run_id.to_string());
+        assert!(matches!(
+            parts
+                .service
+                .queue_prepared_next_turn(
+                    "client-message-1".to_string(),
+                    "next display".to_string(),
+                    "next agent".to_string(),
+                )
+                .unwrap(),
+            SessionQueueOutcome::Replay(_)
+        ));
+        assert!(parts
+            .service
+            .queue_prepared_next_turn(
+                "client-message-2".to_string(),
+                "occupied".to_string(),
+                "occupied".to_string(),
+            )
+            .is_err());
+
+        assert!(
+            parts
+                .service
+                .finish_run_once(&active.run_id, RunOutcome::Failed("boom".to_string(), None))
+                .await
+        );
+        assert!(parts.service.active_run().is_none());
+        let retained = crate::store::load_queued_run(&store_path, "queued-session")
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.state, crate::store::QueuedRunState::Pending);
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert_eq!(snapshot.queued_message, Some(retained));
+    }
+
+    #[test]
+    fn successful_handoff_replaces_active_state_without_idle_and_increments_once() {
+        let (parts, store_path) =
+            test_active_service("queued_lifecycle_handoff", "handoff-session");
+        let old = parts.service.try_begin_run(None, "current").unwrap();
+        let queued = match parts
+            .service
+            .queue_prepared_next_turn(
+                "handoff-client".to_string(),
+                "next".to_string(),
+                "prepared next".to_string(),
+            )
+            .unwrap()
+        {
+            SessionQueueOutcome::Queued(record) => record,
+            _ => unreachable!(),
+        };
+        let mut finishing = parts.service.mark_run_finishing(&old.run_id).unwrap();
+        let (admitting, next) = parts
+            .service
+            .try_handoff_queued_run(&mut finishing)
+            .unwrap();
+        assert_eq!(admitting.queued_run_id, queued.queued_run_id);
+        assert_eq!(admitting.state, crate::store::QueuedRunState::Admitting);
+        assert_eq!(parts.service.active_run().unwrap().run_id, next.run_id);
+        assert_ne!(old.run_id, next.run_id);
+        let connection = rusqlite::Connection::open(&store_path).unwrap();
+        let run_count: i64 = connection
+            .query_row(
+                "SELECT run_count FROM sessions WHERE session_id='handoff-session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_count, 2);
     }
 }

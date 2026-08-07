@@ -37,9 +37,10 @@ pub mod lineage {
 pub mod queued_runs {
     pub use crate::store::{
         begin_queued_run_admission, create_queued_run, delete_queued_run, edit_queued_run,
-        load_message_receipt, load_queued_run, rollback_queued_run_admission, CreateQueuedRun,
-        CreateQueuedRunOutcome, MessageReceiptDisposition, MessageReceiptRecord, QueuedRunRecord,
-        QueuedRunState, QueuedRunStoreError, MAX_QUEUED_ID_BYTES, MAX_QUEUED_PROMPT_BYTES,
+        load_message_receipt, load_queued_run, message_receipt_matches_prompt,
+        rollback_queued_run_admission, CreateQueuedRun, CreateQueuedRunOutcome,
+        MessageReceiptDisposition, MessageReceiptRecord, QueuedRunRecord, QueuedRunState,
+        QueuedRunStoreError, MAX_QUEUED_ID_BYTES, MAX_QUEUED_PROMPT_BYTES,
     };
 }
 
