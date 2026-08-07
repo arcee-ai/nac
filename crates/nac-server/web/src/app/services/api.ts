@@ -14,6 +14,7 @@ import type {
   ForkSessionRequest,
   DeviceLoginStarted,
   DeviceLoginState,
+  EditQueuedRunRequest,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
   ManagedAuthList,
@@ -28,6 +29,7 @@ import type {
   OrchestratorSteeringResponse,
   ProviderModelList,
   ProviderModelsRequest,
+  QueuedRunRecord,
   RawSessionConfig,
   RecentEventsResponse,
   ReorderSessionsRequest,
@@ -459,10 +461,23 @@ export const api = {
       `${sessionPath(id)}/overview`,
     ),
 
-  submitRun: (id: string, prompt: string) =>
+  submitRun: (id: string, prompt: string, clientMessageId: string) =>
     request<SubmitPromptResponse>("POST", `${sessionPath(id)}/runs`, {
-      body: { prompt },
+      body: { prompt, client_message_id: clientMessageId },
     }),
+
+  editQueuedRun: (id: string, queuedRunId: string, body: EditQueuedRunRequest) =>
+    request<QueuedRunRecord>(
+      "PATCH",
+      `${sessionPath(id)}/queued-runs/${encodeURIComponent(queuedRunId)}`,
+      { body },
+    ),
+
+  deleteQueuedRun: (id: string, queuedRunId: string, expectedVersion: number) =>
+    request<void>(
+      "DELETE",
+      `${sessionPath(id)}/queued-runs/${encodeURIComponent(queuedRunId)}?expected_version=${expectedVersion}`,
+    ),
 
   cancelActiveRun: (id: string) =>
     request<void>("POST", `${sessionPath(id)}/cancel-active-run`),

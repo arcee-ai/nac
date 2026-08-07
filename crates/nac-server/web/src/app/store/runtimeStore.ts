@@ -3,7 +3,7 @@
 // deltas are accepted only when their run and provider-call ownership matches.
 
 import { createStore } from "@/app/lib/store";
-import { isActiveRun } from "@/app/lib/format";
+import { displayPromptFromMessageText, isActiveRun } from "@/app/lib/format";
 import { threadLogLine, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
@@ -80,6 +80,8 @@ interface RuntimeState {
    * first and jumps down when the user bubble finally lands.
    */
   optimisticUserPrompt: string | null;
+  /** Suppresses a stale snapshot's queue bubble during authoritative handoff. */
+  admittedQueuedRunId: string | null;
 }
 
 export const runtimeStore = createStore<RuntimeState>(
@@ -99,6 +101,7 @@ export const runtimeStore = createStore<RuntimeState>(
     retiredModelCallIds: [],
     streamSettled: false,
     optimisticUserPrompt: null,
+    admittedQueuedRunId: null,
   },
   "runtime",
 );
@@ -124,6 +127,7 @@ export function resetRuntime(sessionId: string | null): void {
     retiredModelCallIds: [],
     streamSettled: false,
     optimisticUserPrompt: null,
+    admittedQueuedRunId: null,
   });
 }
 
@@ -294,6 +298,9 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         streamModelCallId: null,
         retiredModelCallIds: [],
         streamSettled: false,
+        optimisticUserPrompt: event.submitted_user_message
+          ? displayPromptFromMessageText(event.submitted_user_message.content)
+          : null,
       });
       pushEvent({
         seq,
@@ -301,6 +308,20 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         text: `Run started: ${event.prompt_preview}`,
         isError: false,
       });
+      return true;
+    case "queued_run_created":
+    case "queued_run_updated":
+      setState((state) => ({
+        admittedQueuedRunId:
+          state.admittedQueuedRunId === event.queued_message.queued_run_id
+            ? null
+            : state.admittedQueuedRunId,
+      }));
+      return true;
+    case "queued_run_deleted":
+      return true;
+    case "queued_run_admitted":
+      setState({ admittedQueuedRunId: event.queued_run_id });
       return true;
     case "run_completed":
       // The run's own answer is the authoritative version of whatever the
@@ -542,4 +563,6 @@ export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);
 export const useOptimisticUserPrompt = () =>
   useStore((s) => s.optimisticUserPrompt);
+export const useAdmittedQueuedRunId = () =>
+  useStore((s) => s.admittedQueuedRunId);
 export { getState as getRuntimeState };

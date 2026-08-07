@@ -9,7 +9,7 @@ import {
   type UseQueryOptions,
 } from "@tanstack/react-query";
 
-import { api } from "@/app/services/api";
+import { ApiError, api } from "@/app/services/api";
 import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   BackendKind,
@@ -735,16 +735,92 @@ export function useUpdateConfig() {
 
 export function useSubmitRun() {
   const invalidate = useInvalidators();
+  const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, prompt }: { id: string; prompt: string }) =>
-      api.submitRun(id, prompt),
-    onMutate: ({ prompt }) => {
-      setOptimisticUserPrompt(prompt);
+    mutationFn: ({
+      id,
+      prompt,
+      clientMessageId,
+    }: {
+      id: string;
+      prompt: string;
+      clientMessageId: string;
+    }) => api.submitRun(id, prompt, clientMessageId),
+    onSuccess: (data, { id, prompt }) => {
+      if (data.disposition === "started") {
+        setOptimisticUserPrompt(prompt);
+      } else {
+        client.setQueryData<SessionSnapshotResponse>(
+          queryKeys.session(id),
+          (snapshot) =>
+            snapshot ? { ...snapshot, queued_message: data.queued_message } : snapshot,
+        );
+      }
+      void invalidate.session(id);
     },
-    onError: () => {
-      setOptimisticUserPrompt(null);
+    onError: (error, { id }) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void invalidate.session(id);
+      }
     },
-    onSuccess: (_data, { id }) => invalidate.session(id),
+  });
+}
+
+export function useEditQueuedRun() {
+  const invalidate = useInvalidators();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      queuedRunId,
+      prompt,
+      expectedVersion,
+    }: {
+      id: string;
+      queuedRunId: string;
+      prompt: string;
+      expectedVersion: number;
+    }) =>
+      api.editQueuedRun(id, queuedRunId, {
+        prompt,
+        expected_version: expectedVersion,
+      }),
+    onSuccess: (queued, { id }) => {
+      client.setQueryData<SessionSnapshotResponse>(queryKeys.session(id), (snapshot) =>
+        snapshot ? { ...snapshot, queued_message: queued } : snapshot,
+      );
+      void invalidate.session(id);
+    },
+    onError: (error, { id }) => {
+      if (error instanceof ApiError && error.status === 409) void invalidate.session(id);
+    },
+  });
+}
+
+export function useDeleteQueuedRun() {
+  const invalidate = useInvalidators();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      queuedRunId,
+      expectedVersion,
+    }: {
+      id: string;
+      queuedRunId: string;
+      expectedVersion: number;
+    }) => api.deleteQueuedRun(id, queuedRunId, expectedVersion),
+    onSuccess: (_data, { id, queuedRunId }) => {
+      client.setQueryData<SessionSnapshotResponse>(queryKeys.session(id), (snapshot) =>
+        snapshot?.queued_message?.queued_run_id === queuedRunId
+          ? { ...snapshot, queued_message: undefined }
+          : snapshot,
+      );
+      void invalidate.session(id);
+    },
+    onError: (error, { id }) => {
+      if (error instanceof ApiError && error.status === 409) void invalidate.session(id);
+    },
   });
 }
 

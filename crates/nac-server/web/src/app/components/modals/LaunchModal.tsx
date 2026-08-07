@@ -320,7 +320,7 @@ function LaunchForm({
       const prompt = initialPrompt.trim();
       if (newId && prompt) {
         try {
-          await api.submitRun(newId, prompt);
+          await api.submitRun(newId, prompt, crypto.randomUUID());
         } catch (runError) {
           toast.error(
             `Session created, but the initial run failed: ${errorMessage(runError)}`,

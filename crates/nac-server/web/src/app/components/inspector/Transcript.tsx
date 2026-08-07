@@ -12,6 +12,7 @@ import {
   MessageBoxVariant,
 } from "@/app/atoms";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
+import { QueuedMessage } from "@/app/components/inspector/QueuedMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { ForkModal } from "@/app/components/modals/ForkModal";
@@ -31,6 +32,8 @@ import {
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
+  useDeleteQueuedRun,
+  useEditQueuedRun,
   useRegenerateRun,
   useSubmitRun,
   useWorkspaceRevisions,
@@ -48,6 +51,7 @@ import {
 import {
   pushLocalEvent,
   setOptimisticUserPrompt,
+  useAdmittedQueuedRunId,
   useActivity,
   useLiveThreads,
   useOptimisticUserPrompt,
@@ -118,6 +122,9 @@ export function Transcript({
   const toast = useToast();
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
+  const editQueuedRun = useEditQueuedRun();
+  const deleteQueuedRun = useDeleteQueuedRun();
+  const admittedQueuedRunId = useAdmittedQueuedRunId();
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
     useStickToBottom({ resetKey: sessionId });
 
@@ -171,10 +178,11 @@ export function Transcript({
             id: sessionId,
             messageIdx,
           });
-          pushLocalEvent(
-            "run",
-            `▶ resent: ${response.display_prompt.slice(0, 80)}`,
-          );
+          const label =
+            response.disposition === "started"
+              ? response.display_prompt
+              : response.queued_message.display_prompt;
+          pushLocalEvent("run", `▶ resent: ${label.slice(0, 80)}`);
         } catch (err) {
           const message = errorMessage(err);
           pushLocalEvent("error", `resend failed: ${message}`, true);
@@ -284,6 +292,44 @@ export function Transcript({
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
   const notice = errorNotice ?? (runError ? { message: runError } : null);
+  const queued =
+    snapshot?.queued_message?.queued_run_id === admittedQueuedRunId
+      ? undefined
+      : snapshot?.queued_message;
+
+  const editQueued = useCallback(
+    async (prompt: string, expectedVersion: number) => {
+      if (!queued) return;
+      try {
+        await editQueuedRun.mutateAsync({
+          id: sessionId,
+          queuedRunId: queued.queued_run_id,
+          prompt,
+          expectedVersion,
+        });
+      } catch (err) {
+        toast.error(`Failed to edit next message: ${errorMessage(err)}`);
+        throw err;
+      }
+    },
+    [editQueuedRun, queued, sessionId, toast],
+  );
+  const deleteQueued = useCallback(
+    async (expectedVersion: number) => {
+      if (!queued) return;
+      try {
+        await deleteQueuedRun.mutateAsync({
+          id: sessionId,
+          queuedRunId: queued.queued_run_id,
+          expectedVersion,
+        });
+      } catch (err) {
+        toast.error(`Failed to delete next message: ${errorMessage(err)}`);
+        throw err;
+      }
+    },
+    [deleteQueuedRun, queued, sessionId, toast],
+  );
 
   return (
     <div className="relative flex-1 min-h-0">
@@ -398,6 +444,15 @@ export function Transcript({
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}
+            />
+          ) : null}
+
+          {queued ? (
+            <QueuedMessage
+              key={`${queued.queued_run_id}:${queued.version}`}
+              message={queued}
+              onEdit={editQueued}
+              onDelete={deleteQueued}
             />
           ) : null}
 

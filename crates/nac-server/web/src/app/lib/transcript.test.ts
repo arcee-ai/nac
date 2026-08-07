@@ -73,6 +73,26 @@ describe("transcript projection", () => {
     });
   });
 
+  it("never projects the durable next message into canonical turns", () => {
+    const projected = snapshot([{ role: "user", content: "active prompt" }]);
+    projected.queued_message = {
+      session_id: "session-1",
+      queued_run_id: "queued-1",
+      client_message_id: "client-1",
+      display_prompt: "next prompt",
+      agent_prompt: "next prompt",
+      after_run_id: "run-1",
+      state: "pending",
+      admitted_run_id: null,
+      version: 0,
+      created_at: "2026-08-07T00:00:00Z",
+      updated_at: "2026-08-07T00:00:00Z",
+    };
+
+    expect(buildTranscript(projected, {}).map((turn) => turn.kind === "user" && turn.text))
+      .toEqual(["active prompt"]);
+  });
+
   it("falls back to one row for cyclic thread dependencies", () => {
     const left = threadCall("left", "left", ["right"]);
     const right = threadCall("right", "right", ["left"]);

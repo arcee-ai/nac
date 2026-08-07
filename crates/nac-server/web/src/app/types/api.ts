@@ -124,6 +124,23 @@ export interface ActiveCompactionSnapshot {
   started_at_epoch_ms: number;
 }
 
+export type QueuedRunState = "pending" | "admitting";
+
+/** Durable, noncanonical next turn projected beside the session snapshot. */
+export interface QueuedRunRecord {
+  session_id: string;
+  queued_run_id: string;
+  client_message_id: string;
+  display_prompt: string;
+  agent_prompt: string;
+  after_run_id: string;
+  state: QueuedRunState;
+  admitted_run_id: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ResponseTimingSnapshot {
   last_response_duration_ms: number | null;
   previous_response_duration_ms: number | null;
@@ -513,6 +530,10 @@ export type SessionEvent =
       submitted_user_message?: SubmittedUserMessageSnapshot;
       started_at_epoch_ms: number;
     }
+  | { type: "queued_run_created"; queued_message: QueuedRunRecord }
+  | { type: "queued_run_updated"; queued_message: QueuedRunRecord }
+  | { type: "queued_run_deleted"; queued_run_id: string }
+  | { type: "queued_run_admitted"; queued_run_id: string; run_id: string }
   | { type: "run_completed"; response: string; duration_ms?: number }
   | { type: "run_failed"; message: string }
   /** The user stopped the run, which is an outcome rather than a fault. */
@@ -608,6 +629,7 @@ export interface SessionFrontendSnapshot {
   response_timing: ResponseTimingSnapshot;
   active_run?: ActiveRunSnapshot;
   active_compaction?: ActiveCompactionSnapshot;
+  queued_message?: QueuedRunRecord;
   sessions: SessionSummarySnapshot[];
   active_threads: string[];
   threads: ThreadSnapshot[];
@@ -1013,12 +1035,21 @@ export interface ReorderSessionsResponse {
 
 export interface SubmitPromptRequest {
   prompt: string;
+  client_message_id?: string;
 }
 
-export interface SubmitPromptResponse {
-  run_id: string;
-  client_id: string | null;
-  display_prompt: string;
+export type SubmitPromptResponse =
+  | {
+      disposition: "started";
+      run_id: string;
+      client_id: string | null;
+      display_prompt: string;
+    }
+  | { disposition: "queued"; queued_message: QueuedRunRecord };
+
+export interface EditQueuedRunRequest {
+  prompt: string;
+  expected_version: number;
 }
 
 export type CompactSessionResponse =

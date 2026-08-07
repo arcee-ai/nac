@@ -125,6 +125,54 @@ describe("runtime external store", () => {
     });
   });
 
+  it("hands a queued turn to the successor without inheriting predecessor output", () => {
+    resetRuntime("session-1");
+    applyEnvelope(envelope(1, {
+      type: "run_started",
+      prompt_preview: "first",
+      started_at_epoch_ms: 1,
+    }));
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-old",
+      thread_name: null,
+      text: "first answer",
+    });
+    applyEnvelope(envelope(2, { type: "run_completed", response: "first answer" }));
+    applyEnvelope(envelope(3, {
+      type: "queued_run_admitted",
+      queued_run_id: "queued-1",
+      run_id: "run-2",
+    }));
+    const successor = envelope(4, {
+      type: "run_started",
+      prompt_preview: "next",
+      submitted_user_message: {
+        run_id: "run-2",
+        content: "next",
+        submitted_at_epoch_ms: 2,
+      },
+      started_at_epoch_ms: 2,
+    });
+    successor.run_id = "run-2";
+    applyEnvelope(successor);
+
+    expect(getRuntimeState()).toMatchObject({
+      running: true,
+      streamRunId: "run-2",
+      streamText: "",
+      admittedQueuedRunId: "queued-1",
+      optimisticUserPrompt: "next",
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-old",
+      thread_name: null,
+      text: "late",
+    });
+    expect(getRuntimeState().streamText).toBe("");
+  });
+
   it("discards cancelled output and rejects a late delta after the next run starts", () => {
     resetRuntime("session-1");
     applyEnvelope(envelope(1, {

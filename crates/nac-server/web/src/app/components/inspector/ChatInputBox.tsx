@@ -29,6 +29,7 @@ import {
 } from "@/app/lib/format";
 import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
+import { ApiError } from "@/app/services/api";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -128,6 +129,7 @@ export function ChatInputBox({
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const retryRef = useRef<{ prompt: string; clientMessageId: string } | null>(null);
 
   const metrics = runMetrics(snapshot, entry);
   const catalog = useModelCatalog();
@@ -149,8 +151,9 @@ export function ChatInputBox({
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
-  const busy = submitRun.isPending || running;
-  const canSend = Boolean(value.trim()) && !busy;
+  const busy = submitRun.isPending;
+  const queued = snapshot?.queued_message;
+  const canSend = Boolean(value.trim()) && !busy && !queued;
 
   const reconnectSsh = useCallback(async () => {
     if (!sshTarget || connectSsh.isPending) return;
@@ -165,18 +168,38 @@ export function ChatInputBox({
 
   const submit = useCallback(async () => {
     const prompt = value.trim();
-    if (!prompt || busy) return;
+    if (!prompt || busy || queued) return;
+    const pending = retryRef.current;
+    const clientMessageId =
+      pending?.prompt === prompt ? pending.clientMessageId : crypto.randomUUID();
+    retryRef.current = { prompt, clientMessageId };
     try {
-      await submitRun.mutateAsync({ id: sessionId, prompt });
-      pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+      const response = await submitRun.mutateAsync({
+        id: sessionId,
+        prompt,
+        clientMessageId,
+      });
+      retryRef.current = null;
+      pushLocalEvent(
+        "run",
+        response.disposition === "queued"
+          ? `◇ queued: ${prompt.slice(0, 80)}`
+          : `▶ submitted: ${prompt.slice(0, 80)}`,
+      );
       setValue("");
-      if (ref.current) ref.current.style.height = "auto";
+      if (ref.current) {
+        ref.current.style.height = "auto";
+        ref.current.focus();
+      }
     } catch (error) {
+      // A received HTTP response is definitive. Network failures are ambiguous,
+      // so retrying the unchanged prompt keeps the same idempotency key.
+      if (error instanceof ApiError) retryRef.current = null;
       const message = errorMessage(error);
       pushLocalEvent("error", `submit failed: ${message}`, true);
       toast.error(`Failed to send: ${message}`);
     }
-  }, [value, busy, sessionId, submitRun, toast]);
+  }, [value, busy, queued, sessionId, submitRun, toast]);
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;
@@ -194,12 +217,17 @@ export function ChatInputBox({
         void submit();
       }}
     >
-      <div className="relative flex items-end rounded-[4px] bg-input shadow-concave pr-[48px]">
+      <div
+        className={cn(
+          "relative flex items-end rounded-[4px] bg-input shadow-concave",
+          running ? "pr-[96px]" : "pr-[48px]",
+        )}
+      >
         <textarea
           ref={ref}
           className="flex-1 min-w-0 bg-transparent resize-none border-none outline-none p-3 text-medium text-input placeholder:text-input-placeholder"
           rows={1}
-          placeholder={running ? "Run in progress…" : "Send a message"}
+          placeholder={queued ? "A next message is already queued" : "Send a message"}
           spellCheck={false}
           value={value}
           disabled={busy}
@@ -220,19 +248,36 @@ export function ChatInputBox({
             void submit();
           }}
         />
+        {running ? (
+          <Button
+            className="absolute bottom-0 right-[48px]"
+            size={ButtonSize.Large}
+            variant={ButtonVariant.Tertiary}
+            content={ButtonContent.Icon}
+            type="button"
+            aria-label="Stop run"
+            onClick={() => void stop()}
+          >
+            <Icon iconName={IconName.Stop} size={24} />
+          </Button>
+        ) : null}
         <Button
           className="absolute bottom-0 right-0"
           size={ButtonSize.Large}
           variant={ButtonVariant.Primary}
           content={ButtonContent.Icon}
-          type={running ? "button" : "submit"}
-          disabled={!running && !canSend}
-          aria-label={running ? "Stop run" : "Send"}
-          onClick={running ? () => void stop() : undefined}
+          type="submit"
+          disabled={!canSend}
+          aria-label={running ? "Send next message" : "Send"}
         >
-          <Icon iconName={running ? IconName.Stop : IconName.Plane} size={24} />
+          <Icon iconName={IconName.Plane} size={24} />
         </Button>
       </div>
+      {running && !queued ? (
+        <p className="-mt-3 label-micro text-basic-tertiary">
+          Sends after the current run finishes
+        </p>
+      ) : null}
 
       <div className="flex items-center gap-[10px]">
         <div className="flex flex-1 min-w-0 items-center gap-4">
@@ -252,7 +297,7 @@ export function ChatInputBox({
             sessionId={sessionId}
             metadata={snapshot?.metadata ?? null}
             label={metrics.model}
-            disabled={busy}
+            disabled={busy || running}
           />
 
           {isSsh ? (
