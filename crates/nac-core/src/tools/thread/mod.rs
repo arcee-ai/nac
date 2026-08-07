@@ -39,42 +39,20 @@ pub fn dispatch_definition(
     });
 
     if let Some(mixed) = mixed {
-        let mut complexity_description = String::from(
-            "Difficulty classification for this dispatch; selects the configured tier worker model:",
-        );
-        let mut effort_values: Vec<&'static str> = Vec::new();
-        for (complexity, client) in mixed.tiers() {
-            let supported = client.supported_reasoning_efforts();
-            let efforts = if supported.is_empty() {
-                "no adjustable reasoning effort".to_string()
-            } else {
-                format!(
-                    "supported efforts: {}",
-                    supported
-                        .iter()
-                        .map(|effort| effort.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            for effort in supported {
-                if !effort_values.contains(&effort.as_str()) {
-                    effort_values.push(effort.as_str());
-                }
-            }
-            complexity_description.push_str(&format!(
-                "\n- {}: {} ({})",
-                complexity.as_str(),
-                client.model,
-                efforts
-            ));
-        }
         parameters["properties"]["complexity"] = json!({
             "type": "string",
             "enum": ["easy", "medium", "hard"],
-            "description": complexity_description
+            "description": format!(
+                "Difficulty classification for this dispatch; selects the configured tier worker model:{}",
+                mixed.describe_tiers()
+            )
         });
         parameters["required"] = json!(["name", "action", "complexity"]);
+        let effort_values: Vec<&'static str> = mixed
+            .supported_effort_union()
+            .into_iter()
+            .map(|effort| effort.as_str())
+            .collect();
         if !effort_values.is_empty() {
             parameters["properties"]["effort"] = json!({
                 "type": "string",
@@ -380,7 +358,7 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let client = &select_dispatch_client(&params, runtime, client);
+    let client = select_dispatch_client(&params, runtime, client);
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -392,7 +370,7 @@ pub async fn execute_dispatch(
             is_error: true,
         };
     }
-    let result = execute_parsed_dispatch(params, runtime, client).await;
+    let result = execute_parsed_dispatch(params, runtime, &client).await;
     if let Some(session_id) = runtime.session_id.as_deref() {
         close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
     }

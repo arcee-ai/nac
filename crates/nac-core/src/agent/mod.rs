@@ -126,7 +126,7 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 /// Mixed-mode addendum to the orchestrator system prompt: names each tier's
 /// configured model, its default effort, and the effort levels it accepts.
 fn mixed_mode_prompt_guidance(mixed: &tools::MixedDispatchClients) -> String {
-    let mut guidance = String::from(
+    format!(
         "\n\nMixed mode is enabled. Every thread dispatch requires a complexity \
          classification — easy, medium, or hard — and the matching user-configured \
          worker model runs that dispatch. Classify by the genuine difficulty of the \
@@ -136,35 +136,9 @@ fn mixed_mode_prompt_guidance(mixed: &tools::MixedDispatchClients) -> String {
          reasoning effort for a single dispatch; do so only when the work genuinely \
          needs it, and only with an effort level the selected tier model supports. \
          Unsupported effort requests fall back to the tier's configured default.\n\
-         Configured tiers:",
-    );
-    for (complexity, client) in mixed.tiers() {
-        let supported = client.supported_reasoning_efforts();
-        let efforts = if supported.is_empty() {
-            "no adjustable reasoning effort".to_string()
-        } else {
-            format!(
-                "supported efforts: {}",
-                supported
-                    .iter()
-                    .map(|effort| effort.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        let default = client
-            .reasoning_effort()
-            .map(|effort| format!("default effort: {}; ", effort.as_str()))
-            .unwrap_or_default();
-        guidance.push_str(&format!(
-            "\n- {}: {} ({}{})",
-            complexity.as_str(),
-            client.model,
-            default,
-            efforts
-        ));
-    }
-    guidance
+         Configured tiers:{}",
+        mixed.describe_tiers()
+    )
 }
 
 /// Trim a trailing assistant tool-call turn whose tool results never arrived
@@ -234,7 +208,7 @@ impl Agent {
             _ => None,
         };
 
-        let (system_prompt, mut tool_defs) = match config.mode {
+        let (mut system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
                 format!(
                     "You are nac, a coding worker. Working directory: {}.\n\n\
@@ -278,8 +252,7 @@ impl Agent {
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (
-                {
-                    let mut prompt = format!(
+                format!(
                     "You are nac, a coding agent orchestrator. Working directory: {}.\n\n\
                      A thread is a named workstream that executes one action at a time and retains its own \
                      history across dispatches. Reusing a thread gives the worker that thread's retained \
@@ -361,12 +334,7 @@ impl Agent {
                      - workset_list()\n\n\
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",
                     cwd, thread_timeout_secs
-                );
-                    if let Some(mixed) = config.mixed_clients.as_deref() {
-                        prompt.push_str(&mixed_mode_prompt_guidance(mixed));
-                    }
-                    prompt
-                },
+                ),
                 tools::orchestrator_tool_definitions(
                     config.skills.as_deref(),
                     config.mixed_clients.as_deref(),
@@ -375,6 +343,9 @@ impl Agent {
         };
         if config.mode == AgentMode::Worker {
             tool_defs.extend(config.extra_tool_defs);
+        }
+        if let Some(mixed) = config.mixed_clients.as_deref() {
+            system_prompt.push_str(&mixed_mode_prompt_guidance(mixed));
         }
 
         let mut messages = vec![Message::System {
