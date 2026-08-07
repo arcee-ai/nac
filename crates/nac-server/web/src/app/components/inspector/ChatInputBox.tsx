@@ -58,12 +58,14 @@ interface ChatInputBoxProps {
 
 function StatBadge({
   iconName,
+  prefix,
   value,
   iconSize = 14,
   className,
   title,
 }: {
-  iconName: IconName;
+  iconName?: IconName;
+  prefix?: string;
   value: string;
   iconSize?: 14 | 16;
   className?: string;
@@ -72,7 +74,11 @@ function StatBadge({
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
       <div className={cn("flex items-center gap-[2px] py-1", className)}>
-        <Icon iconName={iconName} size={iconSize} />
+        {prefix ? (
+          <span className="label-micro">{prefix}</span>
+        ) : (
+          iconName && <Icon iconName={iconName} size={iconSize} />
+        )}
         <span className="label-micro">{value}</span>
       </div>
     </Tooltip>
@@ -276,6 +282,14 @@ export function ChatInputBox({
                 className="text-info-secondary opacity-75"
                 title="Input tokens"
               />
+              {metrics.usage.cache_read_tokens > 0 ? (
+                <StatBadge
+                  prefix="C"
+                  value={formatTokensCompact(metrics.usage.cache_read_tokens)}
+                  className="text-info-secondary opacity-75"
+                  title="Cache read tokens"
+                />
+              ) : null}
               <StatBadge
                 iconName={IconName.ArrowDown}
                 value={formatTokensCompact(metrics.usage.output_tokens)}

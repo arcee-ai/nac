@@ -250,7 +250,6 @@
 
 .chat-response table {
   border-collapse: collapse;
-  overflow-x: auto;
   font-size: 14px;
   line-height: 1.2;
   border: 1px solid var(--color-border-tertiary);

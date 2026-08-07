@@ -108,7 +108,9 @@ function buildComponents(streaming: boolean) {
       <CodeFence>{children}</CodeFence>
     ),
     table: ({ ...props }: React.ComponentPropsWithoutRef<"table">) => (
-      <table {...props} />
+      <div className="overflow-x-auto">
+        <table {...props} />
+      </div>
     ),
     p: ({ children, ...props }: React.ComponentPropsWithoutRef<"p">) => (
       <p {...props}>{wrapStreaming(children, streaming)}</p>
