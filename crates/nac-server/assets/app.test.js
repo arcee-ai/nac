@@ -3004,6 +3004,62 @@ test("orchestrator chat thread dispatches wait for lifecycle evidence before sho
   assert.match(redesignSource, /\.tool-block-status\[data-state="failed"\], \.tool-block-status\[data-state="timed-out"\] \{ color: var\(--danger\); \}/);
 });
 
+test("reused thread names only show the latest accepted dispatch as running", () => {
+  const sessionId = "reused-thread-name";
+  const dispatch = (id, action) => ({ role: "assistant", content: null, tool_calls: [{
+    id, function: { name: "thread", arguments: JSON.stringify({ name: "worker", action }) },
+  }] });
+  const accepted = (id) => ({
+    role: "tool", tool_call_id: id,
+    content: "Thread 'worker' started in the background. Use thread_wait to receive its result without blocking user guidance.",
+  });
+  const snapshot = sessionSnapshot(sessionId, {
+    active_threads: ["worker"],
+    threads: [{ name: "worker" }],
+    thread_events: { worker: [
+      { type: "thread_started", name: "worker", action: "first run", source_threads: [] },
+      { type: "thread_finished", name: "worker", exit_code: 0, timed_out: false },
+      { type: "thread_started", name: "worker", action: "second run", source_threads: [] },
+    ] },
+    message_cycle: { marker: "reuse:2", thread_names: ["worker"] },
+    messages: [
+      { role: "user", content: "Complete the first request" },
+      dispatch("call-old", "first run"),
+      accepted("call-old"),
+      { role: "user", content: "Reuse the worker for a later request" },
+      dispatch("call-new", "second run"),
+      accepted("call-new"),
+    ],
+  });
+
+  ui.state.currentId = sessionId;
+  const context = ui.threadDispatchContext(snapshot);
+  const calls = snapshot.messages.filter((message) => message.tool_calls).map((message) => message.tool_calls[0]);
+  assert.deepEqual(plain(calls.map((call) => ui.threadDispatchStatus(call, context))), [
+    { state: "finished", label: "Finished" },
+    { state: "running", label: "Running" },
+  ]);
+
+  ui.el.orchestratorChatContent = fakeElement();
+  ui.renderOrchestratorChatRail(snapshot);
+  const transcriptStates = [...ui.el.orchestratorChatContent.innerHTML.matchAll(
+    /class="tool-block-status" data-state="([^"]+)"/g,
+  )].map((match) => match[1]);
+  assert.deepEqual(transcriptStates, ["finished", "running"],
+    "only call-new inherits the name-level running lifecycle in transcript badges");
+
+  const groups = ui.threadHistoryGroups(snapshot);
+  assert.deepEqual(plain(groups.map((group) => ({
+    key: group.key, state: group.models[0].state, current: group.current,
+  }))), [
+    { key: "dispatch:call-old", state: "finished", current: false },
+    { key: "dispatch:call-new", state: "running", current: true },
+  ]);
+  const historyHtml = groups.map((group) => ui.renderThreadGroup(group, new Map())).join("");
+  assert.equal((historyHtml.match(/class="thread-tile [^"]*" data-state="finished"/g) || []).length, 1);
+  assert.equal((historyHtml.match(/class="thread-tile [^"]*" data-state="running"/g) || []).length, 1);
+});
+
 test("thread overview groups task history by the user request that dispatched it", () => {
   const sessionId = "thread-history-groups";
   const dispatch = (id, name) => ({ id, function: { name: "thread",

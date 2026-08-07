@@ -4054,7 +4054,12 @@ function isBackgroundThreadDispatchAcceptance(value) {
     || normalized.includes("use thread_wait to receive its result");
 }
 
-function threadDispatchContext(snapshot) {
+function isThreadDispatchFailureResult(value) {
+  return /^(failed to spawn thread\b|thread .+ failed \(exit\b|thread .+ is already running\b|error:|duplicate thread name\b|circular dependency\b)/
+    .test(String(value || "").trim().toLowerCase());
+}
+
+function threadDispatchContext(snapshot, models = buildThreadModels(snapshot)) {
   const toolResults = new Map();
   for (const message of snapshot?.messages || []) {
     if (message?.role !== "tool" || message.tool_call_id === null || message.tool_call_id === undefined) continue;
@@ -4069,8 +4074,26 @@ function threadDispatchContext(snapshot) {
     completions.set(String(event.call_id), event);
   }
 
-  const models = new Map(buildThreadModels(snapshot).map((model) => [model.name, model]));
-  return { toolResults, completions, models };
+  const acceptedCallIds = new Set();
+  const latestAcceptedByName = new Map();
+  for (const message of snapshot?.messages || []) {
+    for (const dispatch of threadDispatchesFromMessage(message)) {
+      if (!dispatch.callId) continue;
+      const result = toolResults.get(dispatch.callId);
+      const completion = completions.get(dispatch.callId);
+      const hasResult = result !== null && result !== undefined;
+      const accepted = !completion?.is_error && !isThreadDispatchFailureResult(result)
+        && (Boolean(completion) || hasResult);
+      if (!accepted) continue;
+      acceptedCallIds.add(dispatch.callId);
+      latestAcceptedByName.set(dispatch.name, dispatch.callId);
+    }
+  }
+
+  return {
+    toolResults, completions, acceptedCallIds, latestAcceptedByName,
+    models: new Map(models.map((model) => [model.name, model])),
+  };
 }
 
 function threadDispatchStatus(call, context) {
@@ -4085,6 +4108,8 @@ function threadDispatchStatus(call, context) {
   const completionPreview = String(completion?.content_preview || "").trim().toLowerCase();
   const backgroundAccepted = !completion?.is_error && (Boolean(completion)
     || isBackgroundThreadDispatchAcceptance(normalizedResult));
+  const latestAcceptedCallId = context?.latestAcceptedByName?.get(threadName);
+  const superseded = callId && latestAcceptedCallId && latestAcceptedCallId !== callId;
 
   if (completion?.is_error) {
     return completionPreview.includes("timed out")
@@ -4095,7 +4120,7 @@ function threadDispatchStatus(call, context) {
     if (/^thread .+ timed out after\b/.test(normalizedResult)) {
       return { state: "timed-out", label: "Timed out" };
     }
-    if (/^(failed to spawn thread\b|thread .+ failed \(exit\b|thread .+ is already running\b|error:|duplicate thread name\b|circular dependency\b)/.test(normalizedResult)) {
+    if (isThreadDispatchFailureResult(normalizedResult)) {
       return { state: "failed", label: "Failed" };
     }
     // Older synchronous dispatches returned the worker's terminal result here.
@@ -4103,6 +4128,11 @@ function threadDispatchStatus(call, context) {
     // real outcome arrives later through the thread lifecycle.
     if (!backgroundAccepted) return { state: "finished", label: "Finished" };
   }
+
+  // The backend rejects overlapping same-name workers. Once a later dispatch
+  // was accepted, this call is known to be terminal even though lifecycle
+  // snapshots can only describe the name's latest run.
+  if (superseded) return { state: "finished", label: "Finished" };
 
   if (model?.state === "running") return { state: "running", label: "Running" };
   if (model?.state === "queued") return { state: "queued", label: "Queued" };
@@ -4840,7 +4870,8 @@ function threadDispatchesFromMessage(message) {
 }
 
 function threadHistoryGroups(snapshot, models = buildThreadModels(snapshot)) {
-  const modelsByName = new Map(models.map((model) => [model.name, model]));
+  const dispatchContext = threadDispatchContext(snapshot, models);
+  const modelsByName = dispatchContext.models;
   const groups = [];
   let cycle = null;
   for (const [messageIndex, message] of (snapshot?.messages || []).entries()) {
@@ -4873,7 +4904,22 @@ function threadHistoryGroups(snapshot, models = buildThreadModels(snapshot)) {
     return {
       key: firstCallId ? `dispatch:${firstCallId}` : `request:${group.messageIndex}:${names[0] || group.purpose}`,
       purpose: group.purpose,
-      models: names.map((name) => modelsByName.get(name)),
+      models: names.map((name) => {
+        const model = modelsByName.get(name);
+        const dispatches = group.dispatches.filter((candidate) => candidate.name === name);
+        const latestAcceptedCallId = dispatchContext.latestAcceptedByName.get(name);
+        const superseded = latestAcceptedCallId
+          && !dispatches.some((dispatch) => dispatch.callId === latestAcceptedCallId);
+        return superseded ? {
+          ...model,
+          state: "finished",
+          terminal: true,
+          finish: null,
+          latestError: null,
+          outcome: "finished; a later same-name dispatch was accepted",
+          compact: true,
+        } : model;
+      }),
       current: false,
       fallback: group.messageIndex < 0,
     };
