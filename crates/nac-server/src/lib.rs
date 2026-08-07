@@ -8150,9 +8150,21 @@ model = "gpt-5.2"
             let live = test_event(6, "live-6");
             let (sender, receiver) = tokio::sync::broadcast::channel(4);
             sender.send(live).unwrap();
-            drop(sender);
             let (delta_sender, assistant_deltas) = tokio::sync::broadcast::channel(4);
-            drop(delta_sender);
+            delta_sender
+                .send(AssistantStreamDelta {
+                    run_id: nac_core::events::SessionRunId::new(),
+                    model_call_id: "model-call-sse".to_string(),
+                    thread_name: None,
+                    text: Some("live text".to_string()),
+                    reasoning: None,
+                })
+                .unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                drop(sender);
+                drop(delta_sender);
+            });
 
             Sse::new(session_event_stream(
                 "test-epoch".to_string(),
@@ -8188,6 +8200,9 @@ model = "gpt-5.2"
         assert!(boundary < gap && gap < replay_4 && replay_4 < replay_5 && replay_5 < live_6);
         assert!(body.contains("\"replay_boundary_sequence_id\":5"));
         assert!(body.contains("\"epoch_id\":\"test-epoch\""));
+        assert!(body.contains("event: assistant_delta"));
+        assert!(body.contains("\"model_call_id\":\"model-call-sse\""));
+        assert!(body.contains("\"run_id\":"));
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));

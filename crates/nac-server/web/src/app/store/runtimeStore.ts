@@ -1,7 +1,6 @@
 // Live run state for the currently viewed session, driven by the SSE stream.
-// The backend streams event- and message-level updates (no token deltas), so
-// this tracks a running flag, a human-readable activity line, an error and a
-// capped event log feeding the Events tab and the transcript typing indicator.
+// Sequenced lifecycle events reconcile canonical state; unsequenced token
+// deltas are accepted only when their run and provider-call ownership matches.
 
 import { createStore } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
@@ -63,6 +62,11 @@ interface RuntimeState {
   streamText: string;
   /** Reasoning the current model call has produced so far. */
   streamReasoning: string;
+  /** Run and provider-call ownership for the live-only delta buffers. */
+  streamRunId: string | null;
+  streamModelCallId: string | null;
+  /** Calls already committed/discarded; late chunks from them stay rejected. */
+  retiredModelCallIds: string[];
   /**
    * The buffers hold output that is already committed, so the next delta starts
    * a new call rather than appending to it. They are kept rather than cleared so
@@ -90,6 +94,9 @@ export const runtimeStore = createStore<RuntimeState>(
     threads: {},
     streamText: "",
     streamReasoning: "",
+    streamRunId: null,
+    streamModelCallId: null,
+    retiredModelCallIds: [],
     streamSettled: false,
     optimisticUserPrompt: null,
   },
@@ -112,6 +119,9 @@ export function resetRuntime(sessionId: string | null): void {
     threads: {},
     streamText: "",
     streamReasoning: "",
+    streamRunId: null,
+    streamModelCallId: null,
+    retiredModelCallIds: [],
     streamSettled: false,
     optimisticUserPrompt: null,
   });
@@ -129,6 +139,15 @@ export function setOptimisticUserPrompt(prompt: string | null): void {
 export function applyAssistantDelta(delta: AssistantStreamDelta): void {
   if (delta.thread_name) return;
   setState((state) => {
+    if (
+      !state.running ||
+      delta.run_id !== state.streamRunId ||
+      state.retiredModelCallIds.includes(delta.model_call_id) ||
+      (state.streamModelCallId !== null &&
+        state.streamModelCallId !== delta.model_call_id)
+    ) {
+      return {};
+    }
     const base = state.streamSettled
       ? { streamText: "", streamReasoning: "" }
       : {
@@ -136,6 +155,7 @@ export function applyAssistantDelta(delta: AssistantStreamDelta): void {
           streamReasoning: state.streamReasoning,
         };
     return {
+      streamModelCallId: delta.model_call_id,
       streamSettled: false,
       streamText: base.streamText + (delta.text ?? ""),
       streamReasoning: base.streamReasoning + (delta.reasoning ?? ""),
@@ -143,22 +163,52 @@ export function applyAssistantDelta(delta: AssistantStreamDelta): void {
   });
 }
 
+/** Drop non-authoritative partial output and permanently retire its call id. */
+export function discardAssistantStream(): void {
+  setState((state) => ({
+    streamText: "",
+    streamReasoning: "",
+    streamModelCallId: null,
+    retiredModelCallIds: state.streamModelCallId
+      ? [...state.retiredModelCallIds, state.streamModelCallId].slice(-16)
+      : state.retiredModelCallIds,
+    streamSettled: false,
+  }));
+}
+
 export function setStreamStatus(streamStatus: StreamStatus): void {
+  if (streamStatus === "reconnecting" || streamStatus === "error") {
+    discardAssistantStream();
+  }
   setState({ streamStatus });
 }
 
 /**
- * Seed the running flag from a snapshot. Without this a reload or reconnect in
- * the middle of a run would show the session as idle until the next event, the
- * way the legacy UI did.
+ * Seed the running flag and run identity from a snapshot. A changed run owns a
+ * fresh delta namespace; an idle snapshot owns no live partial output.
  */
 export function syncRunFromSnapshot(
   activeRun: ActiveRunSnapshot | null | undefined,
 ): void {
   const running = isActiveRun(activeRun);
+  const runId = running ? (activeRun?.run_id ?? null) : null;
   const state = getState();
-  if (state.running === running) return;
-  setState({ running, activity: running ? state.activity : "" });
+  if (state.running === running && state.streamRunId === runId) return;
+  const runChanged = state.streamRunId !== runId;
+  setState({
+    running,
+    activity: running ? state.activity : "",
+    streamRunId: runId,
+    ...(runChanged
+      ? {
+          streamText: "",
+          streamReasoning: "",
+          streamModelCallId: null,
+          retiredModelCallIds: [],
+          streamSettled: false,
+        }
+      : {}),
+  });
 }
 
 /** Record a client-side event so the Events tab shows the full interaction. */
@@ -240,6 +290,9 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         modelError: null,
         streamText: "",
         streamReasoning: "",
+        streamRunId: envelope.run_id ?? null,
+        streamModelCallId: null,
+        retiredModelCallIds: [],
         streamSettled: false,
       });
       pushEvent({
@@ -257,6 +310,9 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         activity: "",
         streamText: event.response,
         streamReasoning: "",
+        streamRunId: null,
+        streamModelCallId: null,
+        retiredModelCallIds: [],
         streamSettled: true,
       });
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
@@ -269,7 +325,12 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         running: false,
         activity: "",
         error: message,
-        streamSettled: true,
+        streamText: "",
+        streamReasoning: "",
+        streamRunId: null,
+        streamModelCallId: null,
+        retiredModelCallIds: [],
+        streamSettled: false,
       });
       pushEvent({ seq, kind: "error", text: message, isError: true });
       return true;
@@ -283,27 +344,43 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         activity: "",
         error: null,
         modelError: null,
-        streamSettled: true,
+        streamText: "",
+        streamReasoning: "",
+        streamRunId: null,
+        streamModelCallId: null,
+        retiredModelCallIds: [],
+        streamSettled: false,
       });
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return true;
     case "snapshot_saved":
       return true;
     case "transcript_appended":
-      // A message was committed, so the buffers now describe the past.
-      setState({ streamSettled: true });
+      // A message was committed, so the active call is retired. Cross-channel
+      // scheduling may still deliver one of its deltas after this event.
+      setState((state) => ({
+        streamSettled: true,
+        streamModelCallId: null,
+        retiredModelCallIds: state.streamModelCallId
+          ? [...state.retiredModelCallIds, state.streamModelCallId].slice(-16)
+          : state.retiredModelCallIds,
+      }));
       return true;
     case "transcript_reverted":
       // The messages the buffers were catching up to no longer exist, so the
       // leftovers would be replayed against a transcript that never had them.
       // The live threads went with those messages, and a rerun that dispatches
       // the same name again would otherwise inherit the discarded run's log.
-      setState({
-        streamSettled: true,
+      setState((state) => ({
+        streamSettled: false,
         streamText: "",
         streamReasoning: "",
+        streamModelCallId: null,
+        retiredModelCallIds: state.streamModelCallId
+          ? [...state.retiredModelCallIds, state.streamModelCallId].slice(-16)
+          : state.retiredModelCallIds,
         threads: {},
-      });
+      }));
       return true;
     case "agent":
       return applyAgent(seq, event.event);

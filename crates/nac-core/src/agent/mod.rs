@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
+use uuid::Uuid;
 
-use crate::events::{AgentEvent, AssistantStreamDelta, EventSink};
+use crate::events::{AgentEvent, EventSink};
 use crate::mcp::McpRegistry;
 use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
 use crate::sandbox::{SandboxSession, SshConnection};
@@ -482,6 +483,7 @@ impl Agent {
                 }
             };
             iteration = iteration.saturating_add(1);
+            let model_call_id = Uuid::new_v4().to_string();
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),
                 iteration,
@@ -489,11 +491,12 @@ impl Agent {
 
             let call_started = Instant::now();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
-                self.event_sink.emit_assistant_delta(AssistantStreamDelta {
-                    thread_name: self.thread_name.clone(),
-                    text: (!delta.text.is_empty()).then_some(delta.text),
-                    reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
-                });
+                self.event_sink.emit_assistant_delta(
+                    model_call_id.clone(),
+                    self.thread_name.clone(),
+                    (!delta.text.is_empty()).then_some(delta.text),
+                    (!delta.reasoning.is_empty()).then_some(delta.reasoning),
+                );
             });
             let push_delta = |delta| deltas.push(delta);
             // Only the orchestrator's output is read as it arrives: a thread is

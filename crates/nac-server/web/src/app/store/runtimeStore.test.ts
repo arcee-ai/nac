@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applyAssistantDelta,
   applyEnvelope,
   getRuntimeState,
   resetRuntime,
   runtimeStore,
+  setStreamStatus,
+  syncRunFromSnapshot,
 } from "@/app/store/runtimeStore";
 import type { SessionEventEnvelope } from "@/app/types/api";
 
@@ -16,6 +19,7 @@ function envelope(
     session_id: "session-1",
     epoch_id: "epoch-1",
     sequence_id: sequenceId,
+    run_id: "run-1",
     event,
   };
 }
@@ -66,5 +70,143 @@ describe("runtime external store", () => {
     expect(getRuntimeState().events.map((event) => event.seq)).toEqual([1, 2]);
 
     unsubscribe();
+  });
+
+  it("streams only the active run and provider call", () => {
+    resetRuntime("session-1");
+    syncRunFromSnapshot({
+      run_id: "run-1",
+      prompt_preview: "hello",
+      started_at_epoch_ms: 1,
+    });
+
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-1",
+      thread_name: null,
+      reasoning: "thinking ",
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-1",
+      thread_name: null,
+      text: "answer",
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "other-call",
+      thread_name: null,
+      text: "stale",
+    });
+
+    expect(getRuntimeState()).toMatchObject({
+      streamText: "answer",
+      streamReasoning: "thinking ",
+      streamModelCallId: "call-1",
+    });
+
+    applyEnvelope(envelope(2, { type: "transcript_appended", transcript_len: 2 }));
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-1",
+      thread_name: null,
+      text: " late",
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-2",
+      thread_name: null,
+      text: "next call",
+    });
+    expect(getRuntimeState()).toMatchObject({
+      streamText: "next call",
+      streamReasoning: "",
+      streamModelCallId: "call-2",
+    });
+  });
+
+  it("discards cancelled output and rejects a late delta after the next run starts", () => {
+    resetRuntime("session-1");
+    applyEnvelope(envelope(1, {
+      type: "run_started",
+      prompt_preview: "first",
+      started_at_epoch_ms: 1,
+    }));
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-old",
+      thread_name: null,
+      text: "discard me",
+    });
+    applyEnvelope(envelope(2, { type: "run_cancelled" }));
+    expect(getRuntimeState()).toMatchObject({
+      running: false,
+      streamText: "",
+      streamReasoning: "",
+      streamRunId: null,
+    });
+
+    const next = envelope(3, {
+      type: "run_started",
+      prompt_preview: "second",
+      started_at_epoch_ms: 2,
+    });
+    next.run_id = "run-2";
+    applyEnvelope(next);
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-old",
+      thread_name: null,
+      text: "late prior run",
+    });
+    applyAssistantDelta({
+      run_id: "run-2",
+      model_call_id: "call-new",
+      thread_name: null,
+      text: "current",
+    });
+    expect(getRuntimeState().streamText).toBe("current");
+  });
+
+  it("clears failed and reconnect-invalidated partial buffers", () => {
+    resetRuntime("session-1");
+    syncRunFromSnapshot({
+      run_id: "run-1",
+      prompt_preview: "hello",
+      started_at_epoch_ms: 1,
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-1",
+      thread_name: null,
+      text: "partial",
+    });
+    setStreamStatus("reconnecting");
+    syncRunFromSnapshot({
+      run_id: "run-1",
+      prompt_preview: "hello",
+      started_at_epoch_ms: 1,
+    });
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-1",
+      thread_name: null,
+      text: "late after reconnect",
+    });
+    expect(getRuntimeState().streamText).toBe("");
+
+    applyAssistantDelta({
+      run_id: "run-1",
+      model_call_id: "call-2",
+      thread_name: null,
+      text: "fresh",
+    });
+    applyEnvelope(envelope(4, { type: "run_failed", message: "run failed" }));
+    expect(getRuntimeState()).toMatchObject({
+      running: false,
+      streamText: "",
+      streamReasoning: "",
+      streamRunId: null,
+    });
   });
 });

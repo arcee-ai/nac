@@ -329,6 +329,12 @@ pub enum SessionEvent {
 /// to receive in full anyway.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssistantStreamDelta {
+    /// The active orchestrator run that produced this output. Deltas are
+    /// live-only, so consumers must reject any id that is no longer active.
+    pub run_id: SessionRunId,
+    /// Opaque identity of the provider call within the run. A run may make
+    /// several calls around tool batches or steering boundaries.
+    pub model_call_id: String,
     pub thread_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -1176,10 +1182,23 @@ impl EventSink {
     /// Live-only model output, for the transcript to render before the
     /// assistant message is committed. Bus-only: the stderr and channel sinks
     /// carry the durable event log, which deltas are deliberately not part of.
-    pub fn emit_assistant_delta(&self, delta: AssistantStreamDelta) {
-        if let Some(bus) = &self.bus {
-            bus.emit_assistant_delta(delta);
-        }
+    pub fn emit_assistant_delta(
+        &self,
+        model_call_id: String,
+        thread_name: Option<String>,
+        text: Option<String>,
+        reasoning: Option<String>,
+    ) {
+        let (Some(bus), Some(run_id)) = (&self.bus, &self.run_id) else {
+            return;
+        };
+        bus.emit_assistant_delta(AssistantStreamDelta {
+            run_id: run_id.clone(),
+            model_call_id,
+            thread_name,
+            text,
+            reasoning,
+        });
     }
 
     /// Whether anything is listening for deltas. The streaming request shape
@@ -1878,6 +1897,27 @@ mod tests {
         assert_eq!(envelope.run_id.as_ref(), Some(&run_id));
         assert_eq!(envelope.client_id.as_ref(), Some(&client_id));
         assert!(!envelope.epoch_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn assistant_deltas_are_stamped_with_run_and_model_call_identity() {
+        let bus = SessionEventBus::new(Some("session-delta".to_string()));
+        let mut deltas = bus.subscribe_assistant_deltas();
+        let run_id = SessionRunId::new();
+        let sink = EventSink::bus_with_context(bus, Some(run_id.clone()), None);
+
+        sink.emit_assistant_delta(
+            "model-call-1".to_string(),
+            None,
+            Some("hello".to_string()),
+            Some("thinking".to_string()),
+        );
+
+        let delta = deltas.recv().await.unwrap();
+        assert_eq!(delta.run_id, run_id);
+        assert_eq!(delta.model_call_id, "model-call-1");
+        assert_eq!(delta.text.as_deref(), Some("hello"));
+        assert_eq!(delta.reasoning.as_deref(), Some("thinking"));
     }
 
     #[test]

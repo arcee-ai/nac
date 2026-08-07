@@ -554,6 +554,8 @@ export interface LaggedEvent {
  * is the authoritative copy of the same text.
  */
 export interface AssistantStreamDelta {
+  run_id: string;
+  model_call_id: string;
   thread_name: string | null;
   text?: string;
   reasoning?: string;

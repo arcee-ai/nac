@@ -7,6 +7,7 @@ import { subscribeToSessionEvents } from "@/app/services/eventStream";
 import {
   applyAssistantDelta,
   applyEnvelope,
+  discardAssistantStream,
   resetRuntime,
   setStreamStatus,
   syncRunFromSnapshot,
@@ -59,8 +60,14 @@ export function useSessionStream(sessionId: string | null): void {
       onStatus: setStreamStatus,
       // A gap or a lagged subscriber means events were dropped, so the
       // snapshot is the only reliable way back to a consistent view.
-      onReplayGap: scheduleReload,
-      onLagged: scheduleReload,
+      onReplayGap: () => {
+        discardAssistantStream();
+        scheduleReload();
+      },
+      onLagged: () => {
+        discardAssistantStream();
+        scheduleReload();
+      },
     });
 
     return () => {
