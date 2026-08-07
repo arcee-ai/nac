@@ -14,6 +14,7 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
+import { ForkModal } from "@/app/components/modals/ForkModal";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import {
   displayPromptFromMessageText,
@@ -145,6 +146,7 @@ export function Transcript({
 
   const refreshIndex = useMemo(() => lastAnsweredUserIndex(turns), [turns]);
   const actionsBusy = running || submitRun.isPending || regenerateRun.isPending;
+  const [forkBoundaryToken, setForkBoundaryToken] = useState<string | null>(null);
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;
@@ -316,6 +318,8 @@ export function Transcript({
                     actionsDisabled={actionsBusy}
                     onRefresh={refreshIndex === index ? resend : null}
                     onRevert={openRevert}
+                    forkBoundaryToken={turn.forkBoundaryToken}
+                    onFork={setForkBoundaryToken}
                   />
                 );
               }
@@ -439,6 +443,12 @@ export function Transcript({
         </Button>
       </div>
 
+      <ForkModal
+        open={forkBoundaryToken !== null}
+        onClose={() => setForkBoundaryToken(null)}
+        sourceId={sessionId}
+        boundaryToken={forkBoundaryToken}
+      />
       <RevertModal
         open={revertTarget !== null}
         onClose={() => setRevertTarget(null)}

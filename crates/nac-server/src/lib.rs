@@ -42,6 +42,7 @@ use nac_core::{
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
+    lineage::{create_session_fork, load_session_lineage, SessionLineageRecord},
     model::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
@@ -690,9 +691,43 @@ pub struct SessionSnapshotResponse {
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<SessionLineageSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message_page: Option<MessagePageMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SessionLineageSnapshot {
+    pub child_session_id: String,
+    pub source_session_id: String,
+    pub source_raw_end_exclusive: u64,
+    pub source_prefix_sha256: String,
+    pub source_boundary_event_id: Option<i64>,
+    pub source_config_version: i64,
+    pub created_at: String,
+}
+
+impl From<SessionLineageRecord> for SessionLineageSnapshot {
+    fn from(value: SessionLineageRecord) -> Self {
+        Self {
+            child_session_id: value.child_session_id,
+            source_session_id: value.source_session_id,
+            source_raw_end_exclusive: value.source_raw_end_exclusive,
+            source_prefix_sha256: value.source_prefix_sha256,
+            source_boundary_event_id: value.source_boundary_event_id,
+            source_config_version: value.source_config_version,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ForkSessionRequest {
+    pub boundary_token: String,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {
@@ -1231,6 +1266,60 @@ impl SessionManager {
             .await
             .insert(session_id, Arc::new(service));
         Ok(snapshot)
+    }
+
+    async fn fork_session(
+        &self,
+        source_session_id: &str,
+        request: ForkSessionRequest,
+    ) -> std::result::Result<(SessionFrontendSnapshot, SessionLineageSnapshot), ApiError> {
+        if request.boundary_token.trim().is_empty() {
+            return Err(ApiError::bad_request("boundary_token must not be blank"));
+        }
+        let title = validate_optional_fork_title(request.title.as_deref())?;
+        let source_gate = self.lifecycle_gate(source_session_id);
+        let _source_lifecycle = source_gate.lock().await;
+        if !self.persisted_operation_session_exists(source_session_id)? {
+            return Err(ApiError::not_found(format!(
+                "session '{source_session_id}' was not found"
+            )));
+        }
+        // Liveness only tells core whether the mutable tail must be excluded.
+        // It is deliberately not an admission check: historical committed
+        // boundaries remain valid during runs, compaction, workers and leases.
+        let source_active_run = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(source_session_id)
+            .is_some_and(|service| service.active_run().is_some());
+        let child_session_id = uuid::Uuid::new_v4().to_string();
+        let store_path = self.inner.store_path.clone();
+        let source = source_session_id.to_string();
+        let token = request.boundary_token;
+        let child = child_session_id.clone();
+        let lineage = tokio::task::spawn_blocking(move || {
+            create_session_fork(&store_path, &source, &child, &token, source_active_run)
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("session fork task failed: {error}")))?
+        .map_err(ApiError::from_fork_error)?;
+
+        if let Some(title) = title {
+            self.update_session_presentation(&child_session_id, &title, false, 0)
+                .await?;
+        }
+        let child_gate = self.lifecycle_gate(&child_session_id);
+        let _child_lifecycle = child_gate.lock().await;
+        let snapshot = self
+            .attach_session_locked(&child_session_id)
+            .await
+            .map_err(ApiError::from)?
+            .frontend_snapshot()
+            .await
+            .map_err(ApiError::from)?;
+        Ok((snapshot, lineage.into()))
     }
 
     fn lifecycle_gate(&self, session_id: &str) -> Arc<Mutex<()>> {
@@ -2043,6 +2132,7 @@ fn api_router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/presentation",
             put(update_session_presentation_handler),
         )
+        .route("/sessions/{session_id}/fork", post(fork_session_handler))
         .route("/sessions/{session_id}/messages", get(session_messages))
         .route(
             "/sessions/{session_id}/threads/{thread_name}/events",
@@ -2888,6 +2978,24 @@ async fn create_session(
     ))
 }
 
+async fn fork_session_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(source_session_id): AxumPath<String>,
+    payload: std::result::Result<Json<ForkSessionRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<SessionSnapshotResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let (snapshot, lineage) = manager.fork_session(&source_session_id, request).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(SessionSnapshotResponse {
+            snapshot,
+            lineage: Some(lineage),
+            message_page: None,
+            message_cycle: None,
+        }),
+    ))
+}
+
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -2907,8 +3015,10 @@ async fn session_snapshot(
     }
 
     let loaded = manager.snapshot_with_options(&session_id, options).await?;
+    let lineage = load_session_lineage(&manager.inner.store_path, &session_id)?.map(Into::into);
     Ok(Json(SessionSnapshotResponse {
         snapshot: loaded.snapshot,
+        lineage,
         message_page: loaded.message_page.map(Into::into),
         message_cycle: loaded.message_cycle.map(Into::into),
     }))
@@ -3590,10 +3700,85 @@ fn canonicalize_file(path: PathBuf) -> Result<PathBuf> {
     Ok(resolved)
 }
 
+fn validate_optional_fork_title(
+    title: Option<&str>,
+) -> std::result::Result<Option<String>, ApiError> {
+    let Some(title) = title else {
+        return Ok(None);
+    };
+    if title.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "session title must not contain control characters",
+        ));
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(ApiError::bad_request("session title must not be blank"));
+    }
+    if title.chars().count() > 120 {
+        return Err(ApiError::bad_request(
+            "session title must not exceed 120 characters",
+        ));
+    }
+    Ok(Some(title.to_string()))
+}
+
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
     message: String,
+}
+
+impl ApiError {
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+
+    fn from_fork_error(error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let status = if let Some(boundary) =
+            error.downcast_ref::<nac_core::session_service::ForkBoundaryValidationError>()
+        {
+            match boundary {
+                nac_core::session_service::ForkBoundaryValidationError::InvalidToken
+                | nac_core::session_service::ForkBoundaryValidationError::WrongSession => {
+                    StatusCode::BAD_REQUEST
+                }
+                nac_core::session_service::ForkBoundaryValidationError::Stale
+                | nac_core::session_service::ForkBoundaryValidationError::Mutable => {
+                    StatusCode::CONFLICT
+                }
+            }
+        } else if message.contains("credential")
+            || message.contains("API key")
+            || message.contains("api key")
+            || message.contains("environment variable")
+            || message.contains("source session has")
+            || message.contains("configuration")
+        {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        Self { status, message }
+    }
 }
 
 impl From<JsonRejection> for ApiError {
@@ -4407,6 +4592,170 @@ mod tests {
             worker_executable: None,
         })
         .expect("session manager")
+    }
+
+    #[tokio::test]
+    async fn fork_route_maps_missing_source_and_malformed_boundary() {
+        let root = temp_root("fork_route_errors");
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+        let request = Request::builder()
+            .method("POST")
+            .uri("/sessions/missing/fork")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"boundary_token":"not-a-token"}"#))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let snapshot = sessions::new_snapshot(
+            "source".to_string(),
+            root.clone(),
+            "gpt-5".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            vec![],
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/sessions/source/fork")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"boundary_token":"not-a-token"}"#))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(body["error"], "invalid fork boundary token");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fork_manager_attaches_clean_child_and_projects_lineage() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("fork_manager_success");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("fork-test-key"));
+        let manager = test_manager(&root);
+        let messages: Vec<Message> = serde_json::from_value(serde_json::json!([
+            {"role":"user","content":"first"},
+            {"role":"assistant","content":"answer"},
+            {"role":"user","content":"following"}
+        ]))
+        .unwrap();
+        let snapshot = sessions::new_snapshot(
+            "source".to_string(),
+            root.clone(),
+            "gpt-5".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            messages,
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        let source = manager.snapshot("source").await.unwrap();
+        let token = source.fork_boundary_tokens[1].clone().unwrap();
+        let _external_lease =
+            sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "source").unwrap();
+        let (child, lineage) = manager
+            .fork_session(
+                "source",
+                ForkSessionRequest {
+                    boundary_token: token.clone(),
+                    title: Some("  Branch  ".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        let child_id = child.metadata.session_id.clone().unwrap();
+        assert_eq!(lineage.child_session_id, child_id);
+        assert_eq!(lineage.source_session_id, "source");
+        assert_eq!(child.messages.len(), 2);
+        assert!(child.active_run.is_none());
+        assert!(child.active_compaction.is_none());
+        assert!(child.active_threads.is_empty());
+        assert!(child.threads.is_empty());
+        assert!(child.thread_events.is_empty());
+        assert!(child.thread_steering.is_empty());
+        let loaded = load_session_lineage(&root.join("store.db"), &child_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.source_session_id, "source");
+        let summary = child
+            .sessions
+            .iter()
+            .find(|row| row.session_id == child_id)
+            .unwrap();
+        assert_eq!(summary.title.as_deref(), Some("Branch"));
+
+        // A valid boundary whose copied credential no longer resolves is a
+        // configuration conflict, and it leaves no second child behind.
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+        let config_error = manager
+            .fork_session(
+                "source",
+                ForkSessionRequest {
+                    boundary_token: token.clone(),
+                    title: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(config_error.status, StatusCode::CONFLICT);
+        unsafe { std::env::set_var("OPENAI_API_KEY", "fork-test-key") };
+
+        // Replacing the persisted prefix makes the old opaque token stale.
+        let mut replaced = snapshot.clone();
+        replaced.messages[1] = serde_json::from_value(serde_json::json!({
+            "role":"assistant","content":"different answer"
+        }))
+        .unwrap();
+        sessions::save_session(&root.join("store.db"), &replaced).unwrap();
+        let stale = manager
+            .fork_session(
+                "source",
+                ForkSessionRequest {
+                    boundary_token: token,
+                    title: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(stale.status, StatusCode::CONFLICT);
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fork_title_and_conflict_error_mapping_are_typed() {
+        assert_eq!(
+            validate_optional_fork_title(Some("  Child  ")).unwrap(),
+            Some("Child".to_string())
+        );
+        assert_eq!(
+            validate_optional_fork_title(Some(" ")).unwrap_err().status,
+            StatusCode::BAD_REQUEST
+        );
+        for boundary in [
+            nac_core::session_service::ForkBoundaryValidationError::Stale,
+            nac_core::session_service::ForkBoundaryValidationError::Mutable,
+        ] {
+            assert_eq!(
+                ApiError::from_fork_error(anyhow::Error::new(boundary)).status,
+                StatusCode::CONFLICT
+            );
+        }
     }
 
     fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {

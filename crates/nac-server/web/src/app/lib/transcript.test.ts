@@ -80,3 +80,19 @@ describe("transcript projection", () => {
     expect(partitionThreadCalls([left, right])).toEqual([[left, right]]);
   });
 });
+
+
+it("offers only server-issued boundaries on the following user turn", () => {
+  const projected = snapshot([
+    { role: "user", content: "first" },
+    { role: "assistant", content: "answer" },
+    { role: "user", content: "branch here" },
+  ]);
+  projected.fork_boundary_tokens = [null, "opaque-server-token", null];
+  const turns = buildTranscript(projected, {});
+  expect(turns[0]).toMatchObject({ kind: "user", forkBoundaryToken: null });
+  expect(turns[2]).toMatchObject({
+    kind: "user",
+    forkBoundaryToken: "opaque-server-token",
+  });
+});

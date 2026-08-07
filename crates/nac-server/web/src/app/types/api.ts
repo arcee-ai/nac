@@ -620,7 +620,23 @@ export interface SessionFrontendSnapshot {
 }
 
 /** `GET /sessions/{id}` flattens the snapshot and adds paging metadata. */
+export interface SessionLineage {
+  child_session_id: string;
+  source_session_id: string;
+  source_raw_end_exclusive: number;
+  source_prefix_sha256: string;
+  source_boundary_event_id: number | null;
+  source_config_version: number;
+  created_at: string;
+}
+
+export interface ForkSessionRequest {
+  boundary_token: string;
+  title?: string;
+}
+
 export interface SessionSnapshotResponse extends SessionFrontendSnapshot {
+  lineage?: SessionLineage;
   message_page?: MessagePageMetadata;
   message_cycle?: MessageCycleMetadata;
 }

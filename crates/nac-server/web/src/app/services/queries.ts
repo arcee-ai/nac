@@ -18,6 +18,7 @@ import type {
   CommitWorkspaceRequest,
   CreateModelConfigurationRequest,
   CreateSessionRequest,
+  ForkSessionRequest,
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationList,
@@ -500,6 +501,30 @@ export function useSessionSnapshot(
     // The stream invalidates this query, so a stale time only guards bursts.
     staleTime: 1000,
     ...options,
+  });
+}
+
+export function useForkSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, payload }: { sourceId: string; payload: ForkSessionRequest }) =>
+      api.forkSession(sourceId, payload),
+    onSuccess: (snapshot) => {
+      const id = snapshot.metadata.session_id;
+      if (!id) return;
+      client.setQueryData(queryKeys.session(id), snapshot);
+      const summary = snapshot.sessions.find((item) => item.session_id === id);
+      if (summary) {
+        client.setQueriesData<ManagedSessionSummary[]>(
+          { queryKey: queryKeys.sessionsAll },
+          (items) => {
+            if (!items || items.some((item) => item.summary.session_id === id)) return items;
+            return [...items, { summary, active: true }];
+          },
+        );
+      }
+      void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
+    },
   });
 }
 

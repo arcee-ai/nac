@@ -11,6 +11,7 @@ import type {
   CompactSessionResponse,
   CreateModelConfigurationRequest,
   CreateSessionRequest,
+  ForkSessionRequest,
   DeviceLoginStarted,
   DeviceLoginState,
   LaunchModelDefaults,
@@ -310,6 +311,11 @@ export const api = {
 
   createSession: (payload: CreateSessionRequest) =>
     request<SessionSnapshotResponse>("POST", "/sessions", { body: payload }),
+
+  forkSession: (id: string, payload: ForkSessionRequest) =>
+    request<SessionSnapshotResponse>("POST", `${sessionPath(id)}/fork`, {
+      body: payload,
+    }),
 
   deleteSession: (id: string) => request<void>("DELETE", sessionPath(id)),
 

@@ -36,6 +36,9 @@ interface UserMessageProps {
   onRefresh?: ((messageIndex: number) => void) | null;
   /** Restore the session to the snapshot at this prompt. */
   onRevert?: ((messageIndex: number, text: string) => void) | null;
+  /** Fork at the server-issued assistant boundary preceding this prompt. */
+  forkBoundaryToken?: string | null;
+  onFork?: ((boundaryToken: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
 }
@@ -48,6 +51,8 @@ export const UserMessage = memo(function UserMessage({
   messageIndex,
   onRefresh = null,
   onRevert = null,
+  forkBoundaryToken = null,
+  onFork = null,
   actionsDisabled = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
@@ -79,6 +84,21 @@ export const UserMessage = memo(function UserMessage({
             <span className="label-micro text-basic-tertiary whitespace-nowrap truncate">
               {timestamp}
             </span>
+          ) : null}
+
+          {forkBoundaryToken && onFork ? (
+            <Tooltip title="Fork from here" position={TooltipPosition.TopCenter}>
+              <Button
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Tertiary}
+                content={ButtonContent.Icon}
+                aria-label="Fork conversation from here"
+                onClick={() => onFork(forkBoundaryToken)}
+                className="!h-4 !min-h-4 !p-0"
+              >
+                <Icon iconName={IconName.Flow} size={16} />
+              </Button>
+            </Tooltip>
           ) : null}
 
           {canRefresh ? (

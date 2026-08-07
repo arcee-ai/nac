@@ -77,6 +77,8 @@ export interface UserTurn {
   messageIndex: number;
   /** When the message entered the transcript log, if the backend knows. */
   createdAt: string | null;
+  /** Server-issued token for the committed assistant boundary before this prompt. */
+  forkBoundaryToken: string | null;
 }
 
 export interface ModelTurn {
@@ -437,6 +439,7 @@ export function buildTranscript(
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
   const createdAt = snapshot?.message_created_at ?? [];
+  const forkTokens = snapshot?.fork_boundary_tokens ?? [];
 
   const ctx: BuildContext = {
     liveThreads,
@@ -457,12 +460,21 @@ export function buildTranscript(
 
     if (message.role === "user") {
       current = null;
+      let forkBoundaryToken: string | null = null;
+      for (let prior = index - 1; prior >= 0; prior -= 1) {
+        if (messages[prior]?.role === "user") break;
+        if (forkTokens[prior]) {
+          forkBoundaryToken = forkTokens[prior] ?? null;
+          break;
+        }
+      }
       turns.push({
         kind: "user",
         key: `user-${index}`,
         text: displayPromptFromMessageText(message.content),
         messageIndex: index,
         createdAt: createdAt[index] ?? null,
+        forkBoundaryToken,
       });
       return;
     }
