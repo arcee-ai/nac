@@ -57,8 +57,8 @@ export const UserMessage = memo(function UserMessage({
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
         className={cn(
-          "py-3 px-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
-          "label-small text-basic-primary whitespace-pre-wrap break-words",
+          "py-3 px-5 rounded-[12px] user-message-surface shadow-convex",
+          "label-small whitespace-pre-wrap break-words",
           pending && "opacity-60",
         )}
       >

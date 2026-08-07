@@ -1,9 +1,33 @@
 <!doctype html>
-<html lang="en" class="dark" data-theme="dark" style="color-scheme: dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Resolve the theme before styles or React load to avoid a light/dark flash.
+      (() => {
+        const key = "nac-theme";
+        const allowed = ["light", "dark", "system"];
+        let theme = "system";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved && allowed.includes(saved)) theme = saved;
+        } catch {
+          // Storage can be unavailable in privacy-restricted browsing contexts.
+        }
+        const resolved =
+          theme === "system"
+            ? matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : theme;
+        const root = document.documentElement;
+        root.dataset.theme = resolved;
+        root.classList.add(resolved);
+        root.style.colorScheme = resolved;
+      })();
+    </script>
     <!-- Referenced from `src/` rather than a `public/` copy: the embedded server
          serves only `/assets/*`, so an icon at the dist root would 404. -->
     <link
@@ -12,9 +36,9 @@
       href="/assets/dist/assets/favicon-BDhzHmjC.svg"
     />
     <title>Telos</title>
-    <script type="module" crossorigin src="/assets/dist/assets/index-DiQY6Yw9.js"></script>
+    <script type="module" crossorigin src="/assets/dist/assets/index-BA6y5wR-.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/dist/assets/rolldown-runtime-hePW80VL.js">
-    <link rel="stylesheet" crossorigin href="/assets/dist/assets/index-DD_qABcE.css">
+    <link rel="stylesheet" crossorigin href="/assets/dist/assets/index-CqIWt3yT.css">
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

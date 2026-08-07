@@ -11,10 +11,7 @@ export type ResolvedTheme = "light" | "dark";
 
 const THEMES: Theme[] = ["light", "dark", "system"];
 const STORAGE_KEY = "nac-theme";
-
-// The product ships dark-only for now. Theme plumbing (tokens, types, storage)
-// stays so light / system can come back without a redesign.
-const FORCED_THEME: ResolvedTheme = "dark";
+const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -25,56 +22,90 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const prefersDark = () =>
-  window.matchMedia("(prefers-color-scheme: dark)").matches;
+const isTheme = (value: string | null): value is Theme =>
+  value != null && THEMES.includes(value as Theme);
 
-function resolve(_theme: Theme): ResolvedTheme {
-  return FORCED_THEME;
+const prefersDark = () => window.matchMedia(COLOR_SCHEME_QUERY).matches;
+
+function resolve(theme: Theme, systemDark: boolean): ResolvedTheme {
+  return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
 
-function applyToDOM(): void {
+function applyToDOM(resolved: ResolvedTheme): void {
   const root = document.documentElement;
-  root.setAttribute("data-theme", FORCED_THEME);
+  root.setAttribute("data-theme", resolved);
   root.classList.remove("light", "dark");
-  root.classList.add(FORCED_THEME);
-  root.style.colorScheme = FORCED_THEME;
+  root.classList.add(resolved);
+  root.style.colorScheme = resolved;
 }
 
 function initialTheme(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
-  if (saved && THEMES.includes(saved)) return saved;
-  return prefersDark() ? "dark" : "light";
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return isTheme(saved) ? saved : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function persistTheme(theme: Theme): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, theme);
+  } catch {
+    // Keep the in-memory preference when storage is unavailable.
+  }
 }
 
 export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
   children,
 }) => {
   const [theme, setThemeState] = useState<Theme>(initialTheme);
+  const [systemDark, setSystemDark] = useState(prefersDark);
+  const resolved = resolve(theme, systemDark);
 
   const setTheme = useCallback((next: Theme) => {
     if (!THEMES.includes(next)) return;
+    if (next === "system") setSystemDark(prefersDark());
     setThemeState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    applyToDOM();
+    persistTheme(next);
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => {
-      const next: Theme =
-        prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
-      localStorage.setItem(STORAGE_KEY, next);
-      applyToDOM();
-      return next;
-    });
-  }, []);
+    const next: Theme =
+      theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+    if (next === "system") setSystemDark(prefersDark());
+    setThemeState(next);
+    persistTheme(next);
+  }, [theme]);
 
   useEffect(() => {
-    applyToDOM();
+    applyToDOM(resolved);
+  }, [resolved]);
+
+  useEffect(() => {
+    if (theme !== "system") return;
+
+    const media = window.matchMedia(COLOR_SCHEME_QUERY);
+    const updateSystemTheme = (event: MediaQueryListEvent) =>
+      setSystemDark(event.matches);
+    media.addEventListener("change", updateSystemTheme);
+    return () => media.removeEventListener("change", updateSystemTheme);
+  }, [theme]);
+
+  useEffect(() => {
+    const syncStoredTheme = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY && event.key !== null) return;
+      const next = isTheme(event.newValue) ? event.newValue : "system";
+      if (next === "system") setSystemDark(prefersDark());
+      setThemeState(next);
+    };
+    window.addEventListener("storage", syncStoredTheme);
+    return () => window.removeEventListener("storage", syncStoredTheme);
   }, []);
 
   return (
     <ThemeContext.Provider
-      value={{ theme, resolved: resolve(theme), setTheme, toggleTheme }}
+      value={{ theme, resolved, setTheme, toggleTheme }}
     >
       {children}
     </ThemeContext.Provider>

@@ -89,6 +89,10 @@
   --color-bg-elevation-sublevel-variant-A: var(--white-trans-25);
   --color-bg-elevation-sublevel-variant-B: var(--white-trans-50);
 
+  /* Conversation / User message */
+  --color-bg-user-message: var(--gray-800);
+  --color-text-user-message: var(--white);
+
   /* Background / Code-input */
   --color-bg-code-input-content: var(--white-trans-25);
   --color-bg-code-input-content-integration: var(--white-trans-50);

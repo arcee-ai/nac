@@ -17,10 +17,14 @@ const THEME_ICON = {
 } as const;
 
 export function ThemeToggle({ size = ButtonSize.Small }: { size?: ButtonSize }) {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, resolved, toggleTheme } = useTheme();
+  const nextTheme =
+    theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+  const stateLabel =
+    theme === "system" ? `system (${resolved})` : theme;
   return (
     <Tooltip
-      title={`Theme: ${theme} (click to cycle)`}
+      title={`Theme: ${stateLabel}. Switch to ${nextTheme}`}
       position={TooltipPosition.BottomLeft}
     >
       <Button
@@ -28,7 +32,9 @@ export function ThemeToggle({ size = ButtonSize.Small }: { size?: ButtonSize }) 
         size={size}
         content={ButtonContent.Icon}
         onClick={toggleTheme}
-        aria-label={`Theme: ${theme}`}
+        aria-label={`Theme: ${stateLabel}. Switch to ${nextTheme}`}
+        data-theme-mode={theme}
+        data-theme-resolved={resolved}
       >
         <Icon iconName={THEME_ICON[theme] ?? IconName.Desktop} />
       </Button>
