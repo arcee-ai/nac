@@ -72,6 +72,33 @@ describe("runtime external store", () => {
     unsubscribe();
   });
 
+  it("projects orchestrator guidance lifecycle without creating a user turn", () => {
+    resetRuntime("session-1");
+    applyEnvelope(envelope(1, {
+      type: "agent",
+      event: {
+        type: "orchestrator_steering_queued",
+        steering_id: 9,
+        instruction_preview: "focus tests",
+      },
+    }));
+    expect(getRuntimeState().guidance).toMatchObject({
+      steeringId: 9,
+      status: "queued",
+    });
+
+    applyEnvelope(envelope(2, {
+      type: "agent",
+      event: {
+        type: "orchestrator_steering_delivered",
+        steering_id: 9,
+        instruction_preview: "focus tests",
+      },
+    }));
+    expect(getRuntimeState().guidance?.status).toBe("delivered");
+    expect(getRuntimeState().optimisticUserPrompt).toBeNull();
+  });
+
   it("streams only the active run and provider call", () => {
     resetRuntime("session-1");
     syncRunFromSnapshot({

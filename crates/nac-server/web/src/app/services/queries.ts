@@ -766,6 +766,24 @@ export function useSubmitRun() {
   });
 }
 
+export function useGuideCurrentRun() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({
+      id,
+      instruction,
+      expectedRunId,
+    }: {
+      id: string;
+      instruction: string;
+      expectedRunId: string;
+    }) => api.steerOrchestrator(id, instruction, expectedRunId),
+    onSettled: (_data, _error, { id }) => {
+      void invalidate.session(id);
+    },
+  });
+}
+
 export function useEditQueuedRun() {
   const invalidate = useInvalidators();
   const client = useQueryClient();

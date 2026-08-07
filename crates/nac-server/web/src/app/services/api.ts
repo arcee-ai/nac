@@ -495,9 +495,9 @@ export const api = {
       body: { message_idx: messageIdx },
     }),
 
-  steerOrchestrator: (id: string, instruction: string) =>
+  steerOrchestrator: (id: string, instruction: string, expectedRunId: string) =>
     request<OrchestratorSteeringResponse>("POST", `${sessionPath(id)}/steering`, {
-      body: { instruction },
+      body: { instruction, expected_run_id: expectedRunId },
     }),
 
   steerThread: (id: string, threadName: string, instruction: string) =>

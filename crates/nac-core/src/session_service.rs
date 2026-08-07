@@ -869,6 +869,17 @@ impl SessionService {
         &self,
         instruction: &str,
     ) -> Result<crate::store::ThreadSteeringRecord> {
+        self.queue_orchestrator_steering_for_run(instruction, None)
+    }
+
+    /// Queue guidance only if the caller is still looking at the same active run.
+    /// The identity check and durable enqueue share the active-operation lock so
+    /// a terminal run cannot be replaced between them.
+    pub fn queue_orchestrator_steering_for_run(
+        &self,
+        instruction: &str,
+        expected_run_id: Option<&str>,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
         let session_id = self
             .metadata
             .session_id
@@ -884,6 +895,11 @@ impl SessionService {
             }
             _ => return Err(anyhow::anyhow!("session has no active run")),
         };
+        if expected_run_id.is_some_and(|expected| expected != dispatch_id) {
+            return Err(anyhow::anyhow!(
+                "active run changed before guidance was queued"
+            ));
+        }
         let record = crate::store::queue_thread_steering(
             &self.metadata.store_path,
             session_id,
@@ -4305,6 +4321,10 @@ pub(super) mod tests {
         );
         assert_eq!(queued.status, "queued");
         assert_eq!(queued.dispatch_id, active.run_id.as_str());
+        let stale = service
+            .queue_orchestrator_steering_for_run("stale guidance", Some("previous-run"))
+            .unwrap_err();
+        assert!(stale.to_string().contains("active run changed"));
 
         assert!(
             service

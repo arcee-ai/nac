@@ -644,6 +644,8 @@ impl SubmitPromptResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrchestratorSteeringRequest {
     pub instruction: String,
+    /// Optional stale-view guard for clients submitting against a live run.
+    pub expected_run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1971,7 +1973,10 @@ impl SessionManager {
         request: OrchestratorSteeringRequest,
     ) -> Result<OrchestratorSteeringResponse> {
         let service = self.attach_session(session_id).await?;
-        let record = service.queue_orchestrator_steering(&request.instruction)?;
+        let record = service.queue_orchestrator_steering_for_run(
+            &request.instruction,
+            request.expected_run_id.as_deref(),
+        )?;
         Ok(OrchestratorSteeringResponse {
             steering_id: record.id,
             status: record.status,
@@ -4229,6 +4234,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("no active run")
             || message.contains("not active")
             || message.contains("active run is finishing")
+            || message.contains("active run changed before guidance")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
@@ -6284,7 +6290,7 @@ thread_timeout_secs = 7200
         let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
         let manager = test_manager(&root);
 
-        manager
+        let submitted = manager
             .submit_prompt(
                 "session",
                 SubmitPromptRequest {
@@ -6294,11 +6300,24 @@ thread_timeout_secs = 7200
             )
             .await
             .unwrap();
+        let run_id = submitted.run_id().unwrap().to_string();
+        let stale = manager
+            .queue_orchestrator_steering(
+                "session",
+                OrchestratorSteeringRequest {
+                    instruction: "too late".to_string(),
+                    expected_run_id: Some("previous-run".to_string()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(ApiError::from(stale).status, StatusCode::CONFLICT);
         let steering = manager
             .queue_orchestrator_steering(
                 "session",
                 OrchestratorSteeringRequest {
                     instruction: "change direction".to_string(),
+                    expected_run_id: Some(run_id),
                 },
             )
             .await

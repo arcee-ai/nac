@@ -1082,11 +1082,12 @@ export interface RegenerateSessionRequest {
 
 export interface SteeringRequest {
   instruction: string;
+  expected_run_id?: string;
 }
 
 export interface OrchestratorSteeringResponse {
   steering_id: number;
-  status: string;
+  status: SteeringStatus;
   instruction_preview: string;
 }
 

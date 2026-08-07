@@ -25,6 +25,16 @@ export interface RuntimeEvent {
   local: boolean;
 }
 
+export type GuidanceDisplayStatus =
+  "queued" | "delivered" | "expired" | "error";
+
+export interface RuntimeGuidance {
+  steeringId: number | null;
+  runId: string;
+  status: GuidanceDisplayStatus;
+  message?: string;
+}
+
 export interface RuntimeThread {
   name: string;
   status: "running" | "finished";
@@ -82,6 +92,8 @@ interface RuntimeState {
   optimisticUserPrompt: string | null;
   /** Suppresses a stale snapshot's queue bubble during authoritative handoff. */
   admittedQueuedRunId: string | null;
+  /** Latest guidance submitted from this tab and its live lifecycle. */
+  guidance: RuntimeGuidance | null;
 }
 
 export const runtimeStore = createStore<RuntimeState>(
@@ -102,6 +114,7 @@ export const runtimeStore = createStore<RuntimeState>(
     streamSettled: false,
     optimisticUserPrompt: null,
     admittedQueuedRunId: null,
+    guidance: null,
   },
   "runtime",
 );
@@ -128,12 +141,17 @@ export function resetRuntime(sessionId: string | null): void {
     streamSettled: false,
     optimisticUserPrompt: null,
     admittedQueuedRunId: null,
+    guidance: null,
   });
 }
 
 /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
 export function setOptimisticUserPrompt(prompt: string | null): void {
   setState({ optimisticUserPrompt: prompt });
+}
+
+export function setGuidanceStatus(guidance: RuntimeGuidance | null): void {
+  setState({ guidance });
 }
 
 /**
@@ -490,14 +508,32 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
       return false;
     case "orchestrator_steering_queued":
     case "orchestrator_steering_delivered":
-    case "orchestrator_steering_expired":
+    case "orchestrator_steering_expired": {
+      const status = event.type.endsWith("delivered")
+        ? "delivered"
+        : event.type.endsWith("expired")
+          ? "expired"
+          : "queued";
+      setState((state) => ({
+        guidance:
+          !state.guidance || state.guidance.steeringId === event.steering_id
+            ? {
+                steeringId: event.steering_id,
+                runId: state.streamRunId ?? state.guidance?.runId ?? "",
+                status,
+              }
+            : state.guidance,
+      }));
       pushEvent({
         seq,
         kind: "steering",
         text: `${steeringVerb(event.type)} → orchestrator: ${event.instruction_preview}`,
         isError: event.type === "orchestrator_steering_expired",
       });
-      return false;
+      // Delivery appends a canonical user message; all lifecycle states are
+      // durable and should reconcile after reconnect.
+      return true;
+    }
     case "orchestrator_compaction_started":
       setState({ activity: "Compacting context…" });
       pushEvent({
@@ -565,4 +601,5 @@ export const useOptimisticUserPrompt = () =>
   useStore((s) => s.optimisticUserPrompt);
 export const useAdmittedQueuedRunId = () =>
   useStore((s) => s.admittedQueuedRunId);
+export const useGuidanceStatus = () => useStore((s) => s.guidance);
 export { getState as getRuntimeState };

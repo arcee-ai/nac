@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -12,6 +12,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { GuidanceControl } from "@/app/components/inspector/GuidanceControl";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { SshBadge } from "@/app/components/SshBadge";
 import {
@@ -33,11 +34,17 @@ import { ApiError } from "@/app/services/api";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
+  useGuideCurrentRun,
   useModelCatalog,
   useSshConnect,
   useSubmitRun,
 } from "@/app/services/queries";
-import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
+import {
+  pushLocalEvent,
+  setGuidanceStatus,
+  useGuidanceStatus,
+  useRunning,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -128,6 +135,8 @@ export function ChatInputBox({
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
+  const guideRun = useGuideCurrentRun();
+  const guidance = useGuidanceStatus();
   const ref = useRef<HTMLTextAreaElement>(null);
   const retryRef = useRef<{ prompt: string; clientMessageId: string } | null>(null);
 
@@ -152,8 +161,30 @@ export function ChatInputBox({
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
   const busy = submitRun.isPending;
+  const activeRunId = snapshot?.active_run?.run_id ?? null;
   const queued = snapshot?.queued_message;
   const canSend = Boolean(value.trim()) && !busy && !queued;
+
+  useEffect(() => {
+    const latest = snapshot?.thread_steering
+      .filter(
+        (record) =>
+          record.thread_name === "__orchestrator__" &&
+          record.dispatch_id === activeRunId,
+      )
+      .at(-1);
+    if (!latest || guidance?.status === "error") return;
+    setGuidanceStatus({
+      steeringId: latest.id,
+      runId: latest.dispatch_id ?? "",
+      status:
+        latest.status === "delivered"
+          ? "delivered"
+          : latest.status === "expired"
+            ? "expired"
+            : "queued",
+    });
+  }, [snapshot?.thread_steering, activeRunId, guidance?.status]);
 
   const reconnectSsh = useCallback(async () => {
     if (!sshTarget || connectSsh.isPending) return;
@@ -200,6 +231,36 @@ export function ChatInputBox({
       toast.error(`Failed to send: ${message}`);
     }
   }, [value, busy, queued, sessionId, submitRun, toast]);
+
+  const guide = useCallback(
+    async (instruction: string) => {
+      if (!activeRunId || !running) return false;
+      try {
+        const response = await guideRun.mutateAsync({
+          id: sessionId,
+          instruction,
+          expectedRunId: activeRunId,
+        });
+        setGuidanceStatus({
+          steeringId: response.steering_id,
+          runId: activeRunId,
+          status: "queued",
+        });
+        return true;
+      } catch (error) {
+        const message = errorMessage(error);
+        setGuidanceStatus({
+          steeringId: null,
+          runId: activeRunId,
+          status: "error",
+          message,
+        });
+        pushLocalEvent("error", `guidance failed: ${message}`, true);
+        return false;
+      }
+    },
+    [activeRunId, running, guideRun, sessionId],
+  );
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;
@@ -278,6 +339,13 @@ export function ChatInputBox({
           Sends after the current run finishes
         </p>
       ) : null}
+
+      <GuidanceControl
+        active={Boolean(running && activeRunId)}
+        pending={guideRun.isPending}
+        status={guidance}
+        onSubmit={guide}
+      />
 
       <div className="flex items-center gap-[10px]">
         <div className="flex flex-1 min-w-0 items-center gap-4">

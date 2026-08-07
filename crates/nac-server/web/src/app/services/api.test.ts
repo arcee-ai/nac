@@ -61,3 +61,29 @@ describe("queued run API", () => {
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
   });
 });
+
+describe("orchestrator guidance API", () => {
+  it("binds guidance to the run visible when it was submitted", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        steering_id: 12,
+        status: "queued",
+        instruction_preview: "change direction",
+      }, 202),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await api.steerOrchestrator("session-1", "change direction", "run-7");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/sessions/session-1/steering",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          instruction: "change direction",
+          expected_run_id: "run-7",
+        }),
+      }),
+    );
+  });
+});
