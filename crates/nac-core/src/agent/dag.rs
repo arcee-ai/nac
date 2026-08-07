@@ -490,9 +490,11 @@ pub(crate) async fn execute_with_dag(
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
             });
 
-            // Spawn execute_parsed_dispatch.
+            // Spawn execute_parsed_dispatch. Mixed mode selects the tier
+            // client for this dispatch; single mode clones the orchestrator
+            // client unchanged.
             let runtime = runtime.clone();
-            let client = client.clone();
+            let client = thread::select_dispatch_client(&dispatch.params, &runtime, &client);
             let params = dispatch.params.clone();
             let id = dispatch.tool_call_id.clone();
             let original_index = dispatch.original_index;
@@ -679,6 +681,8 @@ mod tests {
                 scheduled_skills: Vec::new(),
                 session_id: "test-session".to_string(),
                 timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
+                complexity: None,
+                effort: None,
             },
         }
     }

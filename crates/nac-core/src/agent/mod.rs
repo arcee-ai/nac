@@ -83,6 +83,8 @@ pub struct AgentConfig {
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
+    /// Mixed-mode tier worker clients; `None` keeps single-model dispatch.
+    pub mixed_clients: Option<Arc<tools::MixedDispatchClients>>,
 }
 
 pub struct Agent {
@@ -119,6 +121,50 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
         content.push_str("\n\n");
         content.push_str(extra);
     }
+}
+
+/// Mixed-mode addendum to the orchestrator system prompt: names each tier's
+/// configured model, its default effort, and the effort levels it accepts.
+fn mixed_mode_prompt_guidance(mixed: &tools::MixedDispatchClients) -> String {
+    let mut guidance = String::from(
+        "\n\nMixed mode is enabled. Every thread dispatch requires a complexity \
+         classification — easy, medium, or hard — and the matching user-configured \
+         worker model runs that dispatch. Classify by the genuine difficulty of the \
+         bounded action: easy for mechanical or well-scoped work, medium for typical \
+         implementation work, hard for work needing deep reasoning or broad context. \
+         You may also pass effort to raise or lower the selected tier model's \
+         reasoning effort for a single dispatch; do so only when the work genuinely \
+         needs it, and only with an effort level the selected tier model supports. \
+         Unsupported effort requests fall back to the tier's configured default.\n\
+         Configured tiers:",
+    );
+    for (complexity, client) in mixed.tiers() {
+        let supported = client.supported_reasoning_efforts();
+        let efforts = if supported.is_empty() {
+            "no adjustable reasoning effort".to_string()
+        } else {
+            format!(
+                "supported efforts: {}",
+                supported
+                    .iter()
+                    .map(|effort| effort.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let default = client
+            .reasoning_effort()
+            .map(|effort| format!("default effort: {}; ", effort.as_str()))
+            .unwrap_or_default();
+        guidance.push_str(&format!(
+            "\n- {}: {} ({}{})",
+            complexity.as_str(),
+            client.model,
+            default,
+            efforts
+        ));
+    }
+    guidance
 }
 
 /// Trim a trailing assistant tool-call turn whose tool results never arrived
@@ -232,7 +278,8 @@ impl Agent {
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (
-                format!(
+                {
+                    let mut prompt = format!(
                     "You are nac, a coding agent orchestrator. Working directory: {}.\n\n\
                      A thread is a named workstream that executes one action at a time and retains its own \
                      history across dispatches. Reusing a thread gives the worker that thread's retained \
@@ -314,8 +361,16 @@ impl Agent {
                      - workset_list()\n\n\
                      You must use threads for all coding work. You cannot read, write, or edit files directly.",
                     cwd, thread_timeout_secs
+                );
+                    if let Some(mixed) = config.mixed_clients.as_deref() {
+                        prompt.push_str(&mixed_mode_prompt_guidance(mixed));
+                    }
+                    prompt
+                },
+                tools::orchestrator_tool_definitions(
+                    config.skills.as_deref(),
+                    config.mixed_clients.as_deref(),
                 ),
-                tools::orchestrator_tool_definitions(config.skills.as_deref()),
             ),
         };
         if config.mode == AgentMode::Worker {
@@ -373,6 +428,7 @@ impl Agent {
                 terminal_manager: crate::terminal::TerminalManager::new(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
+                mixed_clients: config.mixed_clients,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -410,6 +466,7 @@ impl Agent {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                mixed_clients: None,
             },
         )
         .expect("default test agent config must be valid")

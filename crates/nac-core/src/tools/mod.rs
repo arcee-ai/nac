@@ -137,6 +137,39 @@ impl ActiveThreadRegistry {
     }
 }
 
+/// The three tier worker clients a mixed-mode session resolves at
+/// launch/resume. Each client carries its own catalog metadata, so the
+/// dispatch tool can enumerate and validate per-tier reasoning efforts.
+#[derive(Clone)]
+pub struct MixedDispatchClients {
+    pub easy: crate::model::ModelClient,
+    pub medium: crate::model::ModelClient,
+    pub hard: crate::model::ModelClient,
+}
+
+impl MixedDispatchClients {
+    pub fn for_tier(
+        &self,
+        complexity: crate::model::ThreadComplexity,
+    ) -> &crate::model::ModelClient {
+        match complexity {
+            crate::model::ThreadComplexity::Easy => &self.easy,
+            crate::model::ThreadComplexity::Medium => &self.medium,
+            crate::model::ThreadComplexity::Hard => &self.hard,
+        }
+    }
+
+    /// `(tier label, client)` pairs in easy → hard order, for schema and
+    /// prompt descriptions.
+    pub fn tiers(&self) -> [(crate::model::ThreadComplexity, &crate::model::ModelClient); 3] {
+        [
+            (crate::model::ThreadComplexity::Easy, &self.easy),
+            (crate::model::ThreadComplexity::Medium, &self.medium),
+            (crate::model::ThreadComplexity::Hard, &self.hard),
+        ]
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolRuntime {
     pub workspace_cwd: PathBuf,
@@ -156,6 +189,8 @@ pub struct ToolRuntime {
     /// API costs are included in the session totals.  `orchestrator_context_tokens` is
     /// intentionally NOT accumulated here — it stays orchestrator-only.
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
+    /// Mixed-mode tier worker clients; `None` keeps single-model dispatch.
+    pub mixed_clients: Option<Arc<MixedDispatchClients>>,
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -432,9 +467,12 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
     tools
 }
 
-pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
+pub fn orchestrator_tool_definitions(
+    skills: Option<&SkillRegistry>,
+    mixed: Option<&MixedDispatchClients>,
+) -> Vec<ToolDefinition> {
     vec![
-        thread::dispatch_definition(skills),
+        thread::dispatch_definition(skills, mixed),
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
@@ -570,6 +608,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+        mixed_clients: None,
     }
 }
 

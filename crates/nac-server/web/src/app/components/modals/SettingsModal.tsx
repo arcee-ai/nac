@@ -24,6 +24,10 @@ import {
 import { SshBadge } from "@/app/components/SshBadge";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
+  MixedModelsSection,
+  type MixedSelection,
+} from "@/app/components/modals/MixedModelsSection";
+import {
   BACKEND_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -67,6 +71,7 @@ import {
 } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
+  MixedModels,
   RawSessionConfig,
   SessionMetadata,
   SessionSummarySnapshot,
@@ -192,6 +197,7 @@ export function SettingsModal({
     <SettingsForm
       id={id}
       initial={initial}
+      initialMixed={config?.mixed_models ?? null}
       summary={
         snapshot?.sessions.find((entry) => entry.session_id === id) ?? null
       }
@@ -205,12 +211,15 @@ export function SettingsModal({
 function SettingsForm({
   id,
   initial,
+  initialMixed,
   summary,
   diagnostics,
   onClose,
 }: {
   id: string;
   initial: SettingsInitialValues;
+  /** The mixed tiers the session currently runs with, if any. */
+  initialMixed: MixedModels | null;
   /** Carries the presentation version the title save has to match. */
   summary: SessionSummarySnapshot | null;
   diagnostics: string[];
@@ -231,6 +240,10 @@ function SettingsForm({
   // Null while the session keeps the key it already has. A string is a
   // replacement being typed, and an empty one means the key was taken away.
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
+  const [mixed, setMixed] = useState<MixedSelection>({
+    mode: initialMixed ? "mixed" : "single",
+    mixed: initialMixed,
+  });
   const [error, setError] = useState("");
 
   const kind = backend as BackendKind;
@@ -388,6 +401,18 @@ function SettingsForm({
       return;
     }
 
+    if (mixed.mode === "mixed") {
+      if (!mixed.mixed) {
+        setError("Pick a model for each of the easy, medium and hard tiers.");
+        return;
+      }
+      if (JSON.stringify(mixed.mixed) !== JSON.stringify(initialMixed)) {
+        patch.mixed_models = mixed.mixed;
+      }
+    } else if (initialMixed) {
+      patch.mixed_models = null;
+    }
+
     setError("");
     // The title lives on a different endpoint, so it is saved either way — a
     // rename should not be lost because the configuration happened to be
@@ -535,6 +560,10 @@ function SettingsForm({
             />
           </InputWrapper>
         </div>
+
+        <Separator />
+
+        <MixedModelsSection initial={initialMixed} onChange={setMixed} />
 
         <Separator />
 

@@ -51,7 +51,6 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
-    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
@@ -63,6 +62,7 @@ use nac_core::{
         SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -331,6 +331,30 @@ impl<'de> Deserialize<'de> for HeadersRequest {
     }
 }
 
+/// One mixed tier's model identity as a request names it. Same field
+/// semantics as the top-level session model fields; the credential is always
+/// an env/stored-credential name, never a key value.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MixedTierRequest {
+    pub model: String,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+}
+
+/// Mixed-mode worker routing: easy, medium, and hard tier models.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MixedModelsRequest {
+    pub easy: MixedTierRequest,
+    pub medium: MixedTierRequest,
+    pub hard: MixedTierRequest,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct CreateSessionRequest {
     pub cwd: Option<PathBuf>,
@@ -350,6 +374,9 @@ pub struct CreateSessionRequest {
     /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Mixed-mode tier models; omitted or null launches single-model.
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModelsRequest>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -417,6 +444,9 @@ pub struct CreateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,
+    /// Mixed-mode tier models saved with this setup.
+    #[serde(default)]
+    pub mixed_models: Option<MixedModelsRequest>,
 }
 
 /// Edits a saved setup in place. Every field is tri-state: omit it to keep what
@@ -445,6 +475,8 @@ pub struct UpdateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     #[serde(default)]
     pub initial_prompt: RequestField<String>,
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModelsRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -547,6 +579,9 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Omitted preserves; null returns the session to single-model mode.
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModelsRequest>,
 }
 
 impl UpdateConfigRequest {
@@ -561,6 +596,7 @@ impl UpdateConfigRequest {
                 self.orchestrator_compaction_threshold,
                 RequestField::Omitted
             )
+            && matches!(self.mixed_models, RequestField::Omitted)
     }
 }
 
@@ -1176,7 +1212,7 @@ impl SessionManager {
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
-        let model = model_options(
+        let mut model = model_options(
             request.model,
             request.base_url,
             request.backend,
@@ -1184,6 +1220,13 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        model.mixed = match request.mixed_models {
+            RequestField::Omitted | RequestField::Null => None,
+            RequestField::Value(mixed) => Some(mixed_models_config(
+                mixed,
+                &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+            )?),
+        };
         // Mirror the launch-time resolution so the destination is checked
         // against the backend the session will actually use.
         let launch_backend = model.backend.or_else(|| {
@@ -1742,7 +1785,7 @@ impl SessionManager {
     pub async fn update_session_config(
         &self,
         session_id: &str,
-        request: UpdateConfigRequest,
+        mut request: UpdateConfigRequest,
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
@@ -1797,7 +1840,24 @@ impl SessionManager {
             return Ok(());
         }
         let mut prospective = current.clone();
+        // Mixed tiers need the credential destination policy, which the plain
+        // field patch does not, so they are settled here instead.
+        let mixed_field = std::mem::take(&mut request.mixed_models);
         apply_raw_config_patch(&mut prospective, request)?;
+        match mixed_field {
+            RequestField::Omitted => {}
+            RequestField::Null => prospective.mixed_models = None,
+            RequestField::Value(mixed) => {
+                let mixed = mixed_models_config(
+                    mixed,
+                    &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
+                )?;
+                // Fail a broken tier here, not at the session's next launch.
+                runtime::resolve_mixed_dispatch_clients(&mixed)
+                    .map_err(|error| request_configuration_error(format!("{error:#}")))?;
+                prospective.mixed_models = Some(mixed);
+            }
+        }
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
             &mut prospective,
             backend_selected,
@@ -2346,6 +2406,15 @@ async fn create_model_config_handler(
         extra_headers: request.extra_headers.unwrap_or_default(),
         orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
         initial_prompt: request.initial_prompt,
+        mixed_models: request
+            .mixed_models
+            .map(|mixed| {
+                mixed_models_config(
+                    mixed,
+                    &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+                )
+            })
+            .transpose()?,
     };
     let record = model_configurations::insert_model_configuration(
         &manager.inner.store_path,
@@ -2487,6 +2556,14 @@ async fn update_model_config_handler(
             RequestField::Value(prompt) => Some(prompt),
             RequestField::Null => None,
             RequestField::Omitted => existing.initial_prompt.clone(),
+        },
+        mixed_models: match request.mixed_models {
+            RequestField::Value(mixed) => Some(mixed_models_config(
+                mixed,
+                &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+            )?),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.mixed_models.clone(),
         },
     };
 
@@ -3223,6 +3300,65 @@ fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Opti
     }
 }
 
+/// Validate and normalize one mixed tier from a request into the persisted
+/// form: the model is required and nonblank, backend and effort must parse,
+/// and a caller-supplied base URL is held to the same credential destination
+/// policy as the top-level model.
+fn mixed_tier_settings(
+    tier: MixedTierRequest,
+    label: &str,
+    policy: &CredentialDestinationPolicy,
+) -> Result<sessions::MixedTierSettings> {
+    let model = nonblank_request_string(tier.model, &format!("mixed_models.{label}.model"))?;
+    let backend = tier
+        .backend
+        .map(|value| {
+            let value = nonblank_request_string(value, &format!("mixed_models.{label}.backend"))?;
+            parse_request_enum::<BackendKind>(&value, &format!("mixed_models.{label}.backend"))
+                .map(|_: BackendKind| value)
+        })
+        .transpose()?;
+    let reasoning_effort = tier
+        .reasoning_effort
+        .map(|value| {
+            let value =
+                nonblank_request_string(value, &format!("mixed_models.{label}.reasoning_effort"))?;
+            parse_request_enum::<ReasoningEffort>(
+                &value,
+                &format!("mixed_models.{label}.reasoning_effort"),
+            )
+            .map(|_: ReasoningEffort| value)
+        })
+        .transpose()?;
+    let base_url = tier
+        .base_url
+        .map(|value| nonblank_request_string(value, &format!("mixed_models.{label}.base_url")))
+        .transpose()?;
+    let tier_backend = backend
+        .as_deref()
+        .and_then(|raw| raw.parse::<BackendKind>().ok())
+        .or_else(|| provider_for_model(&model));
+    enforce_trusted_base_url(tier_backend, base_url.as_deref(), policy)?;
+    Ok(sessions::MixedTierSettings {
+        model,
+        backend,
+        base_url,
+        api_key_env: tier.api_key_env,
+        reasoning_effort,
+    })
+}
+
+fn mixed_models_config(
+    request: MixedModelsRequest,
+    policy: &CredentialDestinationPolicy,
+) -> Result<sessions::MixedModeConfig> {
+    Ok(sessions::MixedModeConfig {
+        easy: mixed_tier_settings(request.easy, "easy", policy)?,
+        medium: mixed_tier_settings(request.medium, "medium", policy)?,
+        hard: mixed_tier_settings(request.hard, "hard", policy)?,
+    })
+}
+
 fn model_options(
     model: RequestField<String>,
     base_url: RequestField<String>,
@@ -3263,6 +3399,7 @@ fn model_options(
         api_model: required_create_string(model, "model")?,
         api_key_env,
         extra_headers,
+        mixed: None,
     })
 }
 
@@ -4869,6 +5006,7 @@ mod tests {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
+            mixed_models: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             ssh_port: None,
             ssh_identity_file: None,
@@ -4903,6 +5041,7 @@ mod tests {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                     ssh_host: None,
                     ssh_port: None,
                     ssh_identity_file: None,
@@ -4948,6 +5087,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -4990,6 +5130,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5025,6 +5166,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5972,6 +6114,7 @@ thread_timeout_secs = 7200
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -6172,6 +6315,7 @@ threshold_tokens = 64000
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
                 orchestrator_compaction_threshold: RequestField::Null,
+                mixed_models: RequestField::Omitted,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -6194,6 +6338,7 @@ threshold_tokens = 64000
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
                 orchestrator_compaction_threshold: RequestField::Value(0),
+                mixed_models: RequestField::Omitted,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -6959,6 +7104,7 @@ model = "gpt-5.2"
                         "true".to_string(),
                     )]))),
                     orchestrator_compaction_threshold: RequestField::Value(64_000),
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -6995,6 +7141,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Null,
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7016,6 +7163,7 @@ model = "gpt-5.2"
                     base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     orchestrator_compaction_threshold: RequestField::Value(32_000),
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7034,6 +7182,7 @@ model = "gpt-5.2"
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Value(0),
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7243,6 +7392,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7284,6 +7434,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                mixed_models: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7336,6 +7487,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7364,6 +7516,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7384,6 +7537,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7402,6 +7556,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                mixed_models: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7448,6 +7603,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await

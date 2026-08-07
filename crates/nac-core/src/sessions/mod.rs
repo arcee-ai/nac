@@ -33,6 +33,34 @@ pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunSt
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
 
+/// One tier's worker-model identity in mixed mode. Values are persisted
+/// verbatim, like the session's own model fields; resolution and validation
+/// happen at launch/resume through the catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MixedTierSettings {
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    /// Tier default effort; per-dispatch overrides replace it when supported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
+/// Mixed-mode worker model routing: the orchestrator classifies every thread
+/// dispatch as easy, medium, or hard, and the matching tier model runs it.
+/// `Some` on a session means mixed mode is on; `None` keeps single-model
+/// behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MixedModeConfig {
+    pub easy: MixedTierSettings,
+    pub medium: MixedTierSettings,
+    pub hard: MixedTierSettings,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawSessionConfig {
     pub session_id: String,
@@ -42,6 +70,8 @@ pub struct RawSessionConfig {
     pub reasoning_effort: Option<String>,
     pub api_key_env: Option<String>,
     pub extra_headers_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixed_models: Option<MixedModeConfig>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,
@@ -109,6 +139,8 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
+    /// Mixed-mode tier models; `None` keeps single-model behavior.
+    pub mixed_models: Option<MixedModeConfig>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -333,6 +365,56 @@ mod tests {
                 .orchestrator_context_tokens,
             330
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn mixed_models_round_trip_through_session_store() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("mixed_models_round_trip");
+
+        let mixed = MixedModeConfig {
+            easy: MixedTierSettings {
+                model: "small-model".to_string(),
+                backend: Some("openai-responses".to_string()),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
+                reasoning_effort: Some("low".to_string()),
+            },
+            medium: MixedTierSettings {
+                model: "medium-model".to_string(),
+                backend: None,
+                base_url: None,
+                api_key_env: None,
+                reasoning_effort: None,
+            },
+            hard: MixedTierSettings {
+                model: "large-model".to_string(),
+                backend: Some("anthropic-messages".to_string()),
+                base_url: None,
+                api_key_env: None,
+                reasoning_effort: Some("high".to_string()),
+            },
+        };
+
+        let mut snapshot = test_snapshot(
+            "mixed-session",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        snapshot.mixed_models = Some(mixed.clone());
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "mixed-session").unwrap();
+        assert_eq!(loaded.mixed_models, Some(mixed));
+
+        // Clearing the configuration returns the session to single-model mode.
+        let mut cleared = loaded;
+        cleared.mixed_models = None;
+        update_session_config(&store_path, &cleared).unwrap();
+        let reloaded = load_session(&store_path, "mixed-session").unwrap();
+        assert_eq!(reloaded.mixed_models, None);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

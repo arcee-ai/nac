@@ -71,7 +71,7 @@ pub use types::{
     managed_backend_base_url, resolve_model_base_url, EffectiveModelSettings,
     ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
 };
-pub use types::{BackendKind, ReasoningEffort};
+pub use types::{BackendKind, ReasoningEffort, ThreadComplexity};
 
 /// Identifies model setup failures caused by a caller-controlled configuration.
 ///

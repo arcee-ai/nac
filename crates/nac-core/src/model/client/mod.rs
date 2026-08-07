@@ -357,6 +357,26 @@ impl ModelClient {
         &self.extra_headers
     }
 
+    /// The effort levels the resolved model accepts, per catalog metadata,
+    /// in canonical order.
+    pub fn supported_reasoning_efforts(&self) -> Vec<ReasoningEffort> {
+        self.resolved_model.thinking_level_map.supported_efforts()
+    }
+
+    /// Clone this client with a different reasoning effort, preserving the
+    /// full credential, endpoint, header, cache, and catalog identity.
+    /// Returns `None` when the resolved model does not accept `effort`, so
+    /// callers fall back to the client's configured default instead of
+    /// sending an unsupported level to the provider.
+    pub fn with_reasoning_effort_override(&self, effort: ReasoningEffort) -> Option<Self> {
+        if !self.resolved_model.thinking_level_map.is_supported(effort) {
+            return None;
+        }
+        let mut client = self.clone();
+        client.reasoning_effort = Some(effort);
+        Some(client)
+    }
+
     /// Attach per-response cost computed from the resolved catalog metadata
     /// (S3). Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
     /// the metadata's 1h rate — 2x input when the catalog has no explicit
@@ -583,12 +603,16 @@ impl ModelClient {
                     request.header("Authorization", format!("Bearer {token}"))
                 })
                 .await?;
-            return read_sse_response(url, response, ChatStreamFold::new(Some(on_delta), reasoning_field))
-                .await
-                .map_err(|error| ModelHttpError {
-                    status: None,
-                    message: error.to_string(),
-                });
+            return read_sse_response(
+                url,
+                response,
+                ChatStreamFold::new(Some(on_delta), reasoning_field),
+            )
+            .await
+            .map_err(|error| ModelHttpError {
+                status: None,
+                message: error.to_string(),
+            });
         }
         self.try_post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {token}"))

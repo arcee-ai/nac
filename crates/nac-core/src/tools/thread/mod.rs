@@ -1,10 +1,12 @@
 use serde_json::Value;
 
 use crate::events::AgentEvent;
-use crate::model::ModelClient;
+use crate::model::{ModelClient, ReasoningEffort, ThreadComplexity};
 use crate::skills::SkillRegistry;
 use crate::store;
-use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
+use crate::tools::{
+    require_str, require_string_array, MixedDispatchClients, ToolResult, ToolRuntime,
+};
 use crate::types::ToolDefinition;
 
 mod worker;
@@ -15,7 +17,10 @@ use worker::{run_worker, WorkerInvocation};
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
 
-pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
+pub fn dispatch_definition(
+    skills: Option<&SkillRegistry>,
+    mixed: Option<&MixedDispatchClients>,
+) -> ToolDefinition {
     use serde_json::json;
 
     let mut parameters = json!({
@@ -32,6 +37,52 @@ pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
         },
         "required": ["name", "action"]
     });
+
+    if let Some(mixed) = mixed {
+        let mut complexity_description = String::from(
+            "Difficulty classification for this dispatch; selects the configured tier worker model:",
+        );
+        let mut effort_values: Vec<&'static str> = Vec::new();
+        for (complexity, client) in mixed.tiers() {
+            let supported = client.supported_reasoning_efforts();
+            let efforts = if supported.is_empty() {
+                "no adjustable reasoning effort".to_string()
+            } else {
+                format!(
+                    "supported efforts: {}",
+                    supported
+                        .iter()
+                        .map(|effort| effort.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            for effort in supported {
+                if !effort_values.contains(&effort.as_str()) {
+                    effort_values.push(effort.as_str());
+                }
+            }
+            complexity_description.push_str(&format!(
+                "\n- {}: {} ({})",
+                complexity.as_str(),
+                client.model,
+                efforts
+            ));
+        }
+        parameters["properties"]["complexity"] = json!({
+            "type": "string",
+            "enum": ["easy", "medium", "hard"],
+            "description": complexity_description
+        });
+        parameters["required"] = json!(["name", "action", "complexity"]);
+        if !effort_values.is_empty() {
+            parameters["properties"]["effort"] = json!({
+                "type": "string",
+                "enum": effort_values,
+                "description": "Optional reasoning-effort override for the selected tier model on this dispatch. Use only when the work genuinely needs more or less reasoning, and only with a level the selected tier model supports; unsupported requests fall back to the tier's configured default."
+            });
+        }
+    }
 
     if let Some(registry) = skills {
         let catalog = registry.catalog_entries();
@@ -114,6 +165,10 @@ pub struct ParsedDispatchParams {
     pub scheduled_skills: Vec<String>,
     pub session_id: String,
     pub timeout_secs: u64,
+    /// Mixed-mode difficulty tier; `None` outside mixed mode.
+    pub complexity: Option<ThreadComplexity>,
+    /// Mixed-mode per-dispatch reasoning-effort override.
+    pub effort: Option<ReasoningEffort>,
 }
 
 /// Parse tool args into [`ParsedDispatchParams`].  Pure — no side effects.
@@ -127,6 +182,7 @@ pub fn parse_dispatch_args(
     let scheduled_skills = resolve_scheduled_skills(args, runtime.skills.as_deref())?;
     let session_id = require_session(runtime)?.to_string();
     let timeout_secs = resolve_thread_timeout_secs(args, runtime.thread_timeout_secs);
+    let (complexity, effort) = parse_mixed_dispatch_args(args, runtime)?;
 
     Ok(ParsedDispatchParams {
         thread_name,
@@ -136,7 +192,60 @@ pub fn parse_dispatch_args(
         scheduled_skills,
         session_id,
         timeout_secs,
+        complexity,
+        effort,
     })
+}
+
+/// Parse the mixed-only `complexity` and `effort` arguments. Outside mixed
+/// mode both are ignored and stay `None`, preserving single-model behavior.
+/// In mixed mode `complexity` is required; `effort` is optional and only has
+/// to be a recognized level here — per-tier support is enforced at client
+/// selection, where unsupported requests fall back to the tier default.
+fn parse_mixed_dispatch_args(
+    args: &Value,
+    runtime: &ToolRuntime,
+) -> Result<(Option<ThreadComplexity>, Option<ReasoningEffort>), ToolResult> {
+    if runtime.mixed_clients.is_none() {
+        return Ok((None, None));
+    }
+    let complexity = require_str(args, "complexity").and_then(|raw| {
+        raw.parse::<ThreadComplexity>().map_err(|error| ToolResult {
+            content: format!("Error: {}", error),
+            is_error: true,
+        })
+    })?;
+    let effort = match args.get("effort").and_then(|value| value.as_str()) {
+        Some(raw) => Some(raw.parse::<ReasoningEffort>().map_err(|error| ToolResult {
+            content: format!("Error: {}", error),
+            is_error: true,
+        })?),
+        None => None,
+    };
+    Ok((Some(complexity), effort))
+}
+
+/// Select the model client a dispatch runs with. Outside mixed mode this is
+/// the orchestrator client, unchanged. In mixed mode the parsed complexity
+/// picks the tier client, and a supported effort override replaces that
+/// tier's default; an unsupported override falls back to the tier default.
+pub(crate) fn select_dispatch_client(
+    params: &ParsedDispatchParams,
+    runtime: &ToolRuntime,
+    orchestrator_client: &ModelClient,
+) -> ModelClient {
+    let tier = runtime
+        .mixed_clients
+        .as_deref()
+        .zip(params.complexity)
+        .map(|(mixed, complexity)| mixed.for_tier(complexity));
+    let Some(tier) = tier else {
+        return orchestrator_client.clone();
+    };
+    params
+        .effort
+        .and_then(|effort| tier.with_reasoning_effort_override(effort))
+        .unwrap_or_else(|| tier.clone())
 }
 
 /// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
@@ -156,6 +265,8 @@ pub async fn execute_parsed_dispatch(
         scheduled_skills,
         session_id,
         timeout_secs,
+        complexity: _,
+        effort: _,
     } = params;
 
     runtime.event_sink.emit(AgentEvent::ThreadStarted {
@@ -269,6 +380,7 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
+    let client = &select_dispatch_client(&params, runtime, client);
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -551,12 +663,14 @@ mod tests {
 
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
-        assert!(dispatch_definition(None).function.parameters["properties"]
-            .get("skills")
-            .is_none());
+        assert!(
+            dispatch_definition(None, None).function.parameters["properties"]
+                .get("skills")
+                .is_none()
+        );
 
         let registry = test_registry();
-        let definition = dispatch_definition(Some(&registry));
+        let definition = dispatch_definition(Some(&registry), None);
         let skills = &definition.function.parameters["properties"]["skills"];
         assert_eq!(skills["items"]["enum"], json!(["lint", "review"]));
         assert_eq!(skills["uniqueItems"], true);
@@ -683,6 +797,157 @@ mod tests {
 
         let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
+    }
+
+    // ------------------------------------------------------------------
+    // mixed mode
+    // ------------------------------------------------------------------
+
+    fn mixed_runtime() -> ToolRuntime {
+        let mut runtime = test_runtime();
+        runtime.mixed_clients = Some(Arc::new(crate::tools::MixedDispatchClients {
+            easy: ModelClient::new_for_test(),
+            medium: ModelClient::new_for_test(),
+            hard: ModelClient::new_for_test(),
+        }));
+        runtime
+    }
+
+    #[test]
+    fn dispatch_definition_mixed_mode_requires_complexity_and_offers_effort() {
+        let clients = crate::tools::MixedDispatchClients {
+            easy: ModelClient::new_for_test(),
+            medium: ModelClient::new_for_test(),
+            hard: ModelClient::new_for_test(),
+        };
+        let definition = dispatch_definition(None, Some(&clients));
+        let parameters = &definition.function.parameters;
+        assert_eq!(
+            parameters["properties"]["complexity"]["enum"],
+            json!(["easy", "medium", "hard"])
+        );
+        assert_eq!(
+            parameters["required"],
+            json!(["name", "action", "complexity"])
+        );
+
+        let supported = clients.easy.supported_reasoning_efforts();
+        if supported.is_empty() {
+            assert!(parameters["properties"].get("effort").is_none());
+        } else {
+            let offered = parameters["properties"]["effort"]["enum"]
+                .as_array()
+                .unwrap();
+            for effort in supported {
+                assert!(offered.contains(&json!(effort.as_str())));
+            }
+        }
+
+        // Single mode keeps the schema untouched.
+        let single = dispatch_definition(None, None);
+        assert!(single.function.parameters["properties"]
+            .get("complexity")
+            .is_none());
+        assert_eq!(
+            single.function.parameters["required"],
+            json!(["name", "action"])
+        );
+    }
+
+    #[test]
+    fn parse_dispatch_args_requires_complexity_in_mixed_mode() {
+        let runtime = mixed_runtime();
+        let err =
+            parse_dispatch_args(&json!({ "name": "t1", "action": "work" }), &runtime).unwrap_err();
+        assert!(err.is_error);
+        assert!(err.content.contains("'complexity'"));
+
+        let err = parse_dispatch_args(
+            &json!({ "name": "t1", "action": "work", "complexity": "extreme" }),
+            &runtime,
+        )
+        .unwrap_err();
+        assert!(err.content.contains("unsupported complexity"));
+
+        let params = parse_dispatch_args(
+            &json!({ "name": "t1", "action": "work", "complexity": "hard", "effort": "low" }),
+            &runtime,
+        )
+        .unwrap();
+        assert_eq!(params.complexity, Some(ThreadComplexity::Hard));
+        assert_eq!(params.effort, Some(ReasoningEffort::Low));
+    }
+
+    #[test]
+    fn parse_dispatch_args_ignores_complexity_outside_mixed_mode() {
+        let runtime = test_runtime();
+        let params =
+            parse_dispatch_args(&json!({ "name": "t1", "action": "work" }), &runtime).unwrap();
+        assert_eq!(params.complexity, None);
+        assert_eq!(params.effort, None);
+    }
+
+    #[test]
+    fn select_dispatch_client_routes_tiers_and_validates_effort() {
+        let orchestrator = ModelClient::new_for_test();
+
+        // Single mode: the orchestrator client, unchanged.
+        let runtime = test_runtime();
+        let params =
+            parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &runtime).unwrap();
+        let client = select_dispatch_client(&params, &runtime, &orchestrator);
+        assert_eq!(client.reasoning_effort(), orchestrator.reasoning_effort());
+
+        let runtime = mixed_runtime();
+        let tier_default = runtime
+            .mixed_clients
+            .as_deref()
+            .unwrap()
+            .easy
+            .reasoning_effort();
+
+        // A supported override replaces the tier default.
+        let supported = ModelClient::new_for_test().supported_reasoning_efforts();
+        if let Some(&effort) = supported.first() {
+            let params = parse_dispatch_args(
+                &json!({
+                    "name": "t1",
+                    "action": "w",
+                    "complexity": "easy",
+                    "effort": effort.as_str(),
+                }),
+                &runtime,
+            )
+            .unwrap();
+            let client = select_dispatch_client(&params, &runtime, &orchestrator);
+            assert_eq!(client.reasoning_effort(), Some(effort));
+        }
+
+        // An unsupported override falls back to the tier's configured default.
+        let unsupported = [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ]
+        .into_iter()
+        .find(|effort| !supported.contains(effort));
+        if let Some(effort) = unsupported {
+            let params = parse_dispatch_args(
+                &json!({
+                    "name": "t1",
+                    "action": "w",
+                    "complexity": "easy",
+                    "effort": effort.as_str(),
+                }),
+                &runtime,
+            )
+            .unwrap();
+            let client = select_dispatch_client(&params, &runtime, &orchestrator);
+            assert_eq!(client.reasoning_effort(), tier_default);
+        }
     }
 
     #[test]

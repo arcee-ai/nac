@@ -25,6 +25,10 @@ import {
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import {
+  MixedModelsSection,
+  type MixedSelection,
+} from "@/app/components/modals/MixedModelsSection";
+import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -135,6 +139,10 @@ function LaunchForm({
   const [advanced, setAdvanced] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
+  const [mixed, setMixed] = useState<MixedSelection>({
+    mode: "single",
+    mixed: null,
+  });
   const [error, setError] = useState<FormError | null>(null);
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
@@ -176,6 +184,17 @@ function LaunchForm({
     setSelection(next);
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
+
+  const onMixed = useCallback((next: MixedSelection) => {
+    setMixed(next);
+    setError((current) => (current?.field === "config" ? null : current));
+  }, []);
+
+  // A saved setup carrying mixed tiers reopens with them; the key remounts the
+  // section when a different setup (or none) is picked.
+  const savedMixed =
+    selection?.kind === "resolved" ? selection.mixed_models : null;
+  const savedMixedKey = JSON.stringify(savedMixed);
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
   const changeMode = (next: Mode) => {
@@ -221,6 +240,13 @@ function LaunchForm({
       });
       return;
     }
+    if (mixed.mode === "mixed" && !mixed.mixed) {
+      setError({
+        field: "config",
+        message: "Pick a model for each of the easy, medium and hard tiers.",
+      });
+      return;
+    }
 
     let headers: Record<string, string> | undefined;
     try {
@@ -237,7 +263,11 @@ function LaunchForm({
     let configuredEffort: string | null;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync(selection.request);
+        const request =
+          mixed.mode === "mixed" && mixed.mixed
+            ? { ...selection.request, mixed_models: mixed.mixed }
+            : selection.request;
+        const record = await createModelConfig.mutateAsync(request);
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
@@ -278,6 +308,7 @@ function LaunchForm({
           : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
+    if (mixed.mode === "mixed" && mixed.mixed) body.mixed_models = mixed.mixed;
 
     const threshold = nullable(compaction);
     if (threshold !== null)
@@ -466,6 +497,12 @@ function LaunchForm({
           onChange={onSelection}
         >
           <div className="flex flex-col gap-2">
+            <MixedModelsSection
+              key={savedMixedKey}
+              initial={savedMixed}
+              onChange={onMixed}
+            />
+            <Separator />
             <ConfigRow
               label="Advanced Configurations"
               hint="Reasoning, compaction, extra headers and a first message."
