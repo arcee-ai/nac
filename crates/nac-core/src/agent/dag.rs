@@ -490,9 +490,7 @@ pub(crate) async fn execute_with_dag(
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
             });
 
-            // Spawn execute_parsed_dispatch. Mixed mode selects the tier
-            // client for this dispatch; single mode clones the orchestrator
-            // client unchanged.
+            // Spawn execute_parsed_dispatch.
             let runtime = runtime.clone();
             let client = thread::select_dispatch_client(&dispatch.params, &runtime, &client);
             let params = dispatch.params.clone();

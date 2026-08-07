@@ -3326,7 +3326,7 @@ fn mixed_tier_settings(
         .map(|value| {
             let value = nonblank_request_string(value, &format!("mixed_models.{label}.backend"))?;
             parse_request_enum::<BackendKind>(&value, &format!("mixed_models.{label}.backend"))
-                .map(|_: BackendKind| value)
+                .map(|kind: BackendKind| (value, kind))
         })
         .transpose()?;
     let reasoning_effort = tier
@@ -3346,13 +3346,13 @@ fn mixed_tier_settings(
         .map(|value| nonblank_request_string(value, &format!("mixed_models.{label}.base_url")))
         .transpose()?;
     let tier_backend = backend
-        .as_deref()
-        .and_then(|raw| raw.parse::<BackendKind>().ok())
+        .as_ref()
+        .map(|(_, kind)| *kind)
         .or_else(|| provider_for_model(&model));
     enforce_trusted_base_url(tier_backend, base_url.as_deref(), policy)?;
     Ok(sessions::MixedTierSettings {
         model,
-        backend,
+        backend: backend.map(|(value, _)| value),
         base_url,
         api_key_env: tier.api_key_env,
         reasoning_effort,

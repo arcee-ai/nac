@@ -21,7 +21,10 @@ import {
   type CatalogPick,
 } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
-import { reasoningOptionsFor } from "@/app/components/modals/options";
+import {
+  EFFORT_LEVEL_OPTIONS,
+  reasoningOptionsFor,
+} from "@/app/components/modals/options";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
 import type {
@@ -66,16 +69,11 @@ const TIER_HINTS: Record<Tier, string> = {
 /** "" is the tier's model default, so the list starts from it, not "inherit". */
 const TIER_EFFORT_OPTIONS: SelectItem[] = [
   { id: "", label: "Model default" },
-  { id: "none", label: "None" },
-  { id: "minimal", label: "Minimal" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "X-High" },
+  ...EFFORT_LEVEL_OPTIONS,
 ];
 
 /** The efforts variant requires a level per tier, so there is no default row. */
-const REQUIRED_EFFORT_OPTIONS: SelectItem[] = TIER_EFFORT_OPTIONS.slice(1);
+const REQUIRED_EFFORT_OPTIONS: SelectItem[] = EFFORT_LEVEL_OPTIONS;
 
 interface TierState {
   pick: CatalogPick | null;
