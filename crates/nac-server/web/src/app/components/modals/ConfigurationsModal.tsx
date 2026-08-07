@@ -13,8 +13,6 @@ import {
   LoaderSize,
   Modal,
   ModalSize,
-  PopoverPlacement,
-  Select,
   type SelectItem,
   Separator,
   TabButton,
@@ -23,14 +21,16 @@ import {
   TextArea,
 } from "@/app/atoms";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
-import { AuthenticationRow } from "@/app/components/modals/ConfigurationsPanel";
+import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
   KEY_DEBOUNCE_MS,
@@ -90,11 +90,18 @@ export function ConfigurationsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  if (!open) return null;
-  return <ConfigurationsManager onClose={onClose} />;
+  const mounted = useExitTransition(open);
+  if (!mounted) return null;
+  return <ConfigurationsManager open={open} onClose={onClose} />;
 }
 
-function ConfigurationsManager({ onClose }: { onClose: () => void }) {
+function ConfigurationsManager({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const { data, isLoading } = useModelConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
 
@@ -107,7 +114,7 @@ function ConfigurationsManager({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="Configurations"
       size={ModalSize.Large}
@@ -482,12 +489,13 @@ function ConfigurationForm({
           <Separator />
           <ConfigRow
             label="Orchestrator compaction threshold"
+            verticalOnMobile
             labelClassName="max-w-none"
             hint="Context size that triggers compaction; 0 disables it."
             control={
               <Input
                 inputSize={InputSize.Medium}
-                className="w-[105px]"
+                className="w-full md:w-[105px]"
                 inputClassName="text-right"
                 placeholder="config.toml"
                 inputMode="numeric"
@@ -563,29 +571,4 @@ function autoName(backend: BackendKind, taken: string[]): string {
     const candidate = `${backend}-config-${index}`;
     if (!names.has(candidate)) return candidate;
   }
-}
-
-function SmallSelect({
-  items,
-  value,
-  onValueChange,
-  placeholder,
-}: {
-  items: SelectItem[];
-  value: string;
-  onValueChange: (id: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <Select
-      items={items}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      size={ButtonSize.Medium}
-      variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.CenterLeft}
-      panelClassName="max-h-[200px] overflow-auto min-w-[220px]"
-    />
-  );
 }

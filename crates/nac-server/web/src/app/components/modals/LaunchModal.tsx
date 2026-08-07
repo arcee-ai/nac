@@ -16,7 +16,9 @@ import {
   Select,
   type SelectItem,
   Separator,
+  StickyButton,
   Switch,
+  SwitchSize,
   TextArea,
 } from "@/app/atoms";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
@@ -30,6 +32,7 @@ import {
 } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
@@ -54,6 +57,7 @@ import type {
   CreateSessionRequest,
   SshTarget,
 } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -105,16 +109,23 @@ export function LaunchModal({
   onClose: () => void;
 }) {
   const { data: storeInfo } = useStoreInfo();
-  if (!open) return null;
+  const mounted = useExitTransition(open);
+  if (!mounted) return null;
   return (
-    <LaunchForm defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />
+    <LaunchForm
+      open={open}
+      defaultCwd={storeInfo?.root_cwd ?? ""}
+      onClose={onClose}
+    />
   );
 }
 
 function LaunchForm({
+  open,
   defaultCwd,
   onClose,
 }: {
+  open: boolean;
   defaultCwd: string;
   onClose: () => void;
 }) {
@@ -153,6 +164,7 @@ function LaunchForm({
     ADVANCED_REASONING,
   );
 
+  const isMobile = useIsMobile();
   const isSsh = mode === "ssh";
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
@@ -190,7 +202,10 @@ function LaunchForm({
    * The SSH box owns Connect/Disconnect; we only keep the proved target and
    * seed the working directory from the login home it returned.
    */
-  const onSshConnectionChange = (target: SshTarget | null, homePath?: string) => {
+  const onSshConnectionChange = (
+    target: SshTarget | null,
+    homePath?: string,
+  ) => {
     setError(null);
     setConnection(target);
     if (target) {
@@ -357,26 +372,38 @@ function LaunchForm({
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="New Session"
       size={ModalSize.Wide}
       flush
       className="h-[680px]"
       footer={
-        <Button
-          variant={ButtonVariant.Primary}
-          size={ButtonSize.Large}
-          content={ButtonContent.Text}
-          onClick={submit}
-          loading={busy}
-          disabled={Boolean(error) || !selection || !ready}
-        >
-          Create Session
-        </Button>
+        isMobile ? (
+          <StickyButton
+            variant={ButtonVariant.Primary}
+            content={ButtonContent.Text}
+            onClick={submit}
+            loading={busy}
+            disabled={Boolean(error) || !selection || !ready}
+          >
+            Create Session
+          </StickyButton>
+        ) : (
+          <Button
+            variant={ButtonVariant.Primary}
+            size={ButtonSize.Large}
+            content={ButtonContent.Text}
+            onClick={submit}
+            loading={busy}
+            disabled={Boolean(error) || !selection || !ready}
+          >
+            Create Session
+          </Button>
+        )
       }
     >
-      <div className="flex flex-col gap-6 [&>*]:shrink-0">
+      <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
         <div className="flex flex-col gap-1">
           <FieldLabel
             label="Execution"
@@ -395,6 +422,7 @@ function LaunchForm({
                 content={ButtonContent.Text}
                 onClick={() => changeMode(item.id)}
                 aria-pressed={mode === item.id}
+                className={`${isMobile ? "!rounded-full" : ""}`}
               >
                 {item.label}
               </Button>
@@ -411,8 +439,8 @@ function LaunchForm({
         ) : null}
 
         {ready ? (
-          <div className="flex items-start gap-4">
-            <div className="flex flex-col gap-1 flex-1 min-w-0">
+          <div className="flex flex-col md:flex-row items-start gap-6 md:gap-4">
+            <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
               <FieldLabel
                 label="Working Directory"
                 hint={
@@ -425,7 +453,7 @@ function LaunchForm({
               />
               <Button
                 variant={ButtonVariant.Secondary}
-                size={ButtonSize.Medium}
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
                 content={ButtonContent.IconRight}
                 className={cn("w-full", invalid("cwd") && "input-validation")}
                 style={CWD_BUTTON_PADDING}
@@ -447,174 +475,182 @@ function LaunchForm({
                 </p>
               ) : null}
             </div>
-            <div className="flex flex-col gap-1 flex-1 min-w-0">
+            <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
               <FieldLabel label="Title (optional)" />
               <Input
-                inputSize={InputSize.Medium}
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 placeholder="Shown on the session card"
                 value={title}
                 onChange={(e) => edit(setTitle)(e.target.value)}
+                className={`${isMobile ? "w-full" : ""}`}
               />
             </div>
           </div>
         ) : null}
 
         {ready ? (
-        <ConfigurationsPanel
-          invalid={invalid("config")}
-          errorText={invalid("config") ? error?.message : undefined}
-          onChange={onSelection}
-        >
-          <div className="flex flex-col gap-2">
-            <ConfigRow
-              label="Advanced Configurations"
-              hint="Reasoning, compaction, extra headers and a first message."
-              control={
-                <Switch
-                  checked={advanced}
-                  onChange={setAdvanced}
-                  aria-label="Advanced Configurations"
-                />
-              }
-            />
+          <ConfigurationsPanel
+            invalid={invalid("config")}
+            errorText={invalid("config") ? error?.message : undefined}
+            onChange={onSelection}
+          >
+            <div className="flex flex-col gap-2">
+              <ConfigRow
+                label="Advanced Configurations"
+                hint="Reasoning, compaction, extra headers and a first message."
+                control={
+                  <Switch
+                    checked={advanced}
+                    onChange={setAdvanced}
+                    aria-label="Advanced Configurations"
+                  />
+                }
+              />
 
-            {advanced ? (
-              <>
-                <Separator />
-                <ConfigRow
-                  label="Reasoning"
-                  hint="Reasoning effort passed to the model."
-                  control={smallSelect(
-                    reasoningItems,
-                    reasoning,
-                    edit(setReasoning),
-                  )}
-                />
-                <Separator />
-                <ConfigRow
-                  label="Orchestrator compaction threshold"
-                  hint="Context size that triggers compaction; 0 disables it."
-                  control={
-                    <Input
-                      inputSize={InputSize.Medium}
-                      className="w-[105px]"
-                      inputClassName="text-right"
-                      placeholder="config.toml"
-                      inputMode="numeric"
-                      value={compaction}
-                      onChange={(e) => edit(setCompaction)(e.target.value)}
-                    />
-                  }
-                />
+              {advanced ? (
+                <>
+                  <Separator />
+                  <ConfigRow
+                    label="Reasoning"
+                    hint="Reasoning effort passed to the model."
+                    control={smallSelect(
+                      reasoningItems,
+                      reasoning,
+                      edit(setReasoning),
+                    )}
+                  />
+                  <Separator />
+                  <ConfigRow
+                    label="Orchestrator compaction threshold"
+                    verticalOnMobile
+                    hint="Context size that triggers compaction; 0 disables it."
+                    labelClassName="pt-2 md:pt-0"
+                    control={
+                      <Input
+                        inputSize={
+                          isMobile ? InputSize.Large : InputSize.Medium
+                        }
+                        className="w-full md:w-[105px] pb-3 md:pb-0"
+                        inputClassName="md:text-right"
+                        placeholder="config.toml"
+                        inputMode="numeric"
+                        value={compaction}
+                        onChange={(e) => edit(setCompaction)(e.target.value)}
+                      />
+                    }
+                  />
 
-                {mode === "sandbox" ? (
-                  <>
-                    <Separator />
-                    <ConfigRow
-                      label="Container image"
-                      hint="Image the sandbox runs; empty uses the configured default."
-                      control={
-                        <Input
-                          inputSize={InputSize.Medium}
-                          className="w-[181px]"
-                          placeholder="python:3.13-bookworm"
-                          value={sandbox.image}
-                          onChange={(e) => setSb({ image: e.target.value })}
-                        />
-                      }
-                    />
-                    <Separator />
-                    <ConfigRow
-                      label="GPUs"
-                      hint="Comma-separated GPU list, e.g. all."
-                      control={
-                        <Input
-                          inputSize={InputSize.Medium}
-                          className="w-[181px]"
-                          placeholder="all"
-                          value={sandbox.gpu}
-                          onChange={(e) => setSb({ gpu: e.target.value })}
-                        />
-                      }
-                    />
-                    <Separator />
-                    <ConfigRow
-                      label="Container workdir"
-                      hint="Working directory inside the container."
-                      control={
-                        <Input
-                          inputSize={InputSize.Medium}
-                          className="w-[181px]"
-                          placeholder="/workspace"
-                          value={sandbox.workdir}
-                          onChange={(e) => setSb({ workdir: e.target.value })}
-                        />
-                      }
-                    />
-                    <Separator />
-                    <ConfigRow
-                      label="Shared memory size"
-                      hint="Container /dev/shm size, e.g. 1g."
-                      control={
-                        <Input
-                          inputSize={InputSize.Medium}
-                          className="w-[181px]"
-                          placeholder="0"
-                          value={sandbox.shm}
-                          onChange={(e) => setSb({ shm: e.target.value })}
-                        />
-                      }
-                    />
-                    <Separator />
-                    <ConfigRow
-                      label="Mounts (HOST:GUEST)"
-                      hint="Comma-separated bind mounts."
-                      control={
-                        <Input
-                          inputSize={InputSize.Medium}
-                          className="w-[181px]"
-                          placeholder="/data:/data"
-                          value={sandbox.mounts}
-                          onChange={(e) => setSb({ mounts: e.target.value })}
-                        />
-                      }
-                    />
-                    <Separator />
-                    <ConfigRow
-                      label="Don't mount the working directory"
-                      secondary
-                      control={
-                        <Switch
-                          checked={sandbox.noMount}
-                          onChange={(value) => setSb({ noMount: value })}
-                          aria-label="Don't mount the working directory"
-                        />
-                      }
-                    />
-                  </>
-                ) : null}
+                  {mode === "sandbox" ? (
+                    <>
+                      <Separator />
+                      <ConfigRow
+                        label="Container image"
+                        hint="Image the sandbox runs; empty uses the configured default."
+                        control={
+                          <Input
+                            inputSize={InputSize.Medium}
+                            className="w-[181px]"
+                            placeholder="python:3.13-bookworm"
+                            value={sandbox.image}
+                            onChange={(e) => setSb({ image: e.target.value })}
+                          />
+                        }
+                      />
+                      <Separator />
+                      <ConfigRow
+                        label="GPUs"
+                        hint="Comma-separated GPU list, e.g. all."
+                        control={
+                          <Input
+                            inputSize={InputSize.Medium}
+                            className="w-[181px]"
+                            placeholder="all"
+                            value={sandbox.gpu}
+                            onChange={(e) => setSb({ gpu: e.target.value })}
+                          />
+                        }
+                      />
+                      <Separator />
+                      <ConfigRow
+                        label="Container workdir"
+                        hint="Working directory inside the container."
+                        control={
+                          <Input
+                            inputSize={InputSize.Medium}
+                            className="w-[181px]"
+                            placeholder="/workspace"
+                            value={sandbox.workdir}
+                            onChange={(e) => setSb({ workdir: e.target.value })}
+                          />
+                        }
+                      />
+                      <Separator />
+                      <ConfigRow
+                        label="Shared memory size"
+                        hint="Container /dev/shm size, e.g. 1g."
+                        control={
+                          <Input
+                            inputSize={InputSize.Medium}
+                            className="w-[181px]"
+                            placeholder="0"
+                            value={sandbox.shm}
+                            onChange={(e) => setSb({ shm: e.target.value })}
+                          />
+                        }
+                      />
+                      <Separator />
+                      <ConfigRow
+                        label="Mounts (HOST:GUEST)"
+                        hint="Comma-separated bind mounts."
+                        control={
+                          <Input
+                            inputSize={InputSize.Medium}
+                            className="w-[181px]"
+                            placeholder="/data:/data"
+                            value={sandbox.mounts}
+                            onChange={(e) => setSb({ mounts: e.target.value })}
+                          />
+                        }
+                      />
+                      <Separator />
+                      <ConfigRow
+                        label="Don't mount the working directory"
+                        secondary
+                        control={
+                          <Switch
+                            checked={sandbox.noMount}
+                            onChange={(value) => setSb({ noMount: value })}
+                            aria-label="Don't mount the working directory"
+                            size={
+                              isMobile ? SwitchSize.Large : SwitchSize.Medium
+                            }
+                          />
+                        }
+                      />
+                    </>
+                  ) : null}
 
-                <Separator />
-                <TextArea
-                  label="Extra headers (JSON object)"
-                  hintText="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
-                  placeholder='{"X-Title": "nac"}'
-                  value={extraHeaders}
-                  onChange={(e) => edit(setExtraHeaders)(e.target.value)}
-                  textAreaClassName="h-[108px] resize-none"
-                />
-                <Separator />
-                <TextArea
-                  label="Initial prompt"
-                  placeholder="Send a first message right after the session is created…"
-                  value={initialPrompt}
-                  onChange={(e) => edit(setInitialPrompt)(e.target.value)}
-                  textAreaClassName="h-[116px] resize-none"
-                />
-              </>
-            ) : null}
-          </div>
-        </ConfigurationsPanel>
+                  <Separator />
+                  <TextArea
+                    label="Extra headers (JSON object)"
+                    hintText="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
+                    placeholder='{"X-Title": "nac"}'
+                    value={extraHeaders}
+                    onChange={(e) => edit(setExtraHeaders)(e.target.value)}
+                    textAreaClassName="h-[108px] resize-none"
+                  />
+                  <Separator />
+                  <TextArea
+                    label="Initial prompt"
+                    placeholder="Send a first message right after the session is created…"
+                    value={initialPrompt}
+                    onChange={(e) => edit(setInitialPrompt)(e.target.value)}
+                    textAreaClassName="h-[116px] resize-none"
+                  />
+                </>
+              ) : null}
+            </div>
+          </ConfigurationsPanel>
         ) : null}
       </div>
 

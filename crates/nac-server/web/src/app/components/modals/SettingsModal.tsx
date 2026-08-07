@@ -31,6 +31,7 @@ import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
   isGeneratedCredentialName,
@@ -119,11 +120,13 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
 
 /** Shared chrome, so the loading state does not resize into the loaded form. */
 function SettingsShell({
+  open,
   onClose,
   footer,
   titleExtra,
   children,
 }: {
+  open: boolean;
   onClose: () => void;
   footer?: React.ReactNode;
   titleExtra?: React.ReactNode;
@@ -131,7 +134,7 @@ function SettingsShell({
 }) {
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title={
         titleExtra ? (
@@ -162,12 +165,15 @@ export function SettingsModal({
   id: string | null;
   onClose: () => void;
 }) {
-  const { data: snapshot } = useSessionSnapshot(open ? id : null);
+  // Keyed on `mounted` rather than `open`: dropping the queries the moment the
+  // dialog starts closing would blank the form out mid-slide.
+  const mounted = useExitTransition(open);
+  const { data: snapshot } = useSessionSnapshot(mounted ? id : null);
   // Fetched for diagnostics ("repair required") and as a fallback source when
   // the live snapshot is unavailable.
-  const { data: config, isLoading } = useSessionConfig(open ? id : null);
+  const { data: config, isLoading } = useSessionConfig(mounted ? id : null);
 
-  if (!open || !id) return null;
+  if (!mounted || !id) return null;
 
   const meta = snapshot?.metadata;
   const initial = meta
@@ -178,7 +184,7 @@ export function SettingsModal({
 
   if (!initial) {
     return (
-      <SettingsShell onClose={onClose}>
+      <SettingsShell open={open} onClose={onClose}>
         <p className="text-basic-muted text-micro">
           {isLoading
             ? "Loading session configuration…"
@@ -190,6 +196,7 @@ export function SettingsModal({
 
   return (
     <SettingsForm
+      open={open}
       id={id}
       initial={initial}
       summary={
@@ -203,12 +210,14 @@ export function SettingsModal({
 
 /** Mounted only once the initial values are known, so the form owns its state. */
 function SettingsForm({
+  open,
   id,
   initial,
   summary,
   diagnostics,
   onClose,
 }: {
+  open: boolean;
   id: string;
   initial: SettingsInitialValues;
   /** Carries the presentation version the title save has to match. */
@@ -439,6 +448,7 @@ function SettingsForm({
 
   return (
     <SettingsShell
+      open={open}
       onClose={onClose}
       footer={footer}
       titleExtra={

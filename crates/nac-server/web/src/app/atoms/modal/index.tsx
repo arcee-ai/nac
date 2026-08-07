@@ -14,6 +14,18 @@ const FOCUSABLE =
 /** Kept in step with the mobile slide transition. */
 const MOBILE_EXIT_MS = 300;
 
+// TopBar's "HeaderSurface" turned upside down: the phone footer floats over the
+// scrolling body, so it fades the content passing underneath the same way the
+// bar fades what scrolls below it. Stacked twice for the same opacity.
+const GROUND_FADE_UP =
+  "linear-gradient(to top, var(--color-bg-elevation-level-1), var(--color-bg-elevation-ground-transparent))";
+const MOBILE_FOOTER_SURFACE = {
+  backgroundImage: `${GROUND_FADE_UP}, ${GROUND_FADE_UP}`,
+};
+
+/** Clearance the scrolling body leaves for the footer floating over it. */
+const MOBILE_FOOTER_CLEARANCE = "pb-[88px]";
+
 export enum ModalSize {
   Small = "max-w-[400px]",
   Medium = "max-w-[560px]",
@@ -201,8 +213,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   // makes no sense once the dialog covers the whole screen.
   const chrome = flush || isMobile;
   const onTop =
-    modalStack.length === 0 ||
-    modalStack[modalStack.length - 1]?.id === token;
+    modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
   // On a phone the scrim never dismisses — only the back/close control does.
   const overlayCloses = closeOnOverlay && !isMobile;
 
@@ -285,7 +296,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       <div
         className={cn(
           "fixed inset-0 z-[100] flex pointer-events-none",
-          fullScreen ? "p-2" : !isMobile && "items-center justify-center p-4",
+          // A phone panel is the viewport itself, so it never gets the inset
+          // the desktop card sits in — not even in full-screen mode.
+          !isMobile && (fullScreen ? "p-2" : "items-center justify-center p-4"),
         )}
       >
         <div
@@ -298,11 +311,8 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
             "relative flex flex-col shadow-2xl pointer-events-auto outline-none",
             isMobile
               ? cn(
-                  "w-full h-[100dvh] rounded-none",
-                  "transition-transform duration-300 ease-in-out",
-                  offscreen && open
-                    ? "translate-x-full"
-                    : mobileTransform,
+                  "rounded-none transition-transform duration-300 ease-in-out",
+                  offscreen && open ? "translate-x-full" : mobileTransform,
                   !chromeless && "bg-elevation-level-1",
                 )
               : cn(
@@ -319,6 +329,13 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   fullScreen && !chromeless && "rounded-[8px]",
                 ),
             className,
+            // Callers size the desktop card through `className` (LaunchModal
+            // asks for `h-[680px]`). On a phone the panel *is* the screen, so
+            // its own sizing has to win: it comes after `className`, which is
+            // where tailwind-merge resolves the conflict, and the min/max pair
+            // clamps anything the caller adds on top.
+            isMobile &&
+              "w-full h-[100dvh] min-w-full min-h-[100dvh] max-w-full max-h-[100dvh]",
           )}
         >
           {chromelessClose ? (
@@ -335,6 +352,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                     "paragraph-medium text-basic-secondary",
                     chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
                     fullScreen && "flex-1 min-h-0 w-full",
+                    isMobile && footer && MOBILE_FOOTER_CLEARANCE,
                   ),
               bodyClassName,
             )}
@@ -345,8 +363,13 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
             <div
               className={cn(
                 "flex justify-end gap-2",
-                chrome && "items-center p-4 border-t border-muted shrink-0",
+                chrome && "items-center p-4 shrink-0",
+                chrome && !isMobile && "border-t border-muted",
+                // The card's transform makes it the containing block, so the
+                // row pins to the bottom of the panel rather than the document.
+                isMobile && "fixed inset-x-0 bottom-0 z-10",
               )}
+              style={isMobile ? MOBILE_FOOTER_SURFACE : undefined}
             >
               {footer}
             </div>

@@ -16,6 +16,7 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useCreateSshConfig,
@@ -42,11 +43,18 @@ export function SshConfigsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  if (!open) return null;
-  return <SshConfigsManager onClose={onClose} />;
+  const mounted = useExitTransition(open);
+  if (!mounted) return null;
+  return <SshConfigsManager open={open} onClose={onClose} />;
 }
 
-function SshConfigsManager({ onClose }: { onClose: () => void }) {
+function SshConfigsManager({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const { data, isLoading } = useSshConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -56,7 +64,7 @@ function SshConfigsManager({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="SSH configs"
       size={ModalSize.Large}

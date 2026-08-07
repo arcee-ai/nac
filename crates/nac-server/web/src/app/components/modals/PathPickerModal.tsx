@@ -13,7 +13,9 @@ import {
   LoaderSize,
   Modal,
   ModalSize,
+  StickyButton,
 } from "@/app/atoms";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
@@ -22,6 +24,7 @@ import {
   type BrowseKind,
 } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /**
  * Picks a path from the machine running the server, or from an SSH host when
@@ -53,11 +56,13 @@ export function PathPickerModal({
   ssh,
   ...props
 }: PathPickerProps & { open: boolean }) {
-  if (!open) return null;
-  return <PathPicker ssh={ssh ?? null} {...props} />;
+  const mounted = useExitTransition(open);
+  if (!mounted) return null;
+  return <PathPicker open={open} ssh={ssh ?? null} {...props} />;
 }
 
 function PathPicker({
+  open,
   kind,
   initialPath,
   ssh,
@@ -67,8 +72,9 @@ function PathPicker({
   onClear,
   onClose,
   onSelect,
-}: PathPickerProps) {
+}: PathPickerProps & { open: boolean }) {
   const pickingFile = kind !== "directory";
+  const isMobile = useIsMobile();
   // A directory is picked from an empty path so the server starts at its root,
   // or the host at the login home.
   const [directory, setDirectory] = useState(initialPath.trim());
@@ -78,7 +84,12 @@ function PathPicker({
   // Both hooks are called every render, as hooks must be; the one that is not
   // the source of this listing is disabled and never fetches.
   const local = useBrowsePath(directory || null, kind, hidden, !ssh);
-  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
+  const remote = useSshBrowsePath(
+    ssh ?? null,
+    directory || null,
+    hidden,
+    Boolean(ssh),
+  );
   const { data, error, isFetching } = ssh ? remote : local;
 
   const goTo = (path: string) => {
@@ -91,7 +102,7 @@ function PathPicker({
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title={
         title ??
@@ -109,35 +120,69 @@ function PathPicker({
       footer={
         <>
           {onClear ? (
-            <Button
-              variant={ButtonVariant.Ghost}
-              size={ButtonSize.Medium}
-              content={ButtonContent.Text}
-              className="mr-auto"
-              onClick={onClear}
-            >
-              {clearLabel ?? "Clear"}
-            </Button>
+            isMobile ? (
+              <StickyButton
+                variant={ButtonVariant.Secondary}
+                content={ButtonContent.Text}
+                onClick={onClear}
+              >
+                {clearLabel ?? "Clear"}
+              </StickyButton>
+            ) : (
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Large}
+                content={ButtonContent.Text}
+                className="mr-auto"
+                onClick={onClear}
+              >
+                {clearLabel ?? "Clear"}
+              </Button>
+            )
           ) : null}
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={ButtonSize.Medium}
-            content={ButtonContent.Text}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant={ButtonVariant.Primary}
-            size={ButtonSize.Medium}
-            content={ButtonContent.Text}
-            disabled={!chosen}
-            onClick={() => {
-              if (chosen) onSelect(chosen);
-            }}
-          >
-            Select
-          </Button>
+          {isMobile ? (
+            <StickyButton
+              variant={ButtonVariant.Secondary}
+              content={ButtonContent.Text}
+              onClick={onClose}
+            >
+              Cancel
+            </StickyButton>
+          ) : (
+            <Button
+              variant={ButtonVariant.Secondary}
+              size={ButtonSize.Large}
+              content={ButtonContent.Text}
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+          )}
+
+          {isMobile ? (
+            <StickyButton
+              variant={ButtonVariant.Primary}
+              content={ButtonContent.Text}
+              disabled={!chosen}
+              onClick={() => {
+                if (chosen) onSelect(chosen);
+              }}
+            >
+              Select
+            </StickyButton>
+          ) : (
+            <Button
+              variant={ButtonVariant.Primary}
+              size={ButtonSize.Large}
+              content={ButtonContent.Text}
+              disabled={!chosen}
+              onClick={() => {
+                if (chosen) onSelect(chosen);
+              }}
+            >
+              Select
+            </Button>
+          )}
         </>
       }
     >
@@ -175,16 +220,22 @@ function PathPicker({
           />
           <Button
             variant={
-              hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
+              hidden
+                ? ButtonVariant.SecondaryHighlighted
+                : ButtonVariant.Secondary
             }
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
             onClick={() => setHidden((on) => !on)}
             aria-pressed={hidden}
             title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
-            aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
+            aria-label={
+              hidden ? "Hide dot-prefixed entries" : "Show hidden entries"
+            }
           >
-            <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
+            <Icon
+              iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough}
+            />
           </Button>
         </div>
 
@@ -215,7 +266,7 @@ function PathPicker({
               key={entry.path}
               type="button"
               className={cn(
-                "flex items-center gap-2 w-full px-2 py-1.5 rounded-[4px] text-left",
+                "flex items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
                 "hover:bg-elevation-sublevel-variant-A",
                 file === entry.path && "bg-elevation-sublevel-variant-A",
               )}
@@ -228,10 +279,15 @@ function PathPicker({
             >
               <Icon
                 iconName={entry.is_directory ? IconName.Folder : IconName.File}
-                size={16}
+                size={isMobile ? 20 : 16}
                 className="shrink-0 text-basic-muted"
               />
-              <span className="paragraph-small text-basic-primary truncate">
+              <span
+                className={cn(
+                  "text-basic-primary truncate",
+                  isMobile ? "text-small" : "text-small ",
+                )}
+              >
                 {entry.name}
               </span>
             </button>

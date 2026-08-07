@@ -78,7 +78,7 @@ export { default as RangeInput } from "./range-input";
 export { default as Select, type SelectItem } from "./select";
 export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
 export { default as Separator } from "./separator";
-export { default as Switch } from "./switch";
+export { default as Switch, SwitchSize } from "./switch";
 export {
   default as TabButton,
   TabButtonSize,
